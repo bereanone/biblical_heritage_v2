@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../core/database/study_bible_database.dart';
-import 'bible_explorer_screen.dart';
 import 'viewer_acrostic_block.dart';
 import 'viewer_heading_block.dart';
 import 'viewer_interlinear_settings.dart';
+import 'viewer_interlinear_token_tile.dart';
+import 'viewer_passage_models.dart';
+import 'viewer_range_selection.dart';
 import 'viewer_render_models.dart';
 import 'viewer_render_resolver.dart';
+import 'viewer_strongs_launcher.dart';
 
 class ViewerInterlinearBody extends StatefulWidget {
   const ViewerInterlinearBody({
@@ -19,6 +22,10 @@ class ViewerInterlinearBody extends StatefulWidget {
     required this.fontScale,
     required this.settings,
     required this.onSelectVerse,
+    required this.onSelectBlockId,
+    this.onTapSelectedRange = _noop,
+    this.rangeSelection = const ViewerRangeSelection(),
+    this.navigationTick = 0,
   });
 
   final PassageData? passage;
@@ -28,6 +35,12 @@ class ViewerInterlinearBody extends StatefulWidget {
   final double fontScale;
   final ViewerInterlinearSettings settings;
   final ValueChanged<VerseLine> onSelectVerse;
+  final ValueChanged<int> onSelectBlockId;
+  final VoidCallback onTapSelectedRange;
+  final ViewerRangeSelection rangeSelection;
+  final int navigationTick;
+
+  static void _noop() {}
 
   @override
   State<ViewerInterlinearBody> createState() => _ViewerInterlinearBodyState();
@@ -57,6 +70,9 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
         oldWidget.passage?.bookName != widget.passage?.bookName) {
       _lastScrolledBlockId = null;
     }
+    if (oldWidget.navigationTick != widget.navigationTick) {
+      _lastScrolledBlockId = null;
+    }
   }
 
   @override
@@ -83,18 +99,23 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
     final cachedAcrostics = _acrosticCache[cacheKey];
     final cachedTokens = _tokenCache[cacheKey];
 
-    if (cachedHeadings == null || cachedAcrostics == null || cachedTokens == null) {
+    if (cachedHeadings == null ||
+        cachedAcrostics == null ||
+        cachedTokens == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         try {
-          final headings = cachedHeadings ??
+          final headings =
+              cachedHeadings ??
               await StudyBibleDatabase.instance.loadSectionHeadingsForBlockIds(
                 blockIds,
               );
-          final acrostics = cachedAcrostics ??
+          final acrostics =
+              cachedAcrostics ??
               await StudyBibleDatabase.instance.loadAcrosticsForBlockIds(
                 blockIds,
               );
-          final tokens = cachedTokens ??
+          final tokens =
+              cachedTokens ??
               await _loadCompleteTokenMap(
                 blockIds,
                 englishOrder: widget.settings.englishOrder,
@@ -128,9 +149,7 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
     }
 
     if (cachedTokens == null) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     final renderItems = resolveViewerRenderItems(
@@ -152,8 +171,9 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
 
     final selectedLine = _findSelectedLine(passage.lines);
     final selectedBlockId = selectedLine?.blockId ?? 0;
-    final initialIndex =
-        selectedBlockId > 0 ? (verseItemIndex[selectedBlockId] ?? 0) : 0;
+    final initialIndex = selectedBlockId > 0
+        ? (verseItemIndex[selectedBlockId] ?? 0)
+        : 0;
 
     if (cachedHeadings != null && selectedBlockId > 0) {
       if (_lastScrolledBlockId != selectedBlockId) {
@@ -188,38 +208,46 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
                 : 10,
           ),
           child: switch (item) {
-            ViewerAcrosticItem(:final hebrew, :final transliteration) =>
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Divider(height: 8),
-                  ViewerAcrosticBlock(
-                    hebrew: hebrew,
-                    transliteration: transliteration,
-                    fontScale: widget.fontScale,
-                  ),
-                ],
-              ),
-            ViewerHeadingItem(:final text) =>
-              ViewerHeadingBlock(text: text, fontScale: widget.fontScale),
+            ViewerAcrosticItem(:final hebrew, :final transliteration) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Divider(height: 8),
+                ViewerAcrosticBlock(
+                  hebrew: hebrew,
+                  transliteration: transliteration,
+                  fontScale: widget.fontScale,
+                ),
+              ],
+            ),
+            ViewerHeadingItem(:final text) => ViewerHeadingBlock(
+              text: text,
+              fontScale: widget.fontScale,
+            ),
             ViewerVerseItem(:final line) => _InterlinearVerseFlow(
-                blockId: line.blockId,
-                line: line,
-                tokens:
-                    cachedTokens[line.blockId] ??
-                    const <InterlinearTokenRecord>[],
-                fontScale: widget.fontScale,
-                settings: widget.settings,
-                isSelected: _matchesSelectedLine(line),
-                showChapterNumber:
-                    previousVerseLine == null ||
-                    previousVerseLine.bookNumber != line.bookNumber ||
-                    previousVerseLine.chapter != line.chapter,
-                isHebrew: (passage.bookNumber ?? 1) <= 39,
-                showTopDivider:
-                    index == 0 || renderItems[index - 1] is! ViewerAcrosticItem,
-                onTap: () => widget.onSelectVerse(line),
-              ),
+              blockId: line.blockId,
+              line: line,
+              tokens:
+                  cachedTokens[line.blockId] ??
+                  const <InterlinearTokenRecord>[],
+              fontScale: widget.fontScale,
+              settings: widget.settings,
+              isSelected: _matchesSelectedLine(line),
+              showChapterNumber:
+                  previousVerseLine == null ||
+                  previousVerseLine.bookNumber != line.bookNumber ||
+                  previousVerseLine.chapter != line.chapter,
+              isHebrew: (passage.bookNumber ?? 1) <= 39,
+              showTopDivider:
+                  index == 0 || renderItems[index - 1] is! ViewerAcrosticItem,
+              onTap: () => widget.onSelectVerse(line),
+              onOpenStrongs: (strongsId) {
+                showViewerStrongsPageOne(
+                  context,
+                  strongsId: strongsId,
+                  onSelectBlockId: widget.onSelectBlockId,
+                );
+              },
+            ),
           },
         );
       },
@@ -245,10 +273,8 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
       return const <int, List<InterlinearTokenRecord>>{};
     }
 
-    final tokens = await StudyBibleDatabase.instance.loadInterlinearTokensForBlockIds(
-      blockIds,
-      englishOrder: englishOrder,
-    );
+    final tokens = await StudyBibleDatabase.instance
+        .loadInterlinearTokensForBlockIds(blockIds, englishOrder: englishOrder);
 
     final missingBlockIds = blockIds
         .where((id) => (tokens[id] ?? const <InterlinearTokenRecord>[]).isEmpty)
@@ -258,14 +284,12 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
       return tokens;
     }
 
-    final repaired = <int, List<InterlinearTokenRecord>>{
-      ...tokens,
-    };
+    final repaired = <int, List<InterlinearTokenRecord>>{...tokens};
     for (final blockId in missingBlockIds) {
-      final single = await StudyBibleDatabase.instance.loadInterlinearTokensForBlockIds(
-        <int>[blockId],
-        englishOrder: englishOrder,
-      );
+      final single = await StudyBibleDatabase.instance
+          .loadInterlinearTokensForBlockIds(<int>[
+            blockId,
+          ], englishOrder: englishOrder);
       final rows = single[blockId];
       if (rows != null && rows.isNotEmpty) {
         repaired[blockId] = rows;
@@ -344,6 +368,7 @@ class _InterlinearVerseFlow extends StatefulWidget {
     required this.isHebrew,
     required this.showTopDivider,
     required this.onTap,
+    required this.onOpenStrongs,
   });
 
   final int? blockId;
@@ -356,6 +381,7 @@ class _InterlinearVerseFlow extends StatefulWidget {
   final bool isHebrew;
   final bool showTopDivider;
   final VoidCallback onTap;
+  final ValueChanged<String> onOpenStrongs;
 
   @override
   State<_InterlinearVerseFlow> createState() => _InterlinearVerseFlowState();
@@ -390,10 +416,9 @@ class _InterlinearVerseFlowState extends State<_InterlinearVerseFlow> {
       return;
     }
     _recoveryFuture = StudyBibleDatabase.instance
-        .loadInterlinearTokensForBlockIds(
-          <int>[blockId],
-          englishOrder: widget.settings.englishOrder,
-        )
+        .loadInterlinearTokensForBlockIds(<int>[
+          blockId,
+        ], englishOrder: widget.settings.englishOrder)
         .then((map) => map[blockId] ?? const <InterlinearTokenRecord>[]);
   }
 
@@ -410,13 +435,15 @@ class _InterlinearVerseFlowState extends State<_InterlinearVerseFlow> {
         isHebrew: widget.isHebrew,
         showTopDivider: widget.showTopDivider,
         onTap: widget.onTap,
+        onOpenStrongs: widget.onOpenStrongs,
       );
     }
 
     return FutureBuilder<List<InterlinearTokenRecord>>(
       future: _recoveryFuture,
       builder: (context, snapshot) {
-        final recoveredTokens = snapshot.data ?? const <InterlinearTokenRecord>[];
+        final recoveredTokens =
+            snapshot.data ?? const <InterlinearTokenRecord>[];
         if (snapshot.connectionState == ConnectionState.done &&
             recoveredTokens.isEmpty &&
             !_retriedEmptyTokens) {
@@ -441,9 +468,8 @@ class _InterlinearVerseFlowState extends State<_InterlinearVerseFlow> {
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
                   color: widget.isSelected
-                      ? Theme.of(
-                          context,
-                        ).colorScheme.surfaceContainerHigh.withValues(alpha: 0.72)
+                      ? Theme.of(context).colorScheme.surfaceContainerHigh
+                            .withValues(alpha: 0.72)
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -469,6 +495,7 @@ class _InterlinearVerseFlowState extends State<_InterlinearVerseFlow> {
           isHebrew: widget.isHebrew,
           showTopDivider: widget.showTopDivider,
           onTap: widget.onTap,
+          onOpenStrongs: widget.onOpenStrongs,
         );
       },
     );
@@ -486,6 +513,7 @@ class _InterlinearVerseContent extends StatelessWidget {
     required this.isHebrew,
     required this.showTopDivider,
     required this.onTap,
+    required this.onOpenStrongs,
   });
 
   final VerseLine line;
@@ -497,6 +525,7 @@ class _InterlinearVerseContent extends StatelessWidget {
   final bool isHebrew;
   final bool showTopDivider;
   final VoidCallback onTap;
+  final ValueChanged<String> onOpenStrongs;
 
   @override
   Widget build(BuildContext context) {
@@ -535,14 +564,14 @@ class _InterlinearVerseContent extends StatelessWidget {
     final headerText = tokens.isEmpty
         ? line.text
         : tokens
-            .map((token) => token.original.trim())
-            .where((text) => text.isNotEmpty && text != '.')
-            .join(' ');
+              .map((token) => token.original.trim())
+              .where((text) => text.isNotEmpty && text != '.')
+              .join(' ');
     final orderedTokens = settings.englishOrder
-        ? (tokens.toList()
-          ..sort((a, b) {
-            final englishCompare =
-                a.english.toLowerCase().compareTo(b.english.toLowerCase());
+        ? (tokens.toList()..sort((a, b) {
+            final englishCompare = a.english.toLowerCase().compareTo(
+              b.english.toLowerCase(),
+            );
             if (englishCompare != 0) return englishCompare;
             return a.original.compareTo(b.original);
           }))
@@ -583,12 +612,13 @@ class _InterlinearVerseContent extends StatelessWidget {
                   runSpacing: (3 * fontScale).clamp(2.0, 8.0),
                   children: orderedTokens
                       .map(
-                        (token) => _InterlinearTokenColumn(
+                        (token) => ViewerInterlinearTokenTile(
                           token: token,
                           settings: settings,
                           englishStyle: englishStyle,
                           originalStyle: originalStyle,
                           metaStyle: metaStyle,
+                          onOpenStrongs: onOpenStrongs,
                         ),
                       )
                       .toList(growable: false),
@@ -633,12 +663,7 @@ class _InterlinearHeaderRow extends StatelessWidget {
             fontScale: fontScale,
           ),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: style,
-            ),
-          ),
+          Expanded(child: Text(text, style: style)),
         ],
       ),
     );
@@ -678,160 +703,4 @@ class _VerseNumberChip extends StatelessWidget {
       ),
     );
   }
-}
-
-class _InterlinearTokenColumn extends StatelessWidget {
-  const _InterlinearTokenColumn({
-    required this.token,
-    required this.settings,
-    required this.englishStyle,
-    required this.originalStyle,
-    required this.metaStyle,
-  });
-
-  final InterlinearTokenRecord token;
-  final ViewerInterlinearSettings settings;
-  final TextStyle englishStyle;
-  final TextStyle originalStyle;
-  final TextStyle metaStyle;
-
-  @override
-  Widget build(BuildContext context) {
-    final englishText =
-        (token.english.trim().isNotEmpty && token.english != '.')
-            ? token.english.replaceAll('-', '\u2011')
-            : ' ';
-    final originalText =
-        (token.original.trim().isNotEmpty && token.original != '.')
-            ? token.original
-            : ' ';
-    final transliterationText =
-        token.transliteration.trim().isNotEmpty ? token.transliteration : ' ';
-    final pronunciationText =
-        token.pronunciation.trim().isNotEmpty ? token.pronunciation : ' ';
-    final strongsText =
-        token.strongsNumber.trim().isNotEmpty ? token.strongsNumber : ' ';
-    final morphologyText = token.morphology.trim();
-    return IntrinsicWidth(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          if (settings.showEnglishGloss)
-            Text(
-              englishText,
-              style: englishStyle,
-              textAlign: TextAlign.center,
-            ),
-          if (settings.showOriginalText)
-            Text(
-              originalText,
-              style: originalStyle,
-              textAlign: TextAlign.center,
-            ),
-          if (settings.showTransliteration)
-            Text(
-              transliterationText,
-              style: metaStyle,
-              textAlign: TextAlign.center,
-            ),
-          if (settings.showPronunciation)
-            Text(
-              pronunciationText,
-              style: metaStyle,
-              textAlign: TextAlign.center,
-            ),
-          if (settings.showStrongsNumber)
-            Text(
-              strongsText,
-              style: metaStyle,
-              textAlign: TextAlign.center,
-            ),
-          if (settings.showMorphology && morphologyText.isNotEmpty) ...[
-            const SizedBox(height: 2),
-            _MorphologyBubble(
-              morphology: morphologyText,
-              style: metaStyle.copyWith(
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _MorphologyBubble extends StatelessWidget {
-  const _MorphologyBubble({
-    required this.morphology,
-    required this.style,
-  });
-
-  final String morphology;
-  final TextStyle style;
-
-  @override
-  Widget build(BuildContext context) {
-    final compact = _compactMorphology(morphology);
-    if (compact.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(
-        color: _morphColor(compact),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        compact,
-        style: style,
-        textAlign: TextAlign.center,
-      ),
-    );
-  }
-}
-
-Color _morphColor(String value) {
-  final upper = value.toUpperCase();
-  if (upper.startsWith('C')) {
-    return Colors.teal.shade600;
-  }
-  if (upper.startsWith('T')) {
-    return Colors.brown.shade400;
-  }
-  if (upper.startsWith('N')) {
-    return Colors.green.shade600;
-  }
-  if (upper.startsWith('A')) {
-    return Colors.green.shade600;
-  }
-  if (upper.startsWith('V')) {
-    return Colors.blue.shade600;
-  }
-  if (upper.startsWith('P') || upper.startsWith('R') || upper.startsWith('D')) {
-    return Colors.teal.shade500;
-  }
-  return Colors.blueGrey.shade400;
-}
-
-String _compactMorphology(String value) {
-  final normalized = value.trim();
-  if (normalized.isEmpty) return '';
-  final parts = normalized
-      .split('/')
-      .map((part) => part.replaceAll('-', '').trim())
-      .where((part) => part.isNotEmpty)
-      .toList(growable: false);
-  if (parts.isEmpty) return '';
-  const primaryOrder = ['N', 'V', 'A', 'P', 'C', 'T', 'R', 'D', 'S', 'H'];
-  for (final tag in primaryOrder) {
-    for (final part in parts) {
-      if (part.toUpperCase().startsWith(tag)) {
-        return part;
-      }
-    }
-  }
-  return parts.first;
 }

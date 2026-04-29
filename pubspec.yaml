@@ -35,6 +35,7 @@ dependencies:
   path: ^1.9.1
   path_provider: ^2.1.5
   scrollable_positioned_list: ^0.3.8
+  sqflite: ^2.4.1
   sqflite_common_ffi: ^2.3.6
 
 dev_dependencies:
@@ -47,6 +48,16 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  macos: true
+  windows: true
+  web:
+    generate: true
+  image_path: "assets/icons/biblical_heritage_icon.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

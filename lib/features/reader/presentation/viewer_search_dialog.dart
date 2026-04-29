@@ -21,7 +21,7 @@ Future<ViewerSearchSelection?> showViewerSearchDialog(
     barrierLabel: 'Verse Search',
     barrierColor: Colors.black54,
     transitionDuration: const Duration(milliseconds: 160),
-    pageBuilder: (context, _, __) => SafeArea(
+    pageBuilder: (context, route, page) => SafeArea(
       child: Material(
         type: MaterialType.transparency,
         child: Center(
@@ -113,7 +113,8 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
         prefix.isNotEmpty && !prefix.endsWith(' ') && token != ')';
     final needsTrailingSpace =
         suffix.isNotEmpty && !suffix.startsWith(' ') && token != '(';
-    final inserted = '${needsLeadingSpace ? ' ' : ''}$token${needsTrailingSpace ? ' ' : ''}';
+    final inserted =
+        '${needsLeadingSpace ? ' ' : ''}$token${needsTrailingSpace ? ' ' : ''}';
     final nextText = '$prefix$inserted$suffix';
     final caretOffset = (prefix + inserted).length;
 
@@ -180,7 +181,9 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
     if (groupId == null) {
       return const PassageSearchResponse(results: [], totalCount: 0);
     }
-    final refs = await HighlightGroupsRepository().loadVerseRefsForGroup(groupId);
+    final refs = await HighlightGroupsRepository().loadVerseRefsForGroup(
+      groupId,
+    );
     return StudyBibleDatabase.instance.loadPassagesForVerseRefs(
       refs,
       section: _selectedSection,
@@ -198,20 +201,20 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
       fontWeight: FontWeight.bold,
     );
     final bodyStyle = theme.textTheme.bodyMedium?.copyWith(
-      fontSize:
-          ((theme.textTheme.bodyMedium?.fontSize ?? 14) * dialogScale).clamp(
-        14.0,
-        22.0,
-      ),
+      fontSize: ((theme.textTheme.bodyMedium?.fontSize ?? 14) * dialogScale)
+          .clamp(14.0, 22.0),
     );
     final bookOptions = buildViewerSearchBookOptions(_books, _selectedSection);
     final selectedBook = bookOptions.firstWhere(
       (option) => option.bookNumber == _selectedBookNumber,
       orElse: () => bookOptions.first,
     );
-    final selectedHighlightGroup = _highlightGroups.cast<HighlightGroupRecord?>().firstWhere(
+    final selectedHighlightGroup = _highlightGroups
+        .cast<HighlightGroupRecord?>()
+        .firstWhere(
           (group) => group?.id == _selectedHighlightGroupId,
-          orElse: () => _highlightGroups.isEmpty ? null : _highlightGroups.first,
+          orElse: () =>
+              _highlightGroups.isEmpty ? null : _highlightGroups.first,
         );
 
     return Dialog(
@@ -227,7 +230,9 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
             final isCompact = constraints.maxWidth < 340;
             final isRoomy = constraints.maxWidth >= 430;
             final fieldSpacing = isCompact ? 6.0 : (isRoomy ? 12.0 : 8.0);
-            final horizontalPadding = isCompact ? 12.0 : (isRoomy ? 18.0 : 16.0);
+            final horizontalPadding = isCompact
+                ? 12.0
+                : (isRoomy ? 18.0 : 16.0);
             final topFieldPadding = isCompact ? 12.0 : (isRoomy ? 18.0 : 14.0);
             final resultTopPadding = isCompact ? 6.0 : (isRoomy ? 14.0 : 10.0);
             final syntaxText = isCompact
@@ -238,7 +243,10 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
             return Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   child: Row(
                     children: [
                       IconButton(
@@ -257,13 +265,21 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
                               SegmentedButton<bool>(
                                 showSelectedIcon: false,
                                 segments: const [
-                                  ButtonSegment<bool>(value: false, label: Text('Verse')),
-                                  ButtonSegment<bool>(value: true, label: Text('Color')),
+                                  ButtonSegment<bool>(
+                                    value: false,
+                                    label: Text('Verse'),
+                                  ),
+                                  ButtonSegment<bool>(
+                                    value: true,
+                                    label: Text('Color'),
+                                  ),
                                 ],
                                 selected: {_lookupByHighlight},
                                 onSelectionChanged: (Set<bool> newSelection) {
                                   final isHighlightMode = newSelection.first;
-                                  if (_lookupByHighlight == isHighlightMode) return;
+                                  if (_lookupByHighlight == isHighlightMode) {
+                                    return;
+                                  }
                                   setState(() {
                                     _lookupByHighlight = isHighlightMode;
                                     _results = const [];
@@ -272,12 +288,15 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
                                     _totalResultsCount = 0;
                                     if (_lookupByHighlight) {
                                       _selectedHighlightGroupId ??=
-                                          _highlightGroups.isEmpty ? null : _highlightGroups.first.id;
+                                          _highlightGroups.isEmpty
+                                          ? null
+                                          : _highlightGroups.first.id;
                                     }
                                   });
                                   if (!_lookupByHighlight) {
                                     _focusNode.requestFocus();
-                                  } else if (_selectedHighlightGroupId != null) {
+                                  } else if (_selectedHighlightGroupId !=
+                                      null) {
                                     _performSearch();
                                   }
                                 },
@@ -368,7 +387,8 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
                                   children: [
                                     ViewerSearchSectionFilterField(
                                       selectedSection: _selectedSection,
-                                      sectionOptions: viewerSearchSectionOptions,
+                                      sectionOptions:
+                                          viewerSearchSectionOptions,
                                       sectionColor: _sectionColor,
                                       compact: true,
                                       onChanged: (value) {
@@ -390,7 +410,9 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
                                       bookOptions: bookOptions,
                                       compact: true,
                                       onChanged: (bookNumber) {
-                                        if (bookNumber == _selectedBookNumber) return;
+                                        if (bookNumber == _selectedBookNumber) {
+                                          return;
+                                        }
                                         setState(() {
                                           _selectedBookNumber = bookNumber;
                                           _results = const [];
@@ -408,7 +430,8 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
                                     Expanded(
                                       child: ViewerSearchSectionFilterField(
                                         selectedSection: _selectedSection,
-                                        sectionOptions: viewerSearchSectionOptions,
+                                        sectionOptions:
+                                            viewerSearchSectionOptions,
                                         sectionColor: _sectionColor,
                                         compact: false,
                                         onChanged: (value) {
@@ -432,7 +455,10 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
                                         bookOptions: bookOptions,
                                         compact: false,
                                         onChanged: (bookNumber) {
-                                          if (bookNumber == _selectedBookNumber) return;
+                                          if (bookNumber ==
+                                              _selectedBookNumber) {
+                                            return;
+                                          }
                                           setState(() {
                                             _selectedBookNumber = bookNumber;
                                             _results = const [];
@@ -547,6 +573,7 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
                           onLoadMore: () => _performSearch(append: true),
                           onSelectResult: (result) => Navigator.of(context).pop(
                             ViewerSearchSelection(
+                              blockId: result.blockId,
                               bookNumber: result.bookNumber,
                               chapter: result.chapter,
                               verse: result.verse,

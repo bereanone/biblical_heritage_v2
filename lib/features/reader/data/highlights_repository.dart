@@ -9,12 +9,18 @@ class VerseHighlightRecord {
     required this.groupId,
     required this.verseRef,
     required this.colorHex,
+    this.startToken,
+    this.endToken,
   });
 
   final int id;
   final int groupId;
   final String verseRef;
   final String colorHex;
+  final int? startToken;
+  final int? endToken;
+
+  bool get isTokenLevel => startToken != null && endToken != null;
 
   Color get color {
     final normalized = colorHex.replaceFirst('#', '');
@@ -51,6 +57,34 @@ class HighlightsRepository {
         'verse_ref': verseRef,
         'start_token': null,
         'end_token': null,
+      });
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> applyHighlightToTokenRanges({
+    required int groupId,
+    required List<TokenHighlightSelection> selections,
+  }) async {
+    if (selections.isEmpty) return;
+    final db = await UserDatabase.instance.database;
+    final batch = db.batch();
+    for (final item in selections) {
+      if (item.startToken != null && item.endToken != null) {
+        batch.delete(
+          'highlights',
+          where:
+              'verse_ref = ? AND ((start_token IS NULL AND end_token IS NULL) OR (start_token <= ? AND end_token >= ?))',
+          whereArgs: [item.verseRef, item.endToken, item.startToken],
+        );
+      } else {
+        batch.delete('highlights', where: 'verse_ref = ?', whereArgs: [item.verseRef]);
+      }
+      batch.insert('highlights', {
+        'group_id': groupId,
+        'verse_ref': item.verseRef,
+        'start_token': item.startToken,
+        'end_token': item.endToken,
       });
     }
     await batch.commit(noResult: true);
@@ -102,4 +136,74 @@ class HighlightsRepository {
     }
     return result;
   }
+
+  Future<Map<String, List<VerseHighlightRecord>>> loadHighlightRangesForVerseRefs(
+    List<String> verseRefs,
+  ) async {
+    if (verseRefs.isEmpty) return const <String, List<VerseHighlightRecord>>{};
+    final db = await UserDatabase.instance.database;
+    final placeholders = List.filled(verseRefs.length, '?').join(',');
+    final rows = await db.rawQuery(
+      '''
+      SELECT h.id, h.group_id, h.verse_ref, h.start_token, h.end_token, g.color_hex
+      FROM highlights h
+      JOIN highlight_groups g ON g.id = h.group_id
+      WHERE h.verse_ref IN ($placeholders)
+      ORDER BY h.id ASC
+      ''',
+      verseRefs,
+    );
+    final result = <String, List<VerseHighlightRecord>>{};
+    for (final row in rows) {
+      final verseRef = row['verse_ref']?.toString() ?? '';
+      if (verseRef.isEmpty) continue;
+      final groupIdValue = row['group_id'];
+      final idValue = row['id'];
+      if (groupIdValue == null || idValue == null) continue;
+      result.putIfAbsent(verseRef, () => <VerseHighlightRecord>[]).add(
+            VerseHighlightRecord(
+              id: (idValue as num).toInt(),
+              groupId: (groupIdValue as num).toInt(),
+              verseRef: verseRef,
+              colorHex: row['color_hex']?.toString() ?? '#E8DCC8',
+              startToken: (row['start_token'] as num?)?.toInt(),
+              endToken: (row['end_token'] as num?)?.toInt(),
+            ),
+          );
+    }
+    return result;
+  }
+
+  Future<void> removeHighlightRanges(
+    List<TokenHighlightSelection> selections,
+  ) async {
+    if (selections.isEmpty) return;
+    final db = await UserDatabase.instance.database;
+    final batch = db.batch();
+    for (final item in selections) {
+      if (item.startToken == null || item.endToken == null) {
+        batch.delete('highlights', where: 'verse_ref = ?', whereArgs: [item.verseRef]);
+      } else {
+        batch.delete(
+          'highlights',
+          where:
+              'verse_ref = ? AND start_token IS NOT NULL AND end_token IS NOT NULL AND start_token <= ? AND end_token >= ?',
+          whereArgs: [item.verseRef, item.endToken, item.startToken],
+        );
+      }
+    }
+    await batch.commit(noResult: true);
+  }
+}
+
+class TokenHighlightSelection {
+  const TokenHighlightSelection({
+    required this.verseRef,
+    this.startToken,
+    this.endToken,
+  });
+
+  final String verseRef;
+  final int? startToken;
+  final int? endToken;
 }

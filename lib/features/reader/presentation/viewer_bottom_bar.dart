@@ -104,7 +104,7 @@ class ViewerBottomBar extends StatelessWidget {
                           ),
                           const SizedBox(width: 2),
                           _BottomIconButton(
-                            tooltip: 'Markup Settings',
+                            tooltip: 'Apply markup',
                             icon: Icons.format_paint_outlined,
                             color: buttonColor,
                             compact: isCompact,
@@ -137,52 +137,18 @@ class _BottomDisplayButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final width = compact ? 30.0 : 40.0;
-    final height = compact ? 30.0 : 40.0;
-    final barWidth = compact ? 18.0 : 20.0;
-    final barHeight = compact ? 7.0 : 8.0;
-    final gap = compact ? 3.0 : 4.0;
-    final stroke = compact ? 1.6 : 1.8;
-
     return IconButton(
-      tooltip: 'Display tools',
+      tooltip: 'Mode',
       onPressed: onPressed,
       padding: EdgeInsets.zero,
       constraints: BoxConstraints.tightFor(
-        width: width,
-        height: height,
+        width: compact ? 30 : 40,
+        height: compact ? 30 : 40,
       ),
-      icon: SizedBox(
-        width: barWidth,
-        height: barHeight * 2 + gap,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: barWidth,
-              height: barHeight,
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: color,
-                  width: stroke,
-                ),
-                borderRadius: BorderRadius.circular(2.2),
-              ),
-            ),
-            SizedBox(height: gap),
-            Container(
-              width: barWidth,
-              height: barHeight,
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: color,
-                  width: stroke,
-                ),
-                borderRadius: BorderRadius.circular(2.2),
-              ),
-            ),
-          ],
-        ),
+      icon: Icon(
+        Icons.slideshow_rounded,
+        color: color,
+        size: compact ? 20 : 24,
       ),
     );
   }

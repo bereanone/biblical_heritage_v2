@@ -186,12 +186,10 @@ class BibleMemorySupport {
     return '*The following is a formatted Bible Memory list for use in the Biblical Heritage #StudyBible app.*';
   }
 
-  static Future<void> exportSelectedGroup(
-    BuildContext context, {
+  static String buildExportText({
     required String selectedGroup,
     required List<MemoryVerse> visibleItems,
-  }) async {
-    if (selectedGroup == allGroups || visibleItems.isEmpty) return;
+  }) {
     final groupLabel = selectedGroup == ungrouped ? 'Ungrouped' : selectedGroup;
     final lines = <String>[
       memoryPromoHeader(),
@@ -206,10 +204,55 @@ class BibleMemorySupport {
       }
       lines.add('');
     }
-    await Clipboard.setData(ClipboardData(text: lines.join('\n').trimRight()));
+    return lines.join('\n').trimRight();
+  }
+
+  static Future<void> exportSelectedGroup(
+    BuildContext context, {
+    required String selectedGroup,
+    required List<MemoryVerse> visibleItems,
+  }) async {
+    if (selectedGroup == allGroups || visibleItems.isEmpty) return;
+    final exportText = buildExportText(
+      selectedGroup: selectedGroup,
+      visibleItems: visibleItems,
+    );
+    final controller = TextEditingController(text: exportText);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Export Group'),
+        content: SizedBox(
+          width: 600,
+          child: TextField(
+            controller: controller,
+            readOnly: true,
+            minLines: 10,
+            maxLines: 18,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.copy),
+            label: const Text('Copy'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (confirmed != true || !context.mounted) return;
+    await Clipboard.setData(ClipboardData(text: exportText));
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Exported ${visibleItems.length} verses to clipboard.')),
+      SnackBar(content: Text('Copied ${visibleItems.length} verses to clipboard.')),
     );
   }
 

@@ -1,0 +1,375 @@
+import 'package:flutter/material.dart';
+
+import 'tag_dialog_models.dart';
+import 'tag_dialog_styles.dart';
+import 'tag_quick_apply_helper.dart';
+
+class TagDialogHashTab extends StatelessWidget {
+  const TagDialogHashTab({
+    super.key,
+    required this.tagSymbol,
+    required this.loading,
+    required this.groupedSummaries,
+    required this.searchSummaries,
+    required this.tagController,
+    required this.categoryController,
+    required this.searchController,
+    required this.selectedCategory,
+    required this.categoryOptions,
+    required this.categoryFieldRevision,
+    required this.categoryFilter,
+    required this.sortMode,
+    required this.working,
+    required this.onTagSubmitted,
+    required this.onApplySelection,
+    required this.onCategoryChanged,
+    required this.onToggleSelectedCategoryBrowseFilter,
+    required this.onResetBrowseState,
+    required this.onSearchSelected,
+    required this.onSortModeChanged,
+    required this.onOpenSummaryDetails,
+  });
+
+  final String tagSymbol;
+  final bool loading;
+  final List<MapEntry<String?, List<HashTagSummary>>> groupedSummaries;
+  final List<HashTagSummary> searchSummaries;
+  final TextEditingController tagController;
+  final TextEditingController categoryController;
+  final TextEditingController searchController;
+  final String? selectedCategory;
+  final List<String> categoryOptions;
+  final int categoryFieldRevision;
+  final String? categoryFilter;
+  final TagSortMode sortMode;
+  final bool working;
+  final Future<void> Function(String value) onTagSubmitted;
+  final VoidCallback onApplySelection;
+  final ValueChanged<String?> onCategoryChanged;
+  final VoidCallback onToggleSelectedCategoryBrowseFilter;
+  final VoidCallback onResetBrowseState;
+  final Future<void> Function(String value) onSearchSelected;
+  final ValueChanged<TagSortMode> onSortModeChanged;
+  final ValueChanged<HashTagSummary> onOpenSummaryDetails;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final theme = Theme.of(context);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+      children: [
+        const SizedBox(height: 10),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 460;
+            final tagField = TextField(
+              controller: tagController,
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: TagDialogStyles.title(theme),
+                fontWeight: FontWeight.w800,
+              ),
+              decoration: InputDecoration(
+                labelText: '$tagSymbol tag',
+                border: const OutlineInputBorder(),
+                filled: true,
+                fillColor: TagDialogStyles.surface(theme),
+              ),
+              onSubmitted: (_) => onTagSubmitted(tagController.text),
+            );
+            final tagButton = SizedBox(
+              width: isNarrow ? 92 : 112,
+              height: isNarrow ? 60 : 62,
+              child: FilledButton(
+                onPressed: working ? null : onApplySelection,
+                style: FilledButton.styleFrom(
+                  backgroundColor: TagDialogStyles.accent(theme),
+                  foregroundColor: theme.brightness == Brightness.dark
+                      ? theme.colorScheme.onPrimary
+                      : Colors.white,
+                  textStyle: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  elevation: 0,
+                ),
+                child: TagDialogStyles.fittedButtonLabel(
+                  'Tag\nVerse',
+                  maxLines: 2,
+                ),
+              ),
+            );
+            if (isNarrow) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  tagField,
+                  const SizedBox(height: 8),
+                  Align(alignment: Alignment.centerRight, child: tagButton),
+                ],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: tagField),
+                const SizedBox(width: 8),
+                tagButton,
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              flex: 5,
+              child: DropdownButtonFormField<String?>(
+                key: ValueKey(categoryFieldRevision),
+                initialValue: selectedCategory,
+                decoration: InputDecoration(
+                  labelText: 'Category',
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                  filled: true,
+                  fillColor: TagDialogStyles.surfaceHigh(theme),
+                ),
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('None'),
+                  ),
+                  ...categoryOptions.map(
+                    (category) => DropdownMenuItem<String?>(
+                      value: category,
+                      child: Text(category, maxLines: 1),
+                    ),
+                  ),
+                  const DropdownMenuItem<String?>(
+                    value: _addNewCategoryValue,
+                    child: Text('Add new...'),
+                  ),
+                ],
+                onChanged: onCategoryChanged,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: TagDialogStyles.title(theme),
+                  fontWeight: FontWeight.w700,
+                ),
+                isExpanded: true,
+              ),
+            ),
+            const SizedBox(width: 6),
+            SizedBox(
+              width: 40,
+              height: 40,
+              child: Tooltip(
+                message: categoryFilter == null
+                    ? 'Filter by selected category'
+                    : 'Show all categories',
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: onToggleSelectedCategoryBrowseFilter,
+                    child: Container(
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: categoryFilter == null
+                            ? TagDialogStyles.surface(theme)
+                            : TagDialogStyles.surfaceHigh(theme),
+                        border: Border.all(
+                          color: TagDialogStyles.outlineColor(theme),
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        categoryFilter == null
+                            ? Icons.filter_alt_outlined
+                            : Icons.filter_alt,
+                        size: 18,
+                        color: TagDialogStyles.body(theme),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            SizedBox(
+              width: 40,
+              height: 40,
+              child: Tooltip(
+                message: 'Reset to all tags and categories',
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: onResetBrowseState,
+                    child: Container(
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: TagDialogStyles.surface(theme),
+                        border: Border.all(
+                          color: TagDialogStyles.outlineColor(theme),
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        Icons.refresh,
+                        size: 18,
+                        color: TagDialogStyles.body(theme),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            PopupMenuButton<String>(
+              tooltip: 'Search within category',
+              initialValue: searchController.text.isEmpty
+                  ? null
+                  : searchController.text,
+              onSelected: (value) async {
+                await onSearchSelected(value);
+              },
+              itemBuilder: (_) => searchSummaries
+                  .map(
+                    (summary) => PopupMenuItem<String>(
+                      value: summary.tag,
+                      child: Text(summary.tag, maxLines: 1),
+                    ),
+                  )
+                  .toList(growable: false),
+              child: Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: TagDialogStyles.surface(theme),
+                  border: Border.all(
+                    color: TagDialogStyles.outlineColor(theme),
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.search, size: 18),
+              ),
+            ),
+            const SizedBox(width: 6),
+            PopupMenuButton<TagSortMode>(
+              tooltip: 'Sort tags',
+              initialValue: sortMode,
+              onSelected: onSortModeChanged,
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: TagSortMode.categoryAlpha,
+                  child: TagDialogStyles.fittedButtonLabel('A→Z'),
+                ),
+                PopupMenuItem(
+                  value: TagSortMode.verseCount,
+                  child: TagDialogStyles.fittedButtonLabel('Count'),
+                ),
+              ],
+              child: Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: TagDialogStyles.surface(theme),
+                  border: Border.all(
+                    color: TagDialogStyles.outlineColor(theme),
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.sort,
+                  size: 18,
+                  color: TagDialogStyles.body(theme),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (groupedSummaries.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Text(
+              'No tags in this category yet.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium,
+            ),
+          )
+        else
+          ...groupedSummaries.map(
+            (group) => Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _displayCategoryLabel(group.key),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: TagDialogStyles.title(theme),
+                      ),
+                    ),
+                  ),
+                ),
+                ...group.value.map(
+                  (summary) => Column(
+                    children: [
+                      ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 0,
+                        ),
+                        tileColor: TagDialogStyles.card(theme),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        title: Text(
+                          '${summary.tag}  ·  ${summary.count}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: TagDialogStyles.title(theme),
+                          ),
+                        ),
+                        trailing: IconButton(
+                          onPressed: () => onOpenSummaryDetails(summary),
+                          tooltip: 'Open verses',
+                          icon: Icon(
+                            Icons.menu_book_outlined,
+                            color: TagDialogStyles.body(theme),
+                          ),
+                        ),
+                        onTap: () => onOpenSummaryDetails(summary),
+                      ),
+                      if (summary != group.value.last) const Divider(height: 1),
+                    ],
+                  ),
+                ),
+                if (group != groupedSummaries.last) const SizedBox(height: 8),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  String _displayCategoryLabel(String? category) {
+    final normalized = category?.trim() ?? '';
+    return normalized.isEmpty ? 'None' : normalized;
+  }
+
+  static const String _addNewCategoryValue = '__add_new_category__';
+}

@@ -441,7 +441,39 @@ class _BibleMemoryScreenState extends State<BibleMemoryScreen> {
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                     ),
-                                    trailing: const Icon(Icons.chevron_right),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          tooltip: 'Drill memory verse',
+                                          onPressed: () => _openPractice(item),
+                                          icon: const Icon(
+                                            Icons.chevron_right,
+                                          ),
+                                          constraints: const BoxConstraints.tightFor(
+                                            width: 40,
+                                            height: 40,
+                                          ),
+                                          padding: const EdgeInsets.all(6),
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        IconButton(
+                                          tooltip: 'Remove memory verse',
+                                          onPressed: () => _deleteVerse(item),
+                                          icon: Icon(
+                                            Icons.delete,
+                                            color: theme.colorScheme.error,
+                                          ),
+                                          constraints: const BoxConstraints.tightFor(
+                                            width: 42,
+                                            height: 42,
+                                          ),
+                                          padding: const EdgeInsets.all(8),
+                                          visualDensity: VisualDensity.standard,
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 );
                               },

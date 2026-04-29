@@ -1,0 +1,1 @@
+enum TagSortMode { categoryAlpha, verseCount }

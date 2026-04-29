@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'viewer_reference_title.dart';
+import 'reader_tag_button.dart';
 
 class ViewerTopBar extends StatelessWidget {
   const ViewerTopBar({
@@ -10,6 +11,9 @@ class ViewerTopBar extends StatelessWidget {
     required this.verse,
     required this.fontScale,
     required this.onSearch,
+    required this.onStandardTag,
+    required this.onDollarTag,
+    required this.onRapidTag,
     required this.onTopics,
     required this.onChoosePassage,
   });
@@ -19,20 +23,21 @@ class ViewerTopBar extends StatelessWidget {
   final int? verse;
   final double fontScale;
   final VoidCallback onSearch;
+  final VoidCallback onStandardTag;
+  final VoidCallback onDollarTag;
+  final VoidCallback onRapidTag;
   final VoidCallback onTopics;
   final VoidCallback onChoosePassage;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final baseTitleStyle = theme.textTheme.headlineSmall?.copyWith(
+    final baseTitleStyle =
+        theme.textTheme.headlineSmall?.copyWith(
           fontWeight: FontWeight.w700,
           color: theme.colorScheme.onSurface,
         ) ??
-        const TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.w700,
-        );
+        const TextStyle(fontSize: 20, fontWeight: FontWeight.w700);
     final readingFontSize =
         ((theme.textTheme.bodyLarge?.fontSize ?? 16) * fontScale);
 
@@ -40,12 +45,15 @@ class ViewerTopBar extends StatelessWidget {
       builder: (context, constraints) {
         const actionWidth = 48.0;
         const leadingActions = 2;
-        const reservedTrailingActions = 2;
+        const reservedTrailingActions = 4;
         const horizontalPadding = 8.0;
         final reservedWidth =
             (leadingActions + reservedTrailingActions) * actionWidth +
-                (horizontalPadding * 2);
-        final titleWidth = (constraints.maxWidth - reservedWidth).clamp(72.0, 420.0);
+            (horizontalPadding * 2);
+        final titleWidth = (constraints.maxWidth - reservedWidth).clamp(
+          72.0,
+          420.0,
+        );
 
         return Material(
           color: theme.colorScheme.surface,
@@ -68,6 +76,12 @@ class ViewerTopBar extends StatelessWidget {
                           icon: const Icon(Icons.search),
                         ),
                         const Spacer(),
+                        ReaderTagButtons(
+                          onStandardTap: onStandardTag,
+                          onDollarTap: onDollarTag,
+                          onRapidTap: onRapidTag,
+                        ),
+                        const SizedBox(width: 2),
                         IconButton(
                           onPressed: onTopics,
                           icon: const Icon(Icons.list_alt),

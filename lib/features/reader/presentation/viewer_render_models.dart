@@ -1,4 +1,4 @@
-import 'bible_explorer_screen.dart';
+import 'viewer_passage_models.dart';
 
 sealed class ViewerRenderItem {
   const ViewerRenderItem();

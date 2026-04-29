@@ -1,4 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
+
+import '../data/highlights_repository.dart';
+import 'viewer_range_selection.dart';
+
+class ViewerMarkupSegment {
+  const ViewerMarkupSegment({
+    required this.text,
+    required this.style,
+    this.tokenIndex,
+    this.strongs,
+  });
+
+  final String text;
+  final TextStyle style;
+  final int? tokenIndex;
+  final String? strongs;
+}
 
 InlineSpan buildViewerMarkupSpan({
   required String html,
@@ -6,9 +24,88 @@ InlineSpan buildViewerMarkupSpan({
   required TextStyle baseStyle,
   required Color redLetterColor,
   bool startsInRedLetter = false,
+  int? blockId,
+  ViewerRangeSelection? rangeSelection,
+  ValueChanged<int>? onTokenLongPress,
+  List<VerseHighlightRecord> persistedHighlights =
+      const <VerseHighlightRecord>[],
+}) {
+  final segments = parseViewerMarkupSegments(
+    html: html,
+    fallbackText: fallbackText,
+    baseStyle: baseStyle,
+    redLetterColor: redLetterColor,
+    startsInRedLetter: startsInRedLetter,
+  );
+  final spans = <InlineSpan>[];
+  final selectedColor =
+      baseStyle.backgroundColor ??
+      baseStyle.color?.withValues(alpha: 0.14) ??
+      Colors.yellow.withValues(alpha: 0.28);
+  for (final segment in segments) {
+    final tokenIndex = segment.tokenIndex;
+    final isSelected =
+        blockId != null &&
+        tokenIndex != null &&
+        rangeSelection?.containsTokenPosition(blockId, tokenIndex) == true;
+    final isPendingAnchor =
+        blockId != null &&
+        tokenIndex != null &&
+        rangeSelection?.containsPendingTokenAnchor(blockId, tokenIndex) == true;
+    final persisted = tokenIndex == null
+        ? null
+        : _tokenHighlightForIndex(persistedHighlights, tokenIndex);
+    final style = (isSelected || isPendingAnchor || persisted != null)
+        ? segment.style.copyWith(
+            backgroundColor: (isSelected || isPendingAnchor)
+                ? selectedColor
+                : persisted!.color,
+            fontWeight: (isSelected || isPendingAnchor)
+                ? FontWeight.w700
+                : null,
+          )
+        : segment.style;
+    final recognizer =
+        blockId != null && tokenIndex != null && onTokenLongPress != null
+        ? (LongPressGestureRecognizer()
+            ..onLongPress = () => onTokenLongPress(tokenIndex))
+        : null;
+    spans.add(
+      TextSpan(text: segment.text, style: style, recognizer: recognizer),
+    );
+  }
+  if (spans.isEmpty) {
+    return TextSpan(text: fallbackText, style: baseStyle);
+  }
+  return TextSpan(children: spans);
+}
+
+VerseHighlightRecord? _tokenHighlightForIndex(
+  List<VerseHighlightRecord> highlights,
+  int tokenIndex,
+) {
+  for (final highlight in highlights) {
+    final start = highlight.startToken;
+    final end = highlight.endToken;
+    if (start == null || end == null) continue;
+    if (tokenIndex >= start && tokenIndex <= end) {
+      return highlight;
+    }
+  }
+  return null;
+}
+
+List<ViewerMarkupSegment> parseViewerMarkupSegments({
+  required String html,
+  required String fallbackText,
+  required TextStyle baseStyle,
+  required Color redLetterColor,
+  bool startsInRedLetter = false,
 }) {
   if (html.trim().isEmpty) {
-    return TextSpan(text: fallbackText, style: baseStyle);
+    return <ViewerMarkupSegment>[
+      ViewerMarkupSegment(text: fallbackText, style: baseStyle),
+    ];
   }
 
   final normalized = html
@@ -23,12 +120,15 @@ InlineSpan buildViewerMarkupSpan({
       .replaceAll('<br/>', '\n')
       .replaceAll('<br />', '\n');
 
-  final spans = <InlineSpan>[];
+  final segments = <ViewerMarkupSegment>[];
   final buffer = StringBuffer();
   var index = 0;
   var italicDepth = 0;
   var redDepth = startsInRedLetter ? 1 : 0;
   var skipDepth = 0;
+  var currentTokenIndex = 0;
+  int? activeTokenIndex;
+  String? activeStrongs;
 
   TextStyle currentStyle() {
     var style = baseStyle;
@@ -46,7 +146,14 @@ InlineSpan buildViewerMarkupSpan({
       buffer.clear();
       return;
     }
-    spans.add(TextSpan(text: _decodeEntities(buffer.toString()), style: currentStyle()));
+    segments.add(
+      ViewerMarkupSegment(
+        text: _decodeEntities(buffer.toString()),
+        style: currentStyle(),
+        tokenIndex: activeTokenIndex,
+        strongs: activeStrongs,
+      ),
+    );
     buffer.clear();
   }
 
@@ -82,6 +189,9 @@ InlineSpan buildViewerMarkupSpan({
         redDepth = redDepth > 0 ? redDepth - 1 : 0;
       } else if (tagName == 'note') {
         skipDepth = skipDepth > 0 ? skipDepth - 1 : 0;
+      } else if (tagName == 'w') {
+        // Keep the last word token active so trailing punctuation stays attached
+        // to the selected/exported token span instead of falling out of range.
       }
       index = closeIndex + 1;
       continue;
@@ -105,20 +215,20 @@ InlineSpan buildViewerMarkupSpan({
         skipDepth++;
       }
     } else if (tagName == 'p') {
-      if (spans.isNotEmpty) {
-        spans.add(TextSpan(text: '\n'));
+      if (segments.isNotEmpty) {
+        segments.add(ViewerMarkupSegment(text: '\n', style: currentStyle()));
       }
+    } else if (tagName == 'w' && !selfClosing) {
+      currentTokenIndex += 1;
+      activeTokenIndex = currentTokenIndex;
+      activeStrongs = _extractCanonicalStrongs(rawTag);
     }
 
     index = closeIndex + 1;
   }
 
   flush();
-
-  if (spans.isEmpty) {
-    return TextSpan(text: fallbackText, style: baseStyle);
-  }
-  return TextSpan(children: spans);
+  return segments;
 }
 
 bool computeViewerRedLetterContinuation(
@@ -182,4 +292,20 @@ String _decodeEntities(String text) {
       .replaceAll('&amp;', '&')
       .replaceAll('&lt;', '<')
       .replaceAll('&gt;', '>');
+}
+
+String? _extractCanonicalStrongs(String rawTag) {
+  final lemmaMatch = RegExp(
+    r'lemma="([^"]+)"',
+    caseSensitive: false,
+  ).firstMatch(rawTag);
+  final lemma = lemmaMatch?.group(1) ?? '';
+  final strongsMatch = RegExp(
+    r'strong:([GH])0*(\d+)',
+    caseSensitive: false,
+  ).firstMatch(lemma);
+  if (strongsMatch == null) return null;
+  final prefix = strongsMatch.group(1)!.toUpperCase();
+  final digits = strongsMatch.group(2)!;
+  return '$prefix${digits.padLeft(4, '0')}';
 }

@@ -36,12 +36,7 @@ class StudyBibleDatabase {
     final db = await bible;
     return db.query(
       'bible_blocks',
-      columns: [
-        'id',
-        'block_index',
-        'html',
-        'plain_text',
-      ],
+      columns: ['id', 'block_index', 'html', 'plain_text'],
       where: 'book_number = ? AND chapter = ?',
       whereArgs: [bookNumber, chapter],
       orderBy: 'block_index',
@@ -67,7 +62,7 @@ class StudyBibleDatabase {
       ],
       where: 'id BETWEEN ? AND ?',
       whereArgs: [minId, maxId],
-      orderBy: 'id',
+      orderBy: 'book_number, chapter, block_index, id',
     );
   }
 
@@ -100,6 +95,23 @@ class StudyBibleDatabase {
     );
     if (rows.isEmpty) return null;
     return rows.first['book_name'] as String?;
+  }
+
+  Future<String?> loadVerseText({
+    required int bookNumber,
+    required int chapter,
+    required int verse,
+  }) async {
+    final db = await bible;
+    final rows = await db.query(
+      'bible_blocks',
+      columns: ['plain_text'],
+      where: 'book_number = ? AND chapter = ? AND block_index = ?',
+      whereArgs: [bookNumber, chapter, verse],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['plain_text']?.toString();
   }
 
   Future<List<int>> loadChapters(int bookNumber) async {
@@ -147,14 +159,11 @@ class StudyBibleDatabase {
 
     final db = await bible;
     final placeholders = List.filled(blockIds.length, '?').join(', ');
-    final rows = await db.rawQuery(
-      '''
+    final rows = await db.rawQuery('''
       SELECT id, book_number, chapter, block_index
       FROM bible_blocks
       WHERE id IN ($placeholders)
-      ''',
-      blockIds,
-    );
+      ''', blockIds);
     final books = await loadBooks();
     final namesByNumber = {
       for (final book in books) book.bookNumber: book.bookName,
@@ -164,8 +173,8 @@ class StudyBibleDatabase {
       for (final row in rows)
         row['id'] as int: PassageReference(
           bookNumber: row['book_number'] as int,
-          bookName: namesByNumber[row['book_number']] ??
-              'Book ${row['book_number']}',
+          bookName:
+              namesByNumber[row['book_number']] ?? 'Book ${row['book_number']}',
           chapter: row['chapter'] as int,
           verse: row['block_index'] as int,
         ),
@@ -219,15 +228,12 @@ class StudyBibleDatabase {
     final placeholders = List.filled(blockIds.length, '?').join(', ');
     List<Map<String, Object?>> rows;
     try {
-      rows = await db.rawQuery(
-        '''
+      rows = await db.rawQuery('''
         SELECT block_id, heading
         FROM section_headings
         WHERE block_id IN ($placeholders)
         ORDER BY block_id
-        ''',
-        blockIds,
-      );
+        ''', blockIds);
     } on DatabaseException catch (error) {
       if (error.toString().contains('no such table: section_headings')) {
         return const <int, List<String>>{};
@@ -295,16 +301,13 @@ class StudyBibleDatabase {
     final placeholders = List.filled(blockIds.length, '?').join(', ');
     List<Map<String, Object?>> rows;
     try {
-      rows = await db.rawQuery(
-        '''
+      rows = await db.rawQuery('''
         SELECT block_id, label_native, label_en, label_string, sort_order
         FROM acrostics
         WHERE block_id IN ($placeholders)
           AND marker_type = 'acrostic'
         ORDER BY sort_order ASC
-        ''',
-        blockIds,
-      );
+        ''', blockIds);
     } on DatabaseException catch (error) {
       if (error.toString().contains('no such table: acrostics')) {
         return const <int, AcrosticRecord>{};
@@ -378,7 +381,8 @@ class StudyBibleDatabase {
             blockId: row['id'] as int,
             bookNumber: row['book_number'] as int,
             bookName:
-                namesByNumber[row['book_number']] ?? 'Book ${row['book_number']}',
+                namesByNumber[row['book_number']] ??
+                'Book ${row['book_number']}',
             chapter: row['chapter'] as int,
             verse: row['block_index'] as int,
             text: row['plain_text'] as String? ?? '',
@@ -403,7 +407,8 @@ class StudyBibleDatabase {
     final db = await bible;
     final books = await loadBooks();
     final namesByLower = {
-      for (final book in books) book.bookName.trim().toLowerCase(): book.bookNumber,
+      for (final book in books)
+        book.bookName.trim().toLowerCase(): book.bookNumber,
     };
     final namesByNumber = {
       for (final book in books) book.bookNumber: book.bookName,
@@ -465,13 +470,11 @@ class StudyBibleDatabase {
       );
     }
 
-    return PassageSearchResponse(
-      results: results,
-      totalCount: parsed.length,
-    );
+    return PassageSearchResponse(results: results, totalCount: parsed.length);
   }
 
-  Future<Map<int, List<InterlinearTokenRecord>>> loadInterlinearTokensForBlockIds(
+  Future<Map<int, List<InterlinearTokenRecord>>>
+  loadInterlinearTokensForBlockIds(
     List<int> blockIds, {
     bool englishOrder = false,
   }) async {
@@ -479,8 +482,7 @@ class StudyBibleDatabase {
 
     final db = await bible;
     final placeholders = List.filled(blockIds.length, '?').join(', ');
-    final rows = await db.rawQuery(
-      '''
+    final rows = await db.rawQuery('''
       SELECT
         bt.block_id,
         bt.verse_index,
@@ -497,15 +499,15 @@ class StudyBibleDatabase {
       ORDER BY bt.block_id,
         ${englishOrder ? 'bt.english_gloss' : 'bt.verse_index'},
         bt.verse_index
-      ''',
-      blockIds,
-    );
+      ''', blockIds);
 
     final byBlockId = <int, List<InterlinearTokenRecord>>{};
     for (final row in rows) {
       final blockId = (row['block_id'] as num?)?.toInt();
       if (blockId == null) continue;
-      byBlockId.putIfAbsent(blockId, () => <InterlinearTokenRecord>[]).add(
+      byBlockId
+          .putIfAbsent(blockId, () => <InterlinearTokenRecord>[])
+          .add(
             InterlinearTokenRecord(
               english: row['english_gloss']?.toString() ?? '',
               original: row['ancient_text']?.toString() ?? '',
@@ -519,13 +521,9 @@ class StudyBibleDatabase {
     return byBlockId;
   }
 
-
   Future<Database> _openBibleDb() async {
     final path = await SandboxBootstrap.bibleDatabasePath();
-    return openDatabase(
-      path,
-      readOnly: true,
-    );
+    return openDatabase(path, readOnly: true);
   }
 }
 
@@ -548,10 +546,7 @@ class InterlinearTokenRecord {
 }
 
 class AcrosticRecord {
-  const AcrosticRecord({
-    required this.hebrew,
-    required this.transliteration,
-  });
+  const AcrosticRecord({required this.hebrew, required this.transliteration});
 
   final String hebrew;
   final String transliteration;

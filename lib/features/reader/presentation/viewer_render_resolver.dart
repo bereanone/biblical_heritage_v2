@@ -1,5 +1,5 @@
-import 'bible_explorer_screen.dart';
 import '../../../core/database/study_bible_database.dart';
+import 'viewer_passage_models.dart';
 import 'viewer_render_models.dart';
 
 List<ViewerRenderItem> resolveViewerRenderItems(

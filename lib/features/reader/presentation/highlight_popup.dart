@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/theme/app_settings_service.dart';
 import '../data/highlight_groups_repository.dart';
 import '../data/highlights_repository.dart';
 import 'markup_settings_screen.dart';
@@ -7,17 +8,25 @@ import 'markup_settings_screen.dart';
 Future<bool?> showHighlightPopup(
   BuildContext context, {
   required List<String> verseRefs,
+  List<TokenHighlightSelection> tokenSelections = const <TokenHighlightSelection>[],
 }) {
   return showDialog<bool>(
     context: context,
-    builder: (_) => _HighlightPopup(verseRefs: verseRefs),
+    builder: (_) => _HighlightPopup(
+      verseRefs: verseRefs,
+      tokenSelections: tokenSelections,
+    ),
   );
 }
 
 class _HighlightPopup extends StatefulWidget {
-  const _HighlightPopup({required this.verseRefs});
+  const _HighlightPopup({
+    required this.verseRefs,
+    required this.tokenSelections,
+  });
 
   final List<String> verseRefs;
+  final List<TokenHighlightSelection> tokenSelections;
 
   @override
   State<_HighlightPopup> createState() => _HighlightPopupState();
@@ -49,16 +58,28 @@ class _HighlightPopupState extends State<_HighlightPopup> {
   Future<void> _apply() async {
     final groupId = _selectedGroupId;
     if (groupId == null) return;
-    await _repository.applyHighlightToVerseRefs(
-      groupId: groupId,
-      verseRefs: widget.verseRefs,
-    );
+    if (widget.tokenSelections.isNotEmpty) {
+      await _repository.applyHighlightToTokenRanges(
+        groupId: groupId,
+        selections: widget.tokenSelections,
+      );
+    } else {
+      await _repository.applyHighlightToVerseRefs(
+        groupId: groupId,
+        verseRefs: widget.verseRefs,
+      );
+    }
+    await AppSettingsService.instance.saveDefaultHighlightGroupId(groupId);
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }
 
   Future<void> _remove() async {
-    await _repository.removeHighlightsForVerseRefs(widget.verseRefs);
+    if (widget.tokenSelections.isNotEmpty) {
+      await _repository.removeHighlightRanges(widget.tokenSelections);
+    } else {
+      await _repository.removeHighlightsForVerseRefs(widget.verseRefs);
+    }
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }

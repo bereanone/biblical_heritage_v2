@@ -15,7 +15,7 @@ class ViewerMarkupSegment {
   final String text;
   final TextStyle style;
   final int? tokenIndex;
-  final String? strongs;
+  final Set<String>? strongs;
 }
 
 InlineSpan buildViewerMarkupSpan({
@@ -29,6 +29,7 @@ InlineSpan buildViewerMarkupSpan({
   ValueChanged<int>? onTokenLongPress,
   List<VerseHighlightRecord> persistedHighlights =
       const <VerseHighlightRecord>[],
+  Set<String> highlightedStrongs = const <String>{},
 }) {
   final segments = parseViewerMarkupSegments(
     html: html,
@@ -55,16 +56,17 @@ InlineSpan buildViewerMarkupSpan({
     final persisted = tokenIndex == null
         ? null
         : _tokenHighlightForIndex(persistedHighlights, tokenIndex);
-    final style = (isSelected || isPendingAnchor || persisted != null)
-        ? segment.style.copyWith(
-            backgroundColor: (isSelected || isPendingAnchor)
-                ? selectedColor
-                : persisted!.color,
-            fontWeight: (isSelected || isPendingAnchor)
-                ? FontWeight.w700
-                : null,
-          )
-        : segment.style;
+    final isStrongsMatch =
+        segment.strongs != null &&
+        segment.strongs!.any(highlightedStrongs.contains);
+    final style = _applyViewerSpanStyle(
+      segment.style,
+      backgroundColor: (isSelected || isPendingAnchor)
+          ? selectedColor
+          : persisted?.color,
+      emphasizeWeight: isSelected || isPendingAnchor || isStrongsMatch,
+      underline: isStrongsMatch,
+    );
     final recognizer =
         blockId != null && tokenIndex != null && onTokenLongPress != null
         ? (LongPressGestureRecognizer()
@@ -78,6 +80,25 @@ InlineSpan buildViewerMarkupSpan({
     return TextSpan(text: fallbackText, style: baseStyle);
   }
   return TextSpan(children: spans);
+}
+
+TextStyle _applyViewerSpanStyle(
+  TextStyle style, {
+  Color? backgroundColor,
+  required bool emphasizeWeight,
+  required bool underline,
+}) {
+  final decoration = underline
+      ? TextDecoration.combine([
+          if (style.decoration != null) style.decoration!,
+          TextDecoration.underline,
+        ])
+      : style.decoration;
+  return style.copyWith(
+    backgroundColor: backgroundColor ?? style.backgroundColor,
+    fontWeight: emphasizeWeight ? FontWeight.w700 : style.fontWeight,
+    decoration: decoration,
+  );
 }
 
 VerseHighlightRecord? _tokenHighlightForIndex(
@@ -128,7 +149,7 @@ List<ViewerMarkupSegment> parseViewerMarkupSegments({
   var skipDepth = 0;
   var currentTokenIndex = 0;
   int? activeTokenIndex;
-  String? activeStrongs;
+  Set<String>? activeStrongs;
 
   TextStyle currentStyle() {
     var style = baseStyle;
@@ -151,7 +172,9 @@ List<ViewerMarkupSegment> parseViewerMarkupSegments({
         text: _decodeEntities(buffer.toString()),
         style: currentStyle(),
         tokenIndex: activeTokenIndex,
-        strongs: activeStrongs,
+        strongs: activeStrongs == null || activeStrongs.isEmpty
+            ? null
+            : Set<String>.of(activeStrongs),
       ),
     );
     buffer.clear();
@@ -294,18 +317,20 @@ String _decodeEntities(String text) {
       .replaceAll('&gt;', '>');
 }
 
-String? _extractCanonicalStrongs(String rawTag) {
+Set<String>? _extractCanonicalStrongs(String rawTag) {
   final lemmaMatch = RegExp(
     r'lemma="([^"]+)"',
     caseSensitive: false,
   ).firstMatch(rawTag);
   final lemma = lemmaMatch?.group(1) ?? '';
-  final strongsMatch = RegExp(
+  final strongs = <String>{};
+  for (final match in RegExp(
     r'strong:([GH])0*(\d+)',
     caseSensitive: false,
-  ).firstMatch(lemma);
-  if (strongsMatch == null) return null;
-  final prefix = strongsMatch.group(1)!.toUpperCase();
-  final digits = strongsMatch.group(2)!;
-  return '$prefix${digits.padLeft(4, '0')}';
+  ).allMatches(lemma)) {
+    final prefix = match.group(1)!.toUpperCase();
+    final digits = match.group(2)!;
+    strongs.add('$prefix${digits.padLeft(4, '0')}');
+  }
+  return strongs.isEmpty ? null : strongs;
 }

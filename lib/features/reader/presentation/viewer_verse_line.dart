@@ -55,7 +55,7 @@ class ViewerVerseLine extends StatelessWidget {
     );
     final numberStyle = style.copyWith(
       fontSize: 12 * fontScaleFromStyle(style),
-      fontWeight: isTagged ? FontWeight.w700 : FontWeight.w600,
+      fontWeight: isSelected || isTagged ? FontWeight.w700 : FontWeight.w600,
       height: 1,
       color: theme.colorScheme.onSurface.withValues(
         alpha: isTagged ? 0.94 : 0.56,
@@ -74,19 +74,22 @@ class ViewerVerseLine extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(isSelected ? 3 : 6),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOut,
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+          padding: EdgeInsets.symmetric(
+            horizontal: isSelected ? 0 : 2,
+            vertical: isSelected ? 0 : 1,
+          ),
           decoration: BoxDecoration(
             color: isSelected
                 ? viewerSelectedVerseColor(context)
                 : isRangeSelected
                 ? theme.colorScheme.primary.withValues(alpha: 0.10)
                 : highlightSpec?.backgroundColor ?? Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(isSelected ? 3 : 6),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,

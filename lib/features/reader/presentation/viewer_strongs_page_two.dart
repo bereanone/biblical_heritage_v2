@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/database/study_bible_database.dart';
 import 'viewer_search_options.dart';
 import 'viewer_search_query.dart';
+import 'viewer_markup_span_builder.dart';
 import 'viewer_strongs_models.dart';
 import 'viewer_strongs_repository.dart';
 
@@ -30,18 +31,21 @@ class _ViewerStrongsPageTwoState extends State<ViewerStrongsPageTwo> {
   Widget build(BuildContext context) {
     final canonical =
         normalizeStrongsCanonical(widget.strongsId) ?? widget.strongsId.trim();
-    return FutureBuilder<({List<ViewerStrongsOccurrence> rows, List<BookRecord> books})>(
+    return FutureBuilder<
+      ({List<ViewerStrongsOccurrence> rows, List<BookRecord> books})
+    >(
       future: _loadData(canonical),
       builder: (context, snapshot) {
         final theme = Theme.of(context);
-        final rows =
-            snapshot.data?.rows ?? const <ViewerStrongsOccurrence>[];
+        final rows = snapshot.data?.rows ?? const <ViewerStrongsOccurrence>[];
         final books = snapshot.data?.books ?? const <BookRecord>[];
         final bookOptions = buildViewerSearchBookOptions(
           books,
           _selectedSection,
         );
-        final filteredRows = rows.where(_matchesFilters).toList(growable: false);
+        final filteredRows = rows
+            .where(_matchesFilters)
+            .toList(growable: false);
 
         return Material(
           color: theme.colorScheme.surface,
@@ -162,8 +166,16 @@ class _ViewerStrongsPageTwoState extends State<ViewerStrongsPageTwo> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  subtitle: Text(
-                    row.text,
+                  subtitle: Text.rich(
+                    buildViewerMarkupSpan(
+                      html: row.html,
+                      fallbackText: row.text,
+                      baseStyle: theme.textTheme.bodyMedium!.copyWith(
+                        color: theme.colorScheme.onSurface,
+                      ),
+                      redLetterColor: theme.colorScheme.error,
+                      highlightedStrongs: {canonical},
+                    ),
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -180,9 +192,8 @@ class _ViewerStrongsPageTwoState extends State<ViewerStrongsPageTwo> {
     );
   }
 
-  Future<({List<ViewerStrongsOccurrence> rows, List<BookRecord> books})> _loadData(
-    String canonical,
-  ) async {
+  Future<({List<ViewerStrongsOccurrence> rows, List<BookRecord> books})>
+  _loadData(String canonical) async {
     final results = await Future.wait([
       widget.repository.loadOccurrences(canonical),
       StudyBibleDatabase.instance.loadBooks(),

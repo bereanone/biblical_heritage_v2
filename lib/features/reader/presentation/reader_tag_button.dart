@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 
+enum ReaderTagFamily { hash, dollar }
+
 class ReaderTagButtons extends StatelessWidget {
   const ReaderTagButtons({
     super.key,
+    required this.activeFamily,
     required this.onStandardTap,
     required this.onDollarTap,
     required this.onRapidTap,
   });
 
+  final ReaderTagFamily? activeFamily;
   final VoidCallback onStandardTap;
   final VoidCallback onDollarTap;
   final VoidCallback onRapidTap;
@@ -15,8 +19,13 @@ class ReaderTagButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final standardColor = theme.colorScheme.onSurface.withValues(alpha: 0.84);
     final rapidColor = theme.colorScheme.primary;
+    final activeColor = theme.colorScheme.primary;
+    final activeForeground = theme.colorScheme.onPrimary;
+    final inactiveForeground = theme.colorScheme.onSurface.withValues(
+      alpha: 0.84,
+    );
+    final inactiveBorder = inactiveForeground.withValues(alpha: 0.18);
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -25,25 +34,38 @@ class ReaderTagButtons extends StatelessWidget {
           message: '# Tags',
           child: _GlyphButton(
             glyph: '#',
-            iconColor: standardColor,
-            backgroundColor: Colors.transparent,
-            borderColor: standardColor.withValues(alpha: 0.18),
+            iconColor: activeFamily == ReaderTagFamily.hash
+                ? activeForeground
+                : inactiveForeground,
+            backgroundColor: activeFamily == ReaderTagFamily.hash
+                ? activeColor
+                : Colors.transparent,
+            borderColor: activeFamily == ReaderTagFamily.hash
+                ? activeColor
+                : inactiveBorder,
             onPressed: onStandardTap,
+            elevated: activeFamily == ReaderTagFamily.hash,
           ),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 8),
         Tooltip(
           message: r'$ Tags',
           child: _GlyphButton(
             glyph: r'$',
-            iconColor: theme.colorScheme.onTertiary,
-            backgroundColor: theme.colorScheme.tertiary,
-            borderColor: theme.colorScheme.tertiary,
+            iconColor: activeFamily == ReaderTagFamily.dollar
+                ? activeForeground
+                : inactiveForeground,
+            backgroundColor: activeFamily == ReaderTagFamily.dollar
+                ? activeColor
+                : Colors.transparent,
+            borderColor: activeFamily == ReaderTagFamily.dollar
+                ? activeColor
+                : inactiveBorder,
             onPressed: onDollarTap,
-            elevated: true,
+            elevated: activeFamily == ReaderTagFamily.dollar,
           ),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 8),
         Tooltip(
           message: '! Rapid tag',
           child: _GlyphButton(

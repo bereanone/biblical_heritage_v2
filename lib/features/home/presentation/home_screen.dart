@@ -79,7 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.library_books_outlined),
-            selectedIcon: Icon(Icons.library_books),
+            selectedIcon: Icon(Icons.library_books_outlined),
             label: 'Library',
           ),
           NavigationDestination(
@@ -99,10 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class _HomeHero extends StatelessWidget {
-  const _HomeHero({
-    required this.titleStyle,
-    required this.bodyStyle,
-  });
+  const _HomeHero({required this.titleStyle, required this.bodyStyle});
 
   final TextStyle? titleStyle;
   final TextStyle? bodyStyle;
@@ -115,9 +112,7 @@ class _HomeHero extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.72),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(
-          color: Theme.of(context).colorScheme.outlineVariant,
-        ),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

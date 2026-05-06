@@ -69,8 +69,10 @@ class AppSettingsService {
   static const _interlinearShowMorphologyKey =
       'viewer.interlinear.show_morphology';
   static const _lastTagTabIndexKey = 'viewer.tag.last_tab_index';
-  static const _presentationAspectRatioKey =
-      'viewer.presentation.aspect_ratio';
+  static const _activeTagFamilyKey = 'viewer.tag.active_family';
+  static const _presentationAspectRatioKey = 'viewer.presentation.aspect_ratio';
+  static const _churchAutoMuteEnabledKey =
+      'utilities.church_auto_mute.enabled';
 
   Future<AppVisualSettings> loadVisualSettings(AppThemeMode mode) async {
     final db = await UserDatabase.instance.database;
@@ -263,7 +265,34 @@ class AppSettingsService {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  Future<PresentationAspectRatioPreset> loadPresentationAspectRatioPreset() async {
+  Future<String?> loadActiveTagFamily() async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_activeTagFamilyKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final value = rows.first['value']?.toString().trim().toLowerCase() ?? '';
+    if (value == 'hash' || value == '#') return 'hash';
+    if (value == 'dollar' || value == r'$') return 'dollar';
+    return null;
+  }
+
+  Future<void> saveActiveTagFamily(String family) async {
+    final normalized = family.trim().toLowerCase();
+    if (normalized != 'hash' && normalized != 'dollar') return;
+    final db = await UserDatabase.instance.database;
+    await db.insert('app_settings', {
+      'key': _activeTagFamilyKey,
+      'value': normalized,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<PresentationAspectRatioPreset>
+  loadPresentationAspectRatioPreset() async {
     final db = await UserDatabase.instance.database;
     final rows = await db.query(
       'app_settings',
@@ -287,6 +316,27 @@ class AppSettingsService {
     await db.insert('app_settings', {
       'key': _presentationAspectRatioKey,
       'value': preset.name,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<bool> loadChurchAutoMuteEnabled() async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_churchAutoMuteEnabledKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    return _parseBool(rows.first['value'] as String?) ?? false;
+  }
+
+  Future<void> saveChurchAutoMuteEnabled(bool value) async {
+    final db = await UserDatabase.instance.database;
+    await db.insert('app_settings', {
+      'key': _churchAutoMuteEnabledKey,
+      'value': value ? '1' : '0',
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 

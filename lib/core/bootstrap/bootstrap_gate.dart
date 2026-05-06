@@ -1,68 +1,117 @@
 import 'package:flutter/material.dart';
 
 import '../../app/study_bible_app.dart';
-import 'sandbox_bootstrap.dart';
+import 'startup_coordinator.dart';
 
 class BootstrapGate extends StatefulWidget {
-  const BootstrapGate({
-    super.key,
-    required this.showSetupScreen,
-  });
-
-  final bool showSetupScreen;
+  const BootstrapGate({super.key});
 
   @override
   State<BootstrapGate> createState() => _BootstrapGateState();
 }
 
 class _BootstrapGateState extends State<BootstrapGate> {
-  late final Future<void> _future;
+  StartupSnapshot? _snapshot;
   String _status = 'Preparing sandbox...';
+  bool _busy = false;
+  Object? _error;
 
   @override
   void initState() {
     super.initState();
-    _future = SandboxBootstrap.ensureReady(
-      onStatus: (status) {
-        if (!mounted) return;
-        setState(() {
-          _status = status;
-        });
-      },
-    );
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    try {
+      final snapshot = await StartupCoordinator.instance.initialize();
+      if (!mounted) return;
+      setState(() {
+        _snapshot = snapshot;
+        _status = snapshot.message;
+        _error = snapshot.errorMessage;
+        _busy = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _snapshot = StartupSnapshot(
+          phase: StartupPhase.migrationFailed,
+          message: 'Startup failed.',
+          errorMessage: error.toString(),
+        );
+        _status = 'Startup failed.';
+        _error = error;
+        _busy = false;
+      });
+    }
+  }
+
+  Future<void> _runSelection(Future<StartupSnapshot> Function() action) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final snapshot = await action();
+      if (!mounted) return;
+      setState(() {
+        _snapshot = snapshot;
+        _status = snapshot.message;
+        _error = snapshot.errorMessage;
+        _busy = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _snapshot = StartupSnapshot(
+          phase: StartupPhase.migrationFailed,
+          message: 'Migration failed.',
+          errorMessage: error.toString(),
+        );
+        _status = 'Migration failed.';
+        _error = error;
+        _busy = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<void>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.done) {
-          if (snapshot.hasError) {
-            return _BootstrapError(error: snapshot.error);
-          }
-          return const StudyBibleApp();
-        }
+    final snapshot = _snapshot;
+    if (snapshot == null || _busy) {
+      return _BootstrapSplash(status: _status);
+    }
 
-        if (!widget.showSetupScreen) {
-          return const MaterialApp(
-            debugShowCheckedModeBanner: false,
-            home: Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            ),
-          );
-        }
+    if (snapshot.isReady ||
+        snapshot.phase == StartupPhase.noLegacyFound ||
+        snapshot.phase == StartupPhase.freshInstallSelected ||
+        snapshot.phase == StartupPhase.migrationCompleted) {
+      return const StudyBibleApp();
+    }
 
-        return _BootstrapSplash(status: _status);
-      },
+    if (snapshot.requiresDecision) {
+      return _LegacyUpgradeDecisionScreen(
+        status: snapshot.message,
+        errorMessage: _error?.toString() ?? snapshot.errorMessage,
+        onUpgrade: () =>
+            _runSelection(StartupCoordinator.instance.backUpAndUpgrade),
+        onFreshStart: () => _runSelection(
+          StartupCoordinator.instance.startFreshButKeepLegacyBackup,
+        ),
+        onNotNow: () {},
+      );
+    }
+
+    return _BootstrapError(
+      error: _error ?? snapshot.errorMessage ?? snapshot.message,
+      onRetry: _initialize,
     );
   }
 }
 
 class _BootstrapSplash extends StatelessWidget {
-  const _BootstrapSplash({
-    required this.status,
-  });
+  const _BootstrapSplash({required this.status});
 
   final String status;
 
@@ -106,12 +155,99 @@ class _BootstrapSplash extends StatelessWidget {
   }
 }
 
-class _BootstrapError extends StatelessWidget {
-  const _BootstrapError({
-    required this.error,
+class _LegacyUpgradeDecisionScreen extends StatelessWidget {
+  const _LegacyUpgradeDecisionScreen({
+    required this.status,
+    required this.onUpgrade,
+    required this.onFreshStart,
+    required this.onNotNow,
+    this.errorMessage,
   });
 
+  final String status;
+  final String? errorMessage;
+  final VoidCallback onUpgrade;
+  final VoidCallback onFreshStart;
+  final VoidCallback onNotNow;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Card(
+                elevation: 0,
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Legacy data found',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(status),
+                      if (errorMessage != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          errorMessage!,
+                          style: const TextStyle(color: Colors.redAccent),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      const Text(
+                        'Choose whether to back up and upgrade existing data or start fresh while keeping a legacy backup.',
+                      ),
+                      const SizedBox(height: 20),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          FilledButton(
+                            onPressed: onUpgrade,
+                            child: const Text(
+                              'Back Up and Upgrade Existing Data',
+                            ),
+                          ),
+                          OutlinedButton(
+                            onPressed: onFreshStart,
+                            child: const Text(
+                              'Start Fresh but Keep Legacy Backup',
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: onNotNow,
+                            child: const Text('Cancel / Not Now'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BootstrapError extends StatelessWidget {
+  const _BootstrapError({required this.error, required this.onRetry});
+
   final Object? error;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -143,8 +279,12 @@ class _BootstrapError extends StatelessWidget {
                       border: Border.all(color: Colors.black12),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: SelectableText(error?.toString() ?? '(unknown error)'),
+                    child: SelectableText(
+                      error?.toString() ?? '(unknown error)',
+                    ),
                   ),
+                  const SizedBox(height: 16),
+                  FilledButton(onPressed: onRetry, child: const Text('Retry')),
                 ],
               ),
             ),

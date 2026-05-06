@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/database/study_bible_database.dart';
+import '../../../core/theme/app_settings_service.dart';
 import 'tag_dialog_styles.dart';
 import 'tag_quick_apply_helper.dart';
 import 'viewer_presentation_launcher.dart';
@@ -131,6 +132,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       await widget.repository.saveTagCategory(widget.tag, currentCategory);
     }
     await widget.repository.saveDefaultTag(widget.tag);
+    await AppSettingsService.instance.saveActiveTagFamily(
+      _isDollarRepository ? 'dollar' : 'hash',
+    );
     if (!mounted) return;
     setState(() => _defaultTag = widget.tag);
     final onSelectTag = widget.onSelectTag;

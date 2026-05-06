@@ -1,22 +1,30 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/theme/app_theme_mode.dart';
+
 class ViewerBottomBar extends StatelessWidget {
   const ViewerBottomBar({
     super.key,
+    required this.themeMode,
+    required this.onToggleThemeMode,
+    required this.onMode,
     required this.onHistory,
     required this.onDecreaseFont,
     required this.onIncreaseFont,
-    required this.onMode,
+    required this.onCommentary,
     required this.onMarkup,
     required this.canDecreaseFont,
     required this.canIncreaseFont,
     required this.backgroundColor,
   });
 
+  final AppThemeMode themeMode;
+  final VoidCallback onToggleThemeMode;
+  final VoidCallback onMode;
   final VoidCallback onHistory;
   final VoidCallback onDecreaseFont;
   final VoidCallback onIncreaseFont;
-  final VoidCallback onMode;
+  final VoidCallback onCommentary;
   final VoidCallback onMarkup;
   final bool canDecreaseFont;
   final bool canIncreaseFont;
@@ -85,22 +93,40 @@ class ViewerBottomBar extends StatelessWidget {
                         ],
                       ),
                     ),
-                    _BottomIconButton(
-                      tooltip: 'Reader tools',
-                      icon: Icons.menu_book_rounded,
-                      color: buttonColor,
-                      compact: isCompact,
-                      onPressed: () {},
+                    Align(
+                      alignment: Alignment.center,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _BottomIconButton(
+                            tooltip: 'Commentary',
+                            icon: Icons.menu_book_outlined,
+                            color: buttonColor,
+                            compact: isCompact,
+                            onPressed: onCommentary,
+                          ),
+                          const SizedBox(width: 2),
+                          _LibraryStubButton(compact: isCompact),
+                        ],
+                      ),
                     ),
                     Align(
                       alignment: Alignment.centerRight,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          _BottomDisplayButton(
+                          _BottomIconButton(
+                            tooltip: 'Mode',
+                            icon: Icons.slideshow_rounded,
                             color: buttonColor,
                             compact: isCompact,
                             onPressed: onMode,
+                          ),
+                          const SizedBox(width: 2),
+                          _ThemeToggleButton(
+                            themeMode: themeMode,
+                            compact: isCompact,
+                            onToggleThemeMode: onToggleThemeMode,
                           ),
                           const SizedBox(width: 2),
                           _BottomIconButton(
@@ -124,31 +150,114 @@ class ViewerBottomBar extends StatelessWidget {
   }
 }
 
-class _BottomDisplayButton extends StatelessWidget {
-  const _BottomDisplayButton({
-    required this.color,
-    required this.compact,
-    required this.onPressed,
-  });
+class _LibraryStubButton extends StatelessWidget {
+  const _LibraryStubButton({required this.compact});
 
-  final Color color;
   final bool compact;
-  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: 'Mode',
-      onPressed: onPressed,
-      padding: EdgeInsets.zero,
-      constraints: BoxConstraints.tightFor(
-        width: compact ? 30 : 40,
-        height: compact ? 30 : 40,
+    final iconColor = const Color(0xFF2E6FD6);
+    final textStyle = TextStyle(
+      color: iconColor,
+      fontWeight: FontWeight.w700,
+      fontSize: compact ? 8 : 9,
+      height: 1,
+    );
+
+    return Tooltip(
+      message: 'eLibrary',
+      child: Semantics(
+        button: true,
+        label: 'eLibrary',
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('eLibrary not wired yet')),
+              );
+            },
+            borderRadius: BorderRadius.circular(10),
+            child: SizedBox(
+              width: compact ? 38 : 46,
+              height: compact ? 38 : 46,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.library_books_outlined,
+                    color: iconColor,
+                    size: compact ? 18 : 20,
+                  ),
+                  if (!compact) ...[
+                    const SizedBox(height: 1),
+                    Text('eLibrary', style: textStyle),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
-      icon: Icon(
-        Icons.slideshow_rounded,
-        color: color,
-        size: compact ? 20 : 24,
+    );
+  }
+}
+
+class _ThemeToggleButton extends StatelessWidget {
+  const _ThemeToggleButton({
+    required this.themeMode,
+    required this.compact,
+    required this.onToggleThemeMode,
+  });
+
+  final AppThemeMode themeMode;
+  final bool compact;
+  final VoidCallback onToggleThemeMode;
+
+  @override
+  Widget build(BuildContext context) {
+    final isNight = themeMode == AppThemeMode.night;
+    final label = isNight ? 'Sepia' : 'Night';
+    final icon = isNight ? Icons.wb_sunny_outlined : Icons.nightlight_round;
+    final showLabel = !compact;
+
+    return Tooltip(
+      message: 'Switch to $label mode',
+      child: Semantics(
+        button: true,
+        label: 'Switch to $label mode',
+        child: Material(
+          color: const Color(0xFF8A5A2C),
+          borderRadius: BorderRadius.circular(999),
+          child: InkWell(
+            onTap: onToggleThemeMode,
+            borderRadius: BorderRadius.circular(999),
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? 8 : 12,
+                vertical: compact ? 6 : 7,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: compact ? 15 : 18, color: Colors.white),
+                  if (showLabel) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.96),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -179,11 +288,7 @@ class _BottomIconButton extends StatelessWidget {
         width: compact ? 30 : 40,
         height: compact ? 30 : 40,
       ),
-      icon: Icon(
-        icon,
-        color: color,
-        size: compact ? 20 : 24,
-      ),
+      icon: Icon(icon, color: color, size: compact ? 20 : 24),
     );
   }
 }

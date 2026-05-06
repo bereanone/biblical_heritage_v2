@@ -9,10 +9,12 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
           line.chapter != _chapter ||
           line.verse != _verse) {
         setState(() {
+          _selectedBlockId = line.blockId;
           _bookNumber = line.bookNumber;
           _chapter = line.chapter;
           _verse = line.verse;
         });
+        _pinHeaderToSelectedVerse(line.blockId);
         _recordHistory();
       }
       _openRangeActions();
@@ -29,17 +31,20 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         _rangeSelection = _rangeSelection.clear();
       });
     }
-    if (line.bookNumber == _bookNumber &&
+    if (_selectedBlockId == line.blockId &&
+        line.bookNumber == _bookNumber &&
         line.chapter == _chapter &&
         line.verse == _verse) {
       return;
     }
     _resetRapidTagArmed();
     setState(() {
+      _selectedBlockId = line.blockId;
       _bookNumber = line.bookNumber;
       _chapter = line.chapter;
       _verse = line.verse;
     });
+    _pinHeaderToSelectedVerse(line.blockId);
     _recordHistory();
   }
 
@@ -99,7 +104,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
   }
 
   Future<void> _openRangeActions() async {
-    final passage = await _passageFuture;
+    final passage = await _currentPassageOrLoad();
     if (!mounted) return;
     final startId = _rangeSelection.startBlockId ?? 0;
     final endId =
@@ -298,7 +303,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
     List<VerseLine> lines, {
     required bool includeCitation,
   }) async {
-    final passage = await _passageFuture;
+    final passage = await _currentPassageOrLoad();
     if (!mounted || lines.isEmpty) return;
     final text = lines.map((line) => line.text.trim()).join('\n');
     final payload = includeCitation
@@ -391,7 +396,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         final tokenIndex = segment.tokenIndex;
         if (tokenIndex == null) continue;
         if (_rangeSelection.containsTokenPosition(blockId, tokenIndex)) {
-          final strongs = segment.strongs?.trim();
+          final strongs = _preferredStrongs(segment.strongs);
           if (strongs != null && strongs.isNotEmpty) {
             return strongs;
           }
@@ -399,6 +404,21 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       }
     }
     return null;
+  }
+
+  String? _preferredStrongs(Set<String>? strongs) {
+    if (strongs == null || strongs.isEmpty) return null;
+    if (strongs.length == 1) return strongs.first;
+
+    const ignore = {'G3588', 'H853', 'H136'};
+    final preferred = strongs
+        .where((value) => !ignore.contains(value))
+        .toList();
+    if (preferred.isNotEmpty) {
+      return preferred.first;
+    }
+
+    return strongs.first;
   }
 
   List<TokenHighlightSelection> _buildTokenHighlightSelections(

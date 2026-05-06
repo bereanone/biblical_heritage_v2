@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/theme/app_settings_service.dart';
 import 'tag_dialog_header.dart';
 import 'tag_dialog_hash_tab.dart';
 import 'tag_dialog_models.dart';
@@ -451,7 +452,9 @@ class _HashTagDialogState extends State<HashTagDialog>
         expectedBrowseStateRevision != _browseStateRevision) {
       return;
     }
-    final tagStillExists = summaries.any((summary) => summary.tag == normalizedTag);
+    final tagStillExists = summaries.any(
+      (summary) => summary.tag == normalizedTag,
+    );
     setState(() {
       _summaries = summaries;
       _summaryCategories = summaryCategories;
@@ -480,6 +483,9 @@ class _HashTagDialogState extends State<HashTagDialog>
     if (tag.isEmpty) return;
     await _saveCurrentCategory();
     await _repository.saveDefaultTag(tag);
+    await AppSettingsService.instance.saveActiveTagFamily(
+      _repository is DollarTagRepository ? 'dollar' : 'hash',
+    );
     if (!mounted) return;
     setState(() {
       _defaultTag = tag;
@@ -647,18 +653,16 @@ class _HashTagDialogState extends State<HashTagDialog>
       builder: (resultCtx) {
         final media = MediaQuery.of(resultCtx);
         return MediaQuery(
-          data: media.copyWith(
-            textScaler: MediaQuery.textScalerOf(resultCtx),
-          ),
+          data: media.copyWith(textScaler: MediaQuery.textScalerOf(resultCtx)),
           child: AlertDialog(
             title: Text(
               'Import Results',
               style: Theme.of(resultCtx).textTheme.titleLarge?.copyWith(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
-                    height: 1.0,
-                  ),
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
+                height: 1.0,
+              ),
             ),
             content: ConstrainedBox(
               constraints: BoxConstraints(
@@ -707,7 +711,9 @@ class _HashTagDialogState extends State<HashTagDialog>
       },
     );
     if (!mounted) return;
-    _showSnack('Imported ${result.insertedCount} $itemLabel${result.insertedCount == 1 ? '' : 's'} into ${result.tag}.');
+    _showSnack(
+      'Imported ${result.insertedCount} $itemLabel${result.insertedCount == 1 ? '' : 's'} into ${result.tag}.',
+    );
   }
 
   Future<void> _openSummaryDetails(HashTagSummary summary) async {

@@ -538,6 +538,7 @@ class HashTagRepository {
         'chapter_number': target.chapter,
         'verse_number': target.verse,
         'token_number': target.tokenNumber,
+        if (tableName == 'dollar_tags') 'content_html': '',
         'sort_order': now,
         'created_at': now,
       });
@@ -562,12 +563,7 @@ class HashTagRepository {
   }) async {
     await ensureSchema();
     final db = await _db();
-    await db.update(
-      tableName,
-      values,
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await db.update(tableName, values, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<int> insertNoteSlide({
@@ -784,7 +780,8 @@ class HashTagRepository {
           _ParsedSharedSlide(
             target: null,
             contentText: currentNote.join('\n').trim(),
-            noteRef: 'note:${DateTime.now().microsecondsSinceEpoch}:${slides.length}',
+            noteRef:
+                'note:${DateTime.now().microsecondsSinceEpoch}:${slides.length}',
           ),
         );
       }
@@ -860,7 +857,10 @@ class HashTagRepository {
     return null;
   }
 
-  List<List<String>> _splitSharedListBlocks(List<String> lines, String tagName) {
+  List<List<String>> _splitSharedListBlocks(
+    List<String> lines,
+    String tagName,
+  ) {
     final blocks = <List<String>>[];
     var current = <String>[];
     for (final rawLine in lines) {
@@ -1280,12 +1280,12 @@ class HashTagRepository {
 
 class DollarTagRepository extends HashTagRepository {
   DollarTagRepository()
-      : super(
-          tableName: 'dollar_tags',
-          defaultSettingKey: 'tags.default.dollar',
-          categorySettingKeyPrefix: 'tags.category.dollar.',
-          tagPrefix: r'$',
-        );
+    : super(
+        tableName: 'dollar_tags',
+        defaultSettingKey: 'tags.default.dollar',
+        categorySettingKeyPrefix: 'tags.category.dollar.',
+        tagPrefix: r'$',
+      );
 }
 
 class _ParsedSharedList {

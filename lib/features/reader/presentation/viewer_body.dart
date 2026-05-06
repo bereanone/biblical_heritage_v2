@@ -1,16 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../core/database/study_bible_database.dart';
 import '../data/highlights_repository.dart';
 import 'viewer_acrostic_block.dart';
 import 'bible_explorer_range_interaction.dart';
+import 'viewer_data_controller.dart';
 import 'viewer_heading_block.dart';
 import 'viewer_markup_span_builder.dart';
 import 'viewer_passage_models.dart';
 import 'viewer_range_selection.dart';
-import 'viewer_render_models.dart';
-import 'viewer_render_resolver.dart';
 import 'viewer_verse_line.dart';
 
 part 'viewer_body_helpers.dart';
@@ -18,11 +20,13 @@ part 'viewer_body_helpers.dart';
 class ViewerBody extends StatefulWidget {
   const ViewerBody({
     super.key,
-    required this.passage,
-    required this.selectedBookNumber,
-    required this.selectedChapter,
-    required this.selectedVerse,
+    required this.anchorBlockId,
+    required this.data,
+    required this.bookNamesByNumber,
+    required this.selectedBlockId,
     required this.fontScale,
+    required this.onVisibleIdChanged,
+    this.onSelectionVisibilityChanged,
     required this.onSelectVerse,
     this.onSelectVerseNumber = _noopVerseSelection,
     this.onSelectTokenLongPress,
@@ -32,11 +36,13 @@ class ViewerBody extends StatefulWidget {
     this.navigationTick = 0,
   });
 
-  final PassageData? passage;
-  final int selectedBookNumber;
-  final int selectedChapter;
-  final int selectedVerse;
+  final int anchorBlockId;
+  final ViewerDataController data;
+  final Map<int, String> bookNamesByNumber;
+  final int? selectedBlockId;
   final double fontScale;
+  final ValueChanged<int> onVisibleIdChanged;
+  final ValueChanged<bool>? onSelectionVisibilityChanged;
   final ValueChanged<VerseLine> onSelectVerse;
   final ValueChanged<VerseLine> onSelectVerseNumber;
   final void Function(VerseLine line, int tokenIndex)? onSelectTokenLongPress;
@@ -64,41 +70,76 @@ class _ViewerBodyState extends State<ViewerBody> {
       <String, Map<String, VerseHighlightRecord>>{};
   final Map<String, Map<String, List<VerseHighlightRecord>>>
   _tokenHighlightCache = <String, Map<String, List<VerseHighlightRecord>>>{};
+
+  Timer? _scrollDebounce;
   int? _lastScrolledBlockId;
   int _recenterToken = 0;
+  bool _suppressUserScroll = false;
+  bool _userIsScrolling = false;
+  bool _selectionVisible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _itemPositionsListener.itemPositions.addListener(_onScroll);
+  }
 
   @override
   void didUpdateWidget(covariant ViewerBody oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.selectedVerse != widget.selectedVerse ||
-        oldWidget.selectedChapter != widget.selectedChapter ||
-        oldWidget.selectedBookNumber != widget.selectedBookNumber ||
-        oldWidget.passage?.chapter != widget.passage?.chapter ||
-        oldWidget.passage?.bookName != widget.passage?.bookName ||
+    if (oldWidget.selectedBlockId != widget.selectedBlockId ||
+        oldWidget.anchorBlockId != widget.anchorBlockId ||
         oldWidget.fontScale != widget.fontScale ||
-        oldWidget.highlightRefreshTick != widget.highlightRefreshTick) {
+        oldWidget.navigationTick != widget.navigationTick) {
       _lastScrolledBlockId = null;
     }
-    if (oldWidget.navigationTick != widget.navigationTick) {
-      _lastScrolledBlockId = null;
-    }
-    if (oldWidget.highlightRefreshTick != widget.highlightRefreshTick &&
-        widget.passage != null) {
-      final blockIds = widget.passage!.lines
-          .map((line) => line.blockId ?? 0)
-          .where((id) => id > 0)
-          .toList(growable: false);
-      final headingCacheKey = blockIds.isEmpty
-          ? '${widget.passage!.bookName}|${widget.passage!.chapter}'
-          : '${blockIds.first}-${blockIds.last}';
-      _highlightCache.remove(headingCacheKey);
-      _tokenHighlightCache.remove(headingCacheKey);
+    if (oldWidget.highlightRefreshTick != widget.highlightRefreshTick) {
+      final loadedIds = widget.data.loadedBlockIds;
+      if (loadedIds.isNotEmpty) {
+        final cacheKey = '${loadedIds.first}-${loadedIds.last}';
+        _highlightCache.remove(cacheKey);
+        _tokenHighlightCache.remove(cacheKey);
+      }
     }
   }
 
   @override
   void dispose() {
+    _scrollDebounce?.cancel();
+    _itemPositionsListener.itemPositions.removeListener(_onScroll);
     super.dispose();
+  }
+
+  void _onScroll() {
+    _scrollDebounce?.cancel();
+    _scrollDebounce = Timer(const Duration(milliseconds: 150), () {
+      final positions = _itemPositionsListener.itemPositions.value;
+      if (positions.isEmpty) return;
+
+      var minIndex = 1 << 30;
+      var maxIndex = -1;
+      for (final position in positions) {
+        if (position.index < minIndex) minIndex = position.index;
+        if (position.index > maxIndex) maxIndex = position.index;
+      }
+      if (maxIndex < 0) return;
+
+      final centerIndex = (minIndex + maxIndex) ~/ 2;
+      final centerId = centerIndex + 1;
+      final selectedBlockId = widget.selectedBlockId;
+      if (selectedBlockId != null) {
+        final isVisible = _isVerseVisible(selectedBlockId);
+        if (_selectionVisible != isVisible) {
+          _selectionVisible = isVisible;
+          widget.onSelectionVisibilityChanged?.call(isVisible);
+        }
+      } else if (_selectionVisible) {
+        _selectionVisible = false;
+        widget.onSelectionVisibilityChanged?.call(false);
+      }
+      widget.onVisibleIdChanged(centerId);
+      widget.data.ensureWindow(centerId);
+    });
   }
 
   @override
@@ -110,175 +151,186 @@ class _ViewerBodyState extends State<ViewerBody> {
       height: 1.38,
     );
 
-    if (widget.passage == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    final selectedLine = _findSelectedLine(widget.passage!.lines);
-    final selectedBlockId = selectedLine?.blockId;
-
-    final blockIds = widget.passage!.lines
-        .map((line) => line.blockId ?? 0)
-        .where((id) => id > 0)
-        .toList(growable: false);
-    final headingCacheKey = blockIds.isEmpty
-        ? '${widget.passage!.bookName}|${widget.passage!.chapter}'
-        : '${blockIds.first}-${blockIds.last}';
-    final cachedHeadings = _headingCache[headingCacheKey];
-    final cachedAcrostics = _acrosticCache[headingCacheKey];
-    final verseRefs = widget.passage!.lines
-        .map(
-          (line) => '${widget.passage!.bookName} ${line.chapter}:${line.verse}',
-        )
-        .toList(growable: false);
-    final cachedHighlights = _highlightCache[headingCacheKey];
-    final cachedTokenHighlights = _tokenHighlightCache[headingCacheKey];
-    if (cachedHeadings == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        final headings = await StudyBibleDatabase.instance
-            .loadSectionHeadingsForBlockIds(blockIds);
-        if (!mounted) return;
-        setState(() {
-          _headingCache[headingCacheKey] = headings;
-        });
-      });
-    }
-    if (cachedAcrostics == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        final acrostics = await StudyBibleDatabase.instance
-            .loadAcrosticsForBlockIds(blockIds);
-        if (!mounted) return;
-        setState(() {
-          _acrosticCache[headingCacheKey] = acrostics;
-        });
-      });
-    }
-    if (cachedHighlights == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        final highlights = await HighlightsRepository()
-            .loadHighlightsForVerseRefs(verseRefs);
-        final tokenHighlights = await HighlightsRepository()
-            .loadHighlightRangesForVerseRefs(verseRefs);
-        if (!mounted) return;
-        setState(() {
-          _highlightCache[headingCacheKey] = highlights;
-          _tokenHighlightCache[headingCacheKey] = tokenHighlights;
-        });
-      });
-    }
-
-    final renderItems = resolveViewerRenderItems(
-      widget.passage!,
-      headingsByBlockId: cachedHeadings ?? const <int, List<String>>{},
-      acrosticsByBlockId: cachedAcrostics ?? const <int, AcrosticRecord>{},
-    );
-    final renderEntries = _buildRenderEntries(renderItems);
-    final verseItemIndex = <int, int>{};
-    for (var index = 0; index < renderEntries.length; index++) {
-      final item = renderEntries[index].item;
-      if (item case ViewerVerseItem(:final line)) {
-        final blockId = line.blockId;
-        if (blockId != null) {
-          verseItemIndex[blockId] = index;
+    return ListenableBuilder(
+      listenable: widget.data,
+      builder: (context, _) {
+        final loadedIds = widget.data.loadedBlockIds;
+        if (loadedIds.isEmpty) {
+          return const Center(child: CircularProgressIndicator());
         }
-      }
-    }
 
-    final initialScrollIndex = selectedBlockId != null && selectedBlockId > 0
-        ? (verseItemIndex[selectedBlockId] ?? 0)
-        : 0;
+        final cacheKey = '${loadedIds.first}-${loadedIds.last}';
+        final cachedHeadings = _headingCache[cacheKey];
+        final cachedAcrostics = _acrosticCache[cacheKey];
+        final cachedHighlights = _highlightCache[cacheKey];
+        final cachedTokenHighlights = _tokenHighlightCache[cacheKey];
+        final blockContextById = _buildBlockContextMap(loadedIds);
 
-    if (selectedBlockId != null &&
-        selectedBlockId > 0 &&
-        _lastScrolledBlockId != selectedBlockId) {
-      _scheduleCenterSelectedBlock(selectedBlockId, verseItemIndex);
-    }
-    return ScrollablePositionedList.builder(
-      itemCount: renderEntries.length,
-      itemScrollController: _itemScrollController,
-      itemPositionsListener: _itemPositionsListener,
-      initialScrollIndex: initialScrollIndex,
-      padding: const EdgeInsets.fromLTRB(22, 4, 22, 14),
-      itemBuilder: (context, index) {
-        final entry = renderEntries[index];
-        final item = entry.item;
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: index == renderEntries.length - 1
-                ? 0
-                : item is ViewerHeadingItem
-                ? 2
-                : item is ViewerAcrosticItem
-                ? 4
-                : 12,
-          ),
-          child: switch (item) {
-            ViewerAcrosticItem(:final hebrew, :final transliteration) =>
-              ViewerAcrosticBlock(
-                hebrew: hebrew,
-                transliteration: transliteration,
-                fontScale: widget.fontScale,
-              ),
-            ViewerHeadingItem(:final text) => ViewerHeadingBlock(
-              text: text,
-              fontScale: widget.fontScale,
-            ),
-            ViewerVerseItem(:final line) => Builder(
-              builder: (context) {
-                final blockId = line.blockId ?? 0;
-                final rangeSelected = shouldOpenRangeActionsOnTap(
-                  widget.rangeSelection,
-                  blockId,
-                );
-                final verseKey =
-                    '${widget.passage!.bookName} ${line.chapter}:${line.verse}';
-                final verseLine = ViewerVerseLine(
-                  line: line,
-                  style: bodyStyle,
-                  isSelected: _matchesSelectedLine(line),
-                  isRangeSelected: rangeSelected,
-                  highlight:
-                      (cachedHighlights ??
-                      const <String, VerseHighlightRecord>{})[verseKey],
-                  tokenHighlights:
-                      (cachedTokenHighlights ??
-                          const <
-                            String,
-                            List<VerseHighlightRecord>
-                          >{})[verseKey] ??
-                      const <VerseHighlightRecord>[],
-                  showChapterNumber:
-                      entry.previousVerseLine == null ||
-                      entry.previousVerseLine!.bookNumber != line.bookNumber ||
-                      entry.previousVerseLine!.chapter != line.chapter,
-                  startsInRedLetter: entry.startsInRedLetter,
-                  onTap: () => widget.onSelectVerse(line),
-                  onVerseNumberLongPress: () =>
-                      widget.onSelectVerseNumber(line),
-                  rangeSelection: widget.rangeSelection,
-                  onTokenLongPress: (tokenIndex) {
-                    widget.onSelectTokenLongPress?.call(line, tokenIndex);
-                  },
-                );
-                return verseLine;
-              },
-            ),
+        if (cachedHeadings == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            final headings = await StudyBibleDatabase.instance
+                .loadSectionHeadingsForBlockIds(loadedIds);
+            if (!mounted) return;
+            setState(() {
+              _headingCache[cacheKey] = headings;
+            });
+          });
+        }
+        if (cachedAcrostics == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            final acrostics = await StudyBibleDatabase.instance
+                .loadAcrosticsForBlockIds(loadedIds);
+            if (!mounted) return;
+            setState(() {
+              _acrosticCache[cacheKey] = acrostics;
+            });
+          });
+        }
+        if (cachedHighlights == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            final verseRefs = loadedIds
+                .map((id) => widget.data.getBlock(id))
+                .whereType<VerseLine>()
+                .map((line) {
+                  final bookName =
+                      widget.bookNamesByNumber[line.bookNumber] ??
+                      'Book ${line.bookNumber}';
+                  return '$bookName ${line.chapter}:${line.verse}';
+                })
+                .toList(growable: false);
+            final highlights = await HighlightsRepository()
+                .loadHighlightsForVerseRefs(verseRefs);
+            final tokenHighlights = await HighlightsRepository()
+                .loadHighlightRangesForVerseRefs(verseRefs);
+            if (!mounted) return;
+            setState(() {
+              _highlightCache[cacheKey] = highlights;
+              _tokenHighlightCache[cacheKey] = tokenHighlights;
+            });
+          });
+        }
+
+        final selectedBlockId = widget.selectedBlockId;
+        if (selectedBlockId != null &&
+            selectedBlockId > 0 &&
+            _lastScrolledBlockId != selectedBlockId) {
+          _scheduleCenterSelectedBlock(selectedBlockId);
+        }
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final currentSelectedBlockId = widget.selectedBlockId;
+          final isVisible = currentSelectedBlockId != null
+              ? _isVerseVisible(currentSelectedBlockId)
+              : false;
+          if (_selectionVisible != isVisible) {
+            _selectionVisible = isVisible;
+            widget.onSelectionVisibilityChanged?.call(isVisible);
+          }
+        });
+
+        return NotificationListener<UserScrollNotification>(
+          onNotification: (notification) {
+            if (_suppressUserScroll) return false;
+            final isScrolling = notification.direction != ScrollDirection.idle;
+            if (_userIsScrolling != isScrolling) {
+              _userIsScrolling = isScrolling;
+              if (!isScrolling && mounted) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) setState(() {});
+                });
+              }
+            }
+            return false;
           },
+          child: ScrollablePositionedList.builder(
+            itemCount: widget.data.maxBlockId,
+            itemScrollController: _itemScrollController,
+            itemPositionsListener: _itemPositionsListener,
+            initialScrollIndex: _indexForBlockId(widget.anchorBlockId),
+            padding: const EdgeInsets.fromLTRB(22, 4, 22, 14),
+            itemBuilder: (context, index) {
+              final blockId = index + 1;
+              final line = widget.data.getBlock(blockId);
+              if (line == null) {
+                return SizedBox(height: 44 * widget.fontScale);
+              }
+
+              final blockContext = blockContextById[blockId];
+              final previousVerseLine = blockContext?.previousVerseLine;
+              final bookName =
+                  widget.bookNamesByNumber[line.bookNumber] ??
+                  'Book ${line.bookNumber}';
+              final verseKey = '$bookName ${line.chapter}:${line.verse}';
+              final rangeSelected = shouldOpenRangeActionsOnTap(
+                widget.rangeSelection,
+                blockId,
+              );
+              final headings =
+                  (cachedHeadings ?? const <int, List<String>>{})[blockId] ??
+                  const <String>[];
+              final acrostic =
+                  (cachedAcrostics ?? const <int, AcrosticRecord>{})[blockId];
+              final showChapterNumber =
+                  previousVerseLine == null ||
+                  previousVerseLine.bookNumber != line.bookNumber ||
+                  previousVerseLine.chapter != line.chapter;
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (acrostic != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: ViewerAcrosticBlock(
+                          hebrew: acrostic.hebrew,
+                          transliteration: acrostic.transliteration,
+                          fontScale: widget.fontScale,
+                        ),
+                      ),
+                    for (final heading in headings)
+                      if (heading.trim().isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: ViewerHeadingBlock(
+                            text: heading,
+                            fontScale: widget.fontScale,
+                          ),
+                        ),
+                    ViewerVerseLine(
+                      line: line,
+                      style: bodyStyle,
+                      isSelected: selectedBlockId == blockId,
+                      isRangeSelected: rangeSelected,
+                      highlight:
+                          (cachedHighlights ??
+                              const <String, VerseHighlightRecord>{})[verseKey],
+                      tokenHighlights:
+                          (cachedTokenHighlights ??
+                              const <
+                                String,
+                                List<VerseHighlightRecord>
+                              >{})[verseKey] ??
+                          const <VerseHighlightRecord>[],
+                      showChapterNumber: showChapterNumber,
+                      startsInRedLetter:
+                          blockContext?.startsInRedLetter ?? false,
+                      onTap: () => widget.onSelectVerse(line),
+                      onVerseNumberLongPress: () =>
+                          widget.onSelectVerseNumber(line),
+                      rangeSelection: widget.rangeSelection,
+                      onTokenLongPress: (tokenIndex) {
+                        widget.onSelectTokenLongPress?.call(line, tokenIndex);
+                      },
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
         );
       },
     );
-  }
-
-  VerseLine? _findSelectedLine(List<VerseLine> lines) {
-    for (final line in lines) {
-      if (_matchesSelectedLine(line)) return line;
-    }
-    return null;
-  }
-
-  bool _matchesSelectedLine(VerseLine line) {
-    return line.bookNumber == widget.selectedBookNumber &&
-        line.chapter == widget.selectedChapter &&
-        line.verse == widget.selectedVerse;
   }
 }

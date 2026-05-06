@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -12,6 +14,8 @@ import 'bible_memory_screen.dart';
 import 'highlight_popup.dart';
 import 'viewer_body.dart';
 import 'viewer_bottom_bar.dart';
+import 'commentary_research_screen.dart';
+import 'viewer_data_controller.dart';
 import 'viewer_history_sheet.dart';
 import 'viewer_interlinear_body.dart';
 import 'viewer_interlinear_settings.dart';
@@ -66,9 +70,6 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
       const ViewerInterlinearSettings();
   PresentationAspectRatioPreset _presentationAspectRatio =
       PresentationAspectRatioPreset.auto;
-  bool _didRestoreHistory = false;
-  bool _didLoadViewerSettings = false;
-  bool _didLoadInterlinearSettings = false;
   String? _lastSearchTerm;
   ViewerRangeSelection _rangeSelection = const ViewerRangeSelection();
   int _highlightRefreshTick = 0;
@@ -76,13 +77,22 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
   int? _defaultHighlightGroupId;
   int _lastTagTabIndex = 0;
   final RapidTagState _rapidTagState = RapidTagState();
+  final ViewerDataController _viewerData = ViewerDataController();
   bool _isRapidTagApplying = false;
-  late Future<PassageData> _passageFuture;
+  bool _viewerReady = false;
+  int? _anchorBlockId;
+  int? _selectedBlockId;
+  bool _selectedIsVisible = false;
+  int? _headerPinnedBlockId;
+  Timer? _headerPinTimer;
+  final Map<int, String> _bookNames = <int, String>{};
 
   @override
   void initState() {
     super.initState();
-    _passageFuture = _loadPassage();
+    _initializeViewer();
+    _loadViewerSettings();
+    _loadInterlinearSettings();
     AppSettingsService.instance.loadDefaultHighlightGroupId().then((id) {
       if (mounted) setState(() => _defaultHighlightGroupId = id);
     });
@@ -100,95 +110,84 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_viewerReady || _anchorBlockId == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    final passage = _buildCurrentPassage();
+    final displayLine = _displayHeaderLine();
+    final displayBookNumber = displayLine?.bookNumber ?? _bookNumber;
+    final displayBookName =
+        _bookNames[displayBookNumber] ?? 'Bible Explorer';
+    final displayChapter = displayLine?.chapter ?? _chapter;
+    final displayVerse = displayLine?.verse ?? _verse;
+
     return Scaffold(
-      body: FutureBuilder<PassageData>(
-        future: _passageFuture,
-        builder: (context, snapshot) {
-          final passage = snapshot.data;
-
-          if (!_didRestoreHistory &&
-              snapshot.connectionState == ConnectionState.done) {
-            _didRestoreHistory = true;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _restoreLatestHistory();
-            });
-          }
-
-          if (!_didLoadViewerSettings) {
-            _didLoadViewerSettings = true;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _loadViewerSettings();
-            });
-          }
-
-          if (!_didLoadInterlinearSettings) {
-            _didLoadInterlinearSettings = true;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _loadInterlinearSettings();
-            });
-          }
-
-          return SafeArea(
-            child: Column(
-              children: [
-                ViewerTopBar(
-                  bookName: passage?.bookName ?? 'Bible Explorer',
-                  chapter: passage?.chapter ?? 0,
-                  verse: passage == null ? null : _verse,
-                  fontScale: _fontScale,
-                  onSearch: () => _openSearch(context),
-                  onStandardTag: _openTagButton,
-                  onDollarTag: _openDollarTagButton,
-                  onRapidTag: _openRapidTagButton,
-                  onTopics: () => _openTopics(context),
-                  onChoosePassage: () => _openReferencePicker(context),
-                ),
-                Expanded(
-                  child: _interlinearEnabled
-                      ? ViewerInterlinearBody(
-                          passage: passage,
-                          selectedBookNumber: _bookNumber,
-                          selectedChapter: _chapter,
-                          selectedVerse: _verse,
-                          fontScale: _fontScale,
-                          settings: _interlinearSettings,
-                          onSelectVerse: _selectLine,
-                          onSelectBlockId: _openBlockId,
-                          onTapSelectedRange: _openRangeActions,
-                          rangeSelection: _rangeSelection,
-                          navigationTick: _navigationTick,
-                        )
-                      : ViewerBody(
-                          passage: passage,
-                          selectedBookNumber: _bookNumber,
-                          selectedChapter: _chapter,
-                          selectedVerse: _verse,
-                          fontScale: _fontScale,
-                          onSelectVerse: _selectLine,
-                          onSelectVerseNumber: _selectMarkupAnchor,
-                          onSelectTokenLongPress: _selectTokenAnchor,
-                          onTapSelectedRange: _openRangeActions,
-                          rangeSelection: _rangeSelection,
-                          highlightRefreshTick: _highlightRefreshTick,
-                          navigationTick: _navigationTick,
-                        ),
-                ),
-                ViewerBottomBar(
-                  onHistory: _openHistory,
-                  onDecreaseFont: _decreaseFont,
-                  onIncreaseFont: _increaseFont,
-                  onMode: _openMode,
-                  onMarkup: _applyDefaultMarkup,
-                  canDecreaseFont: _fontScale > _minFontScale,
-                  canIncreaseFont: _fontScale < _maxFontScale,
-                  backgroundColor:
-                      Theme.of(context).bottomAppBarTheme.color ??
-                      Theme.of(context).colorScheme.surface,
-                ),
-              ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            ViewerTopBar(
+              bookName: displayBookName,
+              chapter: displayChapter,
+              verse: displayVerse,
+              fontScale: _fontScale,
+              onSearch: () => _openSearch(context),
+              onStandardTag: _openTagButton,
+              onDollarTag: _openDollarTagButton,
+              onRapidTag: _openRapidTagButton,
+              activeFamily: null,
+              onTopics: () => _openTopics(context),
+              onChoosePassage: () => _openReferencePicker(context),
             ),
-          );
-        },
+            Expanded(
+              child: _interlinearEnabled
+                  ? ViewerInterlinearBody(
+                      passage: passage,
+                      selectedBookNumber: _bookNumber,
+                      selectedChapter: _chapter,
+                      selectedVerse: _verse,
+                      fontScale: _fontScale,
+                      settings: _interlinearSettings,
+                      onSelectVerse: _selectLine,
+                      onSelectBlockId: _openBlockId,
+                      onTapSelectedRange: _openRangeActions,
+                      rangeSelection: _rangeSelection,
+                      navigationTick: _navigationTick,
+                    )
+                  : ViewerBody(
+                      anchorBlockId: _anchorBlockId!,
+                      data: _viewerData,
+                      bookNamesByNumber: _bookNames,
+                      selectedBlockId: _selectedBlockId,
+                      fontScale: _fontScale,
+                      onVisibleIdChanged: _handleVisibleBlockChanged,
+                      onSelectionVisibilityChanged: _handleSelectedVisibilityChanged,
+                      onSelectVerse: _selectLine,
+                      onSelectVerseNumber: _selectMarkupAnchor,
+                      onSelectTokenLongPress: _selectTokenAnchor,
+                      onTapSelectedRange: _openRangeActions,
+                      rangeSelection: _rangeSelection,
+                      highlightRefreshTick: _highlightRefreshTick,
+                      navigationTick: _navigationTick,
+                    ),
+            ),
+            ViewerBottomBar(
+              themeMode: widget.themeMode,
+              onToggleThemeMode: _toggleThemeMode,
+              onHistory: _openHistory,
+              onDecreaseFont: _decreaseFont,
+              onIncreaseFont: _increaseFont,
+              onCommentary: _openCommentary,
+              onMode: _openMode,
+              onMarkup: _applyDefaultMarkup,
+              canDecreaseFont: _fontScale > _minFontScale,
+              canIncreaseFont: _fontScale < _maxFontScale,
+              backgroundColor:
+                  Theme.of(context).bottomAppBarTheme.color ??
+                  Theme.of(context).colorScheme.surface,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -205,6 +204,54 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
       _fontScale = (_fontScale + _fontStep).clamp(_minFontScale, _maxFontScale);
     });
     AppSettingsService.instance.saveViewerFontScale(_fontScale);
+  }
+
+  void _toggleThemeMode() {
+    final next = widget.themeMode == AppThemeMode.night
+        ? AppThemeMode.sepia
+        : AppThemeMode.night;
+    widget.onThemeChanged(next);
+  }
+
+  void _pinHeaderToSelectedVerse(int? blockId) {
+    _headerPinTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _headerPinnedBlockId = blockId;
+      });
+    } else {
+      _headerPinnedBlockId = blockId;
+    }
+    if (blockId == null) return;
+    _headerPinTimer = Timer(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+      setState(() {
+        if (_headerPinnedBlockId == blockId) {
+          _headerPinnedBlockId = null;
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _headerPinTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _openCommentary() async {
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CommentaryResearchScreen(
+          bookId: _bookNumber,
+          chapter: _chapter,
+          verse: _verse,
+          bookName: _bookNames[_bookNumber] ?? 'Book $_bookNumber',
+          fontScale: _fontScale,
+        ),
+      ),
+    );
   }
 
   Future<void> _saveLastTagTabIndex(int index) async {
@@ -224,7 +271,40 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
   }
 
   Future<PassageData> _currentPassageOrLoad() async {
-    return _passageFuture;
+    return _buildCurrentPassage();
+  }
+
+  PassageData _buildCurrentPassage() {
+    final lines = _viewerData.loadedLines;
+    return PassageData(
+      bookNumber: _bookNumber,
+      bookName: _bookNames[_bookNumber] ?? 'Book $_bookNumber',
+      chapter: _chapter,
+      lines: lines,
+    );
+  }
+
+  VerseLine? _displayHeaderLine() {
+    final pinnedBlockId = _headerPinnedBlockId;
+    if (pinnedBlockId != null) {
+      final pinnedLine = _viewerData.getBlock(pinnedBlockId);
+      if (pinnedLine != null) return pinnedLine;
+    }
+    final selectedBlockId = _selectedBlockId;
+    if (_selectedIsVisible && selectedBlockId != null && selectedBlockId > 0) {
+      final selectedLine = _viewerData.getBlock(selectedBlockId);
+      if (selectedLine != null) {
+        return selectedLine;
+      }
+    }
+    return null;
+  }
+
+  void _handleSelectedVisibilityChanged(bool isVisible) {
+    if (_selectedIsVisible == isVisible || !mounted) return;
+    setState(() {
+      _selectedIsVisible = isVisible;
+    });
   }
 
   List<HashTagTarget> _currentTagTargets(PassageData passage) {

@@ -25,6 +25,7 @@ class ViewerStrongsOccurrence {
     required this.bookName,
     required this.chapter,
     required this.verse,
+    required this.html,
     required this.text,
   });
 
@@ -33,6 +34,7 @@ class ViewerStrongsOccurrence {
   final String bookName;
   final int chapter;
   final int verse;
+  final String html;
   final String text;
 
   String get reference => '$bookName $chapter:$verse';

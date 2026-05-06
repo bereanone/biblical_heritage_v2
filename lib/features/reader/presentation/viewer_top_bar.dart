@@ -14,6 +14,7 @@ class ViewerTopBar extends StatelessWidget {
     required this.onStandardTag,
     required this.onDollarTag,
     required this.onRapidTag,
+    required this.activeFamily,
     required this.onTopics,
     required this.onChoosePassage,
   });
@@ -26,6 +27,7 @@ class ViewerTopBar extends StatelessWidget {
   final VoidCallback onStandardTag;
   final VoidCallback onDollarTag;
   final VoidCallback onRapidTag;
+  final ReaderTagFamily? activeFamily;
   final VoidCallback onTopics;
   final VoidCallback onChoosePassage;
 
@@ -77,6 +79,7 @@ class ViewerTopBar extends StatelessWidget {
                         ),
                         const Spacer(),
                         ReaderTagButtons(
+                          activeFamily: activeFamily,
                           onStandardTap: onStandardTag,
                           onDollarTap: onDollarTag,
                           onRapidTap: onRapidTag,

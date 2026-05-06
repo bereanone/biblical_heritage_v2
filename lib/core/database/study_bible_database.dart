@@ -16,11 +16,10 @@ class StudyBibleDatabase {
 
   Future<void> initialize() async {
     if (Platform.isMacOS || Platform.isLinux || Platform.isWindows) {
-      sqfliteFfiInit();
-      databaseFactory = databaseFactoryFfi;
+      SandboxBootstrap.ensureSqfliteInitializedOnce();
     }
 
-    await SandboxBootstrap.ensureReady();
+    await SandboxBootstrap.ensureBibleReady();
     _bibleDb ??= await _openBibleDb();
   }
 
@@ -62,8 +61,19 @@ class StudyBibleDatabase {
       ],
       where: 'id BETWEEN ? AND ?',
       whereArgs: [minId, maxId],
-      orderBy: 'book_number, chapter, block_index, id',
+      orderBy: 'id ASC',
     );
+  }
+
+  Future<int> loadMaxBlockId() async {
+    final db = await bible;
+    final rows = await db.rawQuery(
+      'SELECT MAX(id) AS max_id FROM bible_blocks',
+    );
+    final value = rows.isNotEmpty ? rows.first['max_id'] : null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 1;
   }
 
   Future<List<BookRecord>> loadBooks() async {

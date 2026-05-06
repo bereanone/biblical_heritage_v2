@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme_mode.dart';
 import '../../reader/presentation/bible_explorer_screen.dart';
+import '../../utilities/presentation/utilities_screen.dart';
 
 class EntryScreen extends StatefulWidget {
   const EntryScreen({
@@ -246,10 +247,12 @@ class _EntryScreenState extends State<EntryScreen> {
                                     textStyle: const TextStyle(fontSize: 16),
                                   ),
                                   onPressed: () {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Utilities screen is next on the rebuild list.',
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => UtilitiesScreen(
+                                          themeMode: widget.themeMode,
+                                          onThemeChanged:
+                                              widget.onThemeChanged,
                                         ),
                                       ),
                                     );

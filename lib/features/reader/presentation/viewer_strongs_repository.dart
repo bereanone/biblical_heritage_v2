@@ -40,7 +40,9 @@ class ViewerStrongsRepository {
     );
   }
 
-  Future<List<ViewerStrongsOccurrence>> loadOccurrences(String strongsId) async {
+  Future<List<ViewerStrongsOccurrence>> loadOccurrences(
+    String strongsId,
+  ) async {
     final canonical = normalizeStrongsCanonical(strongsId);
     if (canonical == null) return const <ViewerStrongsOccurrence>[];
 
@@ -53,12 +55,13 @@ class ViewerStrongsRepository {
         COALESCE(b.book_name, 'Book ' || bb.book_number) AS book_name,
         bb.chapter AS chapter,
         bb.block_index AS verse,
+        COALESCE(bb.html, '') AS html,
         COALESCE(bb.plain_text, '') AS plain_text
       FROM bible_tokens bt
       JOIN bible_blocks bb ON bb.id = bt.block_id
       LEFT JOIN books b ON b.book_number = bb.book_number
       WHERE COALESCE(bt.strongs_canonical, bt.strongs_number, '') = ?
-      GROUP BY bb.id, b.book_name, bb.chapter, bb.block_index, bb.plain_text
+      GROUP BY bb.id, b.book_name, bb.chapter, bb.block_index, bb.html, bb.plain_text
       ORDER BY bb.book_number, bb.chapter, bb.block_index
       ''',
       [canonical],
@@ -72,6 +75,7 @@ class ViewerStrongsRepository {
             bookName: row['book_name']?.toString() ?? 'Bible',
             chapter: (row['chapter'] as num?)?.toInt() ?? 1,
             verse: (row['verse'] as num?)?.toInt() ?? 1,
+            html: row['html']?.toString() ?? '',
             text: row['plain_text']?.toString() ?? '',
           ),
         )

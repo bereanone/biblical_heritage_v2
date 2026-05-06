@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../core/database/study_bible_database.dart';
@@ -58,6 +59,7 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
       <String, Map<int, List<InterlinearTokenRecord>>>{};
   int? _lastScrolledBlockId;
   int _recenterToken = 0;
+  bool _userIsScrolling = false;
   Object? _loadError;
 
   @override
@@ -181,13 +183,24 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
       }
     }
 
-    return ScrollablePositionedList.builder(
-      itemCount: renderItems.length,
-      itemScrollController: _itemScrollController,
-      itemPositionsListener: _itemPositionsListener,
-      initialScrollIndex: initialIndex,
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-      itemBuilder: (context, index) {
+    return NotificationListener<UserScrollNotification>(
+      onNotification: (notification) {
+        final isScrolling = notification.direction != ScrollDirection.idle;
+        _userIsScrolling = isScrolling;
+        if (!isScrolling && mounted) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() {});
+          });
+        }
+        return false;
+      },
+      child: ScrollablePositionedList.builder(
+        itemCount: renderItems.length,
+        itemScrollController: _itemScrollController,
+        itemPositionsListener: _itemPositionsListener,
+        initialScrollIndex: initialIndex,
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+        itemBuilder: (context, index) {
         final item = renderItems[index];
         VerseLine? previousVerseLine;
         for (var probe = index - 1; probe >= 0; probe--) {
@@ -250,7 +263,8 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
             ),
           },
         );
-      },
+        },
+      ),
     );
   }
 
@@ -261,6 +275,22 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
       if (position.index == targetIndex) {
         return position.itemTrailingEdge > 0 && position.itemLeadingEdge < 1;
       }
+    }
+    return false;
+  }
+
+  bool _isVerseNearCenter(
+    Map<int, int> verseItemIndex,
+    int blockId, {
+    double tolerance = 0.16,
+  }) {
+    final targetIndex = verseItemIndex[blockId];
+    if (targetIndex == null) return false;
+    for (final position in _itemPositionsListener.itemPositions.value) {
+      if (position.index != targetIndex) continue;
+      final center =
+          (position.itemLeadingEdge + position.itemTrailingEdge) / 2;
+      return (center - 0.5).abs() <= tolerance;
     }
     return false;
   }
@@ -314,21 +344,48 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
         if (!mounted || token != _recenterToken) return;
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted || token != _recenterToken) return;
+          if (_userIsScrolling) return;
           if (!_itemScrollController.isAttached) {
             if (attempt + 1 < delays.length) {
               runAttempt(attempt + 1);
             }
             return;
           }
+          final isVisible = _isVerseVisible(verseItemIndex, blockId);
+          final maxVerseIndex = verseItemIndex.values.isEmpty
+              ? -1
+              : verseItemIndex.values.reduce((a, b) => a > b ? a : b);
+          final isBibleStartBoundary =
+              widget.selectedBookNumber == 1 &&
+              widget.selectedChapter == 1 &&
+              widget.selectedVerse == 1 &&
+              isVisible;
+          final isBibleEndBoundary =
+              widget.selectedBookNumber == 66 &&
+              widget.selectedChapter == 22 &&
+              targetIndex == maxVerseIndex &&
+              isVisible;
+          if (isBibleStartBoundary) {
+            _lastScrolledBlockId = blockId;
+            return;
+          }
+          if (isBibleEndBoundary) {
+            _lastScrolledBlockId = blockId;
+            return;
+          }
+          if (attempt > 0 && isVisible) {
+            _lastScrolledBlockId = blockId;
+            return;
+          }
           final shouldScroll =
-              attempt == 0 || !_isVerseVisible(verseItemIndex, blockId);
+              !isVisible || !_isVerseNearCenter(verseItemIndex, blockId);
           if (shouldScroll) {
-            await _itemScrollController.scrollTo(
-              index: targetIndex,
-              alignment: 0.22,
-              duration: const Duration(milliseconds: 240),
-              curve: Curves.easeInOut,
-            );
+              await _itemScrollController.scrollTo(
+                index: targetIndex,
+                alignment: 0.22,
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeInOut,
+              );
           }
           if (!mounted || token != _recenterToken) return;
           _lastScrolledBlockId = blockId;

@@ -2,13 +2,19 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme_mode.dart';
 
+part 'viewer_bottom_bar_buttons.dart';
+
 class ViewerBottomBar extends StatelessWidget {
   const ViewerBottomBar({
     super.key,
     required this.themeMode,
     required this.onToggleThemeMode,
+    required this.bookNumber,
+    required this.interlinearEnabled,
+    required this.onToggleInterlinear,
     required this.onMode,
     required this.onHistory,
+    required this.onLibrary,
     required this.onDecreaseFont,
     required this.onIncreaseFont,
     required this.onCommentary,
@@ -20,8 +26,12 @@ class ViewerBottomBar extends StatelessWidget {
 
   final AppThemeMode themeMode;
   final VoidCallback onToggleThemeMode;
+  final int bookNumber;
+  final bool interlinearEnabled;
+  final VoidCallback onToggleInterlinear;
   final VoidCallback onMode;
   final VoidCallback onHistory;
+  final VoidCallback onLibrary;
   final VoidCallback onDecreaseFont;
   final VoidCallback onIncreaseFont;
   final VoidCallback onCommentary;
@@ -106,7 +116,10 @@ class ViewerBottomBar extends StatelessWidget {
                             onPressed: onCommentary,
                           ),
                           const SizedBox(width: 2),
-                          _LibraryStubButton(compact: isCompact),
+                          _LibraryButton(
+                            compact: isCompact,
+                            onPressed: onLibrary,
+                          ),
                         ],
                       ),
                     ),
@@ -121,6 +134,14 @@ class ViewerBottomBar extends StatelessWidget {
                             color: buttonColor,
                             compact: isCompact,
                             onPressed: onMode,
+                          ),
+                          const SizedBox(width: 2),
+                          _InterlinearToggleButton(
+                            bookNumber: bookNumber,
+                            interlinearEnabled: interlinearEnabled,
+                            compact: isCompact,
+                            baseColor: buttonColor,
+                            onToggleInterlinear: onToggleInterlinear,
                           ),
                           const SizedBox(width: 2),
                           _ThemeToggleButton(
@@ -145,217 +166,6 @@ class ViewerBottomBar extends StatelessWidget {
             ),
           );
         },
-      ),
-    );
-  }
-}
-
-class _LibraryStubButton extends StatelessWidget {
-  const _LibraryStubButton({required this.compact});
-
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final iconColor = const Color(0xFF2E6FD6);
-    final textStyle = TextStyle(
-      color: iconColor,
-      fontWeight: FontWeight.w700,
-      fontSize: compact ? 8 : 9,
-      height: 1,
-    );
-
-    return Tooltip(
-      message: 'eLibrary',
-      child: Semantics(
-        button: true,
-        label: 'eLibrary',
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('eLibrary not wired yet')),
-              );
-            },
-            borderRadius: BorderRadius.circular(10),
-            child: SizedBox(
-              width: compact ? 38 : 46,
-              height: compact ? 38 : 46,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.library_books_outlined,
-                    color: iconColor,
-                    size: compact ? 18 : 20,
-                  ),
-                  if (!compact) ...[
-                    const SizedBox(height: 1),
-                    Text('eLibrary', style: textStyle),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ThemeToggleButton extends StatelessWidget {
-  const _ThemeToggleButton({
-    required this.themeMode,
-    required this.compact,
-    required this.onToggleThemeMode,
-  });
-
-  final AppThemeMode themeMode;
-  final bool compact;
-  final VoidCallback onToggleThemeMode;
-
-  @override
-  Widget build(BuildContext context) {
-    final isNight = themeMode == AppThemeMode.night;
-    final label = isNight ? 'Sepia' : 'Night';
-    final icon = isNight ? Icons.wb_sunny_outlined : Icons.nightlight_round;
-    final showLabel = !compact;
-
-    return Tooltip(
-      message: 'Switch to $label mode',
-      child: Semantics(
-        button: true,
-        label: 'Switch to $label mode',
-        child: Material(
-          color: const Color(0xFF8A5A2C),
-          borderRadius: BorderRadius.circular(999),
-          child: InkWell(
-            onTap: onToggleThemeMode,
-            borderRadius: BorderRadius.circular(999),
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: compact ? 8 : 12,
-                vertical: compact ? 6 : 7,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: compact ? 15 : 18, color: Colors.white),
-                  if (showLabel) ...[
-                    const SizedBox(width: 6),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.96),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _BottomIconButton extends StatelessWidget {
-  const _BottomIconButton({
-    required this.tooltip,
-    required this.icon,
-    required this.color,
-    required this.compact,
-    required this.onPressed,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final Color color;
-  final bool compact;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: tooltip,
-      onPressed: onPressed,
-      padding: EdgeInsets.zero,
-      constraints: BoxConstraints.tightFor(
-        width: compact ? 30 : 40,
-        height: compact ? 30 : 40,
-      ),
-      icon: Icon(icon, color: color, size: compact ? 20 : 24),
-    );
-  }
-}
-
-class _FontScaleButton extends StatelessWidget {
-  const _FontScaleButton({
-    required this.onPressed,
-    required this.color,
-    required this.baseSize,
-    required this.sign,
-    required this.signSize,
-    required this.compact,
-  });
-
-  final VoidCallback? onPressed;
-  final Color color;
-  final double baseSize;
-  final String sign;
-  final double signSize;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onPressed != null;
-    final effectiveColor = enabled ? color : color.withValues(alpha: 0.35);
-
-    return SizedBox(
-      width: compact ? 28 : 34,
-      height: compact ? 28 : 34,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(4),
-          child: Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'A',
-                  textScaler: TextScaler.noScaling,
-                  softWrap: false,
-                  maxLines: 1,
-                  style: TextStyle(
-                    fontSize: baseSize,
-                    fontWeight: FontWeight.w600,
-                    color: effectiveColor,
-                    height: 1,
-                  ),
-                ),
-                const SizedBox(width: 1),
-                Text(
-                  sign,
-                  textScaler: TextScaler.noScaling,
-                  softWrap: false,
-                  maxLines: 1,
-                  style: TextStyle(
-                    fontSize: signSize,
-                    fontWeight: FontWeight.w700,
-                    color: effectiveColor,
-                    height: 1,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }

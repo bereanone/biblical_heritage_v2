@@ -225,14 +225,6 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
       themeMode: widget.themeMode,
       onThemeChanged: widget.onThemeChanged,
       onOpenBibleMemory: _openBibleMemory,
-      interlinearEnabled: _interlinearEnabled,
-      onInterlinearChanged: (value) {
-        if (!mounted) return;
-        setState(() {
-          _interlinearEnabled = value;
-        });
-        AppSettingsService.instance.saveInterlinearEnabled(value);
-      },
       onOpenInterlinearSettings: _openInterlinearSettings,
       onOpenColorSetup: _openMarkupSettings,
       presentationAspectRatio: _presentationAspectRatio,
@@ -264,6 +256,12 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
     await Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => const BibleMemoryScreen()));
+  }
+
+  Future<void> _openLibrary() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const LibraryScreen()),
+    );
   }
 
   Future<void> _openMarkupSettings() async {

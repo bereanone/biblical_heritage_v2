@@ -8,8 +8,6 @@ Future<void> showViewerModePopup(
   required AppThemeMode themeMode,
   required ValueChanged<AppThemeMode> onThemeChanged,
   required VoidCallback onOpenBibleMemory,
-  required bool interlinearEnabled,
-  required ValueChanged<bool> onInterlinearChanged,
   required VoidCallback onOpenInterlinearSettings,
   required VoidCallback onOpenColorSetup,
   required PresentationAspectRatioPreset presentationAspectRatio,
@@ -48,12 +46,8 @@ Future<void> showViewerModePopup(
                       color: theme.dividerColor.withValues(alpha: 0.55),
                     ),
                     _ModeRow(
-                      title: 'Interlinear Mode',
-                      subtitle: interlinearEnabled ? 'On' : 'Off',
-                      titleColor: interlinearEnabled
-                          ? const Color(0xFFD00000)
-                          : theme.colorScheme.onSurface,
-                      titleFontSizeDelta: interlinearEnabled ? 2 : 0,
+                      title: 'Interlinear Settings',
+                      subtitle: 'Open',
                       trailing: IconButton(
                         tooltip: 'Interlinear Settings',
                         onPressed: () {
@@ -64,7 +58,7 @@ Future<void> showViewerModePopup(
                       ),
                       onTap: () {
                         Navigator.of(dialogContext).pop();
-                        onInterlinearChanged(!interlinearEnabled);
+                        onOpenInterlinearSettings();
                       },
                     ),
                     Divider(
@@ -235,16 +229,12 @@ class _ModeRow extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
     this.trailing,
-    this.titleColor,
-    this.titleFontSizeDelta = 0,
   });
 
   final String title;
   final String subtitle;
   final VoidCallback onTap;
   final Widget? trailing;
-  final Color? titleColor;
-  final double titleFontSizeDelta;
 
   @override
   Widget build(BuildContext context) {
@@ -263,11 +253,7 @@ class _ModeRow extends StatelessWidget {
                   Text(
                     title,
                     style: theme.textTheme.titleMedium?.copyWith(
-                      fontSize:
-                          (theme.textTheme.titleMedium?.fontSize ?? 16) +
-                          titleFontSizeDelta,
                       fontWeight: FontWeight.w700,
-                      color: titleColor,
                     ),
                   ),
                   const SizedBox(height: 2),

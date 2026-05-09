@@ -14,11 +14,19 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 1;
 
-  late final List<Widget> _screens = const [
-    LibraryScreen(),
-    ReaderScreen(),
-    StudyScreen(),
-  ];
+  Widget _screenForIndex(int index) {
+    return switch (index) {
+      0 => LibraryScreen(
+        onOpenBible: () {
+          setState(() {
+            _currentIndex = 1;
+          });
+        },
+      ),
+      1 => const ReaderScreen(),
+      _ => const StudyScreen(),
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +69,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   duration: const Duration(milliseconds: 220),
                   child: KeyedSubtree(
                     key: ValueKey(_currentIndex),
-                    child: _screens[_currentIndex],
+                    child: _screenForIndex(_currentIndex),
                   ),
                 ),
               ),

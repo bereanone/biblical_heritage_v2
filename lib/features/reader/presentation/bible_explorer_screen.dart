@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/app_theme_mode.dart';
+import '../../library/presentation/library_screen.dart';
 import '../data/highlights_repository.dart';
 import '../data/history_log_service.dart';
 import '../data/navigation_history_service.dart';
@@ -174,7 +175,11 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
             ViewerBottomBar(
               themeMode: widget.themeMode,
               onToggleThemeMode: _toggleThemeMode,
+              bookNumber: _bookNumber,
+              interlinearEnabled: _interlinearEnabled,
+              onToggleInterlinear: _toggleInterlinearMode,
               onHistory: _openHistory,
+              onLibrary: _openLibrary,
               onDecreaseFont: _decreaseFont,
               onIncreaseFont: _increaseFont,
               onCommentary: _openCommentary,
@@ -211,6 +216,14 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
         ? AppThemeMode.sepia
         : AppThemeMode.night;
     widget.onThemeChanged(next);
+  }
+
+  void _toggleInterlinearMode() {
+    final next = !_interlinearEnabled;
+    setState(() {
+      _interlinearEnabled = next;
+    });
+    AppSettingsService.instance.saveInterlinearEnabled(next);
   }
 
   void _pinHeaderToSelectedVerse(int? blockId) {

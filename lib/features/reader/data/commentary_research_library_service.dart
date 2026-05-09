@@ -10,6 +10,7 @@ import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../../core/database/user_database.dart';
+import '../../library/data/library_author_resolver.dart';
 import 'commentary_research_models.dart';
 import 'commentary_research_filters.dart';
 import 'commentary_reference_parser.dart';
@@ -22,6 +23,32 @@ class CommentaryResearchLibraryService
 
   static final CommentaryResearchLibraryService instance =
       CommentaryResearchLibraryService._();
+
+  Future<List<LibraryBookSection>> loadBookSections({
+    required String filePath,
+    required String libraryItemId,
+    bool includeFrontMatter = true,
+  }) async {
+    final file = File(filePath);
+    if (!await file.exists()) return const [];
+    final chunks = await _readBodySections(
+      file: file,
+      libraryItemId: libraryItemId,
+      includeFrontMatter: includeFrontMatter,
+      preserveHeadingBlocks: true,
+    );
+    return chunks
+        .map(
+          (chunk) => LibraryBookSection(
+            entryName: chunk.entryName,
+            title: chunk.sectionTitle,
+            paragraphs: List<String>.unmodifiable(chunk.paragraphs),
+            blocks: List<LibraryBookBlock>.unmodifiable(chunk.blocks),
+            spineIndex: chunk.spineIndex,
+          ),
+        )
+        .toList(growable: false);
+  }
 
   Future<CommentaryResearchPassageData> loadPassage({
     required int bookId,
@@ -441,4 +468,45 @@ class CommentaryResearchLibraryService
       stats: stats,
     );
   }
+}
+
+class LibraryBookSection {
+  const LibraryBookSection({
+    required this.entryName,
+    required this.title,
+    required this.paragraphs,
+    required this.blocks,
+    required this.spineIndex,
+  });
+
+  final String entryName;
+  final String title;
+  final List<String> paragraphs;
+  final List<LibraryBookBlock> blocks;
+  final int? spineIndex;
+}
+
+class LibraryBookBlock {
+  const LibraryBookBlock({
+    required this.html,
+    required this.text,
+    required this.kind,
+    this.sourceTag,
+    this.className,
+    this.headingLevel,
+    this.anchorId,
+    this.bodyOrder,
+  });
+
+  final String html;
+  final String text;
+  final String kind;
+  final String? sourceTag;
+  final String? className;
+  final int? headingLevel;
+  final String? anchorId;
+  final int? bodyOrder;
+
+  bool get isHeading => kind == 'heading';
+  bool get isBlockquote => kind == 'blockquote';
 }

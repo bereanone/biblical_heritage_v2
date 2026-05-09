@@ -26,7 +26,9 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
   }) async {
     stats.filesIndexed += 1;
     final stat = await file.stat();
-    final fingerprint = '${stat.size}:${stat.modified.millisecondsSinceEpoch}';
+    const indexVersion = 'epub_nav_v3';
+    final fingerprint =
+        '$indexVersion:${stat.size}:${stat.modified.millisecondsSinceEpoch}';
     final relativePath = await LibraryRootService.instance.relativePathFor(
       absolutePath: file.path,
       rootPath: rootPath,
@@ -44,6 +46,11 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
       file: file,
       isEpub: isEpub,
     );
+    final author = await _resolveLibraryAuthor(
+      file: file,
+      metadata: metadata,
+      relativePath: relativePath,
+    );
     final existing = await db.query(
       'library_items',
       columns: const [
@@ -51,6 +58,7 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
         'source_url',
         'source_site',
         'collection_name',
+        'cover_path',
         'indexed_at',
         'index_status',
         'index_error',
@@ -69,10 +77,11 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
     final existingRow = existing.isEmpty
         ? const <String, Object?>{}
         : existing.first;
+    final existingCoverPath = existingRow['cover_path']?.toString().trim();
     await db.insert('library_items', {
       'id': itemId,
       'title': title,
-      'author': null,
+      'author': author,
       'file_name': p.basename(file.path),
       'relative_path': relativePath,
       'file_hash': fingerprint,
@@ -87,6 +96,7 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
       'source_site':
           metadata.sourceSite ?? existingRow['source_site']?.toString(),
       'source_url': existingRow['source_url']?.toString(),
+      'cover_path': existingCoverPath,
       'date_added': now,
       'last_opened': null,
       'source_type': metadata.sourceType,
@@ -110,6 +120,19 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
 
     if (isEpub) {
+      final coverPath = await _cacheEpubCover(
+        file: file,
+        rootPath: rootPath,
+        itemId: itemId,
+      );
+      if (coverPath != null) {
+        await db.update(
+          'library_items',
+          {'cover_path': coverPath, 'updated_at': now},
+          where: 'id = ?',
+          whereArgs: [itemId],
+        );
+      }
       await _storeNavigationMetadata(
         db: db,
         file: file,
@@ -138,6 +161,22 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
 
     if (!needsIndex) {
       final linksCount = await _countLinks(db, itemId, folderType);
+      if (isEpub &&
+          (existingCoverPath == null || existingCoverPath.trim().isEmpty)) {
+        final coverPath = await _cacheEpubCover(
+          file: file,
+          rootPath: rootPath,
+          itemId: itemId,
+        );
+        if (coverPath != null) {
+          await db.update(
+            'library_items',
+            {'cover_path': coverPath, 'updated_at': now},
+            where: 'id = ?',
+            whereArgs: [itemId],
+          );
+        }
+      }
       return _FileIndexResult(
         fileItem: CommentaryResearchFileItem(
           id: itemId,
@@ -468,35 +507,7 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
     );
 
     final entries = <_NavigationEntryDraft>[];
-    var sortOrder = 0;
-    for (final spinePath in packageInfo.spineOrderedPaths) {
-      final entry = packageInfo.findArchiveEntry(archive, spinePath);
-      final sectionTitle = entry == null
-          ? p.basenameWithoutExtension(spinePath)
-          : _extractSectionTitle(
-                  utf8.decode(entry.content as List<int>, allowMalformed: true),
-                ) ??
-                p.basenameWithoutExtension(spinePath);
-      sortOrder += 1;
-      entries.add(
-        _NavigationEntryDraft(
-          id: 'nav_${_slug(libraryItemId)}_${_slug(spinePath)}',
-          libraryItemId: libraryItemId,
-          parentId: null,
-          label: sectionTitle,
-          href: spinePath,
-          anchorId: null,
-          spineIndex: sortOrder,
-          sortOrder: sortOrder,
-          depth: 0,
-          navType: 'spine',
-          createdAt: now,
-          updatedAt: now,
-          deviceId: deviceId,
-        ),
-      );
-    }
-
+    final seenKeys = <String>{};
     for (final navPath in packageInfo.navigationPaths) {
       final navEntry = packageInfo.findArchiveEntry(archive, navPath);
       if (navEntry == null) continue;
@@ -505,21 +516,174 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
         allowMalformed: true,
       );
       final navType = packageInfo.navigationTypeFor(navPath, raw);
-      entries.addAll(
-        _extractNavigationEntriesFromDocument(
-          raw: raw,
-          basePath: navPath,
-          libraryItemId: libraryItemId,
-          navType: navType,
-          deviceId: deviceId,
-          startSortOrder: ++sortOrder,
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      for (final entry in _extractNavigationEntriesFromDocument(
+        raw: raw,
+        basePath: navPath,
+        libraryItemId: libraryItemId,
+        navType: navType,
+        deviceId: deviceId,
+        createdAt: now,
+        updatedAt: now,
+      )) {
+        final key = _navigationEntryKey(
+          entry.label,
+          entry.href,
+          entry.anchorId,
+        );
+        if (!seenKeys.add(key)) continue;
+        entries.add(entry);
+      }
     }
 
+    final rootsByHref = <String, _NavigationEntryDraft>{};
     for (final entry in entries) {
+      if (entry.parentId != null || entry.href == null) continue;
+      rootsByHref.putIfAbsent(_navigationHrefKey(entry.href!), () => entry);
+    }
+
+    final hasTOCRoots = rootsByHref.isNotEmpty;
+    if (!hasTOCRoots) {
+      var spineSortOrder = 0;
+      for (final spinePath in packageInfo.spineOrderedPaths) {
+        final entry = packageInfo.findArchiveEntry(archive, spinePath);
+        final sectionTitle = entry == null
+            ? p.basenameWithoutExtension(spinePath)
+            : _extractSectionTitle(
+                    utf8.decode(
+                      entry.content as List<int>,
+                      allowMalformed: true,
+                    ),
+                  ) ??
+                  p.basenameWithoutExtension(spinePath);
+        spineSortOrder += 1;
+        final rootEntry = _NavigationEntryDraft(
+          id: 'nav_${_slug(libraryItemId)}_${_slug(spinePath)}',
+          libraryItemId: libraryItemId,
+          parentId: null,
+          label: sectionTitle,
+          href: spinePath,
+          anchorId: null,
+          spineIndex: spineSortOrder,
+          sortOrder: spineSortOrder,
+          depth: 0,
+          navType: 'spine',
+          contentKind: _navigationContentKind(
+            label: sectionTitle,
+            href: spinePath,
+            navType: 'spine',
+          ),
+          createdAt: now,
+          updatedAt: now,
+          deviceId: deviceId,
+        );
+        final key = _navigationEntryKey(
+          rootEntry.label,
+          rootEntry.href,
+          rootEntry.anchorId,
+        );
+        if (!seenKeys.add(key)) continue;
+        entries.add(rootEntry);
+        rootsByHref.putIfAbsent(_navigationHrefKey(spinePath), () => rootEntry);
+      }
+    }
+
+    for (final spinePath in packageInfo.spineOrderedPaths) {
+      final entry = packageInfo.findArchiveEntry(archive, spinePath);
+      if (entry == null) continue;
+      final raw = utf8.decode(entry.content as List<int>, allowMalformed: true);
+      final sectionTitle =
+          _extractSectionTitle(raw) ?? p.basenameWithoutExtension(spinePath);
+      final sectionBlocks = _extractBodyBlocks(
+        raw: raw,
+        chapterPath: spinePath,
+        sectionTitle: sectionTitle,
+        includeHeadingBlocks: true,
+      );
+
+      final rootEntry =
+          rootsByHref[_navigationHrefKey(spinePath)] ??
+          (() {
+            final fallbackSortOrder =
+                (packageInfo.spineIndexForPath(spinePath) ?? 1) * 1000;
+            final fallbackRoot = _NavigationEntryDraft(
+              id: 'nav_${_slug(libraryItemId)}_${_slug(spinePath)}',
+              libraryItemId: libraryItemId,
+              parentId: null,
+              label: sectionTitle,
+              href: spinePath,
+              anchorId: null,
+              spineIndex: packageInfo.spineIndexForPath(spinePath),
+              sortOrder: fallbackSortOrder,
+              depth: 0,
+              navType: 'spine',
+              contentKind: _navigationContentKind(
+                label: sectionTitle,
+                href: spinePath,
+                navType: 'spine',
+              ),
+              createdAt: now,
+              updatedAt: now,
+              deviceId: deviceId,
+            );
+            final key = _navigationEntryKey(
+              fallbackRoot.label,
+              fallbackRoot.href,
+              fallbackRoot.anchorId,
+            );
+            if (seenKeys.add(key)) {
+              entries.add(fallbackRoot);
+            }
+            rootsByHref[_navigationHrefKey(spinePath)] = fallbackRoot;
+            return fallbackRoot;
+          })();
+
+      var headingIndex = 0;
+      for (final block in sectionBlocks) {
+        if (!block.isHeading) continue;
+        if (_isChapterTitleBlock(block.text, sectionTitle: sectionTitle)) {
+          continue;
+        }
+
+        headingIndex += 1;
+        final anchorId = _generatedHeadingAnchor(
+          chapterPath: spinePath,
+          headingIndex: headingIndex,
+          headingText: block.text,
+          explicitAnchorId: block.anchorId,
+        );
+        final childEntry = _NavigationEntryDraft(
+          id: 'nav_${_slug(libraryItemId)}_${_slug(spinePath)}_heading_$headingIndex',
+          libraryItemId: libraryItemId,
+          parentId: rootEntry.id,
+          label: block.text,
+          href: rootEntry.href ?? spinePath,
+          anchorId: anchorId,
+          spineIndex: rootEntry.spineIndex,
+          sortOrder: (rootEntry.sortOrder ?? 0) * 1000 + headingIndex,
+          depth: (rootEntry.depth ?? 0) + 1,
+          navType: 'body',
+          contentKind: 'body_subsection',
+          isFrontMatter: false,
+          isBodyStart: false,
+          bodyOrder: block.bodyOrder,
+          createdAt: now,
+          updatedAt: now,
+          deviceId: deviceId,
+        );
+        final key = _navigationEntryKey(
+          childEntry.label,
+          childEntry.href,
+          childEntry.anchorId,
+        );
+        if (!seenKeys.add(key)) continue;
+        entries.add(childEntry);
+      }
+    }
+
+    final finalizedEntries = _finalizeNavigationEntries(
+      List<_NavigationEntryDraft>.of(entries)..sort(_compareNavigationDrafts),
+    );
+    for (final entry in finalizedEntries) {
       await db.insert(
         'library_navigation_items',
         entry.toMap(),
@@ -528,10 +692,186 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
     }
   }
 
+  List<_NavigationEntryDraft> _finalizeNavigationEntries(
+    List<_NavigationEntryDraft> entries,
+  ) {
+    if (entries.isEmpty) return entries;
+
+    final bodyStartIndex = _navigationBodyStartIndex(entries);
+    var bodyOrder = 0;
+    final finalized = <_NavigationEntryDraft>[];
+    for (var index = 0; index < entries.length; index++) {
+      final entry = entries[index];
+      final contentKind = entry.contentKind;
+      final isFrontMatter =
+          _isNavigationFrontMatterKind(contentKind) ||
+          (contentKind == 'introduction' &&
+              bodyStartIndex != null &&
+              index < bodyStartIndex);
+      final isBodyStart =
+          bodyStartIndex != null &&
+          index == bodyStartIndex &&
+          !isFrontMatter &&
+          contentKind != 'appendix';
+      final isBody =
+          !isFrontMatter &&
+          contentKind != 'appendix' &&
+          (bodyStartIndex == null || index >= bodyStartIndex);
+      finalized.add(
+        entry.copyWith(
+          isFrontMatter: isFrontMatter,
+          isBodyStart: isBodyStart,
+          bodyOrder: entry.bodyOrder ?? (isBody ? ++bodyOrder : null),
+        ),
+      );
+    }
+    return finalized;
+  }
+
+  int? _navigationBodyStartIndex(List<_NavigationEntryDraft> entries) {
+    for (var index = 0; index < entries.length; index++) {
+      if (entries[index].contentKind == 'body') {
+        return index;
+      }
+    }
+
+    for (var index = 0; index < entries.length; index++) {
+      final contentKind = entries[index].contentKind;
+      if (_isNavigationFrontMatterKind(contentKind) ||
+          contentKind == 'appendix' ||
+          contentKind == 'unknown') {
+        continue;
+      }
+      return index;
+    }
+
+    return null;
+  }
+
+  bool _isNavigationFrontMatterKind(String kind) {
+    return <String>{
+      'cover',
+      'title_page',
+      'toc',
+      'about',
+      'copyright',
+      'preface',
+      'foreword',
+      'introduction',
+    }.contains(kind);
+  }
+
+  String _navigationContentKind({
+    required String label,
+    required String href,
+    required String navType,
+  }) {
+    final normalizedLabel = _normalizeNavigationText(label);
+    final normalizedHref = _normalizeNavigationText(
+      p.basenameWithoutExtension(href),
+    );
+    final combined = '$normalizedLabel $normalizedHref';
+
+    if (_isNavigationCoverLabel(combined)) return 'cover';
+    if (_isNavigationTitlePageLabel(combined)) return 'title_page';
+    if (_isNavigationTocLabel(combined) || navType.toLowerCase() == 'toc') {
+      return 'toc';
+    }
+    if (_isNavigationAboutLabel(combined)) return 'about';
+    if (_isNavigationCopyrightLabel(combined)) return 'copyright';
+    if (_isNavigationForewordLabel(combined)) return 'foreword';
+    if (_isNavigationPrefaceLabel(combined)) return 'preface';
+    if (_isNavigationIntroductionLabel(combined)) return 'introduction';
+    if (_isNavigationAppendixLabel(combined)) return 'appendix';
+    if (_isNavigationBodyLabel(combined)) return 'body';
+    return 'unknown';
+  }
+
+  bool _isNavigationCoverLabel(String value) {
+    return value.contains('cover');
+  }
+
+  bool _isNavigationTitlePageLabel(String value) {
+    return value.contains('title page') || value.contains('titlepage');
+  }
+
+  bool _isNavigationTocLabel(String value) {
+    return value.contains('table of contents') ||
+        value == 'toc' ||
+        value.startsWith('toc ') ||
+        value.contains(' contents') ||
+        value.startsWith('nav ');
+  }
+
+  bool _isNavigationAboutLabel(String value) {
+    return value.contains('about book') ||
+        value.contains('aboutbook') ||
+        value.contains('information about this book') ||
+        value.contains('about this book') ||
+        value.contains('about the author');
+  }
+
+  bool _isNavigationCopyrightLabel(String value) {
+    return value.contains('copyright') ||
+        value.contains('publisher') ||
+        value.contains('editorial') ||
+        value.contains('publication information') ||
+        value.contains('source credits');
+  }
+
+  bool _isNavigationForewordLabel(String value) {
+    return value.startsWith('foreword');
+  }
+
+  bool _isNavigationPrefaceLabel(String value) {
+    return value.startsWith('preface');
+  }
+
+  bool _isNavigationIntroductionLabel(String value) {
+    return value.startsWith('introduction') ||
+        value.startsWith('intro') ||
+        value.contains('to the reader') ||
+        value.contains('for the reader');
+  }
+
+  bool _isNavigationAppendixLabel(String value) {
+    return value.startsWith('appendix') ||
+        value.contains('back matter') ||
+        value.contains('afterword') ||
+        value.contains('bibliography') ||
+        value.contains('index');
+  }
+
+  bool _isNavigationBodyLabel(String value) {
+    if (value.isEmpty) return false;
+    const prefixes = <String>['chapter', 'section', 'day', 'lesson', 'part'];
+    for (final prefix in prefixes) {
+      if (value.startsWith(prefix)) return true;
+    }
+
+    return RegExp(
+          r'^(chapter|section|day|lesson|part)\s+\d+',
+        ).hasMatch(value) ||
+        RegExp(
+          r'^(chapter|section|day|lesson|part)\s+[ivxlcdm]+',
+        ).hasMatch(value) ||
+        RegExp(r'^\d+[\s\.\)]').hasMatch(value);
+  }
+
+  String _normalizeNavigationText(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
   Future<List<_EpubSectionChunk>> _readBodySections({
     required File file,
     required String libraryItemId,
     _IndexingStats? stats,
+    bool includeFrontMatter = false,
+    bool preserveHeadingBlocks = false,
   }) async {
     final bytes = await file.readAsBytes();
     final archive = ZipDecoder().decodeBytes(bytes, verify: false);
@@ -556,7 +896,11 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
         raw: raw,
         packageInfo: packageInfo,
       );
-      if (decision.shouldSkip) {
+      final keepFrontMatter =
+          includeFrontMatter &&
+          (decision.category == 'front_matter' ||
+              decision.category == 'editorial');
+      if (decision.shouldSkip && !keepFrontMatter) {
         stats?.recordSkippedSection(
           libraryItemId: fileId,
           hrefPath: entryName,
@@ -567,13 +911,17 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
         continue;
       }
 
-      final paragraphs =
-          RegExp(r'<p[^>]*>.*?</p>', caseSensitive: false, dotAll: true)
-              .allMatches(raw)
-              .map((match) => match.group(0) ?? '')
-              .where((paragraph) => paragraph.isNotEmpty)
-              .toList(growable: false);
-      if (paragraphs.isEmpty) {
+      final blocks = _extractBodyBlocks(
+        raw: raw,
+        chapterPath: entryName,
+        sectionTitle: title,
+        includeHeadingBlocks: preserveHeadingBlocks,
+      );
+      final paragraphs = blocks
+          .where((block) => block.kind == 'paragraph')
+          .map((block) => block.html)
+          .toList(growable: false);
+      if (blocks.isEmpty) {
         stats?.recordSkippedSection(
           libraryItemId: fileId,
           hrefPath: entryName,
@@ -590,6 +938,7 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
           entryName: entryName,
           sectionTitle: title,
           paragraphs: paragraphs,
+          blocks: blocks,
           spineIndex: packageInfo.spineIndexForPath(entryName),
         ),
       );
@@ -827,6 +1176,11 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
         properties: properties ?? '',
       );
     }
+    final coverImagePath = _discoverCoverImagePath(
+      archive: archive,
+      opfXml: opfXml,
+      manifest: manifest,
+    );
 
     final spinePaths = <String>[];
     for (final match in RegExp(
@@ -856,6 +1210,7 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
     }
 
     return _EpubPackageInfo(
+      coverImagePath: coverImagePath,
       spinePaths: spinePaths.toSet(),
       spineOrderedPaths: List<String>.unmodifiable(
         spinePaths.map((path) => p.normalize(path).toLowerCase()),
@@ -872,24 +1227,127 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
     return match?.group(1);
   }
 
+  String? _extractClassName(String attrs) {
+    final match = RegExp(
+      r'''class\s*=\s*["']([^"']+)["']''',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(attrs);
+    final value = match?.group(1)?.trim();
+    return value != null && value.isNotEmpty ? value : null;
+  }
+
+  String? _discoverCoverImagePath({
+    required Archive archive,
+    required String opfXml,
+    required Map<String, _EpubManifestItem> manifest,
+  }) {
+    final coverIdMatch = RegExp(
+      r'<meta\b[^>]*name="cover"[^>]*content="([^"]+)"',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(opfXml);
+    final coverId = coverIdMatch?.group(1)?.trim();
+    if (coverId != null && coverId.isNotEmpty) {
+      final manifestItem = manifest[coverId];
+      if (manifestItem != null) {
+        return manifestItem.href;
+      }
+    }
+
+    for (final item in manifest.values) {
+      if (item.properties.toLowerCase().contains('cover-image')) {
+        return item.href;
+      }
+    }
+
+    for (final item in manifest.values) {
+      if (_looksLikeCoverImagePath(item.href)) {
+        return item.href;
+      }
+    }
+
+    for (final item in manifest.values) {
+      final basename = p.basename(item.href).toLowerCase();
+      if (basename != 'cover.xhtml' && basename != 'titlepage.xhtml') {
+        continue;
+      }
+      final entry = archive.findFile(item.href);
+      if (entry == null || !entry.isFile) continue;
+      final raw = utf8.decode(entry.content as List<int>, allowMalformed: true);
+      final imgMatch = RegExp(
+        r'<(?:img|image)\b[^>]*(?:src|href|xlink:href)="([^"]+)"',
+        caseSensitive: false,
+        dotAll: true,
+      ).firstMatch(raw);
+      final href = imgMatch?.group(1)?.trim();
+      if (href == null || href.isEmpty) continue;
+      return p.normalize(p.join(p.dirname(item.href), href));
+    }
+
+    return null;
+  }
+
+  bool _looksLikeCoverImagePath(String path) {
+    final lower = path.toLowerCase();
+    final basename = p.basename(lower);
+    if (!_isImageExtension(lower)) return false;
+    return basename.startsWith('cover') ||
+        basename.startsWith('front-cover') ||
+        basename.startsWith('frontcover') ||
+        basename == 'titlepage.jpg' ||
+        basename == 'titlepage.jpeg' ||
+        basename == 'titlepage.png' ||
+        basename == 'titlepage.webp';
+  }
+
+  bool _isImageExtension(String path) {
+    final ext = p.extension(path).toLowerCase();
+    return const <String>{
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.gif',
+      '.webp',
+      '.bmp',
+    }.contains(ext);
+  }
+
+  String _coverImageExtension(String fileName) {
+    final ext = p.extension(fileName).toLowerCase();
+    if (const <String>{
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.gif',
+      '.webp',
+      '.bmp',
+    }.contains(ext)) {
+      return ext;
+    }
+    return '.jpg';
+  }
+
   List<_NavigationEntryDraft> _extractNavigationEntriesFromDocument({
     required String raw,
     required String basePath,
     required String libraryItemId,
     required String navType,
     required String deviceId,
-    required int startSortOrder,
     required String createdAt,
     required String updatedAt,
   }) {
     final entries = <_NavigationEntryDraft>[];
-    var sortOrder = startSortOrder;
+    var sortOrder = 0;
+    final navigationSource = navType.toLowerCase() == 'toc'
+        ? _extractTocDocument(raw)
+        : raw;
     final anchorPattern = RegExp(
       r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
       caseSensitive: false,
       dotAll: true,
     );
-    for (final match in anchorPattern.allMatches(raw)) {
+    for (final match in anchorPattern.allMatches(navigationSource)) {
       final href = match.group(1)?.trim() ?? '';
       final label = _stripHtml(match.group(2) ?? '').trim();
       if (href.isEmpty || label.isEmpty) continue;
@@ -910,8 +1368,13 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
           anchorId: anchorId,
           spineIndex: null,
           sortOrder: sortOrder,
-          depth: _estimateNavDepth(raw, match.start),
+          depth: _estimateNavDepth(navigationSource, match.start),
           navType: navType,
+          contentKind: _navigationContentKind(
+            label: label,
+            href: resolvedPath,
+            navType: navType,
+          ),
           createdAt: createdAt,
           updatedAt: updatedAt,
           deviceId: deviceId,
@@ -920,6 +1383,349 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
       sortOrder += 1;
     }
     return entries;
+  }
+
+  List<LibraryBookBlock> _extractBodyBlocks({
+    required String raw,
+    required String chapterPath,
+    required String sectionTitle,
+    required bool includeHeadingBlocks,
+  }) {
+    final bodyMatch = RegExp(
+      r'<body\b[^>]*>(.*?)</body>',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(raw);
+    final source = bodyMatch?.group(1) ?? raw;
+    final blocks = <LibraryBookBlock>[];
+    final stack = <_HtmlBlockFrame>[];
+    final blockPattern = RegExp(
+      r'<(/?)(h[1-6]|p|div|blockquote)\b([^>]*)>',
+      caseSensitive: false,
+      dotAll: true,
+    );
+    var bodyOrder = 0;
+
+    for (final match in blockPattern.allMatches(source)) {
+      final isClosing = (match.group(1) ?? '').isNotEmpty;
+      final tag = (match.group(2) ?? '').toLowerCase();
+      final attrs = match.group(3) ?? '';
+      final token = match.group(0) ?? '';
+
+      if (!isClosing) {
+        if (token.endsWith('/>')) {
+          continue;
+        }
+        stack.add(
+          _HtmlBlockFrame(
+            tag: tag,
+            attrs: attrs,
+            start: match.start,
+            contentStart: match.end,
+          ),
+        );
+        continue;
+      }
+
+      final openIndex = stack.lastIndexWhere((frame) => frame.tag == tag);
+      if (openIndex < 0) continue;
+      final frame = stack.removeAt(openIndex);
+      final innerHtml = source.substring(frame.contentStart, match.start);
+      final text = _stripHtml(innerHtml);
+      if (text.isEmpty) continue;
+      if (_isHiddenLikeBlock(attrs: frame.attrs, innerHtml: innerHtml)) {
+        continue;
+      }
+      final hasBlockquoteAncestor = stack
+          .take(openIndex)
+          .any((ancestor) => ancestor.tag == 'blockquote');
+      if (hasBlockquoteAncestor && tag != 'blockquote') {
+        continue;
+      }
+
+      final headingLevel = tag.startsWith('h')
+          ? int.tryParse(tag.substring(1))
+          : null;
+      final explicitAnchorId = _extractAnchorIdFromHtml(
+        attrs: frame.attrs,
+        innerHtml: innerHtml,
+      );
+      final headingLike =
+          headingLevel != null ||
+          _looksLikeHeadingLikeBlock(
+            tag: tag,
+            attrs: frame.attrs,
+            innerHtml: innerHtml,
+            text: text,
+          );
+      final hasNestedBlockTags = RegExp(
+        r'<(/?)(h[1-6]|p|div)\b',
+        caseSensitive: false,
+      ).hasMatch(innerHtml);
+
+      if (tag == 'div' && hasNestedBlockTags) {
+        continue;
+      }
+
+      if (headingLike) {
+        if (!includeHeadingBlocks) continue;
+        bodyOrder += 1;
+        blocks.add(
+          LibraryBookBlock(
+            html: source.substring(frame.start, match.end),
+            text: text,
+            kind: 'heading',
+            sourceTag: tag,
+            className: _extractClassName(frame.attrs),
+            headingLevel: headingLevel ?? _headingLevelForHeadingLike(attrs),
+            anchorId: explicitAnchorId?.trim().isNotEmpty == true
+                ? explicitAnchorId!.trim()
+                : _generatedHeadingAnchor(
+                    chapterPath: chapterPath,
+                    headingIndex: bodyOrder,
+                    headingText: text,
+                    explicitAnchorId: explicitAnchorId,
+                  ),
+            bodyOrder: bodyOrder,
+          ),
+        );
+        continue;
+      }
+
+      bodyOrder += 1;
+      blocks.add(
+        LibraryBookBlock(
+          html: source.substring(frame.start, match.end),
+          text: text,
+          kind: tag == 'blockquote' ? 'blockquote' : 'paragraph',
+          sourceTag: tag,
+          className: _extractClassName(frame.attrs),
+          anchorId: explicitAnchorId?.trim().isNotEmpty == true
+              ? explicitAnchorId!.trim()
+              : null,
+          bodyOrder: bodyOrder,
+        ),
+      );
+    }
+
+    return blocks;
+  }
+
+  bool _isHiddenLikeBlock({required String attrs, required String innerHtml}) {
+    final normalizedAttrs = attrs.toLowerCase();
+    final normalizedInner = innerHtml.toLowerCase();
+
+    if (normalizedAttrs.contains('hidden') ||
+        normalizedAttrs.contains('aria-hidden="true"') ||
+        normalizedAttrs.contains("aria-hidden='true'") ||
+        normalizedAttrs.contains('display:none') ||
+        normalizedAttrs.contains('display: none') ||
+        normalizedAttrs.contains('visibility:hidden') ||
+        normalizedAttrs.contains('visibility: hidden')) {
+      return true;
+    }
+
+    final classMatch = RegExp(
+      r'''class\s*=\s*["']([^"']+)["']''',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(attrs);
+    if (classMatch != null) {
+      final classValue = classMatch.group(1)!.toLowerCase();
+      final classTokens = classValue.split(RegExp(r'[\s_-]+'));
+      if (classTokens.contains('nav') ||
+          classTokens.contains('toc') ||
+          classTokens.contains('metadata') ||
+          classTokens.contains('meta') ||
+          classTokens.contains('alternate') ||
+          classTokens.contains('hidden') ||
+          classTokens.contains('sr') ||
+          classTokens.contains('only') ||
+          classValue.contains('visually-hidden')) {
+        return true;
+      }
+    }
+
+    if (RegExp(
+      r'<(nav|script|style|meta|link)\b',
+      caseSensitive: false,
+      dotAll: true,
+    ).hasMatch(normalizedInner)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  String _extractTocDocument(String raw) {
+    final tocNavPattern = RegExp(
+      r'''<nav\b[^>]*(?:epub:type|type)\s*=\s*["']toc["'][^>]*>.*?</nav>''',
+      caseSensitive: false,
+      dotAll: true,
+    );
+    final tocMatch = tocNavPattern.firstMatch(raw);
+    if (tocMatch != null) {
+      return tocMatch.group(0) ?? raw;
+    }
+
+    final navPattern = RegExp(
+      r'<nav\b[^>]*>.*?</nav>',
+      caseSensitive: false,
+      dotAll: true,
+    );
+    final navMatch = navPattern.firstMatch(raw);
+    return navMatch?.group(0) ?? raw;
+  }
+
+  bool _isChapterTitleBlock(String text, {required String sectionTitle}) {
+    final normalizedBlock = _normalizeNavigationText(text);
+    final normalizedTitle = _normalizeNavigationText(sectionTitle);
+    if (normalizedBlock.isEmpty || normalizedTitle.isEmpty) return false;
+    return normalizedBlock == normalizedTitle;
+  }
+
+  bool _looksLikeHeadingLikeBlock({
+    required String tag,
+    required String attrs,
+    required String innerHtml,
+    required String text,
+  }) {
+    if (tag.startsWith('h')) return true;
+    if (tag != 'p' && tag != 'div') return false;
+
+    final normalizedText = _normalizeNavigationText(text);
+    if (normalizedText.isEmpty) return false;
+
+    if (RegExp(
+      r'''class\s*=\s*["'][^"']*(heading|chapter|section|title|subhead|subtitle|headline|chapterhead|sectionhead|lessonhead|versehead|parthead|booktitle|chapter-title|section-title|sub-title|subheading)[^"']*["']''',
+      caseSensitive: false,
+      dotAll: true,
+    ).hasMatch(attrs)) {
+      return true;
+    }
+
+    if (RegExp(
+      r'''style\s*=\s*["'][^"']*(font-weight\s*:\s*(bold|700|800)|text-align\s*:\s*center)[^"']*["']''',
+      caseSensitive: false,
+      dotAll: true,
+    ).hasMatch(attrs)) {
+      return true;
+    }
+
+    if (RegExp(
+          r'<(strong|b)\b',
+          caseSensitive: false,
+          dotAll: true,
+        ).hasMatch(innerHtml) &&
+        normalizedText.split(RegExp(r'\s+')).length <= 16 &&
+        normalizedText.length <= 140) {
+      return true;
+    }
+
+    final lowerAttrs = attrs.toLowerCase();
+    if ((lowerAttrs.contains('font-weight:bold') ||
+            lowerAttrs.contains('font-weight: bold') ||
+            lowerAttrs.contains('font-weight:700') ||
+            lowerAttrs.contains('font-weight: 700')) &&
+        normalizedText.split(RegExp(r'\s+')).length <= 16 &&
+        normalizedText.length <= 140) {
+      return true;
+    }
+
+    return false;
+  }
+
+  int? _headingLevelForHeadingLike(String attrs) {
+    final inferred = RegExp(
+      r'level\s*[:=]\s*([1-6])',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(attrs);
+    final level = inferred?.group(1);
+    if (level == null) return 4;
+    return int.tryParse(level);
+  }
+
+  String? _extractAnchorIdFromHtml({
+    required String attrs,
+    required String innerHtml,
+  }) {
+    final explicit =
+        _attributeValue(attrs, 'id') ?? _attributeValue(attrs, 'name');
+    if (explicit != null && explicit.trim().isNotEmpty) {
+      return explicit.trim();
+    }
+
+    final nestedAnchorMatch = RegExp(
+      r'''<a\b[^>]*(?:id|name)\s*=\s*["']([^"']+)["']''',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(innerHtml);
+    final nestedAnchor = nestedAnchorMatch?.group(1)?.trim();
+    if (nestedAnchor != null && nestedAnchor.isNotEmpty) {
+      return nestedAnchor;
+    }
+
+    final nestedSpanMatch = RegExp(
+      r'''<(?:span|div)\b[^>]*(?:id|name)\s*=\s*["']([^"']+)["']''',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(innerHtml);
+    return nestedSpanMatch?.group(1)?.trim();
+  }
+
+  String _generatedHeadingAnchor({
+    required String chapterPath,
+    required int headingIndex,
+    required String headingText,
+    String? explicitAnchorId,
+  }) {
+    final preservedAnchor = explicitAnchorId?.trim();
+    if (preservedAnchor != null && preservedAnchor.isNotEmpty) {
+      return preservedAnchor;
+    }
+
+    final chapterSlug = _slug(p.basenameWithoutExtension(chapterPath));
+    final headingSlug = _slug(headingText);
+    if (headingSlug.isEmpty) {
+      return '${chapterSlug}_heading_$headingIndex';
+    }
+    return '${chapterSlug}_heading_${headingIndex}_$headingSlug';
+  }
+
+  String _navigationEntryKey(String label, String? href, String? anchorId) {
+    return [
+      _normalizeNavigationText(label),
+      _navigationHrefKey(href),
+      _normalizeNavigationText(anchorId ?? ''),
+    ].join('|');
+  }
+
+  String _navigationHrefKey(String? href) {
+    final trimmed = href?.trim() ?? '';
+    if (trimmed.isEmpty) return '';
+    final base = trimmed.split('#').first;
+    return p.normalize(base).toLowerCase();
+  }
+
+  int _compareNavigationDrafts(
+    _NavigationEntryDraft a,
+    _NavigationEntryDraft b,
+  ) {
+    final leftSort = a.sortOrder ?? 1 << 30;
+    final rightSort = b.sortOrder ?? 1 << 30;
+    final sortCompare = leftSort.compareTo(rightSort);
+    if (sortCompare != 0) return sortCompare;
+
+    final leftDepth = a.depth ?? 0;
+    final rightDepth = b.depth ?? 0;
+    final depthCompare = leftDepth.compareTo(rightDepth);
+    if (depthCompare != 0) return depthCompare;
+
+    final parentCompare = (a.parentId ?? '').compareTo(b.parentId ?? '');
+    if (parentCompare != 0) return parentCompare;
+
+    return a.label.toLowerCase().compareTo(b.label.toLowerCase());
   }
 
   int _estimateNavDepth(String raw, int anchorStart) {
@@ -934,15 +1740,6 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
     ).allMatches(prefix).length;
     final depth = opened - closed;
     return depth < 0 ? 0 : depth;
-  }
-
-  Future<List<String>> _readBodyParagraphs(File file) async {
-    final sections = await _readBodySections(file: file, libraryItemId: '');
-    final paragraphs = <String>[];
-    for (final section in sections) {
-      paragraphs.addAll(section.paragraphs);
-    }
-    return paragraphs;
   }
 
   Future<List<CommentaryResearchMatchItem>> _loadMatches({
@@ -1058,104 +1855,6 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
         .toList(growable: false);
   }
 
-  Future<List<CommentaryResearchMatchItem>> _hydrateCommentaryMatches({
-    required String rootPath,
-    required List<CommentaryResearchMatchItem> matches,
-  }) async {
-    if (matches.isEmpty) return matches;
-
-    final grouped = <String, List<CommentaryResearchMatchItem>>{};
-    for (final match in matches) {
-      final path = match.relativePath.trim();
-      if (path.isEmpty) continue;
-      grouped
-          .putIfAbsent(path, () => <CommentaryResearchMatchItem>[])
-          .add(match);
-    }
-    if (grouped.isEmpty) return matches;
-
-    final hydrated = <CommentaryResearchMatchItem>[];
-    for (final entry in grouped.entries) {
-      final file = File(p.join(rootPath, entry.key));
-      if (!await file.exists()) {
-        hydrated.addAll(entry.value);
-        continue;
-      }
-      final sections = await _readBodySections(
-        file: file,
-        libraryItemId: entry.value.first.libraryItemId,
-      );
-      final allParagraphs = sections
-          .expand((section) => section.paragraphs)
-          .toList(growable: false);
-
-      for (final match in entry.value) {
-        final section = match.epubHref == null
-            ? null
-            : sections.firstWhere(
-                (candidate) =>
-                    p.normalize(candidate.entryName).toLowerCase() ==
-                    p.normalize(match.epubHref!).toLowerCase(),
-                orElse: () => const _EpubSectionChunk(
-                  entryName: '',
-                  sectionTitle: '',
-                  paragraphs: <String>[],
-                  spineIndex: null,
-                ),
-              );
-
-        String? fullParagraph;
-        final paragraphIndex = match.paragraphIndex;
-        if (section != null &&
-            section.entryName.isNotEmpty &&
-            paragraphIndex != null &&
-            paragraphIndex > 0 &&
-            paragraphIndex <= section.paragraphs.length) {
-          fullParagraph = _expandParagraphContext(
-            section.paragraphs,
-            paragraphIndex - 1,
-          );
-          if (fullParagraph.isEmpty) {
-            fullParagraph = _stripHtml(section.paragraphs[paragraphIndex - 1]);
-          }
-        } else {
-          fullParagraph = _bestCommentaryParagraphForMatch(
-            allParagraphs,
-            match: match,
-          );
-        }
-
-        hydrated.add(
-          CommentaryResearchMatchItem(
-            libraryItemId: match.libraryItemId,
-            itemTitle: match.itemTitle,
-            fileName: match.fileName,
-            relativePath: match.relativePath,
-            sourceUrl: match.sourceUrl,
-            originalReferenceText: match.originalReferenceText,
-            bookId: match.bookId,
-            chapter: match.chapter,
-            verseStart: match.verseStart,
-            verseEnd: match.verseEnd,
-            confidence: match.confidence,
-            anchor: fullParagraph ?? match.anchor,
-            parserWarning: match.parserWarning,
-            epubCfi: match.epubCfi,
-            epubHref: match.epubHref,
-            anchorId: match.anchorId,
-            spineIndex: match.spineIndex,
-            paragraphIndex: match.paragraphIndex,
-          ),
-        );
-      }
-    }
-    return hydrated;
-  }
-
-  Future<List<String>> _readParagraphs(File file) async {
-    return _readBodyParagraphs(file);
-  }
-
   String _expandParagraphContext(List<String> paragraphs, int startIndex) {
     if (startIndex < 0 || startIndex >= paragraphs.length) {
       return '';
@@ -1214,159 +1913,6 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
     return true;
   }
 
-  String? _bestCommentaryParagraphForMatch(
-    List<String> paragraphs, {
-    required CommentaryResearchMatchItem match,
-  }) {
-    final candidate = _bestParagraphForMatch(paragraphs, match: match);
-    if (candidate == null || candidate.trim().isEmpty) return candidate;
-
-    final target = CommentaryResearchFilters.normalizeForSearch(candidate);
-    if (target.isEmpty) return candidate;
-
-    for (var index = 0; index < paragraphs.length; index++) {
-      final paragraphText = _stripHtml(paragraphs[index]);
-      final normalized = CommentaryResearchFilters.normalizeForSearch(
-        paragraphText,
-      );
-      if (normalized.isEmpty) continue;
-      if (normalized == target || normalized.contains(target)) {
-        final expanded = _expandParagraphContext(paragraphs, index);
-        return expanded.isNotEmpty ? expanded : paragraphText;
-      }
-    }
-
-    return candidate;
-  }
-
-  String? _bestParagraphForMatch(
-    List<String> paragraphs, {
-    required CommentaryResearchMatchItem match,
-  }) {
-    if (paragraphs.isEmpty) return null;
-    final reference = CommentaryResearchFilters.normalizeForSearch(
-      '${match.originalReferenceText} ${match.itemTitle}',
-    );
-    final prefix = CommentaryResearchFilters.normalizeForSearch(
-      (match.anchor ?? '').split(RegExp(r'\s+')).take(20).join(' '),
-    );
-    for (final paragraph in paragraphs) {
-      final normalized = CommentaryResearchFilters.normalizeForSearch(
-        paragraph,
-      );
-      if (reference.isNotEmpty && normalized.contains(reference)) {
-        return paragraph;
-      }
-      if (prefix.isNotEmpty && normalized.startsWith(prefix)) {
-        return paragraph;
-      }
-    }
-    return null;
-  }
-
-  Future<List<CommentaryResearchMatchItem>> _loadLiveEpubMatches({
-    required List<File> epubFiles,
-    required String folderType,
-    required String? preferredVolumeCode,
-    required Map<String, int> bookLookup,
-    required List<String> bookAliases,
-    required String bookName,
-    required int bookId,
-    required int chapter,
-    required int verse,
-    required bool chapterWideMatches,
-  }) async {
-    if (epubFiles.isEmpty) return const [];
-    final hits = <CommentaryResearchMatchItem>[];
-
-    for (final file in epubFiles) {
-      final inferred = preferredVolumeCode == null
-          ? null
-          : _inferVolumeCodeForItem(
-              p.basename(file.path),
-              await _readTitle(file) ?? '',
-            );
-      if (preferredVolumeCode != null && inferred != preferredVolumeCode) {
-        continue;
-      }
-
-      final fileTitle =
-          await _readTitle(file) ?? p.basenameWithoutExtension(file.path);
-      final relativePath = await LibraryRootService.instance.relativePathFor(
-        absolutePath: file.path,
-        rootPath:
-            (await LibraryRootService.instance.loadSelection()).path ?? '',
-      );
-      final paragraphs = await _readParagraphs(file);
-      for (final paragraph in paragraphs) {
-        final strippedParagraph = _stripHtml(paragraph);
-        if (strippedParagraph.isEmpty) continue;
-        final references = BibleReferenceParser.extractReferences(
-          strippedParagraph,
-          bookLookup,
-          aliases: bookAliases,
-        );
-        final reference = _selectReferenceForParagraph(
-          references,
-          bookId: bookId,
-          chapter: chapter,
-          verse: verse,
-          chapterWideMatches: chapterWideMatches,
-        );
-        if (reference == null) continue;
-        hits.add(
-          CommentaryResearchMatchItem(
-            libraryItemId: _itemId(folderType, relativePath),
-            itemTitle: fileTitle,
-            fileName: p.basename(file.path),
-            relativePath: relativePath,
-            originalReferenceText: reference.originalReferenceText,
-            bookId: reference.bookId,
-            chapter: reference.chapter,
-            verseStart: reference.verseStart,
-            verseEnd: reference.verseEnd,
-            confidence: reference.confidence,
-            anchor: strippedParagraph,
-            parserWarning: reference.parserWarning,
-            epubCfi: null,
-            epubHref: null,
-            anchorId: null,
-            spineIndex: null,
-            paragraphIndex: null,
-            sourceUrl: null,
-          ),
-        );
-      }
-    }
-
-    debugPrint(
-      '[CommentaryResearch] live fallback $folderType hits=${hits.length} '
-      'selected=$bookName $chapter:${verse > 0 ? verse : 1}',
-    );
-    return hits;
-  }
-
-  ParsedBibleReference? _selectReferenceForParagraph(
-    List<ParsedBibleReference> references, {
-    required int bookId,
-    required int chapter,
-    required int verse,
-    required bool chapterWideMatches,
-  }) {
-    for (final reference in references) {
-      if (reference.bookId != bookId || reference.chapter != chapter) {
-        continue;
-      }
-      if (!chapterWideMatches &&
-          verse > 0 &&
-          (verse < reference.verseStart || verse > reference.verseEnd)) {
-        continue;
-      }
-      return reference;
-    }
-    return null;
-  }
-
   Future<int> _countLinks(Database db, String itemId, String folderType) async {
     final rows = await db.rawQuery(
       '''
@@ -1408,6 +1954,48 @@ mixin _CommentaryResearchLibraryServiceEpubSupport {
       ).firstMatch(opfXml);
       final title = titleMatch?.group(1)?.trim() ?? '';
       return _stripHtml(title);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _resolveLibraryAuthor({
+    required File file,
+    required _LibraryFileMetadata metadata,
+    required String relativePath,
+  }) async {
+    if (metadata.fileFormat != 'epub') return null;
+    return resolveLibraryAuthorFromEpub(
+      file,
+      collectionName: metadata.collectionName,
+      sourceSite: metadata.sourceSite,
+      relativePath: relativePath,
+    );
+  }
+
+  Future<String?> _cacheEpubCover({
+    required File file,
+    required String rootPath,
+    required String itemId,
+  }) async {
+    try {
+      final bytes = await file.readAsBytes();
+      final archive = ZipDecoder().decodeBytes(bytes, verify: false);
+      final packageInfo = _readEpubPackageInfo(archive);
+      final coverHref = packageInfo.coverImagePath;
+      if (coverHref == null || coverHref.trim().isEmpty) return null;
+      final entry = packageInfo.findArchiveEntry(archive, coverHref);
+      if (entry == null || !entry.isFile) return null;
+      final content = entry.content as List<int>;
+      if (content.isEmpty) return null;
+      final coverDir = Directory(
+        p.join(rootPath, 'Graphics', 'eLibraryCovers'),
+      );
+      await coverDir.create(recursive: true);
+      final extension = _coverImageExtension(entry.name);
+      final coverPath = p.join(coverDir.path, '$itemId$extension');
+      await File(coverPath).writeAsBytes(content, flush: true);
+      return coverPath;
     } catch (_) {
       return null;
     }
@@ -1887,13 +2475,29 @@ class _EpubSectionChunk {
     required this.entryName,
     required this.sectionTitle,
     required this.paragraphs,
+    required this.blocks,
     required this.spineIndex,
   });
 
   final String entryName;
   final String sectionTitle;
   final List<String> paragraphs;
+  final List<LibraryBookBlock> blocks;
   final int? spineIndex;
+}
+
+class _HtmlBlockFrame {
+  const _HtmlBlockFrame({
+    required this.tag,
+    required this.attrs,
+    required this.start,
+    required this.contentStart,
+  });
+
+  final String tag;
+  final String attrs;
+  final int start;
+  final int contentStart;
 }
 
 class _EpubManifestItem {
@@ -1915,6 +2519,10 @@ class _NavigationEntryDraft {
     required this.sortOrder,
     required this.depth,
     required this.navType,
+    required this.contentKind,
+    this.isFrontMatter = false,
+    this.isBodyStart = false,
+    this.bodyOrder,
     required this.createdAt,
     required this.updatedAt,
     required this.deviceId,
@@ -1930,9 +2538,40 @@ class _NavigationEntryDraft {
   final int? sortOrder;
   final int? depth;
   final String navType;
+  final String contentKind;
+  final bool isFrontMatter;
+  final bool isBodyStart;
+  final int? bodyOrder;
   final String createdAt;
   final String updatedAt;
   final String deviceId;
+
+  _NavigationEntryDraft copyWith({
+    String? contentKind,
+    bool? isFrontMatter,
+    bool? isBodyStart,
+    int? bodyOrder,
+  }) {
+    return _NavigationEntryDraft(
+      id: id,
+      libraryItemId: libraryItemId,
+      parentId: parentId,
+      label: label,
+      href: href,
+      anchorId: anchorId,
+      spineIndex: spineIndex,
+      sortOrder: sortOrder,
+      depth: depth,
+      navType: navType,
+      contentKind: contentKind ?? this.contentKind,
+      isFrontMatter: isFrontMatter ?? this.isFrontMatter,
+      isBodyStart: isBodyStart ?? this.isBodyStart,
+      bodyOrder: bodyOrder ?? this.bodyOrder,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      deviceId: deviceId,
+    );
+  }
 
   Map<String, Object?> toMap() => <String, Object?>{
     'id': id,
@@ -1945,6 +2584,10 @@ class _NavigationEntryDraft {
     'sort_order': sortOrder,
     'depth': depth,
     'nav_type': navType,
+    'content_kind': contentKind,
+    'is_front_matter': isFrontMatter ? 1 : 0,
+    'is_body_start': isBodyStart ? 1 : 0,
+    'body_order': bodyOrder,
     'created_at': createdAt,
     'updated_at': updatedAt,
     'deleted_at': null,
@@ -1991,11 +2634,13 @@ class _EpubSectionDecision {
 
 class _EpubPackageInfo {
   const _EpubPackageInfo({
+    this.coverImagePath,
     this.spinePaths = const <String>{},
     this.spineOrderedPaths = const <String>[],
     this.navigationPaths = const <String>{},
   });
 
+  final String? coverImagePath;
   final Set<String> spinePaths;
   final List<String> spineOrderedPaths;
   final Set<String> navigationPaths;

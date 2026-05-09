@@ -9,6 +9,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/user_database.dart';
+import '../../library/data/library_author_resolver.dart';
 
 class LegacyELibraryMigrationService {
   LegacyELibraryMigrationService._();
@@ -458,6 +459,12 @@ class LegacyELibraryMigrationService {
     final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
     final now = DateTime.now().toUtc().toIso8601String();
     final isEpub = p.extension(file.path).toLowerCase() == '.epub';
+    final author = await _resolveMigratedAuthor(
+      file: file,
+      classification: classification,
+      relativePath: relativePath,
+      isEpub: isEpub,
+    );
     final newItemId = _itemId(classification.libraryRole, relativePath);
     final existingRows = await db.query(
       'library_items',
@@ -479,7 +486,7 @@ class LegacyELibraryMigrationService {
     await db.insert('library_items', {
       'id': newItemId,
       'title': p.basenameWithoutExtension(file.path),
-      'author': null,
+      'author': author,
       'file_name': p.basename(file.path),
       'relative_path': relativePath,
       'file_hash': '${stat.size}:${stat.modified.millisecondsSinceEpoch}',
@@ -515,6 +522,29 @@ class LegacyELibraryMigrationService {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
     debugPrint(
       '[ELibraryMigration] registered $sourceRelativePath -> $relativePath sha256=$sha256',
+    );
+  }
+
+  Future<String?> _resolveMigratedAuthor({
+    required File file,
+    required _LegacyClassification classification,
+    required String relativePath,
+    required bool isEpub,
+  }) async {
+    if (!isEpub) {
+      return resolveLibraryAuthor(
+        author: null,
+        collectionName: classification.collectionName,
+        sourceSite: classification.sourceSite,
+        relativePath: relativePath,
+      );
+    }
+
+    return resolveLibraryAuthorFromEpub(
+      file,
+      collectionName: classification.collectionName,
+      sourceSite: classification.sourceSite,
+      relativePath: relativePath,
     );
   }
 

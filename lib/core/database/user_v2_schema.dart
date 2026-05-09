@@ -7,6 +7,7 @@ class UserV2Schema {
     await _createCoreTables(db);
     await _createSyncTables(db);
     await _ensureLibraryLinkColumns(db);
+    await _ensureLibraryNavigationColumns(db);
     await _seedDevicesTable(db, deviceId: deviceId);
     await _seedSyncState(db, deviceId: deviceId);
   }
@@ -392,6 +393,7 @@ class UserV2Schema {
         collection_name TEXT,
         source_site TEXT,
         source_url TEXT,
+        cover_path TEXT,
         date_added TEXT,
         last_opened TEXT,
         source_type TEXT,
@@ -456,6 +458,10 @@ class UserV2Schema {
         sort_order INTEGER,
         depth INTEGER,
         nav_type TEXT,
+        content_kind TEXT,
+        is_front_matter INTEGER NOT NULL DEFAULT 0,
+        is_body_start INTEGER NOT NULL DEFAULT 0,
+        body_order INTEGER,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         deleted_at TEXT,
@@ -644,6 +650,13 @@ class UserV2Schema {
       db,
       'library_items',
       itemColumns,
+      'cover_path',
+      'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      'library_items',
+      itemColumns,
       'source_site',
       'TEXT',
     );
@@ -722,6 +735,41 @@ class UserV2Schema {
       CREATE INDEX IF NOT EXISTS idx_library_navigation_items_lookup
       ON library_navigation_items (library_item_id, sort_order, depth)
     ''');
+  }
+
+  static Future<void> _ensureLibraryNavigationColumns(Database db) async {
+    final navigationColumns = await _tableColumns(
+      db,
+      'library_navigation_items',
+    );
+    await _addColumnIfMissing(
+      db,
+      'library_navigation_items',
+      navigationColumns,
+      'content_kind',
+      'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      'library_navigation_items',
+      navigationColumns,
+      'is_front_matter',
+      'INTEGER',
+    );
+    await _addColumnIfMissing(
+      db,
+      'library_navigation_items',
+      navigationColumns,
+      'is_body_start',
+      'INTEGER',
+    );
+    await _addColumnIfMissing(
+      db,
+      'library_navigation_items',
+      navigationColumns,
+      'body_order',
+      'INTEGER',
+    );
   }
 
   static Future<Set<String>> _tableColumns(

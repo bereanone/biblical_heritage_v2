@@ -10,6 +10,7 @@ import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/user_database.dart';
 import '../../library/data/library_author_resolver.dart';
+import '../../library/data/library_epub_metadata.dart';
 
 class LegacyELibraryMigrationService {
   LegacyELibraryMigrationService._();
@@ -465,6 +466,7 @@ class LegacyELibraryMigrationService {
       relativePath: relativePath,
       isEpub: isEpub,
     );
+    final title = await _resolveMigratedTitle(file: file, isEpub: isEpub);
     final newItemId = _itemId(classification.libraryRole, relativePath);
     final existingRows = await db.query(
       'library_items',
@@ -485,7 +487,7 @@ class LegacyELibraryMigrationService {
     }
     await db.insert('library_items', {
       'id': newItemId,
-      'title': p.basenameWithoutExtension(file.path),
+      'title': title,
       'author': author,
       'file_name': p.basename(file.path),
       'relative_path': relativePath,
@@ -546,6 +548,23 @@ class LegacyELibraryMigrationService {
       sourceSite: classification.sourceSite,
       relativePath: relativePath,
     );
+  }
+
+  Future<String> _resolveMigratedTitle({
+    required File file,
+    required bool isEpub,
+  }) async {
+    if (!isEpub) {
+      return p.basenameWithoutExtension(file.path);
+    }
+
+    final metadata = await readLibraryEpubMetadata(file);
+    final title = metadata?.title?.trim();
+    if (title != null && title.isNotEmpty) {
+      return title;
+    }
+
+    return p.basenameWithoutExtension(file.path).replaceAll('_', ' ').trim();
   }
 
   String _itemId(String folderType, String relativePath) {

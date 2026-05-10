@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/library_root_service.dart';
+import '../../library/data/library_catalog_service.dart';
+import '../../library/presentation/library_book_reader_screen.dart';
 import '../data/commentary_research_library_service.dart';
 import '../data/commentary_research_filters.dart';
 
@@ -455,10 +457,10 @@ class _ResearchHitCard extends StatelessWidget {
               children: [
                 Expanded(child: Text(match.itemTitle, style: titleStyle)),
                 Tooltip(
-                  message: 'Open full EPUB source',
+                  message: 'Open source EPUB',
                   child: Semantics(
                     button: true,
-                    label: 'Open full EPUB source',
+                    label: 'Open source EPUB',
                     child: InkWell(
                       onTap: onOpenEpub,
                       borderRadius: BorderRadius.circular(999),
@@ -563,10 +565,10 @@ class _CommentaryLegacyCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 Tooltip(
-                  message: 'Open full EPUB source',
+                  message: 'Open source EPUB',
                   child: Semantics(
                     button: true,
-                    label: 'Open full EPUB source',
+                    label: 'Open source EPUB',
                     child: InkWell(
                       onTap: onOpenEpub,
                       borderRadius: BorderRadius.circular(999),
@@ -622,96 +624,183 @@ Future<void> _openEpubSource(
       : (await LibraryRootService.instance.accessibleLibraryRootPath())
                 ?.trim() ??
             '';
-  final resolvedFilePath = rootPath.isEmpty
-      ? ''
-      : p.join(rootPath, match.relativePath);
-  final availableMetadata = <String>[
+  if (!context.mounted) return;
+
+  if (rootPath.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Source EPUB location is not available for this result.'),
+        duration: Duration(milliseconds: 1800),
+      ),
+    );
+    return;
+  }
+
+  final sourceTarget = await _resolveSourceEpubTarget(match);
+  if (!context.mounted) return;
+
+  if (sourceTarget == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Source EPUB location is not available for this result.'),
+        duration: Duration(milliseconds: 1800),
+      ),
+    );
+    return;
+  }
+
+  final resolvedFilePath = p.join(rootPath, sourceTarget.item.relativePath);
+  if (!File(resolvedFilePath).existsSync()) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Source EPUB location is not available for this result.'),
+        duration: Duration(milliseconds: 1800),
+      ),
+    );
+    return;
+  }
+
+  final metadata = <String>[
     if ((match.epubCfi ?? '').trim().isNotEmpty) 'epub_cfi',
-    if ((match.epubHref ?? '').trim().isNotEmpty) 'epub_href',
-    if ((match.anchorId ?? '').trim().isNotEmpty) 'anchor_id',
-    if (match.spineIndex != null) 'spine_index',
-    if (match.paragraphIndex != null) 'paragraph_index',
-    if (match.originalReferenceText.trim().isNotEmpty)
-      'original_reference_text',
+    if ((sourceTarget.initialHref ?? '').trim().isNotEmpty) 'epub_href',
+    if ((sourceTarget.initialAnchorId ?? '').trim().isNotEmpty) 'anchor_id',
+    if (sourceTarget.initialSpineIndex != null) 'spine_index',
+    if (sourceTarget.initialParagraphIndex != null) 'paragraph_index',
   ];
-  final fallbackUsed = _epubFallbackUsed(match);
   debugPrint(
     '[CommentaryResearch] EPUB badge tapped '
     'itemTitle=${match.itemTitle} '
-    'relativePath=${match.relativePath} '
+    'libraryItemId=${sourceTarget.item.id} '
+    'relativePath=${sourceTarget.item.relativePath} '
     'resolvedFilePath=$resolvedFilePath '
-    'availableJumpMetadata=${availableMetadata.isEmpty ? 'none' : availableMetadata.join(', ')} '
-    'routeUsed=${Platform.isMacOS ? 'open -a eLibrary' : 'unsupported'} '
-    'fallbackUsed=$fallbackUsed',
+    'availableJumpMetadata=${metadata.isEmpty ? 'none' : metadata.join(', ')}',
   );
-  if (!context.mounted) return;
-  if (resolvedFilePath.isEmpty || !File(resolvedFilePath).existsSync()) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Could not resolve the EPUB source file.'),
-        duration: Duration(milliseconds: 1800),
-      ),
-    );
-    return;
-  }
-
-  if (!Platform.isMacOS) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('The eLibrary reader launcher is only wired on macOS.'),
-        duration: Duration(milliseconds: 1800),
-      ),
-    );
-    return;
-  }
 
   try {
-    final result = await Process.run('open', [
-      '-a',
-      'eLibrary',
-      resolvedFilePath,
-    ]);
-    if (result.exitCode != 0) {
-      throw StateError(
-        'open -a eLibrary failed (${result.exitCode}): ${result.stderr}',
-      );
-    }
+    await Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LibraryBookReaderScreen(
+          item: sourceTarget.item,
+          initialHref: sourceTarget.initialHref,
+          initialAnchorId: sourceTarget.initialAnchorId,
+          initialSpineIndex: sourceTarget.initialSpineIndex,
+          initialParagraphIndex: sourceTarget.initialParagraphIndex,
+        ),
+      ),
+    );
   } catch (error) {
     debugPrint('[CommentaryResearch] EPUB launch failed error=$error');
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Could not open eLibrary: $error'),
+        content: Text('Could not open the eLibrary reader: $error'),
         duration: const Duration(milliseconds: 1800),
       ),
     );
   }
 }
 
-String _epubFallbackUsed(CommentaryResearchMatchItem match) {
-  final epubCfi = match.epubCfi?.trim() ?? '';
-  if (epubCfi.isNotEmpty) {
-    return 'epub_cfi';
+Future<_ResolvedSourceEpubTarget?> _resolveSourceEpubTarget(
+  CommentaryResearchMatchItem match,
+) async {
+  final service = LibraryCatalogService.instance;
+  LibraryCatalogItem? item;
+
+  final libraryItemId = match.libraryItemId.trim();
+  if (libraryItemId.isNotEmpty) {
+    item = await service.loadItemById(libraryItemId);
   }
 
-  final epubHref = match.epubHref?.trim() ?? '';
-  final anchorId = match.anchorId?.trim() ?? '';
-  if (epubHref.isNotEmpty && anchorId.isNotEmpty) {
-    return 'href+anchor_id';
+  final relativePath = match.relativePath.trim();
+  if (item == null && relativePath.isNotEmpty) {
+    item = await service.loadItemByRelativePath(relativePath);
   }
 
-  if (match.spineIndex != null && match.paragraphIndex != null) {
-    return 'spine_index+paragraph_index';
+  if (item == null) {
+    final candidates = await service.findItemsByTitle(
+      title: match.itemTitle,
+      limit: 2,
+    );
+    if (candidates.length == 1) {
+      item = candidates.first;
+    } else if (candidates.length > 1) {
+      debugPrint(
+        '[CommentaryResearch] EPUB source lookup ambiguous '
+        'title=${match.itemTitle} '
+        'candidates=${candidates.map((candidate) => candidate.id).join(', ')}',
+      );
+      return null;
+    }
   }
 
-  if (epubHref.isNotEmpty &&
-      (match.fullParagraph?.trim().isNotEmpty == true ||
-          match.anchor?.trim().isNotEmpty == true ||
-          match.originalReferenceText.trim().isNotEmpty)) {
-    return 'href+matched_paragraph_search';
+  if (item == null) {
+    debugPrint(
+      '[CommentaryResearch] EPUB source lookup failed '
+      'libraryItemId=${match.libraryItemId} '
+      'relativePath=${match.relativePath} '
+      'title=${match.itemTitle}',
+    );
+    return null;
   }
 
-  return 'beginning';
+  final hrefParts = _splitEpubHref(match.epubHref);
+  final itemHrefParts = _splitEpubHref(item.epubHref);
+  final initialHref =
+      hrefParts.href ??
+      itemHrefParts.href ??
+      (match.epubHref?.trim().isNotEmpty == true
+          ? match.epubHref!.trim()
+          : null);
+  final initialAnchorId =
+      hrefParts.anchor ??
+      _trimToNull(match.anchorId) ??
+      itemHrefParts.anchor ??
+      _trimToNull(item.anchorId);
+  final initialSpineIndex = match.spineIndex ?? item.spineIndex;
+  final initialParagraphIndex = match.paragraphIndex ?? item.paragraphIndex;
+
+  return _ResolvedSourceEpubTarget(
+    item: item,
+    initialHref: _trimToNull(initialHref),
+    initialAnchorId: initialAnchorId,
+    initialSpineIndex: initialSpineIndex,
+    initialParagraphIndex: initialParagraphIndex,
+  );
+}
+
+({String? href, String? anchor}) _splitEpubHref(String? value) {
+  final trimmed = value?.trim() ?? '';
+  if (trimmed.isEmpty) {
+    return (href: null, anchor: null);
+  }
+  final parts = trimmed.split('#');
+  final href = parts.first.trim();
+  final anchor = parts.length > 1 ? parts.skip(1).join('#').trim() : '';
+  return (
+    href: href.isEmpty ? null : href,
+    anchor: anchor.isEmpty ? null : anchor,
+  );
+}
+
+String? _trimToNull(String? value) {
+  final trimmed = value?.trim() ?? '';
+  return trimmed.isEmpty ? null : trimmed;
+}
+
+class _ResolvedSourceEpubTarget {
+  const _ResolvedSourceEpubTarget({
+    required this.item,
+    required this.initialHref,
+    required this.initialAnchorId,
+    required this.initialSpineIndex,
+    required this.initialParagraphIndex,
+  });
+
+  final LibraryCatalogItem item;
+  final String? initialHref;
+  final String? initialAnchorId;
+  final int? initialSpineIndex;
+  final int? initialParagraphIndex;
 }
 
 String _sectionSourceTitle(CommentaryResearchSectionData section) {

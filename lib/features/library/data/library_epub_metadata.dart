@@ -4,8 +4,9 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 
 class LibraryEpubMetadata {
-  const LibraryEpubMetadata({required this.creator});
+  const LibraryEpubMetadata({required this.title, required this.creator});
 
+  final String? title;
   final String? creator;
 }
 
@@ -39,10 +40,19 @@ Future<LibraryEpubMetadata?> readLibraryEpubMetadata(File file) async {
       caseSensitive: false,
       dotAll: true,
     ).firstMatch(opfXml);
+    final titleMatch = RegExp(
+      r'<dc:title[^>]*>(.*?)</dc:title>',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(opfXml);
+    final title = _cleanXmlText(titleMatch?.group(1));
     final creator = _cleanXmlText(creatorMatch?.group(1));
-    if (creator == null || creator.isEmpty) return null;
+    if ((title == null || title.isEmpty) &&
+        (creator == null || creator.isEmpty)) {
+      return null;
+    }
 
-    return LibraryEpubMetadata(creator: creator);
+    return LibraryEpubMetadata(title: title, creator: creator);
   } catch (_) {
     return null;
   }

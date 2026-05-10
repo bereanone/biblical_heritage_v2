@@ -12,6 +12,18 @@ class _NavigationDisplayEntry {
   final int displayIndex;
 }
 
+class _ContentsPopupRow {
+  const _ContentsPopupRow({
+    required this.entry,
+    required this.depth,
+    required this.isMonthHeading,
+  });
+
+  final _NavigationDisplayEntry entry;
+  final int depth;
+  final bool isMonthHeading;
+}
+
 class _ContentsPopupSheet extends StatefulWidget {
   const _ContentsPopupSheet({
     required this.itemTitle,
@@ -21,6 +33,7 @@ class _ContentsPopupSheet extends StatefulWidget {
     required this.selectedNavigationIndex,
     required this.selectedSectionIndex,
     required this.isNightMode,
+    required this.isDevotionalNavigation,
   });
 
   final String itemTitle;
@@ -30,6 +43,7 @@ class _ContentsPopupSheet extends StatefulWidget {
   final int selectedNavigationIndex;
   final int selectedSectionIndex;
   final bool isNightMode;
+  final bool isDevotionalNavigation;
 
   @override
   State<_ContentsPopupSheet> createState() => _ContentsPopupSheetState();
@@ -39,10 +53,12 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
   final ScrollController _scrollController = ScrollController();
   final Map<String, GlobalKey> _itemKeys = <String, GlobalKey>{};
   String? _lastTargetKey;
+  String? _expandedMonthId;
 
   @override
   void initState() {
     super.initState();
+    _expandedMonthId = _initialExpandedMonthId();
     _scheduleInitialScroll();
   }
 
@@ -64,12 +80,192 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     super.dispose();
   }
 
+  bool get _isDevotionalContents =>
+      widget.isDevotionalNavigation && widget.entries.isNotEmpty;
+
+  LibraryNavigationTreeResult get _navigationTree {
+    return buildLibraryNavigationTree(
+      widget.entries.map((entry) => entry.item).toList(growable: false),
+      devotionalMode: widget.isDevotionalNavigation,
+    );
+  }
+
+  Map<String, _NavigationDisplayEntry> get _entriesById {
+    return {for (final entry in widget.entries) entry.item.id: entry};
+  }
+
+  LibraryCatalogNavigationItem? _selectedPopupNavigationItem() {
+    final selectedId = widget.selectedNavigationItemId?.trim();
+    if (selectedId != null && selectedId.isNotEmpty) {
+      for (final entry in widget.entries) {
+        if (entry.item.id == selectedId) {
+          return entry.item;
+        }
+      }
+    }
+
+    for (final entry in widget.entries) {
+      if (entry.displayIndex == widget.selectedNavigationIndex) {
+        return entry.item;
+      }
+    }
+
+    return null;
+  }
+
+  bool _isDevotionalMonthHeading(LibraryCatalogNavigationItem item) {
+    return parseDevotionalNavigationLabel(item.label)?.isMonthHeading == true;
+  }
+
+  String? _parentMonthIdForSelectedItem(
+    LibraryNavigationTreeResult tree,
+    LibraryCatalogNavigationItem selectedItem,
+  ) {
+    if (_isDevotionalMonthHeading(selectedItem)) {
+      return selectedItem.id;
+    }
+
+    final parentById = <String, String?>{};
+    void visit(List<LibraryCatalogNavigationItem> items, String? parentId) {
+      for (final item in items) {
+        parentById[item.id] = parentId;
+        visit(tree.childrenByParent[item.id] ?? const [], item.id);
+      }
+    }
+
+    visit(tree.childrenByParent[null] ?? const [], null);
+
+    var currentId = selectedItem.id;
+    final visited = <String>{};
+    while (visited.add(currentId)) {
+      final parentId = parentById[currentId];
+      if (parentId == null) return null;
+      final parent = _entriesById[parentId]?.item;
+      if (parent == null) return null;
+      if (_isDevotionalMonthHeading(parent)) {
+        return parent.id;
+      }
+      currentId = parentId;
+    }
+
+    return null;
+  }
+
+  String? _monthRootIdForMonth(
+    LibraryNavigationTreeResult tree,
+    int monthIndex,
+  ) {
+    final roots = tree.childrenByParent[null] ?? const [];
+    for (final root in roots) {
+      final labelInfo = parseDevotionalNavigationLabel(root.label);
+      if (labelInfo != null &&
+          labelInfo.isMonthHeading &&
+          labelInfo.monthIndex == monthIndex) {
+        return root.id;
+      }
+    }
+    return null;
+  }
+
+  String? _initialExpandedMonthId() {
+    if (!_isDevotionalContents) return null;
+
+    final tree = _navigationTree;
+    final roots = tree.childrenByParent[null] ?? const [];
+    final monthRoots = roots.where(_isDevotionalMonthHeading).toList();
+    if (monthRoots.isEmpty) return null;
+
+    final selectedItem = _selectedPopupNavigationItem();
+    if (selectedItem != null) {
+      final selectedMonthId = _parentMonthIdForSelectedItem(tree, selectedItem);
+      if (selectedMonthId != null) return selectedMonthId;
+    }
+
+    final currentMonthId = _monthRootIdForMonth(tree, DateTime.now().month);
+    if (currentMonthId != null) return currentMonthId;
+
+    final januaryMonthId = _monthRootIdForMonth(tree, 1);
+    if (januaryMonthId != null) return januaryMonthId;
+
+    return monthRoots.first.id;
+  }
+
+  List<_ContentsPopupRow> _visibleDevotionalRows(
+    LibraryNavigationTreeResult tree,
+    List<LibraryCatalogNavigationItem> roots,
+  ) {
+    final rows = <_ContentsPopupRow>[];
+    final entriesById = _entriesById;
+
+    void visit(LibraryCatalogNavigationItem item, int depth) {
+      final entry = entriesById[item.id];
+      if (entry == null) return;
+
+      final isMonthHeading = _isDevotionalMonthHeading(item);
+      rows.add(
+        _ContentsPopupRow(
+          entry: entry,
+          depth: depth,
+          isMonthHeading: isMonthHeading,
+        ),
+      );
+
+      if (isMonthHeading && _expandedMonthId != item.id) {
+        return;
+      }
+
+      for (final child in tree.childrenByParent[item.id] ?? const []) {
+        visit(child, depth + 1);
+      }
+    }
+
+    for (final root in roots) {
+      visit(root, 0);
+    }
+
+    return rows;
+  }
+
+  String? _targetKeyForDevotionalScroll() {
+    final selectedItem = _selectedPopupNavigationItem();
+    if (selectedItem == null) return _expandedMonthId;
+
+    final tree = _navigationTree;
+    final selectedMonthId = _parentMonthIdForSelectedItem(tree, selectedItem);
+    if (selectedMonthId != null) {
+      if (_expandedMonthId == selectedMonthId) {
+        return selectedItem.id;
+      }
+      return selectedMonthId;
+    }
+
+    return selectedItem.id;
+  }
+
   void _scheduleInitialScroll() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final targetKey = _initialTargetKey();
+      if (targetKey == null || targetKey == _lastTargetKey) return;
+
+      if (_isDevotionalContents) {
+        _lastTargetKey = targetKey;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final targetContext = _itemKeys[targetKey]?.currentContext;
+          if (targetContext == null) return;
+          Scrollable.ensureVisible(
+            targetContext,
+            alignment: 0.08,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeInOut,
+          );
+        });
+        return;
+      }
+
       final targetIndex = _initialTargetIndex();
-      if (targetKey == null || targetIndex == null) return;
+      if (targetIndex == null) return;
 
       final estimatedOffset = (targetIndex * _estimatedRowExtent())
           .clamp(
@@ -83,7 +279,6 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
         _scrollController.jumpTo(estimatedOffset);
       }
 
-      if (targetKey == _lastTargetKey) return;
       _lastTargetKey = targetKey;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -167,6 +362,10 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
   }
 
   String? _initialTargetKey() {
+    if (_isDevotionalContents) {
+      return _targetKeyForDevotionalScroll();
+    }
+
     final targetEntry = _initialTargetEntry();
     if (targetEntry != null) return targetEntry.item.id;
 
@@ -186,6 +385,7 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
   }
 
   double _estimatedRowExtent() {
+    if (_isDevotionalContents) return 54.0;
     if (widget.entries.isNotEmpty) return 84.0;
     return 84.0;
   }
@@ -202,6 +402,24 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     final borderColor = _readerBorderColor(theme, isNight);
     final sheetTextColor = _readerTextColor(theme, isNight);
     final sheetSubduedColor = _readerSubduedColor(theme, isNight);
+    final devotionalTree = _isDevotionalContents ? _navigationTree : null;
+    final devotionalRoots = devotionalTree?.childrenByParent[null] ?? const [];
+    final devotionalMonthRoots =
+        devotionalRoots.where(_isDevotionalMonthHeading).toList(growable: false)
+          ..sort((left, right) {
+            final leftInfo = parseDevotionalNavigationLabel(left.label);
+            final rightInfo = parseDevotionalNavigationLabel(right.label);
+            return (leftInfo?.monthIndex ?? 0).compareTo(
+              rightInfo?.monthIndex ?? 0,
+            );
+          });
+    final devotionalRows = devotionalTree != null
+        ? _visibleDevotionalRows(devotionalTree, devotionalMonthRoots)
+        : const <_ContentsPopupRow>[];
+    final selectedPopupItem = _selectedPopupNavigationItem();
+    final selectedMonthId = devotionalTree != null && selectedPopupItem != null
+        ? _parentMonthIdForSelectedItem(devotionalTree, selectedPopupItem)
+        : null;
 
     return SafeArea(
       child: Padding(
@@ -305,11 +523,29 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                             );
                           },
                         )
+                      : _isDevotionalContents
+                      ? ListView(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                          children: [
+                            ..._buildDevotionalRowWidgets(
+                              context,
+                              devotionalRows,
+                              theme: theme,
+                              isNight: isNight,
+                              sheetTextColor: sheetTextColor,
+                              sheetSubduedColor: sheetSubduedColor,
+                              selectedPopupItem: selectedPopupItem,
+                              selectedMonthId: selectedMonthId,
+                              devotionalTree: devotionalTree,
+                            ),
+                          ],
+                        )
                       : ListView.separated(
                           controller: _scrollController,
                           padding: const EdgeInsets.all(12),
                           itemCount: widget.entries.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 8),
+                          separatorBuilder: (_, _) => const SizedBox(height: 6),
                           itemBuilder: (context, index) {
                             final entry = widget.entries[index];
                             final selected =
@@ -328,19 +564,27 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                                   color: selected
                                       ? _readerSelectedColor(theme, isNight)
                                       : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(16),
+                                  borderRadius: BorderRadius.circular(14),
                                   child: InkWell(
-                                    borderRadius: BorderRadius.circular(16),
-                                    onTap: () =>
-                                        Navigator.of(context).pop(entry.item),
+                                    borderRadius: BorderRadius.circular(14),
+                                    onTap: () => Navigator.of(
+                                      context,
+                                    ).pop(_tapTargetForEntry(index)),
                                     child: Padding(
-                                      padding: const EdgeInsets.all(12),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 10,
+                                      ),
                                       child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            entry.item.label,
+                                            navigationDisplayLabel(
+                                              entry.item,
+                                              devotionalMode:
+                                                  widget.isDevotionalNavigation,
+                                            ),
                                             maxLines: 2,
                                             overflow: TextOverflow.ellipsis,
                                             style: theme.textTheme.titleMedium
@@ -365,5 +609,142 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
         ),
       ),
     );
+  }
+
+  List<Widget> _buildDevotionalRowWidgets(
+    BuildContext context,
+    List<_ContentsPopupRow> rows, {
+    required ThemeData theme,
+    required bool isNight,
+    required Color sheetTextColor,
+    required Color sheetSubduedColor,
+    required LibraryCatalogNavigationItem? selectedPopupItem,
+    required String? selectedMonthId,
+    required LibraryNavigationTreeResult? devotionalTree,
+  }) {
+    return [
+      for (final row in rows)
+        _buildDevotionalNavigationRow(
+          context,
+          row,
+          theme: theme,
+          isNight: isNight,
+          sheetTextColor: sheetTextColor,
+          sheetSubduedColor: sheetSubduedColor,
+          selectedPopupItem: selectedPopupItem,
+          selectedMonthId: selectedMonthId,
+          devotionalTree: devotionalTree,
+        ),
+    ];
+  }
+
+  Widget _buildDevotionalNavigationRow(
+    BuildContext context,
+    _ContentsPopupRow row, {
+    required ThemeData theme,
+    required bool isNight,
+    required Color sheetTextColor,
+    required Color sheetSubduedColor,
+    required LibraryCatalogNavigationItem? selectedPopupItem,
+    required String? selectedMonthId,
+    required LibraryNavigationTreeResult? devotionalTree,
+  }) {
+    final item = row.entry.item;
+    final selectedById = selectedPopupItem?.id == item.id;
+    final selectedByIndex =
+        selectedPopupItem == null &&
+        row.entry.displayIndex == widget.selectedNavigationIndex;
+    final isExpandedMonth = row.isMonthHeading && _expandedMonthId == item.id;
+    final monthSelectedButCollapsed =
+        row.isMonthHeading && selectedMonthId == item.id && !isExpandedMonth;
+    final hasChildren =
+        (devotionalTree?.childrenByParent[item.id]?.isNotEmpty ?? false) &&
+        row.isMonthHeading;
+    final selected =
+        selectedById || selectedByIndex || monthSelectedButCollapsed;
+
+    return Padding(
+      key: _keyFor(item.id),
+      padding: EdgeInsets.only(
+        left: row.depth * 12.0,
+        bottom: row.isMonthHeading ? 4 : 2,
+      ),
+      child: Material(
+        color: selected
+            ? _readerSelectedColor(theme, isNight)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(row.isMonthHeading ? 14 : 12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(row.isMonthHeading ? 14 : 12),
+          onTap: () {
+            if (row.isMonthHeading) {
+              setState(() {
+                _expandedMonthId = isExpandedMonth ? null : item.id;
+              });
+              _scrollToKey(item.id);
+              return;
+            }
+            Navigator.of(context).pop(item);
+          },
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: row.isMonthHeading ? 9 : 7,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    navigationDisplayLabel(
+                      item,
+                      devotionalMode: widget.isDevotionalNavigation,
+                    ),
+                    maxLines: row.isMonthHeading ? 1 : 2,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        (row.isMonthHeading
+                                ? theme.textTheme.titleMedium
+                                : theme.textTheme.bodyLarge)
+                            ?.copyWith(
+                              fontWeight: row.isMonthHeading
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
+                              color: sheetTextColor,
+                            ),
+                  ),
+                ),
+                if (row.isMonthHeading)
+                  Icon(
+                    isExpandedMonth
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    color: sheetSubduedColor,
+                  )
+                else if (hasChildren)
+                  Icon(Icons.chevron_right, color: sheetSubduedColor),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _scrollToKey(String key) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final targetContext = _itemKeys[key]?.currentContext;
+      if (targetContext == null) return;
+      Scrollable.ensureVisible(
+        targetContext,
+        alignment: 0.08,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeInOut,
+      );
+    });
+  }
+
+  LibraryCatalogNavigationItem _tapTargetForEntry(int index) {
+    return widget.entries[index].item;
   }
 }

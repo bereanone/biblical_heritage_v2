@@ -18,10 +18,16 @@ class LibraryBookReaderScreen extends StatefulWidget {
     super.key,
     required this.item,
     this.initialHref,
+    this.initialAnchorId,
+    this.initialSpineIndex,
+    this.initialParagraphIndex,
   });
 
   final LibraryCatalogItem item;
   final String? initialHref;
+  final String? initialAnchorId;
+  final int? initialSpineIndex;
+  final int? initialParagraphIndex;
 
   @override
   State<LibraryBookReaderScreen> createState() =>
@@ -86,11 +92,14 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
           : await LibraryCatalogService.instance.loadNavigationItems(
               widget.item.id,
             );
+      final devotionalMode =
+          widget.item.isDevotional || isDevotionalNavigation(navigationItems);
       final initialIndex = widget.item.isPdf
           ? 0
           : _initialSectionIndex(
               sections: sections,
               navigationItems: navigationItems,
+              devotionalMode: devotionalMode,
             );
       final initialNavigationIndex = widget.item.isPdf
           ? 0
@@ -102,6 +111,11 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         _selectedIndex = initialIndex;
         _selectedNavigationIndex = initialNavigationIndex;
         _loading = false;
+      });
+      final targetKey = _initialScrollTargetKey();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _scrollToTarget(targetKey);
       });
     } catch (error) {
       if (!mounted) return;
@@ -194,6 +208,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     return navigationItems[_selectedNavigationIndex];
   }
 
+  bool get _isDevotionalNavigationBook {
+    return widget.item.isDevotional || isDevotionalNavigation(_navigationItems);
+  }
+
   String get _currentSubtitle {
     final sectionTitle = _currentSection?.title.trim() ?? '';
     if (sectionTitle.isNotEmpty) {
@@ -211,19 +229,43 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   int _initialSectionIndex({
     required List<LibraryBookSection> sections,
     required List<LibraryCatalogNavigationItem> navigationItems,
+    required bool devotionalMode,
   }) {
     if (sections.isEmpty) return 0;
 
-    final initialHref = widget.initialHref?.trim() ?? '';
+    final initialHref = _splitReaderHref(widget.initialHref).href;
     if (initialHref.isNotEmpty) {
       final initialIndex = _sectionIndexForHref(sections, initialHref);
       if (initialIndex != null) return initialIndex;
     }
 
-    final savedHref = widget.item.epubHref?.trim() ?? '';
+    final initialSpineIndex = widget.initialSpineIndex;
+    if (initialSpineIndex != null && initialSpineIndex > 0) {
+      final initialIndex = _sectionIndexForSpineIndex(
+        sections: sections,
+        navigationItems: navigationItems,
+        spineIndex: initialSpineIndex,
+      );
+      if (initialIndex != null) return initialIndex;
+    }
+
+    final savedHref = _splitReaderHref(widget.item.epubHref).href;
     if (savedHref.isNotEmpty) {
       final savedIndex = _sectionIndexForHref(sections, savedHref);
       if (savedIndex != null) return savedIndex;
+    }
+
+    if (devotionalMode) {
+      final devotionalInitialHref = _devotionalInitialNavigationHref(
+        navigationItems,
+      );
+      if (devotionalInitialHref != null) {
+        final devotionalIndex = _sectionIndexForHref(
+          sections,
+          devotionalInitialHref,
+        );
+        if (devotionalIndex != null) return devotionalIndex;
+      }
     }
 
     final firstRealContentHref = _firstRealContentNavigationHref(
@@ -256,6 +298,31 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     }
 
     return 0;
+  }
+
+  int? _sectionIndexForSpineIndex({
+    required List<LibraryBookSection> sections,
+    required List<LibraryCatalogNavigationItem> navigationItems,
+    required int spineIndex,
+  }) {
+    if (navigationItems.isNotEmpty) {
+      for (var i = 0; i < navigationItems.length; i++) {
+        final nav = navigationItems[i];
+        if (nav.spineIndex == spineIndex) {
+          final sectionIndex = _sectionIndexForNavigationItemInSections(
+            sections,
+            nav,
+          );
+          if (sectionIndex != null) return sectionIndex;
+        }
+      }
+    }
+
+    if (spineIndex > 0 && spineIndex <= sections.length) {
+      return spineIndex - 1;
+    }
+
+    return null;
   }
 
   int? _navigationIndexForSavedState({
@@ -348,27 +415,11 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   List<LibraryCatalogNavigationItem> get _orderedNavigationItems {
     if (_navigationItems.isEmpty) return const [];
 
-    final childrenByParent = <String?, List<LibraryCatalogNavigationItem>>{};
-    for (final item in _navigationItems) {
-      childrenByParent.putIfAbsent(item.parentId, () => []).add(item);
-    }
-
-    final roots = childrenByParent[null] ?? const [];
-    if (roots.isEmpty) return _navigationItems;
-
-    final flattened = <LibraryCatalogNavigationItem>[];
-
-    void visit(LibraryCatalogNavigationItem item) {
-      flattened.add(item);
-      for (final child in childrenByParent[item.id] ?? const []) {
-        visit(child);
-      }
-    }
-
-    for (final root in roots) {
-      visit(root);
-    }
-    return flattened;
+    final tree = buildLibraryNavigationTree(
+      _navigationItems,
+      devotionalMode: _isDevotionalNavigationBook,
+    );
+    return tree.items;
   }
 
   int? _navigationIndexForSectionIndex(int sectionIndex) {
@@ -468,11 +519,143 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     return null;
   }
 
+  String? _devotionalInitialNavigationHref(
+    List<LibraryCatalogNavigationItem> navigationItems,
+  ) {
+    if (navigationItems.isEmpty) return null;
+
+    final tree = buildLibraryNavigationTree(
+      navigationItems,
+      devotionalMode: true,
+    );
+    final roots = tree.childrenByParent[null] ?? const [];
+    if (roots.isEmpty) return null;
+
+    final now = DateTime.now();
+    final currentMonth = _devotionalMonthName(now.month);
+    final currentDay = now.day;
+
+    final todayTarget = _devotionalNavigationHrefForMonthAndDay(
+      roots: roots,
+      tree: tree,
+      monthName: currentMonth,
+      day: currentDay,
+    );
+    if (todayTarget != null) return todayTarget;
+
+    final currentMonthTarget = _devotionalNavigationHrefForMonth(
+      roots: roots,
+      tree: tree,
+      monthName: currentMonth,
+    );
+    if (currentMonthTarget != null) return currentMonthTarget;
+
+    final januaryTarget = _devotionalNavigationHrefForMonth(
+      roots: roots,
+      tree: tree,
+      monthName: 'january',
+    );
+    if (januaryTarget != null) return januaryTarget;
+
+    return _firstRealContentNavigationHref(navigationItems);
+  }
+
+  String? _devotionalNavigationHrefForMonthAndDay({
+    required List<LibraryCatalogNavigationItem> roots,
+    required LibraryNavigationTreeResult tree,
+    required String monthName,
+    required int day,
+  }) {
+    final monthRoot = _devotionalMonthRoot(roots, monthName);
+    if (monthRoot == null) return null;
+
+    final children = tree.childrenByParent[monthRoot.id] ?? const [];
+    final dayMatch = _devotionalDayChild(children, monthName, day);
+    if (dayMatch != null) return _cleanNavigationHref(dayMatch.href);
+
+    return null;
+  }
+
+  String? _devotionalNavigationHrefForMonth({
+    required List<LibraryCatalogNavigationItem> roots,
+    required LibraryNavigationTreeResult tree,
+    required String monthName,
+  }) {
+    final monthRoot = _devotionalMonthRoot(roots, monthName);
+    if (monthRoot == null) return null;
+
+    final children = tree.childrenByParent[monthRoot.id] ?? const [];
+    final firstChild = children.firstWhere(
+      (child) => _cleanNavigationHref(child.href) != null,
+      orElse: () => monthRoot,
+    );
+    final firstChildHref = _cleanNavigationHref(firstChild.href);
+    if (firstChildHref != null) return firstChildHref;
+
+    return _cleanNavigationHref(monthRoot.href);
+  }
+
+  LibraryCatalogNavigationItem? _devotionalMonthRoot(
+    List<LibraryCatalogNavigationItem> roots,
+    String monthName,
+  ) {
+    for (final root in roots) {
+      final labelInfo = parseDevotionalNavigationLabel(root.label);
+      if (labelInfo != null &&
+          labelInfo.isMonthHeading &&
+          _devotionalMonthName(labelInfo.monthIndex) == monthName) {
+        return root;
+      }
+    }
+    return null;
+  }
+
+  LibraryCatalogNavigationItem? _devotionalDayChild(
+    List<LibraryCatalogNavigationItem> children,
+    String monthName,
+    int day,
+  ) {
+    for (final child in children) {
+      final labelInfo = parseDevotionalNavigationLabel(child.label);
+      if (labelInfo == null || labelInfo.isMonthHeading) continue;
+      if (_devotionalMonthName(labelInfo.monthIndex) != monthName) continue;
+      if (labelInfo.day == day) return child;
+    }
+    return null;
+  }
+
+  String _devotionalMonthName(int monthIndex) {
+    const months = <String>[
+      'january',
+      'february',
+      'march',
+      'april',
+      'may',
+      'june',
+      'july',
+      'august',
+      'september',
+      'october',
+      'november',
+      'december',
+    ];
+    if (monthIndex < 1 || monthIndex > months.length) return '';
+    return months[monthIndex - 1];
+  }
+
   void _selectNavigationItem(LibraryCatalogNavigationItem navItem) {
     final navigationItems = _orderedNavigationItems;
     final navIndex = navigationItems.indexWhere((nav) => nav.id == navItem.id);
     final sectionIndex = _sectionIndexForNavigationItem(navItem);
-    final targetKey = _navigationTargetKey(navItem);
+    final targetSection =
+        sectionIndex != null &&
+            sectionIndex >= 0 &&
+            sectionIndex < _sections.length
+        ? _sections[sectionIndex]
+        : _currentSection;
+    final targetKey =
+        _navigationTargetKey(navItem) ??
+        _fallbackTargetKeyForNavigationItem(navItem, section: targetSection);
     setState(() {
       if (navIndex >= 0) {
         _selectedNavigationIndex = navIndex;
@@ -679,6 +862,133 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     );
   }
 
+  String? _initialScrollTargetKey() {
+    if (_hasExplicitInitialSourceLocation) {
+      return _explicitInitialScrollTargetKey();
+    }
+
+    final savedTargetKey = _savedLocationTargetKey();
+    if (savedTargetKey != null) return savedTargetKey;
+
+    final selectedNavigationItem = _selectedNavigationItem;
+    if (selectedNavigationItem != null) {
+      final targetKey = _navigationTargetKey(selectedNavigationItem);
+      if (targetKey != null) return targetKey;
+      final fallback = _fallbackTargetKeyForNavigationItem(
+        selectedNavigationItem,
+        section: _currentSection,
+      );
+      if (fallback != null) return fallback;
+    }
+
+    return null;
+  }
+
+  bool get _hasExplicitInitialSourceLocation {
+    return (widget.initialHref?.trim().isNotEmpty ?? false) ||
+        (widget.initialAnchorId?.trim().isNotEmpty ?? false) ||
+        (widget.initialSpineIndex != null && widget.initialSpineIndex! > 0) ||
+        (widget.initialParagraphIndex != null &&
+            widget.initialParagraphIndex! > 0);
+  }
+
+  String? _explicitInitialScrollTargetKey() {
+    final currentSection = _currentSection;
+    if (currentSection == null || currentSection.blocks.isEmpty) return null;
+
+    final initialHrefParts = _splitReaderHref(widget.initialHref);
+    final initialAnchorId =
+        widget.initialAnchorId?.trim() ?? initialHrefParts.anchor ?? '';
+    if (initialAnchorId.isNotEmpty) {
+      for (var index = 0; index < currentSection.blocks.length; index++) {
+        final block = currentSection.blocks[index];
+        if (block.anchorId?.trim() == initialAnchorId) {
+          return _blockTargetKey(block, index);
+        }
+      }
+    }
+
+    final initialParagraphIndex = widget.initialParagraphIndex;
+    if (initialParagraphIndex != null && initialParagraphIndex > 0) {
+      var paragraphCounter = 0;
+      for (var index = 0; index < currentSection.blocks.length; index++) {
+        final block = currentSection.blocks[index];
+        if (block.kind != 'paragraph') continue;
+        paragraphCounter += 1;
+        if (paragraphCounter == initialParagraphIndex) {
+          return _blockTargetKey(block, index);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  String? _savedLocationTargetKey() {
+    final currentSection = _currentSection;
+    if (currentSection == null || currentSection.blocks.isEmpty) return null;
+
+    final savedAnchorId = widget.item.anchorId?.trim() ?? '';
+    final savedBodyOrder = widget.item.paragraphIndex;
+    if (savedAnchorId.isEmpty && savedBodyOrder == null) return null;
+
+    for (var index = 0; index < currentSection.blocks.length; index++) {
+      final block = currentSection.blocks[index];
+      if (savedAnchorId.isNotEmpty && block.anchorId?.trim() == savedAnchorId) {
+        return _blockTargetKey(block, index);
+      }
+      if (savedBodyOrder != null && block.bodyOrder == savedBodyOrder) {
+        return _blockTargetKey(block, index);
+      }
+    }
+
+    return null;
+  }
+
+  String? _fallbackTargetKeyForNavigationItem(
+    LibraryCatalogNavigationItem navItem, {
+    LibraryBookSection? section,
+  }) {
+    final currentSection = section ?? _currentSection;
+    if (currentSection == null || currentSection.blocks.isEmpty) return null;
+
+    final normalizedNavLabel = _normalizeReaderLabel(
+      navigationDisplayLabel(
+        navItem,
+        devotionalMode: _isDevotionalNavigationBook,
+      ),
+    );
+    final normalizedRawLabel = _normalizeReaderLabel(navItem.label);
+    final isChapterOneNavigation =
+        _isReaderChapterOneLabel(navItem.label) ||
+        _isReaderChapterOneLabel(normalizedNavLabel) ||
+        _isReaderChapterOneLabel(normalizedRawLabel);
+
+    for (var index = 0; index < currentSection.blocks.length; index++) {
+      final block = currentSection.blocks[index];
+      if (!block.isHeading) continue;
+      final blockLabel = _normalizeReaderLabel(block.text);
+      if (normalizedNavLabel.isNotEmpty && blockLabel == normalizedNavLabel) {
+        return _blockTargetKey(block, index);
+      }
+      if (normalizedRawLabel.isNotEmpty && blockLabel == normalizedRawLabel) {
+        return _blockTargetKey(block, index);
+      }
+    }
+
+    if (isChapterOneNavigation) {
+      for (var index = 0; index < currentSection.blocks.length; index++) {
+        final block = currentSection.blocks[index];
+        if (!block.isHeading) continue;
+        if (_isReaderChapterOneLabel(block.text)) {
+          return _blockTargetKey(block, index);
+        }
+      }
+    }
+
+    return null;
+  }
+
   void _scrollToTarget(String? targetKey) {
     if (!_bodyScrollController.hasClients) return;
     final resolvedTargetKey = targetKey ?? _pendingBodyScrollTargetKey;
@@ -764,10 +1074,24 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         .replaceAll(RegExp(r'^_|_$'), '');
   }
 
+  ({String href, String? anchor}) _splitReaderHref(String? value) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return (href: '', anchor: null);
+    }
+    final parts = trimmed.split('#');
+    final href = parts.first.trim();
+    final anchor = parts.length > 1 ? parts.skip(1).join('#').trim() : '';
+    return (href: href, anchor: anchor.isEmpty ? null : anchor);
+  }
+
   List<_NavigationDisplayEntry> get _navigationDisplayEntries {
     final items = _orderedNavigationItems;
     if (items.isEmpty) return const [];
-    final tree = buildLibraryNavigationTree(items);
+    final tree = buildLibraryNavigationTree(
+      items,
+      devotionalMode: _isDevotionalNavigationBook,
+    );
     final childrenByParent = tree.childrenByParent;
     final roots = childrenByParent[null] ?? const [];
     if (roots.isEmpty) {
@@ -845,6 +1169,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
           selectedNavigationIndex: _selectedNavigationIndex,
           selectedSectionIndex: _selectedIndex,
           isNightMode: _nightMode,
+          isDevotionalNavigation: _isDevotionalNavigationBook,
         );
       },
     );

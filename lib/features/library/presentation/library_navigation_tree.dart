@@ -13,8 +13,9 @@ class LibraryNavigationTreeResult {
 }
 
 LibraryNavigationTreeResult buildLibraryNavigationTree(
-  List<LibraryCatalogNavigationItem> items,
-) {
+  List<LibraryCatalogNavigationItem> items, {
+  bool devotionalMode = false,
+}) {
   if (items.isEmpty) {
     return const LibraryNavigationTreeResult(
       items: <LibraryCatalogNavigationItem>[],
@@ -24,10 +25,13 @@ LibraryNavigationTreeResult buildLibraryNavigationTree(
 
   final sortedItems = List<LibraryCatalogNavigationItem>.of(items)
     ..sort(_compareNavigationEntries);
+  final shouldGroupDevotionals =
+      devotionalMode || isDevotionalNavigation(sortedItems);
   final childrenByParent = <String?, List<LibraryCatalogNavigationItem>>{};
   final itemsByDepth = <int, LibraryCatalogNavigationItem>{};
   final rootsByHref = <String, LibraryCatalogNavigationItem>{};
   final seenExactEntries = <String>{};
+  final devotionalMonthParents = <int, LibraryCatalogNavigationItem>{};
 
   for (final item in sortedItems) {
     final exactKey = _navigationEntryKey(item);
@@ -36,7 +40,9 @@ LibraryNavigationTreeResult buildLibraryNavigationTree(
     }
 
     final depth = (item.depth ?? 0).clamp(0, 99);
-    var parentId = _effectiveParentId(item, depth, itemsByDepth);
+    var parentId = shouldGroupDevotionals
+        ? _devotionalParentId(item, devotionalMonthParents)
+        : _effectiveParentId(item, depth, itemsByDepth);
     final normalizedHref = _normalizedNavigationHref(item.href);
 
     if (parentId == null && normalizedHref != null) {
@@ -55,15 +61,24 @@ LibraryNavigationTreeResult buildLibraryNavigationTree(
 
     childrenByParent.putIfAbsent(parentId, () => []).add(item);
 
+    if (shouldGroupDevotionals) {
+      final devotionalLabel = parseDevotionalNavigationLabel(item.label);
+      if (devotionalLabel?.day == null && devotionalLabel != null) {
+        devotionalMonthParents[devotionalLabel.monthIndex] = item;
+      }
+    }
+
     if (parentId == null && normalizedHref != null) {
       rootsByHref.putIfAbsent(normalizedHref, () => item);
     }
 
-    itemsByDepth[depth] = item;
-    final deeperDepths =
-        itemsByDepth.keys.where((value) => value > depth).toList()..sort();
-    for (final deeperDepth in deeperDepths) {
-      itemsByDepth.remove(deeperDepth);
+    if (!shouldGroupDevotionals) {
+      itemsByDepth[depth] = item;
+      final deeperDepths =
+          itemsByDepth.keys.where((value) => value > depth).toList()..sort();
+      for (final deeperDepth in deeperDepths) {
+        itemsByDepth.remove(deeperDepth);
+      }
     }
   }
 
@@ -118,6 +133,74 @@ String _navigationEntryKey(LibraryCatalogNavigationItem item) {
   ].join('|');
 }
 
+String navigationDisplayLabel(
+  LibraryCatalogNavigationItem item, {
+  bool devotionalMode = false,
+}) {
+  if (!devotionalMode) return item.label;
+
+  final labelInfo = parseDevotionalNavigationLabel(item.label);
+  if (labelInfo == null || !labelInfo.isMonthHeading) {
+    return item.label;
+  }
+
+  return _devotionalMonthName(labelInfo.monthIndex);
+}
+
+bool isDevotionalNavigation(List<LibraryCatalogNavigationItem> items) {
+  var monthHeadingCount = 0;
+  var dayLabelCount = 0;
+  for (final item in items) {
+    final labelInfo = parseDevotionalNavigationLabel(item.label);
+    if (labelInfo == null) continue;
+    if (labelInfo.isMonthHeading) {
+      monthHeadingCount += 1;
+    } else {
+      dayLabelCount += 1;
+    }
+  }
+
+  return monthHeadingCount >= 2 && dayLabelCount >= 8;
+}
+
+DevotionalNavigationLabelInfo? parseDevotionalNavigationLabel(String label) {
+  final normalized = _normalizedNavigationText(label);
+  if (normalized.isEmpty) return null;
+
+  for (var index = 0; index < _devotionalMonthNames.length; index++) {
+    final month = _devotionalMonthNames[index];
+    final dayMatch = RegExp(
+      r'\b' + month + r'\s+([1-9]|[12]\d|3[01])\b',
+    ).firstMatch(normalized);
+    if (dayMatch != null) {
+      return DevotionalNavigationLabelInfo(
+        monthIndex: index + 1,
+        day: int.tryParse(dayMatch.group(1) ?? ''),
+      );
+    }
+
+    if (normalized == month ||
+        normalized.startsWith('$month ') ||
+        normalized.startsWith('$month-') ||
+        normalized.startsWith('$month—') ||
+        normalized.startsWith('$month:')) {
+      return DevotionalNavigationLabelInfo(monthIndex: index + 1);
+    }
+  }
+
+  return null;
+}
+
+String? _devotionalParentId(
+  LibraryCatalogNavigationItem item,
+  Map<int, LibraryCatalogNavigationItem> monthParents,
+) {
+  final labelInfo = parseDevotionalNavigationLabel(item.label);
+  if (labelInfo == null) return null;
+  if (labelInfo.isMonthHeading) return null;
+  return monthParents[labelInfo.monthIndex]?.id;
+}
+
 String? _normalizedNavigationHref(String? href) {
   final value = href?.trim() ?? '';
   if (value.isEmpty) return null;
@@ -160,4 +243,46 @@ int _compareNavigationEntries(
   if (depthCompare != 0) return depthCompare;
 
   return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+}
+
+String _normalizedNavigationText(String value) {
+  return value
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+String _devotionalMonthName(int monthIndex) {
+  if (monthIndex < 1 || monthIndex > _devotionalMonthNames.length) {
+    return '';
+  }
+  return _devotionalMonthNames[monthIndex - 1].replaceFirstMapped(
+    RegExp(r'^[a-z]'),
+    (match) => match.group(0)!.toUpperCase(),
+  );
+}
+
+const List<String> _devotionalMonthNames = <String>[
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+];
+
+class DevotionalNavigationLabelInfo {
+  const DevotionalNavigationLabelInfo({required this.monthIndex, this.day});
+
+  final int monthIndex;
+  final int? day;
+
+  bool get isMonthHeading => day == null;
 }

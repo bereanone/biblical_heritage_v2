@@ -33,6 +33,8 @@ class _TocPane extends StatelessWidget {
     }
 
     final filteredNavigation = _filterNavigation(navigationItems, searchQuery);
+    final devotionalNavigation =
+        item.isDevotional || isDevotionalNavigation(navigationItems);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -49,7 +51,10 @@ class _TocPane extends StatelessWidget {
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
                 )
-              : _NavigationTree(items: filteredNavigation),
+              : _NavigationTree(
+                  items: filteredNavigation,
+                  isDevotionalNavigation: devotionalNavigation,
+                ),
         ),
       ],
     );
@@ -120,9 +125,13 @@ class _SelectedBookSummary extends StatelessWidget {
 }
 
 class _NavigationTree extends StatefulWidget {
-  const _NavigationTree({required this.items});
+  const _NavigationTree({
+    required this.items,
+    required this.isDevotionalNavigation,
+  });
 
   final List<LibraryCatalogNavigationItem> items;
+  final bool isDevotionalNavigation;
 
   @override
   State<_NavigationTree> createState() => _NavigationTreeState();
@@ -142,7 +151,8 @@ class _NavigationTreeState extends State<_NavigationTree> {
   @override
   void didUpdateWidget(covariant _NavigationTree oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.items != widget.items) {
+    if (oldWidget.items != widget.items ||
+        oldWidget.isDevotionalNavigation != widget.isDevotionalNavigation) {
       _scheduleScrollToTarget();
     }
   }
@@ -172,7 +182,10 @@ class _NavigationTreeState extends State<_NavigationTree> {
   }
 
   String? _initialTargetId() {
-    final tree = buildLibraryNavigationTree(widget.items);
+    final tree = buildLibraryNavigationTree(
+      widget.items,
+      devotionalMode: widget.isDevotionalNavigation,
+    );
     final roots = tree.childrenByParent[null] ?? const [];
     for (final root in roots) {
       if (root.isBodyStart) {
@@ -209,7 +222,10 @@ class _NavigationTreeState extends State<_NavigationTree> {
 
   @override
   Widget build(BuildContext context) {
-    final tree = buildLibraryNavigationTree(widget.items);
+    final tree = buildLibraryNavigationTree(
+      widget.items,
+      devotionalMode: widget.isDevotionalNavigation,
+    );
     final childrenByParent = tree.childrenByParent;
     final roots = childrenByParent[null] ?? const [];
     if (roots.isEmpty) {
@@ -220,7 +236,11 @@ class _NavigationTreeState extends State<_NavigationTree> {
           for (final item in widget.items)
             KeyedSubtree(
               key: _keyFor(item.id),
-              child: _NavigationTile(item: item, indent: 0),
+              child: _NavigationTile(
+                item: item,
+                indent: 0,
+                isDevotionalNavigation: widget.isDevotionalNavigation,
+              ),
             ),
         ],
       );
@@ -237,6 +257,7 @@ class _NavigationTreeState extends State<_NavigationTree> {
               item: root,
               childrenByParent: childrenByParent,
               depth: 0,
+              isDevotionalNavigation: widget.isDevotionalNavigation,
             ),
           ),
           const SizedBox(height: 8),
@@ -251,11 +272,13 @@ class _NavigationTreeNode extends StatelessWidget {
     required this.item,
     required this.childrenByParent,
     required this.depth,
+    required this.isDevotionalNavigation,
   });
 
   final LibraryCatalogNavigationItem item;
   final Map<String?, List<LibraryCatalogNavigationItem>> childrenByParent;
   final int depth;
+  final bool isDevotionalNavigation;
 
   @override
   Widget build(BuildContext context) {
@@ -263,7 +286,11 @@ class _NavigationTreeNode extends StatelessWidget {
     final textColor = theme.colorScheme.onSurface;
     final children = childrenByParent[item.id] ?? const [];
     if (children.isEmpty) {
-      return _NavigationTile(item: item, indent: depth);
+      return _NavigationTile(
+        item: item,
+        indent: depth,
+        isDevotionalNavigation: isDevotionalNavigation,
+      );
     }
 
     return DecoratedBox(
@@ -282,7 +309,7 @@ class _NavigationTreeNode extends StatelessWidget {
         backgroundColor: _librarySurfaceLowColor(theme),
         collapsedBackgroundColor: _librarySurfaceLowColor(theme),
         title: Text(
-          item.label,
+          navigationDisplayLabel(item, devotionalMode: isDevotionalNavigation),
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w700,
             color: textColor,
@@ -294,6 +321,7 @@ class _NavigationTreeNode extends StatelessWidget {
               item: child,
               childrenByParent: childrenByParent,
               depth: depth + 1,
+              isDevotionalNavigation: isDevotionalNavigation,
             ),
             const SizedBox(height: 6),
           ],
@@ -304,16 +332,20 @@ class _NavigationTreeNode extends StatelessWidget {
 }
 
 class _NavigationTile extends StatelessWidget {
-  const _NavigationTile({required this.item, required this.indent});
+  const _NavigationTile({
+    required this.item,
+    required this.indent,
+    required this.isDevotionalNavigation,
+  });
 
   final LibraryCatalogNavigationItem item;
   final int indent;
+  final bool isDevotionalNavigation;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final textColor = theme.colorScheme.onSurface;
-    final subduedColor = theme.colorScheme.onSurfaceVariant;
     return Padding(
       padding: EdgeInsets.only(left: indent * 12.0, bottom: 6),
       child: Material(
@@ -330,20 +362,15 @@ class _NavigationTile extends StatelessWidget {
             color: theme.colorScheme.onSurfaceVariant,
           ),
           title: Text(
-            item.label,
+            navigationDisplayLabel(
+              item,
+              devotionalMode: isDevotionalNavigation,
+            ),
             style: theme.textTheme.bodyLarge?.copyWith(
               fontWeight: FontWeight.w600,
               color: textColor,
             ),
           ),
-          subtitle: item.href == null
-              ? null
-              : Text(
-                  item.href!,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: subduedColor,
-                  ),
-                ),
         ),
       ),
     );

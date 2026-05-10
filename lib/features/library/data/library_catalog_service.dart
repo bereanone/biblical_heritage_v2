@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/user_database.dart';
 import 'library_author_resolver.dart';
+import 'library_epub_metadata.dart';
 
 part 'library_navigation_dedupe.dart';
 
@@ -17,6 +18,7 @@ class LibraryCatalogService {
   static final LibraryCatalogService instance = LibraryCatalogService._();
   static final Map<String, Future<String?>> _coverWarmJobs = {};
   static final Map<String, Future<String?>> _authorWarmJobs = {};
+  static final Map<String, Future<String?>> _titleWarmJobs = {};
 
   Future<List<LibraryCatalogItem>> loadItems({
     String folderRoot = 'all',
@@ -51,6 +53,7 @@ class LibraryCatalogService {
         li.title,
         li.author,
         li.file_name,
+        li.file_hash,
         li.relative_path,
         li.file_format,
         li.folder_type,
@@ -58,6 +61,7 @@ class LibraryCatalogService {
         li.collection_name,
         li.source_site,
         li.source_url,
+        li.source_type,
         li.cover_path,
         li.date_added,
         li.last_opened,
@@ -84,14 +88,18 @@ class LibraryCatalogService {
 
     final warmedAuthorValues = await _warmMissingAuthorValues(rows);
     final warmedCoverPaths = await _warmMissingCoverPaths(rows);
+    final warmedTitleValues = await _warmMissingTitleValues(rows);
     final hydratedRows = rows
         .map((row) {
           final id = row['id']?.toString() ?? '';
           final warmedAuthor = warmedAuthorValues[id];
           final warmedCoverPath = warmedCoverPaths[id];
+          final warmedTitle = warmedTitleValues[id];
           if ((warmedAuthor == null || warmedAuthor.trim().isEmpty) &&
               (warmedCoverPath == null || warmedCoverPath.trim().isEmpty)) {
-            return row;
+            if (warmedTitle == null || warmedTitle.trim().isEmpty) {
+              return row;
+            }
           }
           return <String, Object?>{
             ...row,
@@ -99,11 +107,18 @@ class LibraryCatalogService {
               'author': warmedAuthor,
             if (warmedCoverPath != null && warmedCoverPath.trim().isNotEmpty)
               'cover_path': warmedCoverPath,
+            if (warmedTitle != null && warmedTitle.trim().isNotEmpty)
+              'title': warmedTitle,
           };
         })
         .toList(growable: false);
 
-    return hydratedRows.map(LibraryCatalogItem.fromRow).toList(growable: false);
+    final items = hydratedRows
+        .map(LibraryCatalogItem.fromRow)
+        .toList(growable: false);
+    return _dedupeLibraryItems(
+      items,
+    ).where(_isVisibleLibraryItem).toList(growable: false);
   }
 
   Future<List<LibraryCatalogNavigationItem>> loadNavigationItems(
@@ -152,6 +167,50 @@ class LibraryCatalogService {
         )
         .toList(growable: false);
     return dedupeLibraryNavigationItems(items);
+  }
+
+  Future<LibraryCatalogItem?> loadItemById(String id) async {
+    final items = await _queryItems(
+      where: 'li.id = ?',
+      args: [id.trim()],
+      limit: 1,
+    );
+    return items.isEmpty ? null : items.first;
+  }
+
+  Future<LibraryCatalogItem?> loadItemByRelativePath(
+    String relativePath,
+  ) async {
+    final normalizedPath = relativePath.trim().toLowerCase();
+    if (normalizedPath.isEmpty) return null;
+
+    final items = await _queryItems(
+      where: 'LOWER(li.relative_path) = ?',
+      args: [normalizedPath],
+      limit: 2,
+    );
+    return items.length == 1 ? items.first : null;
+  }
+
+  Future<List<LibraryCatalogItem>> findItemsByTitle({
+    required String title,
+    String? collectionName,
+    int limit = 2,
+  }) async {
+    final normalizedTitle = title.trim().toLowerCase();
+    if (normalizedTitle.isEmpty) return const [];
+
+    final where = StringBuffer('''
+      LOWER(li.title) = ?
+    ''');
+    final args = <Object?>[normalizedTitle];
+    final normalizedCollection = collectionName?.trim().toLowerCase() ?? '';
+    if (normalizedCollection.isNotEmpty) {
+      where.write(' AND LOWER(COALESCE(li.collection_name, \'\')) = ?');
+      args.add(normalizedCollection);
+    }
+
+    return _queryItems(where: where.toString(), args: args, limit: limit);
   }
 
   Future<Map<String, String>> _warmMissingCoverPaths(
@@ -245,6 +304,96 @@ class LibraryCatalogService {
     return results;
   }
 
+  Future<Map<String, String>> _warmMissingTitleValues(
+    List<Map<String, Object?>> rows,
+  ) async {
+    final results = <String, String>{};
+    final candidates = <Map<String, Object?>>[];
+
+    for (final row in rows) {
+      final id = row['id']?.toString().trim() ?? '';
+      if (id.isEmpty) continue;
+
+      final existingTitle = row['title']?.toString().trim() ?? '';
+      if (!_shouldWarmLibraryTitle(existingTitle)) {
+        continue;
+      }
+
+      final format = row['file_format']?.toString().trim().toLowerCase();
+      if (format != 'epub') continue;
+      candidates.add(row);
+    }
+
+    if (candidates.isEmpty) {
+      return results;
+    }
+
+    final warmResults = await Future.wait(candidates.map(_ensureEpubTitle));
+    for (var index = 0; index < candidates.length; index++) {
+      final title = warmResults[index];
+      if (title == null || title.trim().isEmpty) {
+        continue;
+      }
+      final id = candidates[index]['id']?.toString().trim() ?? '';
+      if (id.isEmpty) continue;
+      results[id] = title;
+    }
+
+    return results;
+  }
+
+  Future<List<LibraryCatalogItem>> _queryItems({
+    required String where,
+    required List<Object?> args,
+    required int limit,
+  }) async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT
+        li.id,
+        li.title,
+        li.author,
+        li.file_name,
+        li.file_hash,
+        li.relative_path,
+        li.file_format,
+        li.folder_type,
+        li.library_role,
+        li.collection_name,
+        li.source_site,
+        li.source_url,
+        li.source_type,
+        li.cover_path,
+        li.date_added,
+        li.last_opened,
+        li.index_status,
+        li.file_size,
+        li.mime_type,
+        li.spine_index,
+        li.anchor_id,
+        li.epub_href,
+        li.paragraph_index,
+        (
+          SELECT COUNT(*)
+          FROM library_navigation_items lni
+          WHERE lni.library_item_id = li.id
+            AND lni.deleted_at IS NULL
+        ) AS navigation_count
+      FROM library_items li
+      WHERE li.deleted_at IS NULL
+        AND $where
+      ORDER BY
+        COALESCE(li.last_opened, li.date_added, li.created_at) DESC,
+        li.title COLLATE NOCASE ASC,
+        li.file_name COLLATE NOCASE ASC
+      LIMIT ?
+      ''',
+      [...args, limit],
+    );
+    return rows.map(LibraryCatalogItem.fromRow).toList(growable: false);
+  }
+
   Future<String?> _ensureEpubAuthor(Map<String, Object?> row) async {
     final id = row['id']?.toString().trim() ?? '';
     final relativePath = row['relative_path']?.toString().trim() ?? '';
@@ -313,6 +462,55 @@ class LibraryCatalogService {
         whereArgs: [id],
       );
       return author;
+    });
+  }
+
+  Future<String?> _ensureEpubTitle(Map<String, Object?> row) {
+    final id = row['id']?.toString().trim() ?? '';
+    final relativePath = row['relative_path']?.toString().trim() ?? '';
+    if (id.isEmpty || relativePath.isEmpty) {
+      return Future.value(null);
+    }
+
+    final cacheKey = '$id|$relativePath';
+    return _titleWarmJobs.putIfAbsent(cacheKey, () async {
+      final existingTitle = row['title']?.toString().trim() ?? '';
+      if (!_shouldWarmLibraryTitle(existingTitle)) {
+        return existingTitle;
+      }
+
+      final selection = await LibraryRootService.instance.loadSelection();
+      final rootPath =
+          (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
+          selection.path;
+      if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
+        return null;
+      }
+
+      final epubPath = await LibraryRootService.instance.resolveRelativePath(
+        relativePath: relativePath,
+        rootPath: rootPath,
+      );
+      final epubFile = File(epubPath);
+      if (!epubFile.existsSync()) {
+        return null;
+      }
+
+      final metadata = await readLibraryEpubMetadata(epubFile);
+      final title = metadata?.title?.trim();
+      if (title == null || title.isEmpty) {
+        return null;
+      }
+
+      final db = await UserDatabase.instance.database;
+      final now = DateTime.now().toUtc().toIso8601String();
+      await db.update(
+        'library_items',
+        {'title': title, 'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      return title;
     });
   }
 
@@ -563,6 +761,22 @@ class LibraryCatalogService {
         basename == 'titlepage.webp';
   }
 
+  bool _shouldWarmLibraryTitle(String title) {
+    final normalized = title.trim();
+    if (normalized.isEmpty) return true;
+    if (_looksLikeFilename(normalized)) return true;
+    if (RegExp(r'\d').hasMatch(normalized)) {
+      return true;
+    }
+    final uppercaseish = normalized.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '');
+    if (uppercaseish.isNotEmpty &&
+        uppercaseish.length <= 12 &&
+        uppercaseish == uppercaseish.toUpperCase()) {
+      return true;
+    }
+    return false;
+  }
+
   bool _isImageExtension(String pathValue) {
     final ext = p.extension(pathValue).toLowerCase();
     return const <String>{
@@ -597,6 +811,7 @@ class LibraryCatalogItem {
     required this.title,
     required this.author,
     required this.fileName,
+    required this.fileHash,
     required this.relativePath,
     required this.fileFormat,
     required this.folderType,
@@ -604,6 +819,7 @@ class LibraryCatalogItem {
     required this.collectionName,
     required this.sourceSite,
     required this.sourceUrl,
+    required this.sourceType,
     required this.coverPath,
     required this.dateAdded,
     required this.lastOpened,
@@ -630,6 +846,7 @@ class LibraryCatalogItem {
       title: row['title']?.toString() ?? '',
       author: row['author']?.toString(),
       fileName: row['file_name']?.toString() ?? '',
+      fileHash: row['file_hash']?.toString(),
       relativePath: row['relative_path']?.toString() ?? '',
       fileFormat: row['file_format']?.toString(),
       folderType: row['folder_type']?.toString(),
@@ -637,6 +854,7 @@ class LibraryCatalogItem {
       collectionName: row['collection_name']?.toString(),
       sourceSite: row['source_site']?.toString(),
       sourceUrl: row['source_url']?.toString(),
+      sourceType: row['source_type']?.toString(),
       coverPath: resolvedCoverPath,
       dateAdded: _parseDate(row['date_added']?.toString()),
       lastOpened: _parseDate(row['last_opened']?.toString()),
@@ -655,6 +873,7 @@ class LibraryCatalogItem {
   final String title;
   final String? author;
   final String fileName;
+  final String? fileHash;
   final String relativePath;
   final String? fileFormat;
   final String? folderType;
@@ -662,6 +881,7 @@ class LibraryCatalogItem {
   final String? collectionName;
   final String? sourceSite;
   final String? sourceUrl;
+  final String? sourceType;
   final String? coverPath;
   final DateTime? dateAdded;
   final DateTime? lastOpened;
@@ -678,10 +898,24 @@ class LibraryCatalogItem {
 
   bool get isPdf => (fileFormat ?? '').toLowerCase() == 'pdf';
 
+  bool get isDevotional {
+    final normalizedCollection = _normalizedLibraryText(collectionName);
+    if (normalizedCollection.contains('egw devotionals')) return true;
+
+    final normalizedPath = _normalizedLibraryText(relativePath);
+    if (normalizedPath.contains('egw devotionals')) return true;
+
+    final normalizedRole = _normalizedLibraryText(libraryRole);
+    if (normalizedRole.contains('devotional')) return true;
+
+    return false;
+  }
+
   LibraryCatalogItem copyWith({
     String? title,
     String? author,
     String? fileName,
+    String? fileHash,
     String? relativePath,
     String? fileFormat,
     String? folderType,
@@ -689,6 +923,7 @@ class LibraryCatalogItem {
     String? collectionName,
     String? sourceSite,
     String? sourceUrl,
+    String? sourceType,
     String? coverPath,
     DateTime? dateAdded,
     DateTime? lastOpened,
@@ -706,6 +941,7 @@ class LibraryCatalogItem {
       title: title ?? this.title,
       author: author ?? this.author,
       fileName: fileName ?? this.fileName,
+      fileHash: fileHash ?? this.fileHash,
       relativePath: relativePath ?? this.relativePath,
       fileFormat: fileFormat ?? this.fileFormat,
       folderType: folderType ?? this.folderType,
@@ -713,6 +949,7 @@ class LibraryCatalogItem {
       collectionName: collectionName ?? this.collectionName,
       sourceSite: sourceSite ?? this.sourceSite,
       sourceUrl: sourceUrl ?? this.sourceUrl,
+      sourceType: sourceType ?? this.sourceType,
       coverPath: coverPath ?? this.coverPath,
       dateAdded: dateAdded ?? this.dateAdded,
       lastOpened: lastOpened ?? this.lastOpened,
@@ -880,4 +1117,171 @@ String _humanizeFileName(String value) {
         return part[0].toUpperCase() + part.substring(1).toLowerCase();
       })
       .join(' ');
+}
+
+String _normalizedLibraryText(String? value) {
+  return (value?.trim() ?? '')
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+List<LibraryCatalogItem> _dedupeLibraryItems(List<LibraryCatalogItem> items) {
+  if (items.length < 2) return items;
+
+  final chosenByKey = <String, LibraryCatalogItem>{};
+  for (final item in items) {
+    final key = _libraryItemDedupKey(item);
+    final existing = chosenByKey[key];
+    if (existing == null) {
+      chosenByKey[key] = item;
+      continue;
+    }
+    chosenByKey[key] = _preferLibraryCatalogItem(existing, item);
+  }
+
+  final deduped = chosenByKey.values.toList(growable: false);
+  deduped.sort(_compareLibraryCatalogItems);
+  return deduped;
+}
+
+String _libraryItemDedupKey(LibraryCatalogItem item) {
+  final sourceUrl = item.sourceUrl?.trim() ?? '';
+  if (sourceUrl.isNotEmpty) {
+    return 'source:${sourceUrl.toLowerCase()}';
+  }
+
+  final canonicalTitle = _normalizedLibraryText(item.displayTitle);
+  if (canonicalTitle.isNotEmpty) {
+    final canonicalAuthor = _normalizedLibraryText(item.displayAuthor);
+    final format = (item.fileFormat ?? '').trim().toLowerCase();
+    final parts = <String>['title:$canonicalTitle'];
+    if (canonicalAuthor.isNotEmpty) {
+      parts.add('author:$canonicalAuthor');
+    }
+    if (format.isNotEmpty) {
+      parts.add('format:$format');
+    }
+    return parts.join('|');
+  }
+
+  final fileHash = item.fileHash?.trim() ?? '';
+  if (fileHash.isNotEmpty) {
+    return 'hash:$fileHash';
+  }
+
+  final normalizedPath = item.relativePath
+      .replaceAll('\\', '/')
+      .trim()
+      .toLowerCase();
+  if (normalizedPath.isNotEmpty) {
+    return 'path:$normalizedPath';
+  }
+
+  return 'id:${item.id}';
+}
+
+LibraryCatalogItem _preferLibraryCatalogItem(
+  LibraryCatalogItem left,
+  LibraryCatalogItem right,
+) {
+  final leftSourcePriority = _libraryItemSourcePriority(left);
+  final rightSourcePriority = _libraryItemSourcePriority(right);
+  if (leftSourcePriority != rightSourcePriority) {
+    return rightSourcePriority > leftSourcePriority ? right : left;
+  }
+
+  final leftScore = _libraryItemQualityScore(left);
+  final rightScore = _libraryItemQualityScore(right);
+  if (leftScore != rightScore) {
+    return rightScore > leftScore ? right : left;
+  }
+
+  final leftStamp =
+      left.lastOpened ??
+      left.dateAdded ??
+      DateTime.fromMillisecondsSinceEpoch(0);
+  final rightStamp =
+      right.lastOpened ??
+      right.dateAdded ??
+      DateTime.fromMillisecondsSinceEpoch(0);
+  if (leftStamp != rightStamp) {
+    return rightStamp.isAfter(leftStamp) ? right : left;
+  }
+
+  final leftTitle = left.displayTitle.toLowerCase();
+  final rightTitle = right.displayTitle.toLowerCase();
+  final titleCompare = leftTitle.compareTo(rightTitle);
+  if (titleCompare != 0) {
+    return titleCompare > 0 ? right : left;
+  }
+
+  return left.fileName.toLowerCase().compareTo(right.fileName.toLowerCase()) <=
+          0
+      ? left
+      : right;
+}
+
+int _libraryItemQualityScore(LibraryCatalogItem item) {
+  var score = 0;
+  final title = item.title.trim();
+  if (title.isNotEmpty && !_looksLikeFilename(title)) {
+    score += 4;
+  }
+  if (normalizeLibraryAuthor(item.author) != null) {
+    score += 1;
+  }
+  if ((item.coverPath ?? '').trim().isNotEmpty) {
+    score += 1;
+  }
+  if ((item.sourceUrl ?? '').trim().isNotEmpty) {
+    score += 1;
+  }
+  return score;
+}
+
+int _libraryItemSourcePriority(LibraryCatalogItem item) {
+  final sourceType = (item.sourceType ?? '').trim().toLowerCase();
+  if (sourceType == 'official_download') return 2;
+  if (sourceType == 'user_added') return 0;
+
+  final normalizedCollection = _normalizedLibraryText(item.collectionName);
+  if (normalizedCollection == 'user') return 0;
+  if (normalizedCollection == 'egw books' ||
+      normalizedCollection == 'egw devotionals' ||
+      normalizedCollection == 'egw commentaries') {
+    return 2;
+  }
+
+  final sourceSite = (item.sourceSite ?? '').trim().toLowerCase();
+  if (sourceSite == 'egwwritings.org') return 2;
+
+  return 1;
+}
+
+bool _isVisibleLibraryItem(LibraryCatalogItem item) {
+  final status = (item.indexStatus ?? '').trim().toLowerCase();
+  return status != 'indexed_empty';
+}
+
+int _compareLibraryCatalogItems(LibraryCatalogItem a, LibraryCatalogItem b) {
+  final aStamp =
+      a.lastOpened ?? a.dateAdded ?? DateTime.fromMillisecondsSinceEpoch(0);
+  final bStamp =
+      b.lastOpened ?? b.dateAdded ?? DateTime.fromMillisecondsSinceEpoch(0);
+  final recencyCompare = bStamp.compareTo(aStamp);
+  if (recencyCompare != 0) return recencyCompare;
+
+  final titleCompare = a.displayTitle.toLowerCase().compareTo(
+    b.displayTitle.toLowerCase(),
+  );
+  if (titleCompare != 0) return titleCompare;
+
+  final authorCompare = (a.author ?? '').toLowerCase().compareTo(
+    (b.author ?? '').toLowerCase(),
+  );
+  if (authorCompare != 0) return authorCompare;
+
+  return a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase());
 }

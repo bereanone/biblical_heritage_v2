@@ -4,11 +4,14 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/user_database.dart';
+import '../../search/search_highlight_helper.dart';
 import 'library_author_resolver.dart';
 import 'library_epub_metadata.dart';
+import 'library_item_identity.dart';
 
 part 'library_navigation_dedupe.dart';
 
@@ -23,6 +26,7 @@ class LibraryCatalogService {
   Future<List<LibraryCatalogItem>> loadItems({
     String folderRoot = 'all',
   }) async {
+    await LibraryRootService.instance.accessibleLibraryRootPath();
     final db = await UserDatabase.instance.database;
     final normalized = folderRoot.trim().toLowerCase();
     final where = <String>['deleted_at IS NULL'];
@@ -89,16 +93,20 @@ class LibraryCatalogService {
     final warmedAuthorValues = await _warmMissingAuthorValues(rows);
     final warmedCoverPaths = await _warmMissingCoverPaths(rows);
     final warmedTitleValues = await _warmMissingTitleValues(rows);
+    final repairedManagedPaths = await _repairMissingManagedPaths(rows);
     final hydratedRows = rows
         .map((row) {
           final id = row['id']?.toString() ?? '';
           final warmedAuthor = warmedAuthorValues[id];
           final warmedCoverPath = warmedCoverPaths[id];
           final warmedTitle = warmedTitleValues[id];
+          final repairedPathValues = repairedManagedPaths[id];
           if ((warmedAuthor == null || warmedAuthor.trim().isEmpty) &&
               (warmedCoverPath == null || warmedCoverPath.trim().isEmpty)) {
             if (warmedTitle == null || warmedTitle.trim().isEmpty) {
-              return row;
+              if (repairedPathValues == null) {
+                return row;
+              }
             }
           }
           return <String, Object?>{
@@ -109,16 +117,251 @@ class LibraryCatalogService {
               'cover_path': warmedCoverPath,
             if (warmedTitle != null && warmedTitle.trim().isNotEmpty)
               'title': warmedTitle,
+            if (repairedPathValues != null) ...repairedPathValues,
           };
         })
         .toList(growable: false);
 
-    final items = hydratedRows
+    final repairedManagedIds = await _repairManagedItemIds(hydratedRows);
+    final normalizedRows = hydratedRows
+        .map((row) {
+          final id = row['id']?.toString() ?? '';
+          final repairedIdValues = repairedManagedIds[id];
+          if (repairedIdValues == null) return row;
+          return <String, Object?>{...row, ...repairedIdValues};
+        })
+        .toList(growable: false);
+
+    final items = normalizedRows
         .map(LibraryCatalogItem.fromRow)
         .toList(growable: false);
     return _dedupeLibraryItems(
       items,
     ).where(_isVisibleLibraryItem).toList(growable: false);
+  }
+
+  Future<List<LibraryCatalogSearchResult>> searchContent({
+    required String query,
+    int limit = 50,
+  }) async {
+    final normalizedTerms = extractLibrarySearchHighlightTerms(query);
+    if (normalizedTerms.isEmpty || limit <= 0) {
+      return const [];
+    }
+
+    final db = await UserDatabase.instance.database;
+    final where = <String>['li.deleted_at IS NULL', 'll.deleted_at IS NULL'];
+    final args = <Object?>[];
+    for (final term in normalizedTerms) {
+      final normalizedTerm = _normalizedLibrarySearchText(term);
+      if (normalizedTerm.isEmpty) continue;
+      where.add('(${_librarySearchTermClause()})');
+      args.addAll(
+        List<Object?>.filled(
+          _librarySearchClauseFields.length,
+          '%$normalizedTerm%',
+        ),
+      );
+    }
+
+    if (args.isEmpty) {
+      return const [];
+    }
+
+    final rows = await db.rawQuery(
+      '''
+      SELECT
+        li.id AS item_id,
+        li.title,
+        li.author,
+        li.file_name,
+        li.file_hash,
+        li.relative_path,
+        li.file_format,
+        li.folder_type,
+        li.library_role,
+        li.collection_name,
+        li.source_site,
+        li.source_url,
+        li.source_type,
+        li.cover_path,
+        li.date_added,
+        li.last_opened,
+        li.index_status,
+        li.file_size,
+        li.mime_type,
+        li.spine_index AS item_spine_index,
+        li.anchor_id AS item_anchor_id,
+        li.epub_href AS item_epub_href,
+        li.paragraph_index AS item_paragraph_index,
+        ll.original_reference_text,
+        ll.full_paragraph,
+        ll.epub_href AS hit_epub_href,
+        ll.anchor_id AS hit_anchor_id,
+        ll.spine_index AS hit_spine_index,
+        ll.paragraph_index AS hit_paragraph_index,
+        ll.book_id,
+        ll.chapter,
+        ll.verse_start,
+        ll.verse_end,
+        ll.anchor,
+        ll.link_type
+      FROM library_links ll
+      INNER JOIN library_items li ON li.id = ll.library_item_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY
+        li.title COLLATE NOCASE ASC,
+        ll.book_id ASC,
+        ll.chapter ASC,
+        ll.verse_start ASC,
+        ll.verse_end ASC
+      LIMIT ?
+      ''',
+      [...args, limit * 4],
+    );
+
+    final citationCache = <String, Future<_LibraryCitation?>>{};
+    final results = await Future.wait(
+      rows.map((row) async {
+        final item =
+            LibraryCatalogItem.fromRow({
+              'id': row['item_id'],
+              'title': row['title'],
+              'author': row['author'],
+              'file_name': row['file_name'],
+              'file_hash': row['file_hash'],
+              'relative_path': row['relative_path'],
+              'file_format': row['file_format'],
+              'folder_type': row['folder_type'],
+              'library_role': row['library_role'],
+              'collection_name': row['collection_name'],
+              'source_site': row['source_site'],
+              'source_url': row['source_url'],
+              'source_type': row['source_type'],
+              'cover_path': row['cover_path'],
+              'date_added': row['date_added'],
+              'last_opened': row['last_opened'],
+              'index_status': row['index_status'],
+              'file_size': row['file_size'],
+              'mime_type': row['mime_type'],
+              'spine_index': row['item_spine_index'],
+              'anchor_id': row['item_anchor_id'],
+              'epub_href': row['item_epub_href'],
+              'paragraph_index': row['item_paragraph_index'],
+              'navigation_count': 0,
+            }).copyWith(
+              spineIndex: (row['hit_spine_index'] as num?)?.toInt(),
+              anchorId: row['hit_anchor_id']?.toString(),
+              epubHref: row['hit_epub_href']?.toString(),
+              paragraphIndex: (row['hit_paragraph_index'] as num?)?.toInt(),
+            );
+
+        final fullParagraph = _firstNonEmpty([
+          row['full_paragraph']?.toString(),
+          row['anchor']?.toString(),
+        ]);
+        final referenceText = row['original_reference_text']?.toString();
+        final locationText = await _buildLibrarySearchLocationText(
+          db: db,
+          citationCache: citationCache,
+          item: item,
+          libraryItemId: row['item_id']?.toString() ?? item.id,
+          spineIndex: (row['hit_spine_index'] as num?)?.toInt(),
+          paragraphIndex: (row['hit_paragraph_index'] as num?)?.toInt(),
+          chapterNumber: (row['chapter'] as num?)?.toInt(),
+          epubHref: row['hit_epub_href']?.toString(),
+          anchorId: row['hit_anchor_id']?.toString(),
+        );
+        final snippet = _buildLibrarySearchSnippet(
+          fullParagraph: fullParagraph,
+          terms: normalizedTerms,
+        );
+        if (snippet == null || snippet.trim().isEmpty) {
+          return null;
+        }
+        final score = _scoreLibrarySearchResult(
+          item: item,
+          referenceText: referenceText,
+          fullParagraph: fullParagraph,
+          queryTerms: normalizedTerms,
+        );
+        return LibraryCatalogSearchResult(
+          item: item,
+          snippet: snippet,
+          locationText: locationText,
+          referenceText: referenceText,
+          fullParagraph: fullParagraph,
+          chapterNumber: (row['chapter'] as num?)?.toInt(),
+          verseStart: (row['verse_start'] as num?)?.toInt(),
+          verseEnd: (row['verse_end'] as num?)?.toInt(),
+          score: score,
+        );
+      }),
+    );
+
+    final filteredResults = results
+        .whereType<LibraryCatalogSearchResult>()
+        .toList(growable: false);
+
+    filteredResults.sort((left, right) {
+      final scoreCompare = left.score.compareTo(right.score);
+      if (scoreCompare != 0) return scoreCompare;
+      final titleCompare = left.item.displayTitle.toLowerCase().compareTo(
+        right.item.displayTitle.toLowerCase(),
+      );
+      if (titleCompare != 0) return titleCompare;
+      final referenceCompare = (left.referenceText ?? '')
+          .toLowerCase()
+          .compareTo((right.referenceText ?? '').toLowerCase());
+      if (referenceCompare != 0) return referenceCompare;
+      return left.item.displayAuthor.toLowerCase().compareTo(
+        right.item.displayAuthor.toLowerCase(),
+      );
+    });
+
+    return filteredResults.take(limit).toList(growable: false);
+  }
+
+  Future<String?> loadSearchResultParagraph(
+    LibraryCatalogSearchResult result,
+  ) async {
+    final existing = _firstNonEmpty([result.fullParagraph, result.snippet]);
+    if (existing != null &&
+        result.fullParagraph != null &&
+        result.fullParagraph!.trim().isNotEmpty) {
+      return result.fullParagraph!.trim();
+    }
+
+    final db = await UserDatabase.instance.database;
+    final item = result.item;
+    final libraryItemId = item.id.trim();
+    if (libraryItemId.isEmpty) return existing;
+
+    final where = <String>['library_item_id = ?'];
+    final args = <Object?>[libraryItemId];
+    final spineIndex = item.spineIndex;
+    final paragraphIndex = item.paragraphIndex;
+    if (spineIndex != null) {
+      where.add('spine_index = ?');
+      args.add(spineIndex);
+    }
+    if (paragraphIndex != null) {
+      where.add('paragraph_index = ?');
+      args.add(paragraphIndex);
+    }
+    final rows = await db.rawQuery('''
+      SELECT full_paragraph, anchor
+      FROM library_links
+      WHERE ${where.join(' AND ')}
+      ORDER BY paragraph_index ASC
+      LIMIT 1
+      ''', args);
+    if (rows.isEmpty) return existing;
+    return _firstNonEmpty([
+      rows.first['full_paragraph']?.toString(),
+      rows.first['anchor']?.toString(),
+      existing,
+    ]);
   }
 
   Future<List<LibraryCatalogNavigationItem>> loadNavigationItems(
@@ -514,6 +757,176 @@ class LibraryCatalogService {
     });
   }
 
+  Future<Map<String, Map<String, Object?>>> _repairMissingManagedPaths(
+    List<Map<String, Object?>> rows,
+  ) async {
+    final results = <String, Map<String, Object?>>{};
+    final candidates = <Map<String, Object?>>[];
+
+    for (final row in rows) {
+      final id = row['id']?.toString().trim() ?? '';
+      if (id.isEmpty) continue;
+
+      final relativePath = row['relative_path']?.toString().trim() ?? '';
+      if (relativePath.isEmpty) continue;
+
+      final format = row['file_format']?.toString().trim().toLowerCase();
+      if (format != 'epub') continue;
+
+      final title = row['title']?.toString().trim() ?? '';
+      final fileName = row['file_name']?.toString().trim() ?? '';
+      if (title.isEmpty || fileName.isEmpty) continue;
+
+      candidates.add(row);
+    }
+
+    if (candidates.isEmpty) return results;
+
+    final selection = await LibraryRootService.instance.loadSelection();
+    final rootPath =
+        (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
+        selection.path;
+    if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
+      return results;
+    }
+
+    const managedFolders = <({String collectionName, String relativeFolder})>[
+      (collectionName: 'EGW_Books', relativeFolder: 'ePubs/Research/EGW_Books'),
+      (
+        collectionName: 'EGW_Devotionals',
+        relativeFolder: 'ePubs/Research/EGW_Devotionals',
+      ),
+      (
+        collectionName: 'EGW_Commentaries',
+        relativeFolder: 'ePubs/Commentaries/EGW_Commentaries',
+      ),
+    ];
+
+    for (final row in candidates) {
+      final id = row['id']?.toString().trim() ?? '';
+      final fileName = row['file_name']?.toString().trim() ?? '';
+      final expectedTitle = _normalizedLibraryText(
+        row['title']?.toString() ?? '',
+      );
+      if (id.isEmpty || fileName.isEmpty || expectedTitle.isEmpty) continue;
+
+      final currentRelativePath = row['relative_path']?.toString().trim() ?? '';
+      final currentPath = await LibraryRootService.instance.resolveRelativePath(
+        relativePath: currentRelativePath,
+        rootPath: rootPath,
+      );
+      if (File(currentPath).existsSync()) {
+        continue;
+      }
+
+      for (final managedFolder in managedFolders) {
+        final candidatePath = p.join(
+          rootPath,
+          managedFolder.relativeFolder,
+          fileName,
+        );
+        final candidateFile = File(candidatePath);
+        if (!candidateFile.existsSync()) continue;
+
+        final metadata = await readLibraryEpubMetadata(candidateFile);
+        final candidateTitle = _normalizedLibraryText(
+          metadata?.title?.toString() ?? '',
+        );
+        if (candidateTitle.isNotEmpty && candidateTitle != expectedTitle) {
+          continue;
+        }
+
+        final stat = await candidateFile.stat();
+        final now = DateTime.now().toUtc().toIso8601String();
+        final fingerprint =
+            'epub_nav_v3:${stat.size}:${stat.modified.millisecondsSinceEpoch}';
+        final folderType =
+            row['folder_type']?.toString().trim().isNotEmpty == true
+            ? row['folder_type']?.toString().trim() ?? ''
+            : row['library_role']?.toString().trim() ?? '';
+        final canonicalId = canonicalLibraryItemId(
+          folderType: folderType,
+          relativePath: p.relative(candidatePath, from: rootPath),
+        );
+        results[id] = <String, Object?>{
+          'id': canonicalId,
+          'relative_path': p.relative(candidatePath, from: rootPath),
+          'collection_name': managedFolder.collectionName,
+          'source_type': 'official_download',
+          'file_size': stat.size,
+          'file_hash': fingerprint,
+          'index_status': 'indexed',
+          'updated_at': now,
+        };
+
+        final db = await UserDatabase.instance.database;
+        await db.update(
+          'library_items',
+          results[id]!,
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        if (canonicalId != id) {
+          await migrateManagedLibraryItemId(
+            db: db,
+            oldId: id,
+            newId: canonicalId,
+          );
+        }
+        break;
+      }
+    }
+
+    return results;
+  }
+
+  Future<Map<String, Map<String, Object?>>> _repairManagedItemIds(
+    List<Map<String, Object?>> rows,
+  ) async {
+    final results = <String, Map<String, Object?>>{};
+    if (rows.isEmpty) return results;
+
+    final selection = await LibraryRootService.instance.loadSelection();
+    final rootPath =
+        (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
+        selection.path;
+    if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
+      return results;
+    }
+
+    final db = await UserDatabase.instance.database;
+    for (final row in rows) {
+      final id = row['id']?.toString().trim() ?? '';
+      final relativePath = row['relative_path']?.toString().trim() ?? '';
+      if (id.isEmpty || relativePath.isEmpty) continue;
+      if (!isManagedEgwRelativePath(relativePath)) continue;
+
+      final folderType =
+          row['folder_type']?.toString().trim().isNotEmpty == true
+          ? row['folder_type']?.toString().trim() ?? ''
+          : row['library_role']?.toString().trim() ?? '';
+      if (folderType.isEmpty) continue;
+
+      final resolvedPath = await LibraryRootService.instance
+          .resolveRelativePath(relativePath: relativePath, rootPath: rootPath);
+      if (!File(resolvedPath).existsSync()) continue;
+
+      final canonicalId = canonicalLibraryItemId(
+        folderType: folderType,
+        relativePath: relativePath,
+      );
+      if (canonicalId == id) continue;
+
+      await migrateManagedLibraryItemId(db: db, oldId: id, newId: canonicalId);
+      results[id] = <String, Object?>{
+        'id': canonicalId,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+    }
+
+    return results;
+  }
+
   Future<String?> _ensureEpubCoverPath(Map<String, Object?> row) {
     final id = row['id']?.toString().trim() ?? '';
     final relativePath = row['relative_path']?.toString().trim() ?? '';
@@ -536,6 +949,22 @@ class LibraryCatalogService {
           selection.path;
       if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
         return null;
+      }
+
+      final mirroredCoverPath = await _resolveMirroredCoverPath(
+        rootPath: rootPath,
+        existingCoverPath: existingCoverPath,
+      );
+      if (mirroredCoverPath != null) {
+        final db = await UserDatabase.instance.database;
+        final now = DateTime.now().toUtc().toIso8601String();
+        await db.update(
+          'library_items',
+          {'cover_path': mirroredCoverPath, 'updated_at': now},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        return mirroredCoverPath;
       }
 
       final epubPath = await LibraryRootService.instance.resolveRelativePath(
@@ -566,6 +995,22 @@ class LibraryCatalogService {
       );
       return coverPath;
     });
+  }
+
+  Future<String?> _resolveMirroredCoverPath({
+    required String rootPath,
+    required String? existingCoverPath,
+  }) async {
+    final coverPath = existingCoverPath?.trim() ?? '';
+    if (coverPath.isEmpty) return null;
+    final fileName = p.basename(coverPath);
+    if (fileName.isEmpty) return null;
+    final mirrorPath = p.join(rootPath, 'Graphics', 'eLibraryCovers', fileName);
+    final mirrorFile = File(mirrorPath);
+    if (await mirrorFile.exists()) {
+      return mirrorPath;
+    }
+    return null;
   }
 
   Future<String?> _cacheEpubCover({
@@ -745,7 +1190,43 @@ class LibraryCatalogService {
       return p.normalize(p.join(p.dirname(item.href), href));
     }
 
+    final spineCandidates = <_EpubManifestItem>[];
+    for (final item in manifest.values) {
+      if (!item.href.toLowerCase().endsWith('.xhtml')) continue;
+      spineCandidates.add(item);
+    }
+    spineCandidates.sort((left, right) {
+      final leftName = p.basename(left.href).toLowerCase();
+      final rightName = p.basename(right.href).toLowerCase();
+      final leftScore = _coverFallbackScore(leftName);
+      final rightScore = _coverFallbackScore(rightName);
+      if (leftScore != rightScore) return leftScore.compareTo(rightScore);
+      return left.href.compareTo(right.href);
+    });
+
+    for (final item in spineCandidates.take(4)) {
+      final entry = archive.findFile(item.href);
+      if (entry == null || !entry.isFile) continue;
+      final raw = utf8.decode(entry.content as List<int>, allowMalformed: true);
+      final imgMatch = RegExp(
+        r'<(?:img|image)\b[^>]*(?:src|href|xlink:href)="([^"]+)"',
+        caseSensitive: false,
+        dotAll: true,
+      ).firstMatch(raw);
+      final href = imgMatch?.group(1)?.trim();
+      if (href == null || href.isEmpty) continue;
+      return p.normalize(p.join(p.dirname(item.href), href));
+    }
+
     return null;
+  }
+
+  int _coverFallbackScore(String basename) {
+    if (basename == 'cover.xhtml') return 0;
+    if (basename == 'titlepage.xhtml') return 1;
+    if (basename.startsWith('cover')) return 2;
+    if (basename.startsWith('title')) return 3;
+    return 4;
   }
 
   bool _looksLikeCoverImagePath(String pathValue) {
@@ -1010,6 +1491,30 @@ class LibraryCatalogItem {
   }
 }
 
+class LibraryCatalogSearchResult {
+  const LibraryCatalogSearchResult({
+    required this.item,
+    required this.snippet,
+    required this.locationText,
+    required this.score,
+    this.referenceText,
+    this.fullParagraph,
+    this.chapterNumber,
+    this.verseStart,
+    this.verseEnd,
+  });
+
+  final LibraryCatalogItem item;
+  final String snippet;
+  final String locationText;
+  final int score;
+  final String? referenceText;
+  final String? fullParagraph;
+  final int? chapterNumber;
+  final int? verseStart;
+  final int? verseEnd;
+}
+
 class LibraryCatalogNavigationItem {
   const LibraryCatalogNavigationItem({
     required this.id,
@@ -1125,6 +1630,418 @@ String _normalizedLibraryText(String? value) {
       .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
+}
+
+String _normalizedLibrarySearchText(String value) {
+  return value
+      .replaceAll('“', '"')
+      .replaceAll('”', '"')
+      .replaceAll('„', '"')
+      .replaceAll('‟', '"')
+      .replaceAll('‘', "'")
+      .replaceAll('’', "'")
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+String? _buildLibrarySearchSnippet({
+  required String? fullParagraph,
+  required List<String> terms,
+}) {
+  final source = _cleanLibrarySearchText(fullParagraph ?? '');
+  if (source.isEmpty) return null;
+
+  final rankedTerms = terms.toSet().toList(growable: false)
+    ..sort((left, right) => right.length.compareTo(left.length));
+
+  var matchStart = -1;
+  var matchLength = 0;
+  for (final term in rankedTerms) {
+    final cleaned = _normalizedLibrarySearchText(term);
+    if (cleaned.isEmpty) continue;
+    final pattern = _buildLibrarySearchSnippetPattern(cleaned);
+    final match = pattern.firstMatch(source);
+    if (match == null) continue;
+    if (matchStart == -1 || match.start < matchStart) {
+      matchStart = match.start;
+      matchLength = match.end - match.start;
+    }
+  }
+
+  if (matchStart < 0) {
+    return null;
+  }
+
+  final sentenceSnippet = _buildLibrarySentenceSnippet(
+    source: source,
+    matchStart: matchStart,
+    matchEnd: matchStart + matchLength,
+  );
+  if (sentenceSnippet != null && sentenceSnippet.isNotEmpty) {
+    return sentenceSnippet;
+  }
+
+  final start = matchStart > 90 ? matchStart - 90 : 0;
+  final end = (matchStart + matchLength + 120) < source.length
+      ? matchStart + matchLength + 120
+      : source.length;
+  final prefix = start > 0 ? '...' : '';
+  final suffix = end < source.length ? '...' : '';
+  return '$prefix${source.substring(start, end).trim()}$suffix';
+}
+
+String? _buildLibrarySentenceSnippet({
+  required String source,
+  required int matchStart,
+  required int matchEnd,
+}) {
+  final sentencePattern = RegExp(r'[^.!?]+(?:[.!?]+|$)');
+  final sentences = <({int start, int end, String text})>[];
+  for (final match in sentencePattern.allMatches(source)) {
+    final text = match.group(0)?.trim();
+    if (text == null || text.isEmpty) continue;
+    sentences.add((
+      start: match.start,
+      end: match.end,
+      text: text.replaceAll(RegExp(r'\s+'), ' ').trim(),
+    ));
+  }
+  if (sentences.isEmpty) return null;
+
+  var sentenceIndex = -1;
+  for (var index = 0; index < sentences.length; index++) {
+    final sentence = sentences[index];
+    if (matchStart >= sentence.start && matchStart < sentence.end) {
+      sentenceIndex = index;
+      break;
+    }
+  }
+  if (sentenceIndex < 0) return null;
+
+  var startIndex = sentenceIndex;
+  var endIndex = sentenceIndex;
+  final sentenceText = sentences[sentenceIndex].text;
+  final matchLength = matchEnd - matchStart;
+  final needsMoreContext = sentenceText.length < 140 || matchLength < 24;
+
+  if (needsMoreContext) {
+    final matchOffset = matchStart - sentences[sentenceIndex].start;
+    final preferNext = matchOffset > (sentenceText.length ~/ 2);
+    if (preferNext && endIndex + 1 < sentences.length) {
+      endIndex += 1;
+    } else if (!preferNext && startIndex > 0) {
+      startIndex -= 1;
+    } else if (endIndex + 1 < sentences.length) {
+      endIndex += 1;
+    } else if (startIndex > 0) {
+      startIndex -= 1;
+    }
+  }
+
+  if (startIndex == endIndex &&
+      sentenceText.length < 90 &&
+      endIndex + 1 < sentences.length) {
+    endIndex += 1;
+  }
+
+  final selected = sentences.sublist(startIndex, endIndex + 1);
+  final prefix = startIndex > 0 ? '...' : '';
+  final suffix = endIndex < sentences.length - 1 ? '...' : '';
+  final body = selected.map((sentence) => sentence.text).join(' ').trim();
+  return body.isEmpty ? null : '$prefix$body$suffix';
+}
+
+RegExp _buildLibrarySearchSnippetPattern(String term) {
+  final words = term
+      .split(RegExp(r'\s+'))
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .map(RegExp.escape)
+      .toList(growable: false);
+  if (words.isEmpty) {
+    return RegExp(r'$.');
+  }
+  if (words.length == 1) {
+    return RegExp(r'\b' + words.first + r'\b', caseSensitive: false);
+  }
+  return RegExp(
+    r'\b' + words.join(r'[^a-z0-9]+') + r'\b',
+    caseSensitive: false,
+  );
+}
+
+Future<String> _buildLibrarySearchLocationText({
+  required Database db,
+  required Map<String, Future<_LibraryCitation?>> citationCache,
+  required LibraryCatalogItem item,
+  required String libraryItemId,
+  required int? spineIndex,
+  required int? paragraphIndex,
+  required int? chapterNumber,
+  required String? epubHref,
+  required String? anchorId,
+}) async {
+  final abbreviation = _libraryBookAbbreviation(item);
+  final title = item.displayTitle.trim();
+  final citation = paragraphIndex != null && paragraphIndex > 0
+      ? await _resolveLibraryCitation(
+          db: db,
+          cache: citationCache,
+          libraryItemId: libraryItemId,
+          spineIndex: spineIndex,
+          paragraphIndex: paragraphIndex,
+          epubHref: epubHref,
+        )
+      : null;
+
+  if (abbreviation != null) {
+    if (citation != null) {
+      return '$abbreviation ${citation.pageNumber}.${citation.paragraphNumber}';
+    }
+    if (paragraphIndex != null && paragraphIndex > 0) {
+      return '$abbreviation ¶$paragraphIndex';
+    }
+    if (chapterNumber != null && chapterNumber > 0) {
+      return '$abbreviation ch. $chapterNumber';
+    }
+    return abbreviation;
+  }
+
+  if (citation != null) {
+    return '$title ${citation.pageNumber}.${citation.paragraphNumber}';
+  }
+  if (paragraphIndex != null && paragraphIndex > 0) {
+    return '$title ¶$paragraphIndex';
+  }
+  if (chapterNumber != null && chapterNumber > 0) {
+    return '$title ch. $chapterNumber';
+  }
+
+  final cleanHref = epubHref?.trim() ?? '';
+  if (cleanHref.isNotEmpty) {
+    final cleanAnchor = anchorId?.trim() ?? '';
+    final hrefLabel = cleanAnchor.isNotEmpty
+        ? '$cleanHref#$cleanAnchor'
+        : cleanHref;
+    return '$title · $hrefLabel';
+  }
+
+  return title;
+}
+
+String? _firstNonEmpty(List<String?> values) {
+  for (final value in values) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isNotEmpty) return trimmed;
+  }
+  return null;
+}
+
+String? _libraryBookAbbreviation(LibraryCatalogItem item) {
+  final normalizedTitle = _normalizedLibraryText(item.displayTitle);
+  if (normalizedTitle.contains('christ triumphant')) {
+    return 'CTr';
+  }
+  if (normalizedTitle.contains('maranatha')) {
+    return 'Mar';
+  }
+  if (normalizedTitle.contains('radiant religion')) {
+    return 'RRe';
+  }
+
+  final fromFileName = _abbreviationFromPathSegment(item.fileName);
+  if (fromFileName != null) return fromFileName;
+
+  final fromRelativePath = _abbreviationFromPathSegment(item.relativePath);
+  if (fromRelativePath != null) return fromRelativePath;
+
+  final normalized = _normalizedLibraryText(item.displayTitle);
+  if (normalized.isEmpty) return null;
+
+  const rules = <({String needle, String code})>[
+    (needle: 'the great controversy', code: 'GC'),
+    (needle: 'the great controversy 1888', code: 'GC88'),
+    (needle: 'desire of ages', code: 'DA'),
+    (needle: 'christ triumphant', code: 'CTr'),
+    (needle: 'steps to christ', code: 'SC'),
+    (needle: 'patriarchs and prophets', code: 'PP'),
+    (needle: 'prophets and kings', code: 'PK'),
+    (needle: 'acts of the apostles', code: 'AA'),
+    (needle: 'early writings', code: 'EW'),
+    (needle: 'gospel workers', code: 'GW'),
+    (needle: 'life sketches', code: 'LS'),
+    (needle: 'ministry of healing', code: 'MH'),
+    (needle: 'christ s object lessons', code: 'COL'),
+    (needle: 'education', code: 'Ed.'),
+    (needle: 'thoughts from the mount of blessing', code: 'MB'),
+    (needle: 'the faith i live by', code: 'FLB'),
+    (needle: 'homeward bound', code: 'HB'),
+    (needle: 'reflecting christ', code: 'RC'),
+    (needle: 'that i may know him', code: 'TMK'),
+    (needle: 'testimonies for the church vol 1', code: '1T'),
+    (needle: 'testimonies for the church vol 2', code: '2T'),
+    (needle: 'testimonies for the church vol 3', code: '3T'),
+    (needle: 'testimonies for the church vol 4', code: '4T'),
+    (needle: 'testimonies for the church vol 5', code: '5T'),
+    (needle: 'testimonies for the church vol 6', code: '6T'),
+    (needle: 'testimonies for the church vol 7', code: '7T'),
+    (needle: 'testimonies for the church vol 8', code: '8T'),
+    (needle: 'testimonies for the church vol 9', code: '9T'),
+    (needle: 'spiritual gifts vol 1', code: 'SG1'),
+  ];
+
+  for (final rule in rules) {
+    if (normalized.contains(rule.needle)) {
+      return rule.code;
+    }
+  }
+
+  return null;
+}
+
+String? _abbreviationFromPathSegment(String value) {
+  final stem = p.basenameWithoutExtension(value).trim();
+  if (stem.isEmpty) return null;
+  final withoutPrefix = stem.replaceFirst(
+    RegExp(r'^[a-z]{2}[_-]', caseSensitive: false),
+    '',
+  );
+  final candidate = withoutPrefix.trim();
+  if (candidate.isEmpty) return null;
+  if (!RegExp(r'^[A-Za-z0-9]+$').hasMatch(candidate)) return null;
+  if (candidate.length > 10) return null;
+  return candidate.toUpperCase();
+}
+
+Future<_LibraryCitation?> _resolveLibraryCitation({
+  required Database db,
+  required Map<String, Future<_LibraryCitation?>> cache,
+  required String libraryItemId,
+  required int? spineIndex,
+  required int paragraphIndex,
+  required String? epubHref,
+}) {
+  final key = [
+    libraryItemId,
+    spineIndex?.toString() ?? '',
+    paragraphIndex.toString(),
+    epubHref?.trim() ?? '',
+  ].join('|');
+  return cache.putIfAbsent(key, () async {
+    final lowerBound = paragraphIndex > 24 ? paragraphIndex - 24 : 1;
+    final args = <Object?>[libraryItemId, lowerBound, paragraphIndex];
+    final where = StringBuffer('library_item_id = ?');
+    if (spineIndex != null) {
+      where.write(' AND spine_index = ?');
+      args.insert(1, spineIndex);
+    }
+    where.write(' AND paragraph_index BETWEEN ? AND ?');
+    final rows = await db.rawQuery('''
+        SELECT paragraph_index, anchor, full_paragraph
+        FROM library_links
+        WHERE $where
+        ORDER BY paragraph_index ASC
+        ''', args);
+
+    int? pageNumber;
+    int? pageParagraphIndex;
+    for (final row in rows) {
+      final text = _firstNonEmpty([
+        row['anchor']?.toString(),
+        row['full_paragraph']?.toString(),
+      ]);
+      if (text == null) continue;
+      final match = RegExp(r'\[(\d{1,4})\]').firstMatch(text);
+      if (match == null) continue;
+      pageNumber = int.tryParse(match.group(1)!);
+      pageParagraphIndex = (row['paragraph_index'] as num?)?.toInt();
+    }
+
+    if (pageNumber == null || pageParagraphIndex == null) {
+      return null;
+    }
+
+    final paragraphNumber = paragraphIndex - pageParagraphIndex + 1;
+    return _LibraryCitation(
+      pageNumber: pageNumber,
+      paragraphNumber: paragraphNumber > 0 ? paragraphNumber : 1,
+    );
+  });
+}
+
+class _LibraryCitation {
+  const _LibraryCitation({
+    required this.pageNumber,
+    required this.paragraphNumber,
+  });
+
+  final int pageNumber;
+  final int paragraphNumber;
+}
+
+int _scoreLibrarySearchResult({
+  required LibraryCatalogItem item,
+  required String? referenceText,
+  required String? fullParagraph,
+  required List<String> queryTerms,
+}) {
+  final title = _normalizedLibraryText(item.displayTitle);
+  final author = _normalizedLibraryText(item.displayAuthor);
+  final reference = _normalizedLibraryText(referenceText);
+  final paragraph = _normalizedLibrarySearchText(fullParagraph ?? '');
+
+  var bestScore = 6;
+  for (final term in queryTerms) {
+    final normalizedTerm = _normalizedLibrarySearchText(term);
+    if (normalizedTerm.isEmpty) continue;
+    var termScore = 5;
+    if (paragraph.contains(normalizedTerm)) {
+      termScore = 0;
+    } else if (reference.contains(normalizedTerm)) {
+      termScore = 1;
+    } else if (title.contains(normalizedTerm)) {
+      termScore = 2;
+    } else if (author.contains(normalizedTerm)) {
+      termScore = 3;
+    }
+    if (termScore < bestScore) {
+      bestScore = termScore;
+    }
+  }
+  return bestScore;
+}
+
+String _cleanLibrarySearchText(String value) {
+  return value
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .replaceAll('“', '"')
+      .replaceAll('”', '"')
+      .replaceAll('„', '"')
+      .replaceAll('‟', '"')
+      .replaceAll('‘', "'")
+      .replaceAll('’', "'")
+      .trim();
+}
+
+List<String> extractLibrarySearchHighlightTerms(String query) {
+  return extractSearchHighlightTerms(query, booleanSyntax: true);
+}
+
+const List<String> _librarySearchClauseFields = <String>[
+  'LOWER(COALESCE(ll.full_paragraph, \'\')) LIKE ?',
+  'LOWER(COALESCE(ll.original_reference_text, \'\')) LIKE ?',
+  'LOWER(COALESCE(ll.anchor, \'\')) LIKE ?',
+  'LOWER(COALESCE(li.title, \'\')) LIKE ?',
+  'LOWER(COALESCE(li.author, \'\')) LIKE ?',
+  'LOWER(COALESCE(li.collection_name, \'\')) LIKE ?',
+  'LOWER(COALESCE(li.relative_path, \'\')) LIKE ?',
+  'LOWER(COALESCE(li.file_name, \'\')) LIKE ?',
+];
+
+String _librarySearchTermClause() {
+  return _librarySearchClauseFields.join(' OR ');
 }
 
 List<LibraryCatalogItem> _dedupeLibraryItems(List<LibraryCatalogItem> items) {

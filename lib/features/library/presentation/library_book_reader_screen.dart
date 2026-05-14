@@ -1,10 +1,18 @@
+// ignore_for_file: unused_element, dead_code
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:path/path.dart' as p;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/user_database.dart';
 import '../../reader/data/commentary_research_library_service.dart';
+import '../../reader/presentation/reader_search_mode_picker.dart';
+import '../../reader/presentation/viewer_search_dialog.dart';
+import '../../search/search_highlight_helper.dart';
 import '../data/library_catalog_service.dart';
 import 'library_navigation_tree.dart';
 
@@ -12,6 +20,9 @@ part 'epub_inline_span_builder.dart';
 part 'epub_body_block_parser.dart';
 part 'library_contents_popup.dart';
 part 'library_reader_bottom_bar.dart';
+part 'library_book_reader_screen_helpers.dart';
+
+const bool _libraryRefCodeDiagnosticsEnabled = false;
 
 class LibraryBookReaderScreen extends StatefulWidget {
   const LibraryBookReaderScreen({
@@ -21,6 +32,8 @@ class LibraryBookReaderScreen extends StatefulWidget {
     this.initialAnchorId,
     this.initialSpineIndex,
     this.initialParagraphIndex,
+    this.searchQuery,
+    this.highlightTerms = const [],
   });
 
   final LibraryCatalogItem item;
@@ -28,6 +41,8 @@ class LibraryBookReaderScreen extends StatefulWidget {
   final String? initialAnchorId;
   final int? initialSpineIndex;
   final int? initialParagraphIndex;
+  final String? searchQuery;
+  final List<String> highlightTerms;
 
   @override
   State<LibraryBookReaderScreen> createState() =>
@@ -38,8 +53,11 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   final _service = CommentaryResearchLibraryService.instance;
   final ScrollController _bodyScrollController = ScrollController();
   final Map<String, GlobalKey> _bodyBlockKeys = <String, GlobalKey>{};
+  String? _lastSearchTerm;
   bool _loading = true;
   bool _nightMode = false;
+  bool _showRefCodes = false;
+  bool _refCodesLoaded = false;
   double _fontScale = 1.0;
   String? _error;
   List<LibraryBookSection> _sections = const [];
@@ -48,10 +66,15 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   int _selectedNavigationIndex = 0;
   int? _selectedHeadingTargetIndex;
   String? _pendingBodyScrollTargetKey;
+  Map<String, String> _refCodeByLocation = <String, String>{};
+  Map<String, Map<int, String>> _paragraphReferenceCodesBySection =
+      <String, Map<int, String>>{};
 
   @override
   void initState() {
     super.initState();
+    final initialSearchTerm = widget.searchQuery?.trim() ?? '';
+    _lastSearchTerm = initialSearchTerm.isNotEmpty ? initialSearchTerm : null;
     _load();
   }
 
@@ -62,12 +85,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   }
 
   Future<void> _load() async {
+    final savedShowRefCodes = await LocalSettingsStore.instance
+        .loadLibraryReaderShowRefCodes();
     final selection = await LibraryRootService.instance.loadSelection();
-    final rootPath = selection.exists
-        ? selection.path?.trim() ?? ''
-        : (await LibraryRootService.instance.accessibleLibraryRootPath())
-                  ?.trim() ??
-              '';
+    final rootPath =
+        (await LibraryRootService.instance.accessibleLibraryRootPath())
+            ?.trim() ??
+        (selection.exists ? selection.path?.trim() ?? '' : '');
 
     if (rootPath.isEmpty) {
       if (!mounted) return;
@@ -104,12 +128,28 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
       final initialNavigationIndex = widget.item.isPdf
           ? 0
           : _navigationIndexForSectionIndex(initialIndex) ?? 0;
+      final paragraphReferenceCodeLoadResult =
+          !widget.item.isPdf && savedShowRefCodes
+          ? await _loadParagraphReferenceCodes(
+              sections: sections,
+              libraryItemId: widget.item.id,
+              rootPath: rootPath,
+            )
+          : const _ParagraphReferenceCodeLoadResult(
+              bySection: <String, Map<int, String>>{},
+              byLocation: <String, String>{},
+            );
       if (!mounted) return;
       setState(() {
         _sections = sections;
         _navigationItems = navigationItems;
         _selectedIndex = initialIndex;
         _selectedNavigationIndex = initialNavigationIndex;
+        _showRefCodes = savedShowRefCodes;
+        _refCodesLoaded = savedShowRefCodes && !widget.item.isPdf;
+        _refCodeByLocation = paragraphReferenceCodeLoadResult.byLocation;
+        _paragraphReferenceCodesBySection =
+            paragraphReferenceCodeLoadResult.bySection;
         _loading = false;
       });
       final targetKey = _initialScrollTargetKey();
@@ -123,6 +163,20 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         _error = 'Could not open this book: $error';
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _openSearch() async {
+    final selection = await showViewerSearchDialog(
+      context,
+      fontScale: _fontScale,
+      lastSearchTerm: _lastSearchTerm,
+      initialMode: ReaderSearchMode.elibrary,
+    );
+    if (!mounted || selection == null) return;
+    final selectedSearchTerm = selection.lastSearchTerm.trim();
+    if (selectedSearchTerm.isNotEmpty) {
+      _lastSearchTerm = selectedSearchTerm;
     }
   }
 
@@ -235,13 +289,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
 
     final initialHref = _splitReaderHref(widget.initialHref).href;
     if (initialHref.isNotEmpty) {
-      final initialIndex = _sectionIndexForHref(sections, initialHref);
+      final initialIndex = _readableSectionIndexForHref(sections, initialHref);
       if (initialIndex != null) return initialIndex;
     }
 
     final initialSpineIndex = widget.initialSpineIndex;
     if (initialSpineIndex != null && initialSpineIndex > 0) {
-      final initialIndex = _sectionIndexForSpineIndex(
+      final initialIndex = _readableSectionIndexForSpineIndex(
         sections: sections,
         navigationItems: navigationItems,
         spineIndex: initialSpineIndex,
@@ -251,7 +305,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
 
     final savedHref = _splitReaderHref(widget.item.epubHref).href;
     if (savedHref.isNotEmpty) {
-      final savedIndex = _sectionIndexForHref(sections, savedHref);
+      final savedIndex = _readableSectionIndexForHref(sections, savedHref);
       if (savedIndex != null) return savedIndex;
     }
 
@@ -294,10 +348,21 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         navigationItems: navigationItems,
         spineIndex: widget.item.spineIndex!,
       );
-      if (navIndex != null) return navIndex;
+      if (navIndex != null && _isRealContentSection(sections[navIndex])) {
+        return navIndex;
+      }
     }
 
     return 0;
+  }
+
+  int? _readableSectionIndexForHref(
+    List<LibraryBookSection> sections,
+    String href,
+  ) {
+    final sectionIndex = _sectionIndexForHref(sections, href);
+    if (sectionIndex == null) return null;
+    return _isRealContentSection(sections[sectionIndex]) ? sectionIndex : null;
   }
 
   int? _sectionIndexForSpineIndex({
@@ -347,6 +412,20 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     return null;
   }
 
+  int? _readableSectionIndexForSpineIndex({
+    required List<LibraryBookSection> sections,
+    required List<LibraryCatalogNavigationItem> navigationItems,
+    required int spineIndex,
+  }) {
+    final sectionIndex = _sectionIndexForSpineIndex(
+      sections: sections,
+      navigationItems: navigationItems,
+      spineIndex: spineIndex,
+    );
+    if (sectionIndex == null) return null;
+    return _isRealContentSection(sections[sectionIndex]) ? sectionIndex : null;
+  }
+
   int? _sectionIndexForHref(List<LibraryBookSection> sections, String href) {
     final normalizedHref = p.normalize(href).toLowerCase();
     for (var index = 0; index < sections.length; index++) {
@@ -371,8 +450,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
 
     for (var index = 0; index < sections.length; index++) {
       final section = sections[index];
-      if (_isReaderFrontMatterLabel(section.title) ||
-          _isReaderFrontMatterLabel(
+      if (_isReaderMetadataHelpLabel(section.title) ||
+          _isReaderMetadataHelpLabel(
             p.basenameWithoutExtension(section.entryName),
           )) {
         continue;
@@ -384,8 +463,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
 
   bool _isRealContentSection(LibraryBookSection section) {
     final entryLabel = p.basenameWithoutExtension(section.entryName);
-    return !_isReaderFrontMatterLabel(section.title) &&
-        !_isReaderFrontMatterLabel(entryLabel);
+    return !_isReaderMetadataHelpLabel(section.title) &&
+        !_isReaderMetadataHelpLabel(entryLabel);
   }
 
   bool _isReaderChapterOneLabel(String value) {
@@ -497,8 +576,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
               !item.isFrontMatter)) {
         return href;
       }
-      if (_isReaderFrontMatterLabel(item.label) ||
-          _isReaderFrontMatterLabel(p.basenameWithoutExtension(href)) ||
+      if (_isReaderMetadataHelpLabel(item.label) ||
+          _isReaderMetadataHelpLabel(p.basenameWithoutExtension(href)) ||
           item.isFrontMatter) {
         continue;
       }
@@ -508,8 +587,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     for (final item in navigationItems) {
       final href = _cleanNavigationHref(item.href);
       if (href == null) continue;
-      if (_isReaderFrontMatterLabel(item.label) ||
-          _isReaderFrontMatterLabel(p.basenameWithoutExtension(href)) ||
+      if (_isReaderMetadataHelpLabel(item.label) ||
+          _isReaderMetadataHelpLabel(p.basenameWithoutExtension(href)) ||
           item.isFrontMatter) {
         continue;
       }
@@ -1152,6 +1231,529 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     });
   }
 
+  Future<void> _toggleShowRefCodes() async {
+    final nextValue = !_showRefCodes;
+    setState(() {
+      _showRefCodes = nextValue;
+    });
+    await LocalSettingsStore.instance.saveLibraryReaderShowRefCodes(nextValue);
+    if (nextValue) {
+      await _ensureParagraphReferenceCodesLoaded();
+    }
+  }
+
+  Future<void> _ensureParagraphReferenceCodesLoaded() async {
+    if (_refCodesLoaded || widget.item.isPdf || _sections.isEmpty) {
+      return;
+    }
+    final paragraphReferenceCodeLoadResult = await _loadParagraphReferenceCodes(
+      sections: _sections,
+      libraryItemId: widget.item.id,
+      rootPath:
+          (await LibraryRootService.instance.accessibleLibraryRootPath())
+              ?.trim() ??
+          (await LibraryRootService.instance.loadSelection()).path?.trim() ??
+          '',
+    );
+    if (!mounted) return;
+    setState(() {
+      _refCodeByLocation = paragraphReferenceCodeLoadResult.byLocation;
+      _paragraphReferenceCodesBySection =
+          paragraphReferenceCodeLoadResult.bySection;
+      _refCodesLoaded = true;
+    });
+  }
+
+  Future<_ParagraphReferenceCodeLoadResult> _loadParagraphReferenceCodes({
+    required List<LibraryBookSection> sections,
+    required String libraryItemId,
+    required String rootPath,
+  }) async {
+    final itemAbbreviation = libraryReaderBookAbbreviation(widget.item);
+    final isManagedGreatControversy =
+        itemAbbreviation == 'GC' || itemAbbreviation == 'GC88';
+    if (isManagedGreatControversy) {
+      final db = await UserDatabase.instance.database;
+      await _service.ensureManagedEgwReferenceIndex(
+        db: db,
+        rootPath: rootPath,
+        libraryItemId: libraryItemId,
+        relativePath: widget.item.relativePath,
+        bookTitle: widget.item.displayTitle,
+        bookAbbrev: itemAbbreviation ?? 'GC',
+        workKey: 'great_controversy',
+        editionKey: itemAbbreviation ?? 'GC',
+        editionYear: itemAbbreviation == 'GC88' ? 1888 : 1911,
+        refresh: false,
+      );
+      final byLocation = await _service.loadManagedEgwReferenceCodesForItem(
+        db: db,
+        libraryItemId: libraryItemId,
+      );
+      if (_libraryRefCodeDiagnosticsEnabled) {
+        debugPrint(
+          '[LibraryBookReader] ref index load '
+          'showRefCodes=$_showRefCodes '
+          'itemTitle=${widget.item.displayTitle} '
+          'itemId=$libraryItemId '
+          'bookAbbrev=${itemAbbreviation ?? '(none)'} '
+          'resolved=${byLocation.length} '
+          'source=elibrary_ref_index',
+        );
+      }
+      return _ParagraphReferenceCodeLoadResult(
+        bySection: _paragraphReferenceCodesBySectionFromLocation(byLocation),
+        byLocation: byLocation,
+      );
+    }
+
+    final db = await UserDatabase.instance.database;
+    final result = <String, Map<int, String>>{};
+    for (final section in sections) {
+      final sectionKey = _sectionKey(section.entryName);
+      final sectionCodes = await _loadSectionReferenceCodes(
+        db: db,
+        libraryItemId: libraryItemId,
+        section: section,
+        itemAbbreviation: itemAbbreviation,
+        sectionTitle: section.title,
+      );
+      if (sectionCodes.isNotEmpty) {
+        result[sectionKey] = sectionCodes;
+      }
+      if (_libraryRefCodeDiagnosticsEnabled) {
+        debugPrint(
+          '[LibraryBookReader] ref code scan '
+          'showRefCodes=$_showRefCodes '
+          'itemTitle=${widget.item.displayTitle} '
+          'itemId=$libraryItemId '
+          'bookAbbrev=${itemAbbreviation ?? '(none)'} '
+          'section=${section.title.isEmpty ? section.entryName : section.title} '
+          'entryName=${section.entryName} '
+          'resolved=${sectionCodes.length} '
+          'fields=paragraph_index,anchor,full_paragraph,spine_index,epub_href,'
+          'anchor_id,original_reference_text',
+        );
+      }
+    }
+
+    final generatedByLocation =
+        widget.item.isDevotional ||
+            itemAbbreviation == null ||
+            itemAbbreviation.trim().isEmpty
+        ? const <String, String>{}
+        : _buildGeneratedParagraphReferenceCodes(
+            sections: sections,
+            libraryItemId: libraryItemId,
+            itemAbbreviation: itemAbbreviation,
+          );
+    if (generatedByLocation.isNotEmpty) {
+      final generatedBySection = _paragraphReferenceCodesBySectionFromLocation(
+        generatedByLocation,
+      );
+      final mergedBySection = <String, Map<int, String>>{};
+      for (final entry in result.entries) {
+        mergedBySection[entry.key] = Map<int, String>.from(entry.value);
+      }
+      for (final entry in generatedBySection.entries) {
+        mergedBySection
+            .putIfAbsent(entry.key, () => <int, String>{})
+            .addAll(entry.value);
+      }
+      if (_libraryRefCodeDiagnosticsEnabled) {
+        debugPrint(
+          '[LibraryBookReader] generated ref codes '
+          'showRefCodes=$_showRefCodes '
+          'itemTitle=${widget.item.displayTitle} '
+          'itemId=$libraryItemId '
+          'bookAbbrev=${itemAbbreviation ?? '(none)'} '
+          'resolved=${generatedByLocation.length} '
+          'source=epub_raw_html',
+        );
+      }
+      return _ParagraphReferenceCodeLoadResult(
+        bySection: mergedBySection,
+        byLocation: generatedByLocation,
+      );
+    }
+
+    return _ParagraphReferenceCodeLoadResult(
+      bySection: result,
+      byLocation: const <String, String>{},
+    );
+  }
+
+  Future<Map<int, String>> _loadSectionReferenceCodes({
+    required Database db,
+    required String libraryItemId,
+    required LibraryBookSection section,
+    required String? itemAbbreviation,
+    required String sectionTitle,
+  }) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT paragraph_index, anchor, full_paragraph, epub_href, anchor_id,
+             spine_index, original_reference_text
+      FROM library_links
+      WHERE library_item_id = ?
+        AND deleted_at IS NULL
+        AND LOWER(REPLACE(REPLACE(COALESCE(epub_href, ''), '\\', '/'), './', '')) = ?
+      ORDER BY paragraph_index ASC
+      ''',
+      [libraryItemId, _sectionKey(section.entryName)],
+    );
+
+    final resolved = <int, String>{};
+    if (widget.item.isDevotional) {
+      return const <int, String>{};
+    }
+
+    int? currentPageNumber;
+    int? pageParagraphIndex;
+    var markerCount = 0;
+
+    for (final row in rows) {
+      final paragraphIndex = (row['paragraph_index'] as num?)?.toInt();
+      if (paragraphIndex == null || paragraphIndex <= 0) continue;
+
+      final marker =
+          _pageMarkerFromText(row['anchor']?.toString()) ??
+          _pageMarkerFromText(row['full_paragraph']?.toString());
+      if (marker != null) {
+        currentPageNumber = marker.pageNumber;
+        pageParagraphIndex = paragraphIndex;
+        markerCount += 1;
+      }
+
+      final referenceCode = _displayReferenceCodeForParagraph(
+        itemAbbreviation: itemAbbreviation,
+        pageNumber: currentPageNumber,
+        pageParagraphIndex: pageParagraphIndex,
+        paragraphIndex: paragraphIndex,
+      );
+      if (referenceCode != null) {
+        resolved[paragraphIndex] = referenceCode;
+      }
+
+      if (_libraryRefCodeDiagnosticsEnabled) {
+        final rawStableRef = [
+          row['epub_href']?.toString().trim() ?? '',
+          row['anchor_id']?.toString().trim() ?? '',
+        ].where((value) => value.isNotEmpty).join('#');
+        debugPrint(
+          '[LibraryBookReader] ref code row '
+          'section=${section.title.isEmpty ? section.entryName : section.title} '
+          'showRefCodes=$_showRefCodes '
+          'paragraphIndex=$paragraphIndex '
+          'href=${row['epub_href']?.toString() ?? '(none)'} '
+          'anchorId=${row['anchor_id']?.toString() ?? '(none)'} '
+          'spineIndex=${row['spine_index']?.toString() ?? '(none)'} '
+          'sourceRef=${row['original_reference_text']?.toString() ?? '(none)'} '
+          'rawStableRef=${rawStableRef.isEmpty ? '(none)' : rawStableRef} '
+          'officialParagraphRefMetadata=${row['original_reference_text']?.toString().startsWith('GC ') == true || row['original_reference_text']?.toString().startsWith('DA ') == true || row['original_reference_text']?.toString().startsWith('RC ') == true || row['original_reference_text']?.toString().startsWith('HB ') == true || row['original_reference_text']?.toString().startsWith('TMK ') == true ? 'present' : 'missing'} '
+          'finalCleanRefCode=${referenceCode ?? '(null)'}',
+        );
+      }
+    }
+
+    if (_libraryRefCodeDiagnosticsEnabled) {
+      debugPrint(
+        '[LibraryBookReader] ref code summary '
+        'section=${section.title.isEmpty ? section.entryName : section.title} '
+        'paragraphs=${resolved.length} '
+        'markers=$markerCount '
+        'bookAbbrev=${itemAbbreviation ?? '(none)'}',
+      );
+    }
+
+    return resolved;
+  }
+
+  String? _displayReferenceCodeForParagraph({
+    required String? itemAbbreviation,
+    required int? pageNumber,
+    required int? pageParagraphIndex,
+    required int paragraphIndex,
+  }) {
+    final abbreviation = cleanDisplayRefCode(itemAbbreviation);
+    if (abbreviation == null || abbreviation.isEmpty) {
+      return null;
+    }
+    if (abbreviation == 'GC' || abbreviation == 'GC88') {
+      return null;
+    }
+
+    if (pageNumber != null &&
+        pageParagraphIndex != null &&
+        pageNumber > 0 &&
+        pageParagraphIndex > 0) {
+      final paragraphNumber = paragraphIndex - pageParagraphIndex + 1;
+      if (paragraphNumber <= 0) return null;
+      return cleanDisplayRefCode('$abbreviation $pageNumber.$paragraphNumber');
+    }
+    return null;
+  }
+
+  Map<String, String> _buildGeneratedParagraphReferenceCodes({
+    required List<LibraryBookSection> sections,
+    required String libraryItemId,
+    required String? itemAbbreviation,
+  }) {
+    final abbreviation = cleanDisplayRefCode(itemAbbreviation);
+    if (abbreviation == null || abbreviation.isEmpty) {
+      return const <String, String>{};
+    }
+
+    final generatedByLocation = <String, String>{};
+    final markerSamples = <String>[];
+    final content02Samples = <String>[];
+    final content02Href = _sectionKey('OEBPS/content02.xhtml');
+    final isGreatControversy = abbreviation == 'GC' || abbreviation == 'GC88';
+    int? currentPageNumber;
+    var paragraphNumberOnPage = 0;
+    var generatedCount = 0;
+    var content02Count = 0;
+    var insideParagraphMarkerCount = 0;
+    int? content02InitialPage;
+
+    for (final section in sections) {
+      final paragraphBlocks = section.blocks
+          .where((block) => block.kind == 'paragraph')
+          .toList(growable: false);
+      if (paragraphBlocks.isEmpty) {
+        continue;
+      }
+
+      final firstMarkerInSection = _firstPageBreakMarkerOccurrence(
+        paragraphBlocks,
+      );
+      if (currentPageNumber == null && firstMarkerInSection != null) {
+        currentPageNumber = firstMarkerInSection.isInsideParagraph
+            ? (firstMarkerInSection.pageNumber > 1
+                  ? firstMarkerInSection.pageNumber - 1
+                  : 1)
+            : firstMarkerInSection.pageNumber;
+        if (_sectionKey(section.entryName) == content02Href) {
+          content02InitialPage = currentPageNumber;
+        }
+      }
+
+      var paragraphIndex = 0;
+      for (final block in section.blocks) {
+        if (block.kind != 'paragraph') {
+          continue;
+        }
+        paragraphIndex += 1;
+        final markers = _extractPageBreakMarkers(block.html);
+        if (markers.isEmpty) {
+          if (currentPageNumber == null) {
+            continue;
+          }
+        } else {
+          final firstMarkerBeforeText = markers.firstWhere(
+            (marker) => !marker.isInsideParagraph,
+            orElse: () => markers.first,
+          );
+          if (firstMarkerBeforeText.isInsideParagraph &&
+              currentPageNumber == null) {
+            currentPageNumber = firstMarkerBeforeText.pageNumber > 1
+                ? firstMarkerBeforeText.pageNumber - 1
+                : 1;
+            if (_sectionKey(section.entryName) == content02Href) {
+              content02InitialPage ??= currentPageNumber;
+            }
+          } else if (firstMarkerBeforeText.isInsideParagraph) {
+            currentPageNumber ??= firstMarkerBeforeText.pageNumber > 1
+                ? firstMarkerBeforeText.pageNumber - 1
+                : 1;
+          } else {
+            currentPageNumber = firstMarkerBeforeText.pageNumber;
+          }
+        }
+
+        final locationKey = _refCodeLocationKey(
+          libraryItemId: libraryItemId,
+          href: section.entryName,
+          paragraphIndex: paragraphIndex,
+        );
+        paragraphNumberOnPage += 1;
+        final generatedRefCode =
+            '$abbreviation $currentPageNumber.$paragraphNumberOnPage';
+        generatedByLocation[locationKey] = generatedRefCode;
+        generatedCount += 1;
+        if (_sectionKey(section.entryName) == content02Href) {
+          content02Count += 1;
+          if (content02Samples.length < 5) {
+            content02Samples.add(
+              'paragraphIndex=$paragraphIndex ref=$generatedRefCode preview=${_paragraphPreview(block.text)}',
+            );
+          }
+        }
+
+        final preview = _paragraphPreview(block.text);
+        if (_libraryRefCodeDiagnosticsEnabled && markerSamples.length < 20) {
+          final markerPreview = markers.isEmpty
+              ? '(none)'
+              : markers.first.preview;
+          markerSamples.add(
+            'href=${section.entryName} paragraphIndex=$paragraphIndex '
+            'page=$currentPageNumber ref=$generatedRefCode '
+            'markerPreview=$markerPreview preview=$preview',
+          );
+        }
+
+        if (markers.isNotEmpty) {
+          for (final marker in markers) {
+            if (marker.isInsideParagraph) {
+              insideParagraphMarkerCount += 1;
+            }
+          }
+          final lastMarker = markers.last;
+          currentPageNumber = lastMarker.pageNumber;
+          paragraphNumberOnPage = 0;
+        }
+      }
+    }
+
+    if (_libraryRefCodeDiagnosticsEnabled && isGreatControversy) {
+      debugPrint(
+        '[LibraryBookReader] generated ref code summary '
+        'itemTitle=${widget.item.displayTitle} '
+        'itemId=$libraryItemId '
+        'bookAbbrev=$abbreviation '
+        'totalGeneratedRefs=$generatedCount '
+        'content02GeneratedRefs=$content02Count '
+        'content02InitialPage=${content02InitialPage?.toString() ?? '(none)'} '
+        'pagebreakInsideParagraphCount=$insideParagraphMarkerCount',
+      );
+      for (var i = 0; i < markerSamples.length; i++) {
+        debugPrint(
+          '[LibraryBookReader] generated pagebreak marker ${i + 1} '
+          '${markerSamples[i]}',
+        );
+      }
+      for (var i = 0; i < content02Samples.length; i++) {
+        debugPrint(
+          '[LibraryBookReader] content02 generated ref ${i + 1} '
+          '${content02Samples[i]}',
+        );
+      }
+    }
+
+    return generatedByLocation;
+  }
+
+  Map<String, Map<int, String>> _paragraphReferenceCodesBySectionFromLocation(
+    Map<String, String> byLocation,
+  ) {
+    final result = <String, Map<int, String>>{};
+    for (final entry in byLocation.entries) {
+      final parts = entry.key.split('|');
+      if (parts.length < 3) continue;
+      final href = parts[1];
+      final paragraphIndex = int.tryParse(parts[2]);
+      if (paragraphIndex == null || paragraphIndex <= 0) continue;
+      final sectionKey = _sectionKey(href);
+      result.putIfAbsent(sectionKey, () => <int, String>{})[paragraphIndex] =
+          entry.value;
+    }
+    return result;
+  }
+
+  _GeneratedPageBreakMarkerOccurrence? _firstPageBreakMarkerOccurrence(
+    List<LibraryBookBlock> blocks,
+  ) {
+    for (final block in blocks) {
+      final markers = _extractPageBreakMarkers(block.html);
+      if (markers.isNotEmpty) {
+        return markers.first;
+      }
+    }
+    return null;
+  }
+
+  List<_GeneratedPageBreakMarkerOccurrence> _extractPageBreakMarkers(
+    String html,
+  ) {
+    final markers = <_GeneratedPageBreakMarkerOccurrence>[];
+    final spanPattern = RegExp(
+      r'<span\b([^>]*)>(.*?)</span>',
+      caseSensitive: false,
+      dotAll: true,
+    );
+    for (final match in spanPattern.allMatches(html)) {
+      final attrs = match.group(1) ?? '';
+      final lowerAttrs = attrs.toLowerCase();
+      if (!lowerAttrs.contains('pagebreak')) {
+        continue;
+      }
+      final titleMatch = RegExp(
+        r'''title\s*=\s*["'](\d{1,4})["']''',
+        caseSensitive: false,
+      ).firstMatch(attrs);
+      if (titleMatch == null) continue;
+      final pageNumber = int.tryParse(titleMatch.group(1)!);
+      if (pageNumber == null) continue;
+      final textBefore = _stripHtmlForRefCode(html.substring(0, match.start));
+      final isInsideParagraph = textBefore.trim().isNotEmpty;
+      final preview = _pageBreakPreview(match.group(0) ?? '');
+      markers.add(
+        _GeneratedPageBreakMarkerOccurrence(
+          pageNumber: pageNumber,
+          isInsideParagraph: isInsideParagraph,
+          preview: preview,
+        ),
+      );
+    }
+    return markers;
+  }
+
+  String _paragraphPreview(String value) {
+    final cleaned = _stripHtmlForRefCode(value);
+    if (cleaned.isEmpty) {
+      return '(none)';
+    }
+    return cleaned.length > 60 ? cleaned.substring(0, 60) : cleaned;
+  }
+
+  String _pageBreakPreview(String value) {
+    final cleaned = _stripHtmlForRefCode(value);
+    if (cleaned.isEmpty) {
+      return '(none)';
+    }
+    return cleaned.length > 40 ? cleaned.substring(0, 40) : cleaned;
+  }
+
+  String _stripHtmlForRefCode(String value) {
+    final stripped = value
+        .replaceAll(RegExp(r'<[^>]+>'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return stripped;
+  }
+
+  String _refCodeLocationKey({
+    required String libraryItemId,
+    required String href,
+    required int paragraphIndex,
+  }) {
+    return '$libraryItemId|${_sectionKey(href)}|$paragraphIndex';
+  }
+
+  _PageMarker? _pageMarkerFromText(String? text) {
+    final clean = text?.trim() ?? '';
+    if (clean.isEmpty) return null;
+    final match = RegExp(r'\[(\d{1,4})\]').firstMatch(clean);
+    if (match == null) return null;
+    final pageNumber = int.tryParse(match.group(1)!);
+    if (pageNumber == null) return null;
+    return _PageMarker(pageNumber);
+  }
+
+  String _sectionKey(String value) {
+    return p.normalize(value).toLowerCase();
+  }
+
   Future<void> _openContentsPopup() async {
     final entries = _navigationDisplayEntries;
     if (entries.isEmpty && _sections.isEmpty) return;
@@ -1197,6 +1799,18 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         ? null
         : _sections[_selectedIndex.clamp(0, _sections.length - 1)];
     final sectionBlocks = currentSection?.blocks ?? const <LibraryBookBlock>[];
+    final sectionReferenceCodes = currentSection == null
+        ? const <int, String>{}
+        : item.isDevotional
+        ? const <int, String>{}
+        : _paragraphReferenceCodesBySection[_sectionKey(
+                currentSection.entryName,
+              )] ??
+              const <int, String>{};
+    final shouldLogRefCodeDiagnostics =
+        _libraryRefCodeDiagnosticsEnabled &&
+        _showRefCodes &&
+        widget.item.displayTitle.toLowerCase().contains('great controversy');
     final showSectionTitle = _shouldShowSectionTitle(
       sectionBlocks,
       currentSection?.title ?? '',
@@ -1206,6 +1820,58 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         (theme.textTheme.bodyLarge?.fontSize ?? 16) * _fontScale;
     final titleFontSize =
         (theme.textTheme.headlineSmall?.fontSize ?? 24) * _fontScale;
+    final sectionBlockWidgets = <Widget>[];
+    if (sectionBlocks.isNotEmpty) {
+      var paragraphIndex = 0;
+      var devotionalFallbackParagraphCount = 0;
+      for (var index = 0; index < sectionBlocks.length; index++) {
+        final block = sectionBlocks[index];
+        final isParagraph = block.kind == 'paragraph';
+        if (isParagraph) {
+          paragraphIndex += 1;
+        }
+
+        final referenceCode = isParagraph
+            ? (item.isDevotional
+                  ? libraryReaderDevotionalFallbackRefCodeForBlock(
+                      item: item,
+                      sectionTitle: currentSection?.title ?? '',
+                      block: block,
+                      fallbackParagraphCount:
+                          devotionalFallbackParagraphCount,
+                    )
+                  : _refCodeByLocation[_refCodeLocationKey(
+                          libraryItemId: item.id,
+                          href: currentSection?.entryName ?? '',
+                          paragraphIndex: paragraphIndex,
+                        )] ??
+                        sectionReferenceCodes[paragraphIndex])
+            : null;
+        if (item.isDevotional && referenceCode != null) {
+          devotionalFallbackParagraphCount += 1;
+        }
+        sectionBlockWidgets.add(
+          _SectionBlockView(
+            key: _keyForBlock(_blockTargetKey(block, index)),
+            block: block,
+            sectionTitle: currentSection?.title ?? '',
+            sectionEntryName: currentSection?.entryName ?? '',
+            paragraphIndex: isParagraph ? paragraphIndex : null,
+            textColor: textColor,
+            subduedColor: subduedColor,
+            bodyFontSize: bodyFontSize,
+            searchQuery: widget.searchQuery,
+            highlightTerms: widget.highlightTerms,
+            topPadding: index == 0 ? 0 : (block.isHeading ? 18 : 6),
+            bottomPadding: block.isHeading ? 12 : 14,
+            isNightMode: isNight,
+            showRefCodes: _showRefCodes,
+            referenceCode: referenceCode,
+            diagnosticLoggingEnabled: shouldLogRefCodeDiagnostics,
+          ),
+        );
+      }
+    }
 
     return Scaffold(
       backgroundColor: background,
@@ -1243,6 +1909,17 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                       ),
                     ),
                     const Spacer(),
+                    FilledButton.tonalIcon(
+                      onPressed: _openSearch,
+                      icon: const Icon(Icons.search),
+                      label: const Text('Search'),
+                      style: FilledButton.styleFrom(
+                        foregroundColor: textColor,
+                        backgroundColor: cardBackground,
+                        side: BorderSide(color: cardBorder),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
                     FilledButton.tonalIcon(
                       onPressed: _close,
                       icon: const Icon(Icons.library_books_outlined),
@@ -1356,33 +2033,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                                             ),
                                       )
                                     else
-                                      for (
-                                        var index = 0;
-                                        index < sectionBlocks.length;
-                                        index++
-                                      ) ...[
-                                        _SectionBlockView(
-                                          key: _keyForBlock(
-                                            _blockTargetKey(
-                                              sectionBlocks[index],
-                                              index,
-                                            ),
-                                          ),
-                                          block: sectionBlocks[index],
-                                          textColor: textColor,
-                                          bodyFontSize: bodyFontSize,
-                                          topPadding: index == 0
-                                              ? 0
-                                              : (sectionBlocks[index].isHeading
-                                                    ? 18
-                                                    : 6),
-                                          bottomPadding:
-                                              sectionBlocks[index].isHeading
-                                              ? 12
-                                              : 14,
-                                          isNightMode: isNight,
-                                        ),
-                                      ],
+                                      ...sectionBlockWidgets,
                                   ],
                                 ),
                               ),
@@ -1434,6 +2085,15 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                     onPressed: () => setState(() => _nightMode = !_nightMode),
                   ),
                   const SizedBox(width: 12),
+                  _ToolbarPillButton(
+                    isNightMode: isNight,
+                    icon: _showRefCodes
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    label: _showRefCodes ? 'Hide Ref Codes' : 'Show Ref Codes',
+                    onPressed: _sections.isEmpty ? null : _toggleShowRefCodes,
+                  ),
+                  const SizedBox(width: 12),
                   _ZoomCluster(
                     isNightMode: isNight,
                     valueLabel: '${(_fontScale * 100).round()}%',
@@ -1462,206 +2122,30 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   }
 }
 
-String _normalizeReaderLabel(String value) {
-  return value
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
+class _PageMarker {
+  const _PageMarker(this.pageNumber);
+
+  final int pageNumber;
 }
 
-bool _shouldShowSectionTitle(
-  List<LibraryBookBlock> blocks,
-  String sectionTitle,
-) {
-  final normalizedSectionTitle = _normalizeReaderLabel(sectionTitle);
-  if (normalizedSectionTitle.isEmpty || blocks.isEmpty) {
-    return true;
-  }
+class _ParagraphReferenceCodeLoadResult {
+  const _ParagraphReferenceCodeLoadResult({
+    required this.bySection,
+    required this.byLocation,
+  });
 
-  for (final block in blocks) {
-    if (block.isHeading &&
-        _normalizeReaderLabel(block.text) == normalizedSectionTitle) {
-      return false;
-    }
-  }
-
-  return true;
+  final Map<String, Map<int, String>> bySection;
+  final Map<String, String> byLocation;
 }
 
-bool _hasEpubClass(String? className, String target) {
-  if (className == null || className.trim().isEmpty) return false;
-  final tokens = className
-      .toLowerCase()
-      .split(RegExp(r'[\s_-]+'))
-      .where((token) => token.isNotEmpty);
-  return tokens.contains(target.toLowerCase());
-}
+class _GeneratedPageBreakMarkerOccurrence {
+  const _GeneratedPageBreakMarkerOccurrence({
+    required this.pageNumber,
+    required this.isInsideParagraph,
+    required this.preview,
+  });
 
-double _headingFontScale(int? level) {
-  switch (level) {
-    case 1:
-      return 1.32;
-    case 2:
-      return 1.24;
-    case 3:
-      return 1.18;
-    case 4:
-      return 1.12;
-    case 5:
-      return 1.08;
-    case 6:
-      return 1.04;
-    default:
-      return 1.12;
-  }
-}
-
-bool _isReaderChapterOneLabel(String value) {
-  final normalized = _normalizeReaderLabel(value);
-  if (normalized.isEmpty) return false;
-
-  const prefixes = <String>[
-    'chapter 1',
-    'chapter i',
-    'chapter one',
-    '1 ',
-    '1.',
-    '1)',
-    'i ',
-    'i.',
-    'i)',
-  ];
-  for (final prefix in prefixes) {
-    if (normalized == prefix.trim() || normalized.startsWith(prefix)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-String? _cleanNavigationHref(String? href) {
-  final value = href?.trim() ?? '';
-  if (value.isEmpty) return null;
-  final clean = value.split('#').first.split('?').first.trim();
-  if (clean.isEmpty) return null;
-  return p.normalize(clean);
-}
-
-bool _hrefMatchesSection(String sectionEntryName, String normalizedHref) {
-  final normalizedSectionHref = p.normalize(sectionEntryName).toLowerCase();
-  if (normalizedSectionHref == normalizedHref) return true;
-  return p.basename(normalizedSectionHref) == p.basename(normalizedHref);
-}
-
-bool _isReaderFrontMatterLabel(String value) {
-  final normalized = _normalizeReaderLabel(value);
-  if (normalized.isEmpty) return false;
-
-  const exactMatches = <String>{
-    'cover',
-    'title page',
-    'titlepage',
-    'table of contents',
-    'contents',
-    'toc',
-    'nav',
-    'preface',
-    'foreword',
-    'introduction',
-    'about this book',
-    'about book',
-    'aboutbook',
-    'about the author',
-    'information about this book',
-    'copyright',
-    'publisher note',
-    'publisher',
-    'editor note',
-    'editorial note',
-    'editorial',
-    'publication information',
-    'source credits',
-    'dedication',
-    'acknowledgments',
-    'acknowledgements',
-    'index',
-    'bibliography',
-    'appendix',
-  };
-  if (exactMatches.contains(normalized)) return true;
-
-  const prefixes = <String>[
-    'cover ',
-    'title page',
-    'titlepage',
-    'table of contents',
-    'contents',
-    'preface',
-    'foreword',
-    'introduction',
-    'about this book',
-    'about book',
-    'aboutbook',
-    'about the author',
-    'information about this book',
-    'copyright',
-    'publisher note',
-    'publisher',
-    'editor note',
-    'editorial note',
-    'editorial',
-    'publication information',
-    'source credits',
-    'dedication',
-    'acknowledgments',
-    'acknowledgements',
-    'index',
-    'bibliography',
-    'appendix',
-  ];
-  for (final prefix in prefixes) {
-    if (normalized.startsWith(prefix)) return true;
-  }
-
-  return false;
-}
-
-Color _readerBackgroundColor(ThemeData theme, bool isNight) {
-  if (!isNight) return theme.scaffoldBackgroundColor;
-  return const Color(0xFF0B0D11);
-}
-
-Color _readerSurfaceColor(ThemeData theme, bool isNight) {
-  if (!isNight) return theme.colorScheme.surface;
-  return const Color(0xFF12151B);
-}
-
-Color _readerSurfaceHighColor(ThemeData theme, bool isNight) {
-  if (!isNight) return theme.colorScheme.surfaceContainerHigh;
-  return const Color(0xFF151922);
-}
-
-Color _readerBorderColor(ThemeData theme, bool isNight) {
-  if (!isNight) return theme.colorScheme.outlineVariant;
-  return const Color(0xFF3A404A);
-}
-
-Color _readerTextColor(ThemeData theme, bool isNight) {
-  if (!isNight) return theme.colorScheme.onSurface;
-  return const Color(0xFFF7F1E5);
-}
-
-Color _readerSubduedColor(ThemeData theme, bool isNight) {
-  if (!isNight) return theme.colorScheme.onSurfaceVariant;
-  return const Color(0xFFC8BFAF);
-}
-
-Color _readerSelectedColor(ThemeData theme, bool isNight) {
-  final base = _readerSurfaceHighColor(theme, isNight);
-  return Color.alphaBlend(
-    theme.colorScheme.primary.withValues(alpha: 0.16),
-    base,
-  );
+  final int pageNumber;
+  final bool isInsideParagraph;
+  final String preview;
 }

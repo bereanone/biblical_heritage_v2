@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/library_root_service.dart';
+import 'elibrary_folder_policy.dart';
 
 class DemoDownloadService {
   DemoDownloadService._();
@@ -34,6 +36,7 @@ class DemoDownloadService {
 
   Future<DemoDownloadReport> run({
     bool refreshExisting = false,
+    bool dryRun = false,
     void Function(DemoDownloadProgress progress)? onProgress,
     bool Function()? isCancelled,
   }) async {
@@ -51,6 +54,7 @@ class DemoDownloadService {
       destinationRoot: destinationRoot,
       reportPrefix: 'demo_download_report',
       refreshExisting: refreshExisting,
+      dryRun: dryRun,
       selectedCollections: _collections,
       selectedFormats: _DownloadFormat.values,
       onProgress: onProgress,
@@ -66,6 +70,7 @@ class DemoDownloadService {
     bool installCommentaries = false,
     bool installEpub = false,
     bool installPdf = false,
+    bool dryRun = false,
     void Function(DemoDownloadProgress progress)? onProgress,
     bool Function()? isCancelled,
   }) async {
@@ -94,6 +99,7 @@ class DemoDownloadService {
       destinationRoot: rootPath,
       reportPrefix: 'production_elibrary_setup',
       refreshExisting: false,
+      dryRun: dryRun,
       selectedCollections: selectedCollections,
       selectedFormats: selectedFormats,
       onProgress: onProgress,
@@ -118,6 +124,7 @@ class DemoDownloadService {
     required String destinationRoot,
     required String reportPrefix,
     required bool refreshExisting,
+    required bool dryRun,
     required List<_CollectionSpec> selectedCollections,
     required List<_DownloadFormat> selectedFormats,
     required void Function(DemoDownloadProgress progress)? onProgress,
@@ -125,12 +132,17 @@ class DemoDownloadService {
     required String userAgent,
     required bool productionLayout,
   }) async {
-    await _prepareDestinationFolders(destinationRoot, productionLayout);
+    if (!dryRun) {
+      await _prepareDestinationFolders(destinationRoot, productionLayout);
+    }
     final reportRoot = productionLayout
         ? p.join(destinationRoot, 'download_reports')
         : p.join(destinationRoot, 'download_reports');
     final client = HttpClient()..autoUncompress = true;
     client.userAgent = userAgent;
+    final dryRunRoot = dryRun
+        ? await Directory.systemTemp.createTemp('studybible2_elibrary_dryrun_')
+        : null;
 
     final report = _MutableDemoDownloadReport(
       startedAt: startedAt,
@@ -143,6 +155,7 @@ class DemoDownloadService {
         selectedCollections,
         productionLayout: productionLayout,
       ),
+      dryRun: dryRun,
     );
 
     try {
@@ -212,29 +225,18 @@ class DemoDownloadService {
             final destinationPath = p.join(destinationRoot, relativePath);
             final destinationFile = File(destinationPath);
 
-            if (!refreshExisting && await destinationFile.exists()) {
-              report.skippedExistingCount += 1;
-              report.filesSkipped.add(
-                DemoDownloadFileRecord(
-                  title: book.title,
-                  collection: collection.label,
-                  format: format.name,
-                  sourceUrl: sourceUrl,
-                  relativePath: relativePath,
-                  fileName: p.basename(destinationPath),
-                  fileSize: await destinationFile.length(),
-                  sha256: null,
-                  status: 'skipped_existing',
-                  error: null,
-                ),
-              );
-              debugPrint(
-                '[DemoDownload] skipped existing ${collection.label} ${book.code} ${format.name}',
-              );
-              continue;
+            final stagingFile = dryRun
+                ? File(
+                    p.join(
+                      dryRunRoot!.path,
+                      '${collection.folderName}_${book.code}_${format.name}.downloading',
+                    ),
+                  )
+                : File('${destinationFile.path}.downloading');
+            if (await stagingFile.exists()) {
+              await stagingFile.delete();
             }
 
-            await destinationFile.parent.create(recursive: true);
             onProgress?.call(
               DemoDownloadProgress(
                 currentCollection: collection.label,
@@ -254,10 +256,88 @@ class DemoDownloadService {
             final downloadResult = await _downloadFile(
               client: client,
               sourceUrl: sourceUrl,
-              destinationFile: destinationFile,
+              destinationFile: stagingFile,
             );
 
             if (downloadResult.success) {
+              final stagedSize = await stagingFile.length();
+              final stagedHash = await _sha256ForFile(stagingFile);
+              if (await destinationFile.exists()) {
+                final destinationSize = await destinationFile.length();
+                final destinationHash = destinationSize == stagedSize
+                    ? await _sha256ForFile(destinationFile)
+                    : null;
+                if (destinationHash != null && destinationHash == stagedHash) {
+                  report.skippedExistingCount += 1;
+                  report.filesSkipped.add(
+                    DemoDownloadFileRecord(
+                      title: book.title,
+                      collection: collection.label,
+                      format: format.name,
+                      sourceUrl: sourceUrl,
+                      relativePath: relativePath,
+                      fileName: p.basename(destinationPath),
+                      fileSize: destinationSize,
+                      sha256: destinationHash,
+                      status: dryRun ? 'would_skip_existing' : 'skipped_existing',
+                      error: null,
+                    ),
+                  );
+                  await stagingFile.delete();
+                  debugPrint(
+                    '[DemoDownload] skipped existing ${collection.label} ${book.code} ${format.name}',
+                  );
+                  continue;
+                }
+
+                final quarantinePath = _uniqueQuarantinePath(
+                  rootPath: destinationRoot,
+                  sourcePath: destinationPath,
+                  suffix: 'conflict',
+                );
+                if (!dryRun) {
+                  final quarantineFile = File(quarantinePath);
+                  await quarantineFile.parent.create(recursive: true);
+                  if (await quarantineFile.exists()) {
+                    await quarantineFile.delete();
+                  }
+                  await stagingFile.rename(quarantineFile.path);
+                } else {
+                  await stagingFile.delete();
+                }
+                report.quarantinedCount += 1;
+                report.filesQuarantined.add(
+                  DemoDownloadFileRecord(
+                    title: book.title,
+                    collection: collection.label,
+                    format: format.name,
+                    sourceUrl: sourceUrl,
+                    relativePath: dryRun
+                        ? relativePath
+                        : p.relative(quarantinePath, from: destinationRoot),
+                    fileName: dryRun
+                        ? p.basename(destinationPath)
+                        : p.basename(quarantinePath),
+                    fileSize: stagedSize,
+                    sha256: stagedHash,
+                    status: dryRun
+                        ? 'would_quarantine_conflict'
+                        : 'quarantined_conflict',
+                    error: 'Destination file already exists with different content.',
+                  ),
+                );
+                debugPrint(
+                  '[DemoDownload] quarantined conflict ${collection.label} ${book.code} ${format.name}',
+                );
+                continue;
+              }
+
+              if (!dryRun) {
+                await destinationFile.parent.create(recursive: true);
+                await stagingFile.rename(destinationFile.path);
+              } else {
+                await stagingFile.delete();
+              }
               report.downloadedCount += 1;
               report.filesDownloaded.add(
                 DemoDownloadFileRecord(
@@ -267,10 +347,9 @@ class DemoDownloadService {
                   sourceUrl: sourceUrl,
                   relativePath: relativePath,
                   fileName: p.basename(destinationPath),
-                  fileSize:
-                      downloadResult.fileSize ?? await destinationFile.length(),
-                  sha256: null,
-                  status: 'downloaded',
+                  fileSize: stagedSize,
+                  sha256: stagedHash,
+                  status: dryRun ? 'would_download' : 'downloaded',
                   error: null,
                 ),
               );
@@ -290,6 +369,9 @@ class DemoDownloadService {
                   error: downloadResult.error,
                 ),
               );
+              if (await stagingFile.exists()) {
+                await stagingFile.delete();
+              }
             }
 
             debugPrint(
@@ -306,6 +388,15 @@ class DemoDownloadService {
       }
     } finally {
       client.close(force: true);
+      if (dryRunRoot != null) {
+        try {
+          if (await dryRunRoot.exists()) {
+            await dryRunRoot.delete(recursive: true);
+          }
+        } catch (_) {
+          // Ignore temp cleanup failures in dry-run mode.
+        }
+      }
     }
 
     report.completedAt = DateTime.now().toUtc();
@@ -519,6 +610,33 @@ class DemoDownloadService {
     }
   }
 
+  String _uniqueQuarantinePath({
+    required String rootPath,
+    required String sourcePath,
+    required String suffix,
+  }) {
+    final candidate = ELibraryFolderPolicy.quarantinePathFor(
+      rootPath,
+      sourcePath,
+      suffix: suffix,
+    );
+    final directory = p.dirname(candidate);
+    final base = p.basenameWithoutExtension(candidate);
+    final extension = p.extension(candidate);
+    var result = candidate;
+    var counter = 1;
+    while (File(result).existsSync()) {
+      result = p.join(directory, '${base}_$counter$extension');
+      counter += 1;
+    }
+    return result;
+  }
+
+  Future<String> _sha256ForFile(File file) async {
+    final digest = await sha256.bind(file.openRead()).first;
+    return digest.toString();
+  }
+
   Future<String> _fetchText(HttpClient client, String url) async {
     final request = await client.getUrl(Uri.parse(url));
     final response = await request.close();
@@ -576,6 +694,7 @@ class DemoDownloadReport {
     required this.startedAt,
     required this.completedAt,
     required this.elapsedSeconds,
+    required this.dryRun,
     required this.sourceCollectionUrls,
     required this.destinationRoot,
     required this.totalLinksDiscovered,
@@ -587,10 +706,12 @@ class DemoDownloadReport {
     required this.failedCount,
     required this.filesDownloaded,
     required this.filesSkipped,
+    required this.filesQuarantined,
     required this.failures,
     required this.usedStaticPageDiscovery,
     required this.usedFallbackManifest,
     required this.usedDirectUrlVerification,
+    required this.quarantinedCount,
     required this.destinationFolders,
     required this.reportFilePath,
   });
@@ -598,6 +719,7 @@ class DemoDownloadReport {
   final DateTime startedAt;
   final DateTime completedAt;
   final double elapsedSeconds;
+  final bool dryRun;
   final List<String> sourceCollectionUrls;
   final String destinationRoot;
   final int totalLinksDiscovered;
@@ -609,10 +731,12 @@ class DemoDownloadReport {
   final int failedCount;
   final List<DemoDownloadFileRecord> filesDownloaded;
   final List<DemoDownloadFileRecord> filesSkipped;
+  final List<DemoDownloadFileRecord> filesQuarantined;
   final List<DemoDownloadFileRecord> failures;
   final bool usedStaticPageDiscovery;
   final bool usedFallbackManifest;
   final bool usedDirectUrlVerification;
+  final int quarantinedCount;
   final List<String> destinationFolders;
   final String reportFilePath;
 
@@ -620,6 +744,7 @@ class DemoDownloadReport {
     'started_at': startedAt.toIso8601String(),
     'completed_at': completedAt.toIso8601String(),
     'elapsed_seconds': elapsedSeconds,
+    'dry_run': dryRun,
     'source_collection_urls': sourceCollectionUrls,
     'destination_root': destinationRoot,
     'total_links_discovered': totalLinksDiscovered,
@@ -635,10 +760,14 @@ class DemoDownloadReport {
     'files_skipped': filesSkipped
         .map((item) => item.toJson())
         .toList(growable: false),
+    'files_quarantined': filesQuarantined
+        .map((item) => item.toJson())
+        .toList(growable: false),
     'failures': failures.map((item) => item.toJson()).toList(growable: false),
     'used_static_page_discovery': usedStaticPageDiscovery,
     'used_fallback_manifest': usedFallbackManifest,
     'used_direct_url_verification': usedDirectUrlVerification,
+    'quarantined_count': quarantinedCount,
     'destination_folders': destinationFolders,
     'report_file_path': reportFilePath,
   };
@@ -715,6 +844,7 @@ class _MutableDemoDownloadReport {
     required this.sourceCollectionUrls,
     required this.destinationRoot,
     required this.destinationFolders,
+    required this.dryRun,
   });
 
   final DateTime startedAt;
@@ -722,15 +852,19 @@ class _MutableDemoDownloadReport {
   double elapsedSeconds = 0;
   final List<String> sourceCollectionUrls;
   final String destinationRoot;
+  final bool dryRun;
   int totalLinksDiscovered = 0;
   int epubDiscoveredCount = 0;
   int pdfDiscoveredCount = 0;
   int downloadedCount = 0;
   int skippedExistingCount = 0;
+  int quarantinedCount = 0;
   int failedCount = 0;
   final List<DemoDownloadFileRecord> filesDownloaded =
       <DemoDownloadFileRecord>[];
   final List<DemoDownloadFileRecord> filesSkipped = <DemoDownloadFileRecord>[];
+  final List<DemoDownloadFileRecord> filesQuarantined =
+      <DemoDownloadFileRecord>[];
   final List<DemoDownloadFileRecord> failures = <DemoDownloadFileRecord>[];
   bool usedStaticPageDiscovery = false;
   bool usedFallbackManifest = false;
@@ -743,6 +877,7 @@ class _MutableDemoDownloadReport {
       startedAt: startedAt,
       completedAt: done,
       elapsedSeconds: elapsedSeconds,
+      dryRun: dryRun,
       sourceCollectionUrls: sourceCollectionUrls,
       destinationRoot: destinationRoot,
       totalLinksDiscovered: totalLinksDiscovered,
@@ -760,10 +895,14 @@ class _MutableDemoDownloadReport {
         filesDownloaded,
       ),
       filesSkipped: List<DemoDownloadFileRecord>.unmodifiable(filesSkipped),
+      filesQuarantined: List<DemoDownloadFileRecord>.unmodifiable(
+        filesQuarantined,
+      ),
       failures: List<DemoDownloadFileRecord>.unmodifiable(failures),
       usedStaticPageDiscovery: usedStaticPageDiscovery,
       usedFallbackManifest: usedFallbackManifest,
       usedDirectUrlVerification: usedDirectUrlVerification,
+      quarantinedCount: quarantinedCount,
       destinationFolders: List<String>.unmodifiable(destinationFolders),
       reportFilePath: reportFilePath,
     );

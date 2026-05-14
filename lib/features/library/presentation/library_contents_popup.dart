@@ -202,6 +202,51 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
       if (entry == null) return;
 
       final isMonthHeading = _isDevotionalMonthHeading(item);
+      final hideAsFrontMatter =
+          !isMonthHeading &&
+          libraryReaderShouldHideDevotionalContentsEntry(
+            label: item.label,
+            href: item.href,
+          );
+      if (hideAsFrontMatter) {
+        return;
+      }
+      rows.add(
+        _ContentsPopupRow(
+          entry: entry,
+          depth: depth,
+          isMonthHeading: isMonthHeading,
+        ),
+      );
+
+      if (isMonthHeading && _expandedMonthId != item.id) {
+        return;
+      }
+
+      for (final child in tree.childrenByParent[item.id] ?? const []) {
+        visit(child, depth + 1);
+      }
+    }
+
+    for (final root in roots) {
+      visit(root, 0);
+    }
+
+    return rows.isNotEmpty ? rows : _visibleDevotionalRowsFallback(tree, roots);
+  }
+
+  List<_ContentsPopupRow> _visibleDevotionalRowsFallback(
+    LibraryNavigationTreeResult tree,
+    List<LibraryCatalogNavigationItem> roots,
+  ) {
+    final rows = <_ContentsPopupRow>[];
+    final entriesById = _entriesById;
+
+    void visit(LibraryCatalogNavigationItem item, int depth) {
+      final entry = entriesById[item.id];
+      if (entry == null) return;
+
+      final isMonthHeading = _isDevotionalMonthHeading(item);
       rows.add(
         _ContentsPopupRow(
           entry: entry,
@@ -297,7 +342,10 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
   _NavigationDisplayEntry? _initialTargetEntry() {
     if (widget.entries.isNotEmpty) {
       for (final entry in widget.entries) {
-        if (entry.item.isBodyStart) {
+        final href = _cleanNavigationHref(entry.item.href);
+        final entryLabel = p.basenameWithoutExtension(href ?? entry.item.label);
+        if (_isReaderChapterOneLabel(entry.item.label) ||
+            _isReaderChapterOneLabel(entryLabel)) {
           return entry;
         }
       }
@@ -305,9 +353,18 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
       for (final entry in widget.entries) {
         final href = _cleanNavigationHref(entry.item.href);
         final entryLabel = p.basenameWithoutExtension(href ?? entry.item.label);
-        if (_isReaderFrontMatterLabel(entry.item.label) ||
-            _isReaderFrontMatterLabel(entryLabel) ||
-            entry.item.isFrontMatter) {
+        if (entry.item.isBodyStart &&
+            !_isReaderMetadataHelpLabel(entry.item.label) &&
+            !_isReaderMetadataHelpLabel(entryLabel)) {
+          return entry;
+        }
+      }
+
+      for (final entry in widget.entries) {
+        final href = _cleanNavigationHref(entry.item.href);
+        final entryLabel = p.basenameWithoutExtension(href ?? entry.item.label);
+        if (_isReaderMetadataHelpLabel(entry.item.label) ||
+            _isReaderMetadataHelpLabel(entryLabel)) {
           continue;
         }
         return entry;
@@ -331,8 +388,8 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
 
     for (var index = 0; index < sections.length; index++) {
       final section = sections[index];
-      if (_isReaderFrontMatterLabel(section.title) ||
-          _isReaderFrontMatterLabel(
+      if (_isReaderMetadataHelpLabel(section.title) ||
+          _isReaderMetadataHelpLabel(
             p.basenameWithoutExtension(section.entryName),
           )) {
         continue;

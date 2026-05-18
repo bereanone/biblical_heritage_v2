@@ -8,6 +8,8 @@ import 'package:path/path.dart' as p;
 import '../../../core/bootstrap/library_root_service.dart';
 import 'elibrary_folder_policy.dart';
 
+const bool _debugDemoDownloadLogs = false;
+
 class DemoDownloadService {
   DemoDownloadService._();
 
@@ -31,6 +33,30 @@ class DemoDownloadService {
       url: 'https://egwwritings.org/allCollection/en/1371',
       fallbackUrl: 'https://next.egwwritings.org/allCollection/en/1371',
       folderName: 'Commentaries',
+    ),
+    _CollectionSpec(
+      label: 'EGW Misc Collections',
+      url: 'https://egwwritings.org/allCollection/en/10',
+      fallbackUrl: 'https://next.egwwritings.org/allCollection/en/10',
+      folderName: 'EGW_Misc_Collections',
+    ),
+    _CollectionSpec(
+      label: 'EGW Pamphlets',
+      url: 'https://egwwritings.org/allCollection/en/8',
+      fallbackUrl: 'https://next.egwwritings.org/allCollection/en/8',
+      folderName: 'EGW_Pamphlets',
+    ),
+    _CollectionSpec(
+      label: 'EGW Periodicals',
+      url: 'https://egwwritings.org/allCollection/en/5',
+      fallbackUrl: 'https://next.egwwritings.org/allCollection/en/5',
+      folderName: 'EGW_Periodicals',
+    ),
+    _CollectionSpec(
+      label: 'EGW Manuscript Releases',
+      url: 'https://egwwritings.org/allCollection/en/1376',
+      fallbackUrl: 'https://next.egwwritings.org/allCollection/en/1376',
+      folderName: 'EGW_Manuscript_Releases',
     ),
   ];
 
@@ -68,6 +94,10 @@ class DemoDownloadService {
     bool installBooks = false,
     bool installDevotionals = false,
     bool installCommentaries = false,
+    bool installMiscCollections = false,
+    bool installPamphlets = false,
+    bool installPeriodicals = false,
+    bool installManuscriptReleases = false,
     bool installEpub = false,
     bool installPdf = false,
     bool dryRun = false,
@@ -85,6 +115,10 @@ class DemoDownloadService {
       if (installBooks) _collections[0],
       if (installDevotionals) _collections[1],
       if (installCommentaries) _collections[2],
+      if (installMiscCollections) _collections[3],
+      if (installPamphlets) _collections[4],
+      if (installPeriodicals) _collections[5],
+      if (installManuscriptReleases) _collections[6],
     ];
     final selectedFormats = <_DownloadFormat>[
       if (installEpub) _DownloadFormat.epub,
@@ -166,9 +200,11 @@ class DemoDownloadService {
       ) {
         if (isCancelled?.call() ?? false) break;
         final collection = selectedCollections[collectionIndex];
-        debugPrint(
-          '[DemoDownload] discovering ${collection.label} (${collection.url})',
-        );
+        if (_debugDemoDownloadLogs) {
+          debugPrint(
+            '[DemoDownload] discovering ${collection.label} (${collection.url})',
+          );
+        }
         onProgress?.call(
           DemoDownloadProgress(
             currentCollection: collection.label,
@@ -193,9 +229,11 @@ class DemoDownloadService {
         if (discovery.usedFallbackManifest) {
           report.usedFallbackManifest = true;
         }
-        debugPrint(
-          '[DemoDownload] ${collection.label} books discovered=${books.length}',
-        );
+        if (_debugDemoDownloadLogs) {
+          debugPrint(
+            '[DemoDownload] ${collection.label} books discovered=${books.length}',
+          );
+        }
 
         for (var bookIndex = 0; bookIndex < books.length; bookIndex++) {
           if (isCancelled?.call() ?? false) break;
@@ -284,9 +322,11 @@ class DemoDownloadService {
                     ),
                   );
                   await stagingFile.delete();
-                  debugPrint(
-                    '[DemoDownload] skipped existing ${collection.label} ${book.code} ${format.name}',
-                  );
+                  if (_debugDemoDownloadLogs) {
+                    debugPrint(
+                      '[DemoDownload] skipped existing ${collection.label} ${book.code} ${format.name}',
+                    );
+                  }
                   continue;
                 }
 
@@ -326,9 +366,11 @@ class DemoDownloadService {
                     error: 'Destination file already exists with different content.',
                   ),
                 );
-                debugPrint(
-                  '[DemoDownload] quarantined conflict ${collection.label} ${book.code} ${format.name}',
-                );
+                if (_debugDemoDownloadLogs) {
+                  debugPrint(
+                    '[DemoDownload] quarantined conflict ${collection.label} ${book.code} ${format.name}',
+                  );
+                }
                 continue;
               }
 
@@ -374,13 +416,15 @@ class DemoDownloadService {
               }
             }
 
-            debugPrint(
-              '[DemoDownload] ${collection.label} ${book.code} ${format.name} '
-              '${downloadResult.success ? 'ok' : 'failed'} '
-              'downloaded=${report.downloadedCount} '
-              'skipped=${report.skippedExistingCount} '
-              'failed=${report.failedCount}',
-            );
+            if (_debugDemoDownloadLogs) {
+              debugPrint(
+                '[DemoDownload] ${collection.label} ${book.code} ${format.name} '
+                '${downloadResult.success ? 'ok' : 'failed'} '
+                'downloaded=${report.downloadedCount} '
+                'skipped=${report.skippedExistingCount} '
+                'failed=${report.failedCount}',
+              );
+            }
 
             await Future<void>.delayed(const Duration(milliseconds: 120));
           }
@@ -432,11 +476,19 @@ class DemoDownloadService {
         Directory(p.join(epubRoot.path, 'Commentaries', 'User')),
         Directory(p.join(epubRoot.path, 'Research', 'EGW_Books')),
         Directory(p.join(epubRoot.path, 'Research', 'EGW_Devotionals')),
+        Directory(p.join(epubRoot.path, 'Research', 'EGW_Misc_Collections')),
+        Directory(p.join(epubRoot.path, 'Research', 'EGW_Pamphlets')),
+        Directory(p.join(epubRoot.path, 'Research', 'EGW_Periodicals')),
+        Directory(p.join(epubRoot.path, 'Research', 'EGW_Manuscript_Releases')),
         Directory(p.join(epubRoot.path, 'Research', 'User')),
         Directory(p.join(pdfRoot.path, 'Commentaries', 'EGW_Commentaries')),
         Directory(p.join(pdfRoot.path, 'Commentaries', 'User')),
         Directory(p.join(pdfRoot.path, 'Research', 'EGW_Books')),
         Directory(p.join(pdfRoot.path, 'Research', 'EGW_Devotionals')),
+        Directory(p.join(pdfRoot.path, 'Research', 'EGW_Misc_Collections')),
+        Directory(p.join(pdfRoot.path, 'Research', 'EGW_Pamphlets')),
+        Directory(p.join(pdfRoot.path, 'Research', 'EGW_Periodicals')),
+        Directory(p.join(pdfRoot.path, 'Research', 'EGW_Manuscript_Releases')),
         Directory(p.join(pdfRoot.path, 'Research', 'User')),
       ]);
     } else {
@@ -476,11 +528,19 @@ class DemoDownloadService {
           'ePubs/Commentaries/User',
           'ePubs/Research/EGW_Books',
           'ePubs/Research/EGW_Devotionals',
+          'ePubs/Research/EGW_Misc_Collections',
+          'ePubs/Research/EGW_Pamphlets',
+          'ePubs/Research/EGW_Periodicals',
+          'ePubs/Research/EGW_Manuscript_Releases',
           'ePubs/Research/User',
           'PDFs/Commentaries/EGW_Commentaries',
           'PDFs/Commentaries/User',
           'PDFs/Research/EGW_Books',
           'PDFs/Research/EGW_Devotionals',
+          'PDFs/Research/EGW_Misc_Collections',
+          'PDFs/Research/EGW_Pamphlets',
+          'PDFs/Research/EGW_Periodicals',
+          'PDFs/Research/EGW_Manuscript_Releases',
           'PDFs/Research/User',
         ].map((relative) => p.join(destinationRoot, relative)),
       );

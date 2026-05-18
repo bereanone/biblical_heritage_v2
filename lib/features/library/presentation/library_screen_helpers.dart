@@ -82,6 +82,15 @@ List<String> _naturalSortTokens(String value) {
   return tokens;
 }
 
+String _sortableTitle(String displayTitle) {
+  final trimmed = displayTitle.trim();
+  final lower = trimmed.toLowerCase();
+  if (lower.startsWith('the ') && trimmed.length > 4) return trimmed.substring(4);
+  if (lower.startsWith('an ') && trimmed.length > 3) return trimmed.substring(3);
+  if (lower.startsWith('a ') && trimmed.length > 2) return trimmed.substring(2);
+  return trimmed;
+}
+
 T? _firstWhereOrNull<T>(Iterable<T> items, bool Function(T item) test) {
   for (final item in items) {
     if (test(item)) return item;
@@ -97,7 +106,7 @@ String _normalizeLibraryText(String value) {
       .trim();
 }
 
-bool _isLibraryFrontMatterLabel(String value) {
+bool _isLibraryMetadataHelpLabel(String value) {
   final normalized = _normalizeLibraryText(value);
   if (normalized.isEmpty) return false;
 
@@ -109,14 +118,17 @@ bool _isLibraryFrontMatterLabel(String value) {
     'contents',
     'toc',
     'nav',
-    'preface',
     'foreword',
-    'introduction',
+    'preface',
     'about this book',
     'about book',
     'aboutbook',
     'about the author',
     'information about this book',
+    'overview',
+    'further links',
+    'further information',
+    'end user license agreement',
     'copyright',
     'publisher note',
     'publisher',
@@ -130,7 +142,8 @@ bool _isLibraryFrontMatterLabel(String value) {
     'acknowledgements',
     'index',
     'bibliography',
-    'appendix',
+    'ellen g white',
+    'ellen white',
   };
   if (exactMatches.contains(normalized)) return true;
 
@@ -140,14 +153,19 @@ bool _isLibraryFrontMatterLabel(String value) {
     'titlepage',
     'table of contents',
     'contents',
-    'preface',
+    'toc',
+    'nav',
     'foreword',
-    'introduction',
+    'preface',
     'about this book',
     'about book',
     'aboutbook',
     'about the author',
     'information about this book',
+    'overview',
+    'further links',
+    'further information',
+    'end user license agreement',
     'copyright',
     'publisher note',
     'publisher',
@@ -161,7 +179,8 @@ bool _isLibraryFrontMatterLabel(String value) {
     'acknowledgements',
     'index',
     'bibliography',
-    'appendix',
+    'ellen g white',
+    'ellen white',
   ];
   for (final prefix in prefixes) {
     if (normalized.startsWith(prefix)) return true;

@@ -16,7 +16,6 @@ class TagDialogHashTab extends StatelessWidget {
     required this.searchController,
     required this.selectedCategory,
     required this.categoryOptions,
-    required this.categoryFieldRevision,
     required this.categoryFilter,
     required this.sortMode,
     required this.working,
@@ -39,7 +38,6 @@ class TagDialogHashTab extends StatelessWidget {
   final TextEditingController searchController;
   final String? selectedCategory;
   final List<String> categoryOptions;
-  final int categoryFieldRevision;
   final String? categoryFilter;
   final TagSortMode sortMode;
   final bool working;
@@ -59,6 +57,25 @@ class TagDialogHashTab extends StatelessWidget {
     }
 
     final theme = Theme.of(context);
+    final selectedCategoryText = selectedCategory?.trim() ?? '';
+    final hasSelectedCategory = selectedCategoryText.isNotEmpty;
+    final categoryItems = <String>[
+      ...categoryOptions,
+      if (hasSelectedCategory &&
+          !categoryOptions.any(
+            (category) =>
+                category.toLowerCase() == selectedCategoryText.toLowerCase(),
+          ))
+        selectedCategoryText,
+    ];
+    final effectiveCategoryValue = categoryItems.isEmpty
+        ? null
+        : categoryItems.firstWhere(
+            (category) =>
+                category.toLowerCase() == selectedCategoryText.toLowerCase(),
+            orElse: () => '',
+          );
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
       children: [
@@ -130,38 +147,65 @@ class TagDialogHashTab extends StatelessWidget {
           children: [
             Expanded(
               flex: 5,
-              child: DropdownButtonFormField<String?>(
-                key: ValueKey(categoryFieldRevision),
-                initialValue: selectedCategory,
-                decoration: InputDecoration(
-                  labelText: 'Category',
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                  filled: true,
-                  fillColor: TagDialogStyles.surfaceHigh(theme),
-                ),
-                items: [
-                  const DropdownMenuItem<String?>(
-                    value: null,
-                    child: Text('None'),
-                  ),
-                  ...categoryOptions.map(
-                    (category) => DropdownMenuItem<String?>(
-                      value: category,
-                      child: Text(category, maxLines: 1),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(left: 2, bottom: 5),
+                    child: Text(
+                      'Category',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: TagDialogStyles.body(theme),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                  const DropdownMenuItem<String?>(
-                    value: _addNewCategoryValue,
-                    child: Text('Add new...'),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: TagDialogStyles.surfaceHigh(theme),
+                      border: Border.all(
+                        color: TagDialogStyles.outlineColor(theme),
+                      ),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String?>(
+                        value: effectiveCategoryValue == null ||
+                                effectiveCategoryValue.isEmpty
+                            ? null
+                            : effectiveCategoryValue,
+                        isDense: true,
+                        isExpanded: true,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: TagDialogStyles.title(theme),
+                          fontWeight: FontWeight.w700,
+                        ),
+                        hint: const Text('None'),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('None'),
+                          ),
+                          ...categoryItems.map(
+                            (category) => DropdownMenuItem<String?>(
+                              value: category,
+                              child: Text(category, maxLines: 1),
+                            ),
+                          ),
+                          const DropdownMenuItem<String?>(
+                            value: _addNewCategoryValue,
+                            child: Text('Add new...'),
+                          ),
+                        ],
+                        onChanged: onCategoryChanged,
+                      ),
+                    ),
                   ),
                 ],
-                onChanged: onCategoryChanged,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: TagDialogStyles.title(theme),
-                  fontWeight: FontWeight.w700,
-                ),
-                isExpanded: true,
               ),
             ),
             const SizedBox(width: 6),

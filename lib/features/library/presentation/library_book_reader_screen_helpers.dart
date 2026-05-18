@@ -99,6 +99,8 @@ bool _isReaderMetadataHelpLabel(String value) {
     'contents',
     'toc',
     'nav',
+    'foreword',
+    'preface',
     'about this book',
     'about book',
     'aboutbook',
@@ -136,6 +138,8 @@ bool _isReaderMetadataHelpLabel(String value) {
     'contents',
     'toc',
     'nav',
+    'foreword',
+    'preface',
     'about this book',
     'about book',
     'aboutbook',
@@ -441,125 +445,55 @@ String _devotionalMonthDisplayName(int monthIndex) {
 }
 
 String? cleanDisplayRefCode(String? value) {
-  final cleaned = (value ?? '').trim().replaceAll(RegExp(r'\s+'), ' ');
-  if (cleaned.isEmpty) return null;
-  final lower = cleaned.toLowerCase();
-  if (lower.startsWith('elibrary:') ||
-      lower.startsWith('note:') ||
-      lower.contains('::') ||
-      lower.contains('oebps/') ||
-      lower.contains('.xhtml') ||
-      lower == 'book 0 0:0') {
-    return null;
-  }
-  if (RegExp(
-    r'^content\d+(?:\.xhtml)?$',
-    caseSensitive: false,
-  ).hasMatch(lower)) {
-    return null;
-  }
-  return cleaned;
+  return librarySafeUserFacingReferenceText(value);
 }
 
 String? libraryReaderBookAbbreviation(LibraryCatalogItem item) {
-  final fromDisplayTitle = _libraryReaderAbbreviationFromTitle(
-    item.displayTitle,
+  return libraryUserFacingBookAbbreviation(
+    title: item.displayTitle,
+    fileName: item.fileName,
+    relativePath: item.relativePath,
   );
-  if (fromDisplayTitle != null) return fromDisplayTitle;
-
-  final fromFileName = _libraryReaderAbbreviationFromPathSegment(item.fileName);
-  if (fromFileName != null) return fromFileName;
-
-  final fromRelativePath = _libraryReaderAbbreviationFromPathSegment(
-    item.relativePath,
-  );
-  if (fromRelativePath != null) return fromRelativePath;
-
-  return null;
 }
 
-String? _libraryReaderAbbreviationFromTitle(String value) {
-  final normalized = _normalizeLibraryReaderText(value);
-  if (normalized.isEmpty) return null;
+// Returns "RH July 21, 1851, par. 3" for a periodical article section.
+// sectionTitle must look like "July 21, 1851"; paragraphIndex is 1-based
+// within the current article XHTML (already so in the reader).
+String? libraryReaderPeriodicalRefCode({
+  required LibraryCatalogItem item,
+  required String sectionTitle,
+  required int? paragraphIndex,
+}) {
+  if (!item.isPeriodical) return null;
+  if (paragraphIndex == null || paragraphIndex <= 0) return null;
 
-  const rules = <({String needle, String code})>[
-    (needle: 'the great controversy', code: 'GC'),
-    (needle: 'the great controversy 1888', code: 'GC88'),
-    (needle: 'desire of ages', code: 'DA'),
-    (needle: 'christ triumphant', code: 'CTr'),
-    (needle: 'steps to christ', code: 'SC'),
-    (needle: 'patriarchs and prophets', code: 'PP'),
-    (needle: 'prophets and kings', code: 'PK'),
-    (needle: 'acts of the apostles', code: 'AA'),
-    (needle: 'early writings', code: 'EW'),
-    (needle: 'gospel workers', code: 'GW'),
-    (needle: 'life sketches', code: 'LS'),
-    (needle: 'ministry of healing', code: 'MH'),
-    (needle: 'christ s object lessons', code: 'COL'),
-    (needle: 'education', code: 'Ed.'),
-    (needle: 'thoughts from the mount of blessing', code: 'MB'),
-    (needle: 'the faith i live by', code: 'FLB'),
-    (needle: 'homeward bound', code: 'HB'),
-    (needle: 'maranatha', code: 'Mar'),
-    (needle: 'radiant religion', code: 'RRe'),
-    (needle: 'reflecting christ', code: 'RC'),
-    (needle: 'that i may know him', code: 'TMK'),
-    (needle: 'testimonies for the church vol 1', code: '1T'),
-    (needle: 'testimonies for the church vol 2', code: '2T'),
-    (needle: 'testimonies for the church vol 3', code: '3T'),
-    (needle: 'testimonies for the church vol 4', code: '4T'),
-    (needle: 'testimonies for the church vol 5', code: '5T'),
-    (needle: 'testimonies for the church vol 6', code: '6T'),
-    (needle: 'testimonies for the church vol 7', code: '7T'),
-    (needle: 'testimonies for the church vol 8', code: '8T'),
-    (needle: 'testimonies for the church vol 9', code: '9T'),
-    (needle: 'spiritual gifts vol 1', code: 'SG1'),
-  ];
+  final abbreviation = cleanDisplayRefCode(libraryReaderBookAbbreviation(item));
+  if (abbreviation == null || abbreviation.isEmpty) return null;
 
-  for (final rule in rules) {
-    if (normalized.contains(rule.needle)) {
-      return rule.code;
-    }
-  }
+  final date = _periodicalArticleDate(sectionTitle);
+  if (date == null) return null;
 
-  return null;
+  return '$abbreviation $date, par. $paragraphIndex';
 }
 
-String? _libraryReaderAbbreviationFromPathSegment(String value) {
-  final stem = p.basenameWithoutExtension(value).trim();
-  if (stem.isEmpty) return null;
+// Validates and normalises a section title that looks like "July 21, 1851".
+String? _periodicalArticleDate(String sectionTitle) {
+  final match = RegExp(
+    r'^(January|February|March|April|May|June|July|August|'
+    r'September|October|November|December)\s+(\d{1,2}),\s*(\d{4})$',
+    caseSensitive: false,
+  ).firstMatch(sectionTitle.trim());
+  if (match == null) return null;
 
-  final tokens = stem
-      .split(RegExp(r'[_\-\s]+'))
-      .map((token) => token.trim())
-      .where((token) => token.isNotEmpty)
-      .toList(growable: false);
-  for (final token in tokens.reversed) {
-    final upper = token.toUpperCase();
-    if (!RegExp(r'^[A-Z0-9]{2,5}$').hasMatch(upper)) continue;
-    if (RegExp(
-      r'^(EPUB|HTML|XHTML|CONTENT\d+)$',
-      caseSensitive: false,
-    ).hasMatch(upper)) {
-      continue;
-    }
-    if (RegExp(
-      r'^(RESEARCH|DEVOTIONALS?|COMMENTARIES?)$',
-      caseSensitive: false,
-    ).hasMatch(upper)) {
-      continue;
-    }
-    return upper;
-  }
-  return null;
+  final month = _capitalizeFirst(match.group(1)!);
+  final day = match.group(2)!;
+  final year = match.group(3)!;
+  return '$month $day, $year';
 }
 
-String _normalizeLibraryReaderText(String? value) {
-  return (value ?? '')
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
+String _capitalizeFirst(String value) {
+  if (value.isEmpty) return value;
+  return value[0].toUpperCase() + value.substring(1).toLowerCase();
 }
 
 Color _readerBackgroundColor(ThemeData theme, bool isNight) {

@@ -4,12 +4,38 @@ class UserV2Schema {
   UserV2Schema._();
 
   static Future<void> ensure(Database db, {required String deviceId}) async {
-    await _createCoreTables(db);
-    await _createSyncTables(db);
-    await _ensureLibraryLinkColumns(db);
-    await _ensureLibraryNavigationColumns(db);
-    await _seedDevicesTable(db, deviceId: deviceId);
-    await _seedSyncState(db, deviceId: deviceId);
+    await _retryOnLocked(() async {
+      await _createCoreTables(db);
+      await _createSyncTables(db);
+      await _ensureLibraryLinkColumns(db);
+      await _ensureLibraryNavigationColumns(db);
+      await _ensureElibraryRefIndex(db);
+      await _ensureLibraryTextBlocks(db);
+      await _seedDevicesTable(db, deviceId: deviceId);
+      await _seedSyncState(db, deviceId: deviceId);
+    });
+  }
+
+  // Retries fn up to 3 times with backoff when SQLite reports SQLITE_BUSY/LOCKED.
+  static Future<void> _retryOnLocked(Future<void> Function() fn) async {
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await fn();
+        return;
+      } catch (e) {
+        final msg = e.toString().toLowerCase();
+        final isLocked =
+            msg.contains('database is locked') ||
+            msg.contains('sqlite_busy') ||
+            msg.contains('code 5') ||
+            msg.contains('code 6');
+        if (isLocked && attempt < 3) {
+          await Future<void>.delayed(Duration(milliseconds: 500 * attempt));
+          continue;
+        }
+        rethrow;
+      }
+    }
   }
 
   static Future<void> _createCoreTables(Database db) async {
@@ -74,8 +100,11 @@ class UserV2Schema {
         chapter_number INTEGER NOT NULL,
         verse_number INTEGER NOT NULL,
         token_number INTEGER,
+        presentation_slide_region TEXT,
         created_at INTEGER NOT NULL,
         sort_order INTEGER,
+        note_format_json TEXT,
+        presentation_slide_number INTEGER,
         created_at_utc TEXT,
         updated_at_utc TEXT,
         deleted_at_utc TEXT,
@@ -97,6 +126,7 @@ class UserV2Schema {
         verse_number INTEGER NOT NULL,
         token_number INTEGER,
         content_html TEXT NOT NULL,
+        note_format_json TEXT,
         source_author TEXT,
         source_work_title TEXT,
         source_title_acronym TEXT,
@@ -260,7 +290,11 @@ class UserV2Schema {
         chapter INTEGER NOT NULL,
         verse_start INTEGER NOT NULL,
         verse_end INTEGER NOT NULL,
+        reference_code TEXT,
+        presentation_slide_number INTEGER,
+        presentation_slide_region TEXT,
         note_text TEXT,
+        note_format_json TEXT,
         sort_order INTEGER NOT NULL DEFAULT 0,
         source_device_name TEXT,
         legacy_group_id TEXT,
@@ -505,6 +539,30 @@ class UserV2Schema {
         sync_status TEXT NOT NULL DEFAULT 'pending',
         last_synced_at TEXT,
         change_id TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS presentation_item_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_type TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        tag_id INTEGER NOT NULL,
+        font_size_override REAL,
+        alignment TEXT,
+        layout TEXT,
+        allow_scroll INTEGER NOT NULL DEFAULT 1,
+        auto_fit INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL,
+        created_at TEXT,
+        created_at_utc TEXT,
+        updated_at_utc TEXT,
+        deleted_at_utc TEXT,
+        device_id TEXT,
+        revision INTEGER DEFAULT 1,
+        sync_status TEXT DEFAULT 'pending',
+        last_synced_at TEXT,
+        change_id TEXT,
+        UNIQUE(source_type, source_id, tag_id)
       )
     ''');
     await db.execute('''
@@ -770,6 +828,78 @@ class UserV2Schema {
       'body_order',
       'INTEGER',
     );
+  }
+
+  static Future<void> _ensureElibraryRefIndex(Database db) async {
+    final existingTables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='elibrary_ref_index'",
+    );
+    if (existingTables.isEmpty) {
+      await db.execute('''
+        CREATE TABLE elibrary_ref_index (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          library_item_id TEXT NOT NULL,
+          work_key TEXT,
+          edition_key TEXT,
+          edition_year INTEGER,
+          book_title TEXT,
+          book_abbrev TEXT NOT NULL,
+          href TEXT NOT NULL,
+          anchor_id TEXT,
+          paragraph_index INTEGER NOT NULL,
+          page_number INTEGER NOT NULL,
+          paragraph_on_page INTEGER NOT NULL,
+          ref_code TEXT NOT NULL,
+          stable_ref TEXT NOT NULL,
+          plain_text TEXT,
+          text_hash TEXT,
+          ref_source TEXT NOT NULL,
+          created_at TEXT,
+          updated_at TEXT,
+          UNIQUE(library_item_id, href, paragraph_index)
+        )
+      ''');
+    }
+
+    final existingIndexes = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_elibrary_ref_index_lookup'",
+    );
+    if (existingIndexes.isEmpty) {
+      await db.execute('''
+        CREATE INDEX idx_elibrary_ref_index_lookup
+        ON elibrary_ref_index (library_item_id, href, paragraph_index)
+      ''');
+    }
+  }
+
+  static Future<void> _ensureLibraryTextBlocks(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_text_blocks (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        library_item_id      TEXT    NOT NULL,
+        epub_href            TEXT    NOT NULL,
+        spine_index          INTEGER,
+        paragraph_index      INTEGER NOT NULL,
+        paragraph_on_section INTEGER NOT NULL DEFAULT 1,
+        section_title        TEXT,
+        plain_text           TEXT    NOT NULL,
+        created_at           TEXT    NOT NULL,
+        updated_at           TEXT    NOT NULL,
+        UNIQUE(library_item_id, epub_href, paragraph_index)
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_library_text_blocks_item
+      ON library_text_blocks (library_item_id)
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_library_text_blocks_item_spine
+      ON library_text_blocks (library_item_id, spine_index)
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_library_text_blocks_item_href
+      ON library_text_blocks (library_item_id, epub_href)
+    ''');
   }
 
   static Future<Set<String>> _tableColumns(

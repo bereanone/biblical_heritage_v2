@@ -8,6 +8,7 @@ import '../../../core/bootstrap/library_root_native.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/user_database.dart';
 import '../../reader/data/commentary_research_library_service.dart';
+import '../data/elibrary_duplicate_cleanup_service.dart';
 import '../data/elibrary_migration_service.dart';
 import '../data/demo_download_service.dart';
 
@@ -27,16 +28,26 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   bool _installBooks = true;
   bool _installDevotionals = true;
   bool _installCommentaries = true;
+  bool _installMiscCollections = true;
+  bool _installPamphlets = true;
+  bool _installPeriodicals = true;
+  bool _installManuscriptReleases = true;
   bool _installEpub = true;
   bool _installPdf = true;
   DemoDownloadProgress? _progress;
   DemoDownloadReport? _downloadReport;
   LegacyELibraryMigrationReport? _migrationReport;
+  ELibraryDuplicateCleanupReport? _cleanupReport;
   String? _setupReportPath;
   String? _indexReportPath;
   String? _error;
   int _indexedCount = 0;
   int _indexingErrors = 0;
+  bool _manualIndexing = false;
+  String? _manualIndexStatus;
+  int _manualIndexCompleted = 0;
+  int _manualIndexTotal = 0;
+  String? _manualIndexCurrentTitle;
 
   @override
   void initState() {
@@ -57,6 +68,44 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       _selection = selection;
       _loading = false;
     });
+  }
+
+  Future<void> _runManualIndex() async {
+    if (_manualIndexing) return;
+    setState(() {
+      _manualIndexing = true;
+      _manualIndexStatus = null;
+      _manualIndexCompleted = 0;
+      _manualIndexTotal = 0;
+      _manualIndexCurrentTitle = null;
+    });
+    try {
+      final result = await CommentaryResearchLibraryService.instance
+          .indexLocalCatalogedEpubs(
+            onProgress: (completed, total, currentTitle) {
+              if (!mounted) return;
+              setState(() {
+                _manualIndexCompleted = completed;
+                _manualIndexTotal = total;
+                _manualIndexCurrentTitle = currentTitle;
+              });
+            },
+          );
+      if (!mounted) return;
+      final String status;
+      if (result.indexed == 0 && result.skipped == 0 && result.failed == 0) {
+        status = 'Library is already indexed';
+      } else {
+        status =
+            'Indexing complete — ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed';
+      }
+      setState(() => _manualIndexStatus = status);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _manualIndexStatus = 'Indexing failed: $error');
+    } finally {
+      if (mounted) setState(() => _manualIndexing = false);
+    }
   }
 
   Future<void> _chooseRoot() async {
@@ -93,6 +142,10 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       _installBooks = true;
       _installDevotionals = true;
       _installCommentaries = true;
+      _installMiscCollections = true;
+      _installPamphlets = true;
+      _installPeriodicals = true;
+      _installManuscriptReleases = true;
       _installEpub = true;
       _installPdf = true;
     });
@@ -124,6 +177,10 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       _installBooks = false;
       _installDevotionals = false;
       _installCommentaries = false;
+      _installMiscCollections = false;
+      _installPamphlets = false;
+      _installPeriodicals = false;
+      _installManuscriptReleases = false;
     });
   }
 
@@ -145,6 +202,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       _error = null;
       _downloadReport = null;
       _migrationReport = null;
+      _cleanupReport = null;
       _setupReportPath = null;
       _indexReportPath = null;
       _progress = null;
@@ -173,6 +231,10 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
             installBooks: _installBooks,
             installDevotionals: _installDevotionals,
             installCommentaries: _installCommentaries,
+            installMiscCollections: _installMiscCollections,
+            installPamphlets: _installPamphlets,
+            installPeriodicals: _installPeriodicals,
+            installManuscriptReleases: _installManuscriptReleases,
             installEpub: _installEpub,
             installPdf: _installPdf,
             onProgress: (progress) {
@@ -185,6 +247,17 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       if (!mounted) return;
       setState(() {
         _downloadReport = downloadReport;
+        _indexing = true;
+      });
+
+      final cleanupReport = await ELibraryDuplicateCleanupService.instance
+          .quarantineDuplicates(
+            isCancelled: () => _cancelRequested,
+          );
+
+      if (!mounted) return;
+      setState(() {
+        _cleanupReport = cleanupReport;
         _indexing = true;
       });
 
@@ -220,6 +293,10 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
           if (_installBooks) 'EGW Books',
           if (_installDevotionals) 'EGW Devotionals',
           if (_installCommentaries) 'EGW Commentaries',
+          if (_installMiscCollections) 'EGW Misc Collections',
+          if (_installPamphlets) 'EGW Pamphlets',
+          if (_installPeriodicals) 'EGW Periodicals',
+          if (_installManuscriptReleases) 'EGW Manuscript Releases',
         ],
         'selected_formats': <String>[
           if (_installEpub) 'EPUB',
@@ -246,6 +323,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
             .toList(growable: false),
         'destination_folders': downloadReport.destinationFolders,
         'download_report_path': downloadReport.reportFilePath,
+        'cleanup_report_path': _cleanupReport?.reportFilePath,
         'index_report_path': passageData.indexReportPath,
       };
 
@@ -355,8 +433,43 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                               onPressed: _running ? _cancelSetup : null,
                               child: const Text('Cancel'),
                             ),
+                            OutlinedButton(
+                              onPressed: (_running || _manualIndexing)
+                                  ? null
+                                  : _runManualIndex,
+                              child: Text(
+                                _manualIndexing
+                                    ? 'Indexing eLibrary books...'
+                                    : 'Index New/Changed Books',
+                              ),
+                            ),
                           ],
                         ),
+                        if (_manualIndexing) ...[
+                          const SizedBox(height: 12),
+                          LinearProgressIndicator(
+                            value: _manualIndexTotal > 0
+                                ? _manualIndexCompleted / _manualIndexTotal
+                                : null,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _manualIndexTotal > 0
+                                ? 'Indexing $_manualIndexCompleted of $_manualIndexTotal'
+                                : 'Preparing...',
+                          ),
+                          if (_manualIndexCurrentTitle != null) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Current: $_manualIndexCurrentTitle',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ],
+                        if (_manualIndexStatus != null) ...[
+                          const SizedBox(height: 8),
+                          Text(_manualIndexStatus!),
+                        ],
                       ],
                     ),
                   ),
@@ -440,6 +553,49 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                                   () => _installCommentaries = value ?? false,
                                 ),
                           title: const Text('Install EGW Commentaries'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        CheckboxListTile(
+                          value: _installMiscCollections,
+                          onChanged: _running
+                              ? null
+                              : (value) => setState(
+                                  () =>
+                                      _installMiscCollections = value ?? false,
+                                ),
+                          title: const Text('Install EGW Misc Collections'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        CheckboxListTile(
+                          value: _installPamphlets,
+                          onChanged: _running
+                              ? null
+                              : (value) => setState(
+                                  () => _installPamphlets = value ?? false,
+                                ),
+                          title: const Text('Install EGW Pamphlets'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        CheckboxListTile(
+                          value: _installPeriodicals,
+                          onChanged: _running
+                              ? null
+                              : (value) => setState(
+                                  () => _installPeriodicals = value ?? false,
+                                ),
+                          title: const Text('Install EGW Periodicals'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        CheckboxListTile(
+                          value: _installManuscriptReleases,
+                          onChanged: _running
+                              ? null
+                              : (value) => setState(
+                                  () =>
+                                      _installManuscriptReleases =
+                                          value ?? false,
+                                ),
+                          title: const Text('Install EGW Manuscript Releases'),
                           contentPadding: EdgeInsets.zero,
                         ),
                         const Divider(height: 24),
@@ -578,7 +734,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: const [
                         Text(
-                          'To add your own files later, place them in the appropriate folder and then tap Refresh Library Index.',
+                          'To add your own files later, place them in the appropriate folder and then tap Index New/Changed Books.',
                         ),
                         SizedBox(height: 12),
                         SelectableText(

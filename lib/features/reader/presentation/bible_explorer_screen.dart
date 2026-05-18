@@ -118,8 +118,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
     final passage = _buildCurrentPassage();
     final displayLine = _displayHeaderLine();
     final displayBookNumber = displayLine?.bookNumber ?? _bookNumber;
-    final displayBookName =
-        _bookNames[displayBookNumber] ?? 'Bible Explorer';
+    final displayBookName = _bookNames[displayBookNumber] ?? 'Bible Explorer';
     final displayChapter = displayLine?.chapter ?? _chapter;
     final displayVerse = displayLine?.verse ?? _verse;
 
@@ -162,7 +161,8 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
                       selectedBlockId: _selectedBlockId,
                       fontScale: _fontScale,
                       onVisibleIdChanged: _handleVisibleBlockChanged,
-                      onSelectionVisibilityChanged: _handleSelectedVisibilityChanged,
+                      onSelectionVisibilityChanged:
+                          _handleSelectedVisibilityChanged,
                       onSelectVerse: _selectLine,
                       onSelectVerseNumber: _selectMarkupAnchor,
                       onSelectTokenLongPress: _selectTokenAnchor,
@@ -443,9 +443,9 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open \$ tags: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not open \$ tags: $error')));
     }
   }
 

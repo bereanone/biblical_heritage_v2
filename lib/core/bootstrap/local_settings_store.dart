@@ -104,4 +104,21 @@ class LocalSettingsStore {
     settings.remove('migration_state');
     await save(settings);
   }
+
+  Future<bool> loadLibraryReaderShowRefCodes() async {
+    final settings = await load();
+    final value = settings['library_reader_show_ref_codes'];
+    if (value is bool) return value;
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      return normalized == 'true' || normalized == '1' || normalized == 'yes';
+    }
+    return false;
+  }
+
+  Future<void> saveLibraryReaderShowRefCodes(bool value) async {
+    final settings = await load();
+    settings['library_reader_show_ref_codes'] = value;
+    await save(settings);
+  }
 }

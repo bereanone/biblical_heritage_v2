@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import '../database/user_v2_schema.dart';
+import '../database/user_database.dart';
 import 'library_root_service.dart';
 import 'local_settings_store.dart';
 import 'sandbox_bootstrap.dart';
@@ -497,7 +497,7 @@ class StartupCoordinator {
               final verseEnd = verseStart;
               final noteText = source.tagKind == 'dollar'
                   ? _cleanHtml(row['content_html']?.toString() ?? '')
-                  : null;
+                  : _cleanHtml(row['note_text']?.toString() ?? '');
 
               await txn.insert('tag_items', {
                 'id':
@@ -661,8 +661,7 @@ class StartupCoordinator {
   }
 
   Future<void> _ensureFreshV2Database({required String deviceId}) async {
-    final db = await _openV2Database(deviceId: deviceId);
-    await db.close();
+    await _openV2Database(deviceId: deviceId);
   }
 
   Future<void> _recordMigrationRow({
@@ -676,51 +675,29 @@ class StartupCoordinator {
     required String sourceDeviceName,
   }) async {
     final db = await _openV2Database(deviceId: deviceId);
-    try {
-      await db.insert('app_migrations', {
-        'migration_key': migrationKey,
-        'from_version': _fromVersion,
-        'to_version': _toVersion,
-        'started_at': startedAt,
-        'completed_at': completedAt,
-        'backup_path': backupPath,
-        'status': status,
-        'error_message': errorMessage,
-        'source_device_name': sourceDeviceName,
-        'created_at': completedAt,
-        'updated_at': completedAt,
-        'deleted_at': null,
-        'device_id': deviceId,
-        'revision': 1,
-        'sync_status': 'pending',
-        'last_synced_at': null,
-        'change_id': null,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
-    } finally {
-      await db.close();
-    }
+    await db.insert('app_migrations', {
+      'migration_key': migrationKey,
+      'from_version': _fromVersion,
+      'to_version': _toVersion,
+      'started_at': startedAt,
+      'completed_at': completedAt,
+      'backup_path': backupPath,
+      'status': status,
+      'error_message': errorMessage,
+      'source_device_name': sourceDeviceName,
+      'created_at': completedAt,
+      'updated_at': completedAt,
+      'deleted_at': null,
+      'device_id': deviceId,
+      'revision': 1,
+      'sync_status': 'pending',
+      'last_synced_at': null,
+      'change_id': null,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  Future<Database> _openV2Database({required String deviceId}) async {
-    final path = await SandboxBootstrap.userDatabasePath();
-    final file = File(path);
-    if (!file.parent.existsSync()) {
-      file.parent.createSync(recursive: true);
-    }
-    final db = await openDatabase(
-      path,
-      version: 1,
-      singleInstance: false,
-      onCreate: (database, version) async {
-        await UserV2Schema.ensure(database, deviceId: deviceId);
-      },
-      onOpen: (database) async {
-        await UserV2Schema.ensure(database, deviceId: deviceId);
-      },
-    );
-    await UserV2Schema.ensure(db, deviceId: deviceId);
-    return db;
-  }
+  Future<Database> _openV2Database({required String deviceId}) =>
+      UserDatabase.instance.database;
 
   Future<void> _resetV2DatabaseFiles() async {
     final path = await SandboxBootstrap.userDatabasePath();
@@ -854,6 +831,7 @@ class StartupCoordinator {
       'library_items',
       'library_links',
       'library_navigation_items',
+      'elibrary_ref_index',
       'presentation_lists',
       'presentation_items',
       'app_migrations',

@@ -110,37 +110,247 @@ class _RecentPane extends StatelessWidget {
 }
 
 class _SearchField extends StatelessWidget {
-  const _SearchField({required this.controller, required this.onChanged});
+  const _SearchField({
+    required this.controller,
+    required this.focusNode,
+    required this.onChanged,
+    required this.onSubmitted,
+    required this.onApply,
+    required this.onClear,
+  });
 
   final TextEditingController controller;
+  final FocusNode focusNode;
   final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
+  final VoidCallback onApply;
+  final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return TextField(
-      controller: controller,
-      onChanged: onChanged,
-      decoration: InputDecoration(
-        prefixIcon: const Icon(Icons.search),
-        hintText: 'Search books',
-        filled: true,
-        fillColor: _librarySurfaceHighestColor(theme),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide(color: _libraryOutlineColor(theme)),
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: controller,
+      builder: (context, value, _) {
+        final hasText = value.text.isNotEmpty;
+        return TextField(
+          controller: controller,
+          focusNode: focusNode,
+          onChanged: onChanged,
+          onSubmitted: onSubmitted,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.search),
+            hintText: 'Find book/title',
+            suffixIcon: hasText
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Apply search',
+                        icon: const Icon(Icons.search),
+                        onPressed: onApply,
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 36,
+                          height: 36,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Clear search',
+                        icon: const Icon(Icons.clear),
+                        onPressed: onClear,
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 36,
+                          height: 36,
+                        ),
+                      ),
+                    ],
+                  )
+                : null,
+            suffixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+            filled: true,
+            fillColor: _librarySurfaceHighestColor(theme),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(18),
+              borderSide: BorderSide(color: _libraryOutlineColor(theme)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(18),
+              borderSide: BorderSide(color: _libraryOutlineColor(theme)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(18),
+              borderSide:
+                  BorderSide(color: theme.colorScheme.primary, width: 1.5),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 14,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CollectionFilterMenu extends StatelessWidget {
+  const _CollectionFilterMenu({
+    required this.currentValue,
+    required this.currentLabel,
+    required this.options,
+    required this.onSelected,
+  });
+
+  final String currentValue;
+  final String currentLabel;
+  final List<LibraryCollectionFilterOption> options;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return _FilterMenuButton(
+      tooltip: 'Choose collection',
+      icon: Icons.folder_outlined,
+      label: currentLabel,
+      onSelected: onSelected,
+      currentValue: currentValue,
+      items: [
+        for (final option in options)
+          PopupMenuItem<String>(value: option.value, child: Text(option.label)),
+      ],
+    );
+  }
+}
+
+class _FileTypeFilterMenu extends StatelessWidget {
+  const _FileTypeFilterMenu({
+    required this.currentValue,
+    required this.onSelected,
+  });
+
+  final String currentValue;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = switch (currentValue.trim().toLowerCase()) {
+      'pdfs' => 'PDFs',
+      'all' => 'All',
+      _ => 'ePubs',
+    };
+    return _FilterMenuButton(
+      tooltip: 'Choose file type',
+      icon: Icons.filter_alt_outlined,
+      label: label,
+      onSelected: onSelected,
+      currentValue: currentValue,
+      items: const [
+        PopupMenuItem<String>(value: 'ePubs', child: Text('ePubs')),
+        PopupMenuItem<String>(value: 'PDFs', child: Text('PDFs')),
+        PopupMenuItem<String>(value: 'all', child: Text('All')),
+      ],
+    );
+  }
+}
+
+class _FilterMenuButton extends StatelessWidget {
+  const _FilterMenuButton({
+    required this.tooltip,
+    required this.icon,
+    required this.label,
+    required this.onSelected,
+    required this.currentValue,
+    required this.items,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final String label;
+  final ValueChanged<String> onSelected;
+  final String currentValue;
+  final List<PopupMenuEntry<String>> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: tooltip,
+      onSelected: onSelected,
+      initialValue: currentValue,
+      itemBuilder: (context) => items,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: _librarySurfaceHighColor(Theme.of(context)),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _libraryOutlineColor(Theme.of(context))),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide(color: _libraryOutlineColor(theme)),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(width: 2),
+            Icon(
+              Icons.arrow_drop_down,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ],
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide(color: theme.colorScheme.primary, width: 1.5),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 14,
+      ),
+    );
+  }
+}
+
+class _SearchTextButton extends StatelessWidget {
+  const _SearchTextButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onPressed,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: _librarySurfaceHighColor(theme),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.4)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.manage_search_rounded, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                'Search Text',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -281,7 +491,6 @@ Widget _bookCoverFrame({
   required BuildContext context,
   required String title,
   required String subtitle,
-  required String? folderLabel,
   required BorderRadius borderRadius,
   required bool compact,
   required bool showCaption,
@@ -289,6 +498,8 @@ Widget _bookCoverFrame({
 }) {
   final theme = Theme.of(context);
   final fillColor = _libraryFallbackCoverColor(theme);
+  final accentColor = _placeholderAccentColor(title);
+  final monogram = _thumbnailMonogram(title);
   final titleStyle = compact
       ? theme.textTheme.labelMedium?.copyWith(
           fontWeight: FontWeight.w800,
@@ -317,16 +528,63 @@ Widget _bookCoverFrame({
   return ClipRRect(
     borderRadius: borderRadius,
     child: DecoratedBox(
-      decoration: BoxDecoration(color: fillColor),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.lerp(fillColor, accentColor, compact ? 0.08 : 0.12)!,
+            Color.lerp(fillColor, accentColor, compact ? 0.22 : 0.18)!,
+          ],
+        ),
+        border: Border.all(
+          color: _libraryOutlineColor(theme).withValues(alpha: 0.75),
+        ),
+      ),
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (folderLabel != null)
-            Positioned(
-              left: compact ? 8 : 10,
-              top: compact ? 8 : 10,
-              child: _CoverTag(label: folderLabel),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(0.15, -0.25),
+                  radius: 1.05,
+                  colors: [
+                    theme.colorScheme.surface.withValues(
+                      alpha: theme.brightness == Brightness.dark ? 0.18 : 0.28,
+                    ),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
             ),
+          ),
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: compact ? 5 : 7,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: accentColor.withValues(
+                  alpha: theme.brightness == Brightness.dark ? 0.28 : 0.20,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            right: compact ? 5 : 7,
+            top: compact ? 5 : 7,
+            bottom: compact ? 5 : 7,
+            width: compact ? 1.5 : 2.0,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
           if (showCenterTitle)
             Center(
               child: Padding(
@@ -340,6 +598,71 @@ Widget _bookCoverFrame({
                 ),
               ),
             ),
+          if (!showCenterTitle && !showCaption)
+            if (compact)
+              Center(
+                child: Text(
+                  monogram,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.clip,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.1,
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.78),
+                  ),
+                ),
+              )
+            else
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surface.withValues(
+                            alpha: theme.brightness == Brightness.dark
+                                ? 0.22
+                                : 0.30,
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: theme.colorScheme.onSurface.withValues(
+                              alpha: 0.12,
+                            ),
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            monogram,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.clip,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.1,
+                              color: theme.colorScheme.onSurface
+                                  .withValues(alpha: 0.78),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Icon(
+                        Icons.menu_book_outlined,
+                        size: 20,
+                        color: theme.colorScheme.onSurface.withValues(
+                          alpha: 0.28,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
           if (showCaption)
             Positioned(
               left: captionSide,
@@ -445,6 +768,87 @@ class _BookCoverCard extends StatelessWidget {
   }
 }
 
+Color _placeholderAccentColor(String title) {
+  const palette = <Color>[
+    Color(0xFF8F6F4E),
+    Color(0xFF6F8A65),
+    Color(0xFF8A6B5E),
+    Color(0xFF76896F),
+    Color(0xFF8A7A4F),
+    Color(0xFF7B6A58),
+  ];
+  final normalized = title.trim();
+  final index = normalized.hashCode.abs() % palette.length;
+  return palette[index];
+}
+
+String _thumbnailMonogram(String title) {
+  final normalized = title
+      .replaceAll(RegExp(r'[_\-]+'), ' ')
+      .replaceAll(RegExp(r'[^a-zA-Z0-9 ]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (normalized.isEmpty) return 'BK';
+
+  final stopWords = <String>{
+    'the',
+    'a',
+    'an',
+    'of',
+    'and',
+    'to',
+    'in',
+    'on',
+    'for',
+    'from',
+    'by',
+    'with',
+    'at',
+    'into',
+    'over',
+    'under',
+  };
+  final words = normalized
+      .split(' ')
+      .where((word) => word.isNotEmpty)
+      .where((word) => !stopWords.contains(word.toLowerCase()))
+      .toList(growable: false);
+  final sourceWords = words.isNotEmpty
+      ? words
+      : normalized.split(' ').where((word) => word.isNotEmpty).toList();
+  if (sourceWords.isEmpty) return 'BK';
+
+  final letters = <String>[];
+  for (final word in sourceWords) {
+    final firstLetter = RegExp(r'[A-Za-z0-9]').firstMatch(word)?.group(0);
+    if (firstLetter == null) continue;
+    letters.add(firstLetter.toUpperCase());
+    if (letters.length >= 3) break;
+  }
+
+  if (letters.isNotEmpty) {
+    if (letters.length == 1) {
+      final compactWord = sourceWords.first.replaceAll(
+        RegExp(r'[^A-Za-z0-9]+'),
+        '',
+      );
+      if (compactWord.length >= 2) {
+        return compactWord.substring(0, 2).toUpperCase();
+      }
+    }
+    return letters.join();
+  }
+
+  final compactWord = sourceWords.first.replaceAll(
+    RegExp(r'[^A-Za-z0-9]+'),
+    '',
+  );
+  if (compactWord.isEmpty) return 'BK';
+  return compactWord.length >= 2
+      ? compactWord.substring(0, 2).toUpperCase()
+      : compactWord.toUpperCase();
+}
+
 class _BookListTile extends StatelessWidget {
   const _BookListTile({
     required this.item,
@@ -538,32 +942,6 @@ class _RecentStamp extends StatelessWidget {
   }
 }
 
-class _CoverTag extends StatelessWidget {
-  const _CoverTag({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Text(
-        label,
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.onSurface,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    );
-  }
-}
-
 class _BookThumbnail extends StatelessWidget {
   const _BookThumbnail({
     required this.item,
@@ -590,12 +968,6 @@ class _BookThumbnail extends StatelessWidget {
               errorBuilder: (context, error, stackTrace) =>
                   _fallbackThumbnail(context),
             ),
-            if (!compact && item.folderRoot.trim().isNotEmpty)
-              Positioned(
-                left: 8,
-                top: 8,
-                child: _CoverTag(label: item.folderRoot),
-              ),
           ],
         ),
       );
@@ -609,11 +981,10 @@ class _BookThumbnail extends StatelessWidget {
       context: context,
       title: item.displayTitle,
       subtitle: item.displayAuthor,
-      folderLabel: compact ? null : item.folderRoot,
       borderRadius: borderRadius,
       compact: compact,
-      showCaption: !compact,
-      showCenterTitle: true,
+      showCaption: false,
+      showCenterTitle: false,
     );
   }
 }

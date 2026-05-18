@@ -11,6 +11,9 @@ import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/user_database.dart';
 import '../../library/data/library_author_resolver.dart';
 import '../../library/data/library_epub_metadata.dart';
+import 'elibrary_folder_policy.dart';
+
+const bool _debugELibraryMigrationLogs = false;
 
 class LegacyELibraryMigrationService {
   LegacyELibraryMigrationService._();
@@ -50,11 +53,19 @@ class LegacyELibraryMigrationService {
         p.join(rootPath, 'ePubs', 'Commentaries', 'User'),
         p.join(rootPath, 'ePubs', 'Research', 'EGW_Books'),
         p.join(rootPath, 'ePubs', 'Research', 'EGW_Devotionals'),
+        p.join(rootPath, 'ePubs', 'Research', 'EGW_Misc_Collections'),
+        p.join(rootPath, 'ePubs', 'Research', 'EGW_Pamphlets'),
+        p.join(rootPath, 'ePubs', 'Research', 'EGW_Periodicals'),
+        p.join(rootPath, 'ePubs', 'Research', 'EGW_Manuscript_Releases'),
         p.join(rootPath, 'ePubs', 'Research', 'User'),
         p.join(rootPath, 'PDFs', 'Commentaries', 'EGW_Commentaries'),
         p.join(rootPath, 'PDFs', 'Commentaries', 'User'),
         p.join(rootPath, 'PDFs', 'Research', 'EGW_Books'),
         p.join(rootPath, 'PDFs', 'Research', 'EGW_Devotionals'),
+        p.join(rootPath, 'PDFs', 'Research', 'EGW_Misc_Collections'),
+        p.join(rootPath, 'PDFs', 'Research', 'EGW_Pamphlets'),
+        p.join(rootPath, 'PDFs', 'Research', 'EGW_Periodicals'),
+        p.join(rootPath, 'PDFs', 'Research', 'EGW_Manuscript_Releases'),
         p.join(rootPath, 'PDFs', 'Research', 'User'),
       ],
     );
@@ -133,24 +144,51 @@ class LegacyELibraryMigrationService {
                 reason: 'Destination already has the same file.',
               ),
             );
+            if (classification.sourceType == 'official_download') {
+              final quarantinePath = await _quarantineSourceFile(
+                sourceFile: sourceFile,
+                sourceRelativePath: sourceRelative,
+                rootPath: rootPath,
+                sourceSize: sourceSize,
+                sourceHash: sourceHash,
+                reason: 'Duplicate of the canonical managed file.',
+              );
+              report.entries.add(
+                LegacyELibraryMigrationEntry(
+                  oldRelativePath: sourceRelative,
+                  newRelativePath: p.relative(quarantinePath, from: rootPath),
+                  size: sourceSize,
+                  sha256: sourceHash,
+                  actionTaken: 'quarantined_duplicate',
+                  reason: 'Duplicate of the canonical managed file.',
+                ),
+              );
+            }
             continue;
           }
 
-          final renamedPath = _safeConflictPath(destinationPath);
-          final renamedFile = File(renamedPath);
-          await _copyVerified(sourceFile, renamedFile, sourceSize, sourceHash);
-          await _registerMigratedMetadata(
-            relativePath: p.relative(renamedPath, from: rootPath),
-            file: renamedFile,
-            classification: classification,
+          final quarantinePath = await _quarantineSourceFile(
+            sourceFile: sourceFile,
             sourceRelativePath: sourceRelative,
-            sha256: sourceHash,
+            rootPath: rootPath,
+            sourceSize: sourceSize,
+            sourceHash: sourceHash,
+            reason:
+                'Destination existed with different content, so the source was quarantined for review.',
           );
           report.filesRenamedDueToConflict += 1;
-          finalDestinationPath = renamedPath;
-          actionTaken = 'copied_renamed';
-          reason =
-              'Destination existed with different content, so a safe suffix was used.';
+          report.entries.add(
+            LegacyELibraryMigrationEntry(
+              oldRelativePath: sourceRelative,
+              newRelativePath: p.relative(quarantinePath, from: rootPath),
+              size: sourceSize,
+              sha256: sourceHash,
+              actionTaken: 'quarantined_conflict',
+              reason:
+                  'Destination existed with different content, so the source was quarantined for review.',
+            ),
+          );
+          continue;
         } else {
           await _copyVerified(
             sourceFile,
@@ -165,6 +203,26 @@ class LegacyELibraryMigrationService {
             sourceRelativePath: sourceRelative,
             sha256: sourceHash,
           );
+          if (classification.sourceType == 'official_download') {
+            final quarantinePath = await _quarantineSourceFile(
+              sourceFile: sourceFile,
+              sourceRelativePath: sourceRelative,
+              rootPath: rootPath,
+              sourceSize: sourceSize,
+              sourceHash: sourceHash,
+              reason: 'Migrated managed source file after successful copy.',
+            );
+            report.entries.add(
+              LegacyELibraryMigrationEntry(
+                oldRelativePath: sourceRelative,
+                newRelativePath: p.relative(quarantinePath, from: rootPath),
+                size: sourceSize,
+                sha256: sourceHash,
+                actionTaken: 'quarantined_source',
+                reason: 'Migrated managed source file after successful copy.',
+              ),
+            );
+          }
         }
 
         report.filesCopied += 1;
@@ -195,7 +253,9 @@ class LegacyELibraryMigrationService {
       }
     } catch (error) {
       report.failures.add(error.toString());
-      debugPrint('[ELibraryMigration] failed: $error');
+      if (_debugELibraryMigrationLogs) {
+        debugPrint('[ELibraryMigration] failed: $error');
+      }
     }
 
     report.completedAt = DateTime.now().toUtc();
@@ -242,6 +302,9 @@ class LegacyELibraryMigrationService {
   }
 
   bool _shouldSkipDirectory(String path) {
+    if (ELibraryFolderPolicy.shouldSkipUserImportPath(path)) {
+      return true;
+    }
     final normalized = p.normalize(path).toLowerCase();
     for (final segment in const [
       'index',
@@ -265,11 +328,19 @@ class LegacyELibraryMigrationService {
       'epubs/commentaries/user',
       'epubs/research/egw_books',
       'epubs/research/egw_devotionals',
+      'epubs/research/egw_misc_collections',
+      'epubs/research/egw_pamphlets',
+      'epubs/research/egw_periodicals',
+      'epubs/research/egw_manuscript_releases',
       'epubs/research/user',
       'pdfs/commentaries/egw_commentaries',
       'pdfs/commentaries/user',
       'pdfs/research/egw_books',
       'pdfs/research/egw_devotionals',
+      'pdfs/research/egw_misc_collections',
+      'pdfs/research/egw_pamphlets',
+      'pdfs/research/egw_periodicals',
+      'pdfs/research/egw_manuscript_releases',
       'pdfs/research/user',
     ]) {
       if (normalized.contains(canonical)) return true;
@@ -365,6 +436,50 @@ class LegacyELibraryMigrationService {
           sourceSite: 'egwwritings.org',
         );
       }
+      if (normalized.contains('egw_misc_collections')) {
+        return _LegacyClassification(
+          destinationRelativePath: (fileName) =>
+              p.join(fileRoot, 'Research', 'EGW_Misc_Collections', fileName),
+          reason: 'Legacy Research EGW Misc Collections folder.',
+          libraryRole: 'research',
+          collectionName: 'EGW Misc Collections',
+          sourceType: 'official_download',
+          sourceSite: 'egwwritings.org',
+        );
+      }
+      if (normalized.contains('egw_pamphlets')) {
+        return _LegacyClassification(
+          destinationRelativePath: (fileName) =>
+              p.join(fileRoot, 'Research', 'EGW_Pamphlets', fileName),
+          reason: 'Legacy Research EGW Pamphlets folder.',
+          libraryRole: 'research',
+          collectionName: 'EGW Pamphlets',
+          sourceType: 'official_download',
+          sourceSite: 'egwwritings.org',
+        );
+      }
+      if (normalized.contains('egw_periodicals')) {
+        return _LegacyClassification(
+          destinationRelativePath: (fileName) =>
+              p.join(fileRoot, 'Research', 'EGW_Periodicals', fileName),
+          reason: 'Legacy Research EGW Periodicals folder.',
+          libraryRole: 'research',
+          collectionName: 'EGW Periodicals',
+          sourceType: 'official_download',
+          sourceSite: 'egwwritings.org',
+        );
+      }
+      if (normalized.contains('egw_manuscript_releases')) {
+        return _LegacyClassification(
+          destinationRelativePath: (fileName) =>
+              p.join(fileRoot, 'Research', 'EGW_Manuscript_Releases', fileName),
+          reason: 'Legacy Research EGW Manuscript Releases folder.',
+          libraryRole: 'research',
+          collectionName: 'EGW Manuscript Releases',
+          sourceType: 'official_download',
+          sourceSite: 'egwwritings.org',
+        );
+      }
       return _LegacyClassification(
         destinationRelativePath: (fileName) =>
             p.join(fileRoot, 'Research', 'User', fileName),
@@ -395,6 +510,50 @@ class LegacyELibraryMigrationService {
           reason: 'Legacy ePub/PDF EGW Devotionals folder.',
           libraryRole: 'research',
           collectionName: 'EGW Devotionals',
+          sourceType: 'official_download',
+          sourceSite: 'egwwritings.org',
+        );
+      }
+      if (normalized.contains('egw_misc_collections')) {
+        return _LegacyClassification(
+          destinationRelativePath: (fileName) =>
+              p.join(fileRoot, 'Research', 'EGW_Misc_Collections', fileName),
+          reason: 'Legacy ePub/PDF EGW Misc Collections folder.',
+          libraryRole: 'research',
+          collectionName: 'EGW Misc Collections',
+          sourceType: 'official_download',
+          sourceSite: 'egwwritings.org',
+        );
+      }
+      if (normalized.contains('egw_pamphlets')) {
+        return _LegacyClassification(
+          destinationRelativePath: (fileName) =>
+              p.join(fileRoot, 'Research', 'EGW_Pamphlets', fileName),
+          reason: 'Legacy ePub/PDF EGW Pamphlets folder.',
+          libraryRole: 'research',
+          collectionName: 'EGW Pamphlets',
+          sourceType: 'official_download',
+          sourceSite: 'egwwritings.org',
+        );
+      }
+      if (normalized.contains('egw_periodicals')) {
+        return _LegacyClassification(
+          destinationRelativePath: (fileName) =>
+              p.join(fileRoot, 'Research', 'EGW_Periodicals', fileName),
+          reason: 'Legacy ePub/PDF EGW Periodicals folder.',
+          libraryRole: 'research',
+          collectionName: 'EGW Periodicals',
+          sourceType: 'official_download',
+          sourceSite: 'egwwritings.org',
+        );
+      }
+      if (normalized.contains('egw_manuscript_releases')) {
+        return _LegacyClassification(
+          destinationRelativePath: (fileName) =>
+              p.join(fileRoot, 'Research', 'EGW_Manuscript_Releases', fileName),
+          reason: 'Legacy ePub/PDF EGW Manuscript Releases folder.',
+          libraryRole: 'research',
+          collectionName: 'EGW Manuscript Releases',
           sourceType: 'official_download',
           sourceSite: 'egwwritings.org',
         );
@@ -446,6 +605,32 @@ class LegacyELibraryMigrationService {
       await destinationFile.delete();
     }
     await tempFile.rename(destinationFile.path);
+  }
+
+  Future<String> _quarantineSourceFile({
+    required File sourceFile,
+    required String sourceRelativePath,
+    required String rootPath,
+    required int sourceSize,
+    required String sourceHash,
+    required String reason,
+  }) async {
+    final quarantinePath = _uniqueQuarantinePath(
+      rootPath: rootPath,
+      sourcePath: sourceFile.path,
+      suffix: 'quarantine',
+    );
+    final quarantineFile = File(quarantinePath);
+    await _copyVerified(sourceFile, quarantineFile, sourceSize, sourceHash);
+    if (await sourceFile.exists()) {
+      await sourceFile.delete();
+    }
+    if (_debugELibraryMigrationLogs) {
+      debugPrint(
+        '[ELibraryMigration] quarantined $sourceRelativePath -> ${p.relative(quarantinePath, from: rootPath)} reason=$reason',
+      );
+    }
+    return quarantinePath;
   }
 
   Future<void> _registerMigratedMetadata({
@@ -522,9 +707,11 @@ class LegacyELibraryMigrationService {
       'change_id': null,
       'device_id': deviceId,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
-    debugPrint(
-      '[ELibraryMigration] registered $sourceRelativePath -> $relativePath sha256=$sha256',
-    );
+    if (_debugELibraryMigrationLogs) {
+      debugPrint(
+        '[ELibraryMigration] registered $sourceRelativePath -> $relativePath sha256=$sha256',
+      );
+    }
   }
 
   Future<String?> _resolveMigratedAuthor({
@@ -579,21 +766,26 @@ class LegacyELibraryMigrationService {
         .replaceAll(RegExp(r'^_|_$'), '');
   }
 
-  String _safeConflictPath(String destinationPath) {
-    final directory = p.dirname(destinationPath);
-    final name = p.basenameWithoutExtension(destinationPath);
-    final extension = p.extension(destinationPath);
-    final timestamp = _timestamp(DateTime.now().toUtc());
-    var candidate = p.join(directory, '${name}__legacy_$timestamp$extension');
+  String _uniqueQuarantinePath({
+    required String rootPath,
+    required String sourcePath,
+    required String suffix,
+  }) {
+    final candidate = ELibraryFolderPolicy.quarantinePathFor(
+      rootPath,
+      sourcePath,
+      suffix: suffix,
+    );
+    final directory = p.dirname(candidate);
+    final base = p.basenameWithoutExtension(candidate);
+    final extension = p.extension(candidate);
+    var result = candidate;
     var counter = 1;
-    while (File(candidate).existsSync()) {
-      candidate = p.join(
-        directory,
-        '${name}__legacy_${timestamp}_$counter$extension',
-      );
+    while (File(result).existsSync()) {
+      result = p.join(directory, '${base}_$counter$extension');
       counter += 1;
     }
-    return candidate;
+    return result;
   }
 
   Future<String?> _writableLibraryRootPath() async {

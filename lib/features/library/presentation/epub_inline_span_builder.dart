@@ -4,10 +4,17 @@ List<InlineSpan> _buildEpubInlineSpans({
   required String html,
   required String fallbackText,
   required TextStyle baseStyle,
+  String? highlightQuery,
+  List<String> highlightTerms = const [],
 }) {
   final innerHtml = _epubBlockInnerHtml(html);
   if (innerHtml.trim().isEmpty) {
-    return <InlineSpan>[TextSpan(text: fallbackText, style: baseStyle)];
+    return _buildHighlightedEpubTextSpans(
+      fallbackText,
+      baseStyle: baseStyle,
+      highlightQuery: highlightQuery,
+      highlightTerms: highlightTerms,
+    );
   }
 
   final normalized = innerHtml
@@ -51,7 +58,14 @@ List<InlineSpan> _buildEpubInlineSpans({
     if (buffer.isEmpty) return;
     final text = _decodeEpubHtmlEntities(buffer.toString());
     if (text.isNotEmpty) {
-      spans.add(TextSpan(text: text, style: currentStyle()));
+      spans.addAll(
+        _buildHighlightedEpubTextSpans(
+          text,
+          baseStyle: currentStyle(),
+          highlightQuery: highlightQuery,
+          highlightTerms: highlightTerms,
+        ),
+      );
     }
     buffer.clear();
   }
@@ -130,7 +144,12 @@ List<InlineSpan> _buildEpubInlineSpans({
   flush();
 
   if (spans.isEmpty) {
-    return <InlineSpan>[TextSpan(text: fallbackText, style: baseStyle)];
+    return _buildHighlightedEpubTextSpans(
+      fallbackText,
+      baseStyle: baseStyle,
+      highlightQuery: highlightQuery,
+      highlightTerms: highlightTerms,
+    );
   }
   return spans;
 }
@@ -151,7 +170,35 @@ String _decodeEpubHtmlEntities(String input) {
       .replaceAll('&gt;', '>')
       .replaceAll('&quot;', '"')
       .replaceAll('&#39;', "'")
+      .replaceAllMapped(RegExp(r'&#x([0-9a-fA-F]+);'), (m) {
+        final code = int.tryParse(m.group(1)!, radix: 16);
+        return code != null ? String.fromCharCode(code) : m.group(0)!;
+      })
+      .replaceAllMapped(RegExp(r'&#(\d+);'), (m) {
+        final code = int.tryParse(m.group(1)!);
+        return code != null ? String.fromCharCode(code) : m.group(0)!;
+      })
       .replaceAll(RegExp(r'\r\n?'), '\n');
+}
+
+List<InlineSpan> _buildHighlightedEpubTextSpans(
+  String text, {
+  required TextStyle baseStyle,
+  String? highlightQuery,
+  required List<String> highlightTerms,
+}) {
+  final candidates =
+      highlightTerms
+          .map((term) => term.trim())
+          .where((term) => term.isNotEmpty)
+          .toSet()
+          .toList(growable: false)
+        ..sort((left, right) => right.length.compareTo(left.length));
+
+  if (candidates.isEmpty || text.isEmpty) {
+    return <InlineSpan>[TextSpan(text: text, style: baseStyle)];
+  }
+  return buildHighlightedSearchSpans(text, candidates, baseStyle: baseStyle);
 }
 
 String _epubTagName(String lowerTag) {

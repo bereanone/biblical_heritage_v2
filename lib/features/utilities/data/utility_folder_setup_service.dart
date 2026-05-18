@@ -7,6 +7,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/user_database.dart';
+import 'elibrary_folder_policy.dart';
 
 class UtilityFolderConfig {
   const UtilityFolderConfig({
@@ -321,6 +322,9 @@ class UtilityFolderSetupService {
       followLinks: false,
     )) {
       if (entity is! File) continue;
+      if (ELibraryFolderPolicy.shouldSkipUserImportPath(entity.path)) {
+        continue;
+      }
       final sourcePath = entity.path;
       final ext = p.extension(sourcePath).toLowerCase();
       if (ext != '.epub' && ext != '.pdf') continue;
@@ -517,6 +521,10 @@ class UtilityFolderSetupService {
       followLinks: false,
     )) {
       if (entity is! File) continue;
+      if (isResearch &&
+          ELibraryFolderPolicy.shouldSkipUserImportPath(entity.path)) {
+        continue;
+      }
       final ext = p.extension(entity.path).toLowerCase();
       if (ext != '.epub' && ext != '.pdf') continue;
       final stat = await entity.stat();
@@ -596,6 +604,7 @@ class UtilityFolderSetupService {
     final files = <String, String>{};
     await for (final entity in dir.list(recursive: true, followLinks: false)) {
       if (entity is! File) continue;
+      if (ELibraryFolderPolicy.isQuarantinePath(entity.path)) continue;
       final ext = p.extension(entity.path).toLowerCase();
       if (ext.isEmpty) continue;
       files[p.basename(entity.path)] = entity.path;

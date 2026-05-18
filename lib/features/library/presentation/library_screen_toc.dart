@@ -188,7 +188,7 @@ class _NavigationTreeState extends State<_NavigationTree> {
     );
     final roots = tree.childrenByParent[null] ?? const [];
     for (final root in roots) {
-      if (root.isBodyStart) {
+      if (root.isBodyStart && !_isLibraryMetadataHelpLabel(root.label)) {
         return root.id;
       }
     }
@@ -196,8 +196,7 @@ class _NavigationTreeState extends State<_NavigationTree> {
       if (_isLibraryChapterOneLabel(root.label)) {
         return root.id;
       }
-      if (root.contentKind?.trim().toLowerCase() == 'body' ||
-          (!root.isFrontMatter && !_isLibraryFrontMatterLabel(root.label))) {
+      if (!_isLibraryMetadataHelpLabel(root.label)) {
         return root.id;
       }
     }
@@ -205,11 +204,10 @@ class _NavigationTreeState extends State<_NavigationTree> {
     if (roots.isNotEmpty) return roots.first.id;
 
     for (final item in widget.items) {
-      if (item.isBodyStart) {
+      if (item.isBodyStart && !_isLibraryMetadataHelpLabel(item.label)) {
         return item.id;
       }
-      if (item.contentKind?.trim().toLowerCase() == 'body' ||
-          (!item.isFrontMatter && !_isLibraryFrontMatterLabel(item.label))) {
+      if (!_isLibraryMetadataHelpLabel(item.label)) {
         return item.id;
       }
     }

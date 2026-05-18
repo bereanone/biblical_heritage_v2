@@ -204,6 +204,12 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
         where: 'library_item_id = ?',
         whereArgs: [itemId],
       );
+      await _storeLibraryTextBlocks(
+        db: db,
+        file: file,
+        libraryItemId: itemId,
+        now: now,
+      );
 
       var inserted = 0;
       final matches = <CommentaryResearchMatchItem>[];
@@ -507,6 +513,52 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
       warnings.add('${p.basename(file.path)}: no canonical references found.');
     }
     return _ReferenceExtractionResult(hits: hits, warnings: warnings);
+  }
+
+  Future<void> _storeLibraryTextBlocks({
+    required Database db,
+    required File file,
+    required String libraryItemId,
+    required String now,
+  }) async {
+    final sections = await _readBodySections(
+      file: file,
+      libraryItemId: libraryItemId,
+      stats: null,
+    );
+    await db.delete(
+      'library_text_blocks',
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+    );
+    var globalParagraphIndex = 0;
+    for (final section in sections) {
+      var paragraphOnSection = 0;
+      final sectionTitle = section.sectionTitle.trim().isNotEmpty
+          ? section.sectionTitle.trim()
+          : null;
+      for (final block in section.blocks) {
+        final text = block.text.trim();
+        if (text.isEmpty) continue;
+        globalParagraphIndex += 1;
+        paragraphOnSection += 1;
+        await db.insert(
+          'library_text_blocks',
+          {
+            'library_item_id': libraryItemId,
+            'epub_href': section.entryName,
+            'spine_index': section.spineIndex,
+            'paragraph_index': globalParagraphIndex,
+            'paragraph_on_section': paragraphOnSection,
+            'section_title': sectionTitle,
+            'plain_text': text,
+            'created_at': now,
+            'updated_at': now,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    }
   }
 
   Future<void> _storeNavigationMetadata({

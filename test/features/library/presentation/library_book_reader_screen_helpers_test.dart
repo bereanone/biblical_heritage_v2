@@ -49,6 +49,25 @@ void main() {
     expect(libraryReaderBookAbbreviation(item), 'CTr');
   });
 
+  test('maps Conflict and Courage to the expected ref abbreviation', () {
+    final item = _catalogItem(
+      id: 'cc',
+      title: 'Conflict and Courage',
+      fileName: 'en_CC.epub',
+      relativePath: 'ePubs/Research/EGW_Devotionals/en_CC.epub',
+    );
+
+    expect(libraryReaderBookAbbreviation(item), 'CC');
+    expect(
+      libraryReaderDevotionalFallbackRefCode(
+        item: item,
+        sectionTitle: 'A Clear View of God, May 13',
+        paragraphIndex: 1,
+      ),
+      'CC May 13.1',
+    );
+  });
+
   test('keeps Christ’s Object Lessons mapped to COL', () {
     final item = _catalogItem(
       id: 'col',

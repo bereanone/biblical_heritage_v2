@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 
 import 'commentary_research_models.dart';
 
+const bool _debugCommentaryResearchLogs = false;
+
 class CommentaryResearchFilters {
   static List<CommentaryResearchMatchItem> prepareResearchMatches(
     List<CommentaryResearchMatchItem> rawMatches, {
@@ -9,7 +11,9 @@ class CommentaryResearchFilters {
     required int chapter,
     required int verse,
   }) {
-    debugPrint('[CommentaryResearch] research raw=${rawMatches.length}');
+    if (_debugCommentaryResearchLogs) {
+      debugPrint('[CommentaryResearch] research raw=${rawMatches.length}');
+    }
     final exactCount = rawMatches
         .where(
           (match) =>
@@ -30,34 +34,42 @@ class CommentaryResearchFilters {
               !(match.verseStart == verse && match.verseEnd == verse),
         )
         .length;
-    debugPrint(
-      '[CommentaryResearch] research exact=$exactCount range=$rangeCount '
-      'subjectExpansion=0',
-    );
+    if (_debugCommentaryResearchLogs) {
+      debugPrint(
+        '[CommentaryResearch] research exact=$exactCount range=$rangeCount '
+        'subjectExpansion=0',
+      );
+    }
 
     final sourceEligible = rawMatches
         .where(isResearchEligibleSource)
         .toList(growable: false);
-    debugPrint(
-      '[CommentaryResearch] research sourceEligible=${sourceEligible.length}',
-    );
+    if (_debugCommentaryResearchLogs) {
+      debugPrint(
+        '[CommentaryResearch] research sourceEligible=${sourceEligible.length}',
+      );
+    }
 
     final frontMatterFiltered = sourceEligible
         .where((match) => !isFrontMatterOrEditorialHit(match))
         .toList(growable: false);
-    debugPrint(
-      '[CommentaryResearch] research frontMatterFiltered=${frontMatterFiltered.length}',
-    );
+    if (_debugCommentaryResearchLogs) {
+      debugPrint(
+        '[CommentaryResearch] research frontMatterFiltered=${frontMatterFiltered.length}',
+      );
+    }
 
     final bodyFiltered = frontMatterFiltered
         .where((match) => isUsableResearchParagraph(match.anchor ?? ''))
         .toList(growable: false);
-    debugPrint(
-      '[CommentaryResearch] research bodyFiltered=${bodyFiltered.length}',
-    );
-    debugPrint(
-      '[CommentaryResearch] research truncatedExcluded=${frontMatterFiltered.length - bodyFiltered.length}',
-    );
+    if (_debugCommentaryResearchLogs) {
+      debugPrint(
+        '[CommentaryResearch] research bodyFiltered=${bodyFiltered.length}',
+      );
+      debugPrint(
+        '[CommentaryResearch] research truncatedExcluded=${frontMatterFiltered.length - bodyFiltered.length}',
+      );
+    }
 
     final precisionFiltered = bodyFiltered
         .where(
@@ -69,12 +81,14 @@ class CommentaryResearchFilters {
           ),
         )
         .toList(growable: false);
-    debugPrint(
-      '[CommentaryResearch] research precisionFiltered=${precisionFiltered.length}',
-    );
-    debugPrint(
-      '[CommentaryResearch] research lowRelevanceExcluded=${bodyFiltered.length - precisionFiltered.length}',
-    );
+    if (_debugCommentaryResearchLogs) {
+      debugPrint(
+        '[CommentaryResearch] research precisionFiltered=${precisionFiltered.length}',
+      );
+      debugPrint(
+        '[CommentaryResearch] research lowRelevanceExcluded=${bodyFiltered.length - precisionFiltered.length}',
+      );
+    }
 
     final grouped = <String, CommentaryResearchMatchItem>{};
     for (final match in precisionFiltered) {
@@ -103,13 +117,15 @@ class CommentaryResearchFilters {
           verse: verse,
         ),
       );
-    debugPrint(
-      '[CommentaryResearch] research duplicatesRemoved=${precisionFiltered.length - deduped.length}',
-    );
-    debugPrint(
-      '[CommentaryResearch] research deduped=${deduped.length} '
-      'titles=${deduped.take(3).map((m) => m.itemTitle).join(' | ')}',
-    );
+    if (_debugCommentaryResearchLogs) {
+      debugPrint(
+        '[CommentaryResearch] research duplicatesRemoved=${precisionFiltered.length - deduped.length}',
+      );
+      debugPrint(
+        '[CommentaryResearch] research deduped=${deduped.length} '
+        'titles=${deduped.take(3).map((m) => m.itemTitle).join(' | ')}',
+      );
+    }
     return deduped;
   }
 
@@ -178,12 +194,14 @@ class CommentaryResearchFilters {
       filtered.add(match);
     }
     filtered.sort(compareCommentaryPriority);
-    debugPrint(
-      '[CommentaryResearch] commentary chapterRejected=$rejectedChapter '
-      'truncatedRejected=$rejectedTruncated '
-      'emptyRejected=$rejectedEmpty '
-      'final=${filtered.length}',
-    );
+    if (_debugCommentaryResearchLogs) {
+      debugPrint(
+        '[CommentaryResearch] commentary chapterRejected=$rejectedChapter '
+        'truncatedRejected=$rejectedTruncated '
+        'emptyRejected=$rejectedEmpty '
+        'final=${filtered.length}',
+      );
+    }
     return filtered;
   }
 
@@ -453,6 +471,8 @@ class CommentaryResearchFilters {
     return normalizeForSearch(_cleanCommentaryParagraphText(value, ''));
   }
 
+  // Intentionally kept for future anchor normalization work.
+  // ignore: unused_element
   static String _canonicalAnchor(String value) {
     return normalizeForSearch(
       value

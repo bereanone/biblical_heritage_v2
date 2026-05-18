@@ -1,8 +1,7 @@
+import '../../search/search_highlight_helper.dart';
+
 class ViewerSearchQuery {
-  const ViewerSearchQuery({
-    required this.whereClause,
-    required this.whereArgs,
-  });
+  const ViewerSearchQuery({required this.whereClause, required this.whereArgs});
 
   final String whereClause;
   final List<Object?> whereArgs;
@@ -13,6 +12,7 @@ ViewerSearchQuery buildViewerSearchQuery(
   String section = 'All',
   int? bookNumber,
 }) {
+  query = _normalizeSearchInput(query);
   query = query.replaceAll('(', ' ( ').replaceAll(')', ' ) ');
   final regex = RegExp(r'"[^"]+"|\S+');
   final tokens = regex.allMatches(query).map((m) => m.group(0)!).toList();
@@ -56,6 +56,7 @@ LOWER(
 
   String normalizeToken(String token) {
     var t = token.toLowerCase().trim();
+    t = _normalizeSearchInput(t);
     t = t
         .replaceAll("'", ' ')
         .replaceAll('’', ' ')
@@ -80,7 +81,8 @@ LOWER(
 
   for (final token in tokens) {
     final upper = token.toUpperCase();
-    final isOperator = ['AND', 'OR', 'NOT', '(', ')'].contains(upper);
+    final isLogicalOperator =
+        token == upper && const ['AND', 'OR', 'NOT'].contains(upper);
 
     if (token == '(') {
       if (needsAnd) {
@@ -101,15 +103,15 @@ LOWER(
       continue;
     }
 
-    if (upper == 'AND' || upper == 'OR') {
+    if (isLogicalOperator && (token == 'AND' || token == 'OR')) {
       if (needsAnd) {
-        sqlTokens.add(upper);
+        sqlTokens.add(token);
         needsAnd = false;
       }
       continue;
     }
 
-    if (upper == 'NOT') {
+    if (isLogicalOperator && token == 'NOT') {
       if (needsAnd) {
         sqlTokens.add('AND');
       }
@@ -118,7 +120,7 @@ LOWER(
       continue;
     }
 
-    if (needsAnd && !isOperator) {
+    if (needsAnd && !isLogicalOperator) {
       sqlTokens.add('AND');
     }
 
@@ -169,6 +171,20 @@ LOWER(
     whereClause: clause,
     whereArgs: <Object?>[...constraintArgs, ...args],
   );
+}
+
+List<String> extractViewerSearchHighlightTerms(String query) {
+  return extractSearchHighlightTerms(query, booleanSyntax: true);
+}
+
+String _normalizeSearchInput(String value) {
+  return value
+      .replaceAll('“', '"')
+      .replaceAll('”', '"')
+      .replaceAll('„', '"')
+      .replaceAll('‟', '"')
+      .replaceAll('‘', "'")
+      .replaceAll('’', "'");
 }
 
 (int, int)? viewerSectionBookRange(String section) {

@@ -255,12 +255,27 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         );
         return;
       }
-      final result = await repository.quickApplyTargets(
-        targets: targets,
-        tag: defaultTag,
-      );
+      final chapterGroups = <int, List<VerseLine>>{};
+      for (final line in selectedLines) {
+        chapterGroups.putIfAbsent(line.chapter, () => <VerseLine>[]).add(line);
+      }
+      var inserted = 0;
+      var skipped = 0;
+      for (final chapterLines in chapterGroups.values) {
+        if (chapterLines.isEmpty) continue;
+        chapterLines.sort((left, right) => left.verse.compareTo(right.verse));
+        final result = await repository.addBibleRangeToTag(
+          tag: defaultTag,
+          bookNumber: chapterLines.first.bookNumber,
+          chapter: chapterLines.first.chapter,
+          verseStart: chapterLines.first.verse,
+          verseEnd: chapterLines.last.verse,
+        );
+        inserted += result.inserted;
+        skipped += result.skipped;
+      }
       if (!mounted) return;
-      if (result.tag == null) {
+      if (inserted == 0 && skipped == 0) {
         _resetRapidTagArmed();
         await showHashTagScreen(
           navigator,
@@ -275,8 +290,8 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         return;
       }
       _showRangeActionMessage(
-        'Tagged ${result.inserted} verse(s) with ${result.tag}'
-        '${result.skipped > 0 ? ' (${result.skipped} already in this tag)' : ''}.',
+        'Tagged $inserted verse(s) with $defaultTag'
+        '${skipped > 0 ? ' ($skipped already in this tag)' : ''}.',
       );
     } catch (error) {
       if (!mounted) return;

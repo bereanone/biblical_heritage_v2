@@ -102,6 +102,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
 
   Future<void> _openSearch(BuildContext context) async {
     _resetRapidTagArmed();
+    if (!context.mounted) return;
     final ViewerSearchSelection? selection = await showViewerSearchDialog(
       context,
       fontScale: _fontScale,
@@ -233,9 +234,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
         setState(() {
           _presentationAspectRatio = preset;
         });
-        AppSettingsService.instance.savePresentationAspectRatioPreset(
-          preset,
-        );
+        AppSettingsService.instance.savePresentationAspectRatioPreset(preset);
       },
     );
   }
@@ -259,9 +258,9 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
   }
 
   Future<void> _openLibrary() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const LibraryScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const LibraryScreen()));
   }
 
   Future<void> _openMarkupSettings() async {

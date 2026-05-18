@@ -82,6 +82,11 @@ LibraryNavigationTreeResult buildLibraryNavigationTree(
     }
   }
 
+  final rootItems = childrenByParent[null];
+  if (rootItems != null && rootItems.length > 1) {
+    rootItems.sort(_compareNavigationDisplayEntries);
+  }
+
   final flattened = <LibraryCatalogNavigationItem>[];
   final visited = <String>{};
 
@@ -243,6 +248,87 @@ int _compareNavigationEntries(
   if (depthCompare != 0) return depthCompare;
 
   return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+}
+
+int _compareNavigationDisplayEntries(
+  LibraryCatalogNavigationItem a,
+  LibraryCatalogNavigationItem b,
+) {
+  final leftBucket = _navigationDisplayBucket(a);
+  final rightBucket = _navigationDisplayBucket(b);
+  final bucketCompare = leftBucket.compareTo(rightBucket);
+  if (bucketCompare != 0) return bucketCompare;
+
+  final leftSort = a.sortOrder ?? 1 << 30;
+  final rightSort = b.sortOrder ?? 1 << 30;
+  final sortCompare = leftSort.compareTo(rightSort);
+  if (sortCompare != 0) return sortCompare;
+
+  return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+}
+
+int _navigationDisplayBucket(LibraryCatalogNavigationItem item) {
+  if (_isNavigationMetadataHelpEntry(item)) return 2;
+  if (item.isBodyStart) return 0;
+  return 1;
+}
+
+bool _isNavigationMetadataHelpEntry(LibraryCatalogNavigationItem item) {
+  final normalizedLabel = _normalizedNavigationText(item.label);
+  final normalizedHref = _normalizedNavigationText(
+    p.basenameWithoutExtension(item.href ?? ''),
+  );
+  final combined = '$normalizedLabel $normalizedHref';
+
+  if (_isNavigationMetadataHelpLabel(combined)) return true;
+
+  final contentKind = item.contentKind?.trim().toLowerCase() ?? '';
+  switch (contentKind) {
+    case 'cover':
+    case 'title_page':
+    case 'toc':
+    case 'about':
+    case 'copyright':
+    case 'foreword':
+    case 'preface':
+    case 'introduction':
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool _isNavigationMetadataHelpLabel(String value) {
+  return value.contains('overview') ||
+      value.contains('table of contents') ||
+      value == 'toc' ||
+      value.startsWith('toc ') ||
+      value.contains(' contents') ||
+      value.startsWith('nav ') ||
+      value.contains('cover') ||
+      value.contains('title page') ||
+      value.contains('titlepage') ||
+      value.contains('about book') ||
+      value.contains('aboutbook') ||
+      value.contains('information about this book') ||
+      value.contains('about this book') ||
+      value.contains('about the author') ||
+      value.contains('further links') ||
+      value.contains('further information') ||
+      value.contains('end user license agreement') ||
+      value.contains('copyright') ||
+      value.contains('publisher') ||
+      value.contains('editorial') ||
+      value.contains('publication information') ||
+      value.contains('source credits') ||
+      value.contains('dedication') ||
+      value.contains('acknowledgments') ||
+      value.contains('acknowledgements') ||
+      value.contains('index') ||
+      value.contains('bibliography') ||
+      value.contains('ellen g white') ||
+      value.contains('foreword') ||
+      value.contains('preface');
 }
 
 String _normalizedNavigationText(String value) {

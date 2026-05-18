@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -11,14 +12,24 @@ import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../../core/database/user_database.dart';
 import '../../library/data/library_author_resolver.dart';
+import '../../library/data/library_item_identity.dart';
 import 'commentary_research_models.dart';
 import 'commentary_research_filters.dart';
 import 'commentary_reference_parser.dart';
 export 'commentary_research_models.dart';
-part 'commentary_research_library_service_epub.dart';
+part 'commentary_research_library_service_epub_indexing.dart';
+part 'commentary_research_library_service_epub_parsing.dart';
+part 'commentary_research_library_service_elibrary_ref_index.dart';
+part 'commentary_research_library_service_epub_storage.dart';
+
+const bool _debugCommentaryResearchLogs = false;
 
 class CommentaryResearchLibraryService
-    with _CommentaryResearchLibraryServiceEpubSupport {
+    with
+        _CommentaryResearchLibraryServiceEpubIndexingSupport,
+        _CommentaryResearchLibraryServiceElibraryRefIndexSupport,
+        _CommentaryResearchLibraryServiceEpubStorageSupport,
+        _CommentaryResearchLibraryServiceEpubParsingSupport {
   CommentaryResearchLibraryService._();
 
   static final CommentaryResearchLibraryService instance =
@@ -70,9 +81,11 @@ class CommentaryResearchLibraryService
         : p.join(selection.path!, 'Index', 'commentary_index_report.json');
 
     if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
-      debugPrint(
-        '[CommentaryResearch] Root reconnect required for $bookName $chapter:$verse',
-      );
+      if (_debugCommentaryResearchLogs) {
+        debugPrint(
+          '[CommentaryResearch] Root reconnect required for $bookName $chapter:$verse',
+        );
+      }
       return CommentaryResearchPassageData(
         bookId: bookId,
         chapter: chapter,
@@ -188,13 +201,15 @@ class CommentaryResearchLibraryService
     };
     await _writeIndexReport(reportPath, report);
 
-    debugPrint(
-      '[CommentaryResearch] selected=$bookName $chapter:$verse '
-      'bookId=$bookId root=$rootPath '
-      'commentary=${commentary.discoveredCount}/${commentary.matchCount} '
-      'research=${research.discoveredCount}/${research.matchCount} '
-      'report=$reportPath',
-    );
+    if (_debugCommentaryResearchLogs) {
+      debugPrint(
+        '[CommentaryResearch] selected=$bookName $chapter:$verse '
+        'bookId=$bookId root=$rootPath '
+        'commentary=${commentary.discoveredCount}/${commentary.matchCount} '
+        'research=${research.discoveredCount}/${research.matchCount} '
+        'report=$reportPath',
+      );
+    }
 
     return CommentaryResearchPassageData(
       bookId: bookId,
@@ -208,6 +223,101 @@ class CommentaryResearchLibraryService
       research: research,
       indexReportPath: reportPath,
     );
+  }
+
+  /// Indexes all local cataloged EPUBs whose index_status is not yet
+  /// 'indexed' or 'indexed_empty'.  Uses the existing _indexFile pipeline
+  /// (text-blocks + bible-reference links) with refresh:true so each file
+  /// is fully processed on this call.
+  ///
+  /// Returns (indexed, skipped, failed):
+  ///   indexed – files processed without error (may have 0 bible references)
+  ///   skipped – catalog rows whose file is missing on disk
+  ///   failed  – files that threw during navigation/body parsing
+  Future<({int indexed, int skipped, int failed})> indexLocalCatalogedEpubs({
+    void Function(int completed, int total, String? currentTitle)? onProgress,
+  }) async {
+    final selection = await LibraryRootService.instance.loadSelection();
+    final rootPath = selection.path;
+    if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
+      return (indexed: 0, skipped: 0, failed: 0);
+    }
+
+    final db = await UserDatabase.instance.database;
+    // Include books that are either not yet indexed OR indexed before
+    // library_text_blocks was introduced (status = indexed but no text rows).
+    final rows = await db.rawQuery('''
+      SELECT relative_path, folder_type, title
+      FROM library_items
+      WHERE deleted_at IS NULL
+        AND LOWER(COALESCE(file_format, '')) = 'epub'
+        AND (
+          LOWER(COALESCE(index_status, '')) NOT IN ('indexed', 'indexed_empty')
+          OR NOT EXISTS (
+            SELECT 1 FROM library_text_blocks
+            WHERE library_item_id = library_items.id
+          )
+        )
+    ''');
+
+    if (rows.isEmpty) {
+      return (indexed: 0, skipped: 0, failed: 0);
+    }
+
+    final books = await StudyBibleDatabase.instance.loadBooks();
+    final bookLookup = BibleReferenceParser.buildBookLookup(books);
+    final bookAliases = BibleReferenceParser.buildBookAliases(books);
+    final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+
+    var indexed = 0;
+    var skipped = 0;
+    var failed = 0;
+    var completed = 0;
+    final total = rows.length;
+
+    for (final row in rows) {
+      final relativePath = row['relative_path']?.toString().trim() ?? '';
+      final rowTitle = row['title']?.toString().trim();
+      onProgress?.call(completed, total, rowTitle?.isNotEmpty == true ? rowTitle : null);
+
+      if (relativePath.isEmpty) {
+        skipped += 1;
+        completed += 1;
+        continue;
+      }
+      final absolutePath = await LibraryRootService.instance.resolveRelativePath(
+        relativePath: relativePath,
+        rootPath: rootPath,
+      );
+      final file = File(absolutePath);
+      if (!await file.exists()) {
+        skipped += 1;
+        completed += 1;
+        continue;
+      }
+      final rawFolderType = row['folder_type']?.toString().trim() ?? '';
+      final folderType = rawFolderType.isNotEmpty ? rawFolderType : 'research';
+      final stats = _IndexingStats();
+      try {
+        await _indexFile(
+          db: db,
+          rootPath: rootPath,
+          folderType: folderType,
+          file: file,
+          stats: stats,
+          bookLookup: bookLookup,
+          bookAliases: bookAliases,
+          refresh: true,
+          deviceId: deviceId,
+        );
+        indexed += 1;
+      } catch (_) {
+        failed += 1;
+      }
+      completed += 1;
+    }
+
+    return (indexed: indexed, skipped: skipped, failed: failed);
   }
 
   Future<List<CommentaryResearchNavigationItem>> loadNavigationItems({
@@ -440,18 +550,22 @@ class CommentaryResearchLibraryService
     }
     if (lookupMatches.isNotEmpty) {
       // Keep the local report useful even when a file indexed successfully.
-      debugPrint(
-        '[CommentaryResearch] $folderLabel warnings: ${warnings.join(' | ')}',
-      );
+      if (_debugCommentaryResearchLogs) {
+        debugPrint(
+          '[CommentaryResearch] $folderLabel warnings: ${warnings.join(' | ')}',
+        );
+      }
     }
     if (folderType == 'commentary') {
-      debugPrint(
-        '[CommentaryResearch] commentary raw=${matches.length} '
-        'duplicateRejected=${matches.length - commentaryCandidates.length} '
-        'filteredRejected=${commentaryCandidates.length - commentaryMatches.length} '
-        'final=${dedupedMatches.length} '
-        'labels=${dedupedMatches.take(3).map((m) => '${m.verseStart}-${m.verseEnd}').join(' | ')}',
-      );
+      if (_debugCommentaryResearchLogs) {
+        debugPrint(
+          '[CommentaryResearch] commentary raw=${matches.length} '
+          'duplicateRejected=${matches.length - commentaryCandidates.length} '
+          'filteredRejected=${commentaryCandidates.length - commentaryMatches.length} '
+          'final=${dedupedMatches.length} '
+          'labels=${dedupedMatches.take(3).map((m) => '${m.verseStart}-${m.verseEnd}').join(' | ')}',
+        );
+      }
     }
 
     return _SectionLoadResult(
@@ -468,6 +582,24 @@ class CommentaryResearchLibraryService
       stats: stats,
     );
   }
+}
+
+String _statusMessage({
+  required String folderLabel,
+  required int discoveredCount,
+  required int indexedCount,
+  required int matchCount,
+}) {
+  if (discoveredCount == 0) {
+    return 'No $folderLabel files found in the Library Root Folder.';
+  }
+  if (matchCount > 0) {
+    return 'Matching $folderLabel entries found for this passage.';
+  }
+  if (indexedCount > 0) {
+    return '$folderLabel files indexed, but no entries for this passage.';
+  }
+  return '$folderLabel files found, but not indexed to this passage yet.';
 }
 
 class LibraryBookSection {

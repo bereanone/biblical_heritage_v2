@@ -23,6 +23,11 @@ class SandboxBootstrap {
   static Future<String> userDatabasePath() async {
     final root = await LibraryRootService.instance.accessibleLibraryRootPath();
     if (root != null) {
+      final supportDir = await getApplicationDocumentsDirectory();
+      final mirrorRoot = p.join(supportDir.path, 'BiblicalHeritage', 'v2');
+      if (p.normalize(root) == p.normalize(mirrorRoot)) {
+        return legacyV2UserDatabasePath();
+      }
       return p.join(root, 'Databases', _userDbName);
     }
     return legacyV2UserDatabasePath();
@@ -52,7 +57,9 @@ class SandboxBootstrap {
       return;
     }
     sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
+    if (!identical(databaseFactory, databaseFactoryFfi)) {
+      databaseFactory = databaseFactoryFfi;
+    }
     _sqfliteInitialized = true;
   }
 

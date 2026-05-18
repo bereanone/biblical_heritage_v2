@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/library_root_native.dart';
+import '../../reader/data/commentary_research_library_service.dart';
 
 class LibraryRootSetupScreen extends StatefulWidget {
   const LibraryRootSetupScreen({super.key});
@@ -19,6 +20,8 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
   String? _mediaPath;
   String? _backupPath;
   bool _loading = true;
+  bool _indexing = false;
+  String? _indexResult;
 
   @override
   void initState() {
@@ -94,6 +97,27 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
     await _load();
   }
 
+  Future<void> _indexBooks() async {
+    if (_indexing) return;
+    final path = _selection?.path;
+    if (path == null || path.trim().isEmpty) return;
+    setState(() {
+      _indexing = true;
+      _indexResult = null;
+    });
+    final result = await CommentaryResearchLibraryService.instance
+        .indexLocalCatalogedEpubs();
+    if (!mounted) return;
+    final total = result.indexed + result.skipped + result.failed;
+    setState(() {
+      _indexing = false;
+      _indexResult = total == 0
+          ? 'Library is already indexed'
+          : 'Indexing complete — ${result.indexed} indexed, '
+              '${result.skipped} skipped, ${result.failed} failed';
+    });
+  }
+
   Widget _pathLine(String label, String? value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -151,8 +175,23 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
                               onPressed: _refresh,
                               child: const Text('Refresh Folders'),
                             ),
+                            OutlinedButton(
+                              onPressed: (_selection?.path?.isNotEmpty == true) &&
+                                      !_indexing
+                                  ? _indexBooks
+                                  : null,
+                              child: Text(
+                                _indexing
+                                    ? 'Indexing eLibrary books...'
+                                    : 'Index New/Changed Books',
+                              ),
+                            ),
                           ],
                         ),
+                        if (_indexResult != null) ...[
+                          const SizedBox(height: 8),
+                          Text(_indexResult!),
+                        ],
                       ],
                     ),
                   ),

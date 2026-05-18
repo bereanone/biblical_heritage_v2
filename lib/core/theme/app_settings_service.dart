@@ -3,6 +3,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../database/user_database.dart';
 import 'app_theme_mode.dart';
+import '../../features/reader/data/presentation/presentation_models.dart';
 import '../../features/reader/presentation/viewer_interlinear_settings.dart';
 import '../../features/reader/presentation/viewer_presentation_settings.dart';
 
@@ -71,8 +72,10 @@ class AppSettingsService {
   static const _lastTagTabIndexKey = 'viewer.tag.last_tab_index';
   static const _activeTagFamilyKey = 'viewer.tag.active_family';
   static const _presentationAspectRatioKey = 'viewer.presentation.aspect_ratio';
-  static const _churchAutoMuteEnabledKey =
-      'utilities.church_auto_mute.enabled';
+  static const _tagPresentationLayoutKeyPrefix = 'tags.presentation_layout.';
+  static const _churchAutoMuteEnabledKey = 'utilities.church_auto_mute.enabled';
+  static const _lastBibleSearchKey = 'search.last_bible_search';
+  static const _lastElibrarySearchKey = 'search.last_elibrary_search';
 
   Future<AppVisualSettings> loadVisualSettings(AppThemeMode mode) async {
     final db = await UserDatabase.instance.database;
@@ -319,6 +322,93 @@ class AppSettingsService {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  // Tag/list default only. Future slide- and range-level overrides can layer on top.
+  Future<PresentationLayoutPreference> loadTagPresentationLayoutPreference({
+    required String tagFamily,
+    required String tag,
+  }) async {
+    final key = _tagPresentationLayoutKey(tagFamily: tagFamily, tag: tag);
+    if (key.isEmpty) return PresentationLayoutPreference.auto;
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    if (rows.isEmpty) return PresentationLayoutPreference.auto;
+    return presentationLayoutPreferenceFromJson(rows.first['value'] as String?);
+  }
+
+  Future<void> saveTagPresentationLayoutPreference({
+    required String tagFamily,
+    required String tag,
+    required PresentationLayoutPreference preference,
+  }) async {
+    final key = _tagPresentationLayoutKey(tagFamily: tagFamily, tag: tag);
+    if (key.isEmpty) return;
+    final db = await UserDatabase.instance.database;
+    await db.insert('app_settings', {
+      'key': key,
+      'value': presentationLayoutPreferenceToJson(preference),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<Map<int, PresentationLayoutPreference>>
+  loadTagPresentationSlideLayoutPreferences({
+    required String tagFamily,
+    required String tag,
+  }) async {
+    final prefix = _tagPresentationSlideLayoutPrefix(
+      tagFamily: tagFamily,
+      tag: tag,
+    );
+    if (prefix.isEmpty) return const <int, PresentationLayoutPreference>{};
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      columns: ['key', 'value'],
+      where: 'key GLOB ?',
+      whereArgs: ['$prefix*'],
+    );
+    final result = <int, PresentationLayoutPreference>{};
+    for (final row in rows) {
+      final key = row['key']?.toString() ?? '';
+      if (!key.startsWith(prefix)) continue;
+      final slideNumber = int.tryParse(key.substring(prefix.length));
+      if (slideNumber == null || slideNumber <= 0) continue;
+      result[slideNumber] = presentationLayoutPreferenceFromJson(
+        row['value'] as String?,
+      );
+    }
+    return result;
+  }
+
+  Future<void> saveTagPresentationSlideLayoutPreferences({
+    required String tagFamily,
+    required String tag,
+    required PresentationLayoutPreference defaultPreference,
+    required Map<int, PresentationLayoutPreference> slidePreferences,
+  }) async {
+    final prefix = _tagPresentationSlideLayoutPrefix(
+      tagFamily: tagFamily,
+      tag: tag,
+    );
+    if (prefix.isEmpty) return;
+    final db = await UserDatabase.instance.database;
+    final batch = db.batch();
+    batch.delete('app_settings', where: 'key GLOB ?', whereArgs: ['$prefix*']);
+    for (final entry in slidePreferences.entries) {
+      if (entry.value == defaultPreference) continue;
+      batch.insert('app_settings', {
+        'key': '$prefix${entry.key}',
+        'value': presentationLayoutPreferenceToJson(entry.value),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
   Future<bool> loadChurchAutoMuteEnabled() async {
     final db = await UserDatabase.instance.database;
     final rows = await db.query(
@@ -338,6 +428,22 @@ class AppSettingsService {
       'key': _churchAutoMuteEnabledKey,
       'value': value ? '1' : '0',
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<String?> loadLastBibleSearch() {
+    return _loadStringSetting(_lastBibleSearchKey);
+  }
+
+  Future<void> saveLastBibleSearch(String value) {
+    return _saveStringSetting(_lastBibleSearchKey, value);
+  }
+
+  Future<String?> loadLastElibrarySearch() {
+    return _loadStringSetting(_lastElibrarySearchKey);
+  }
+
+  Future<void> saveLastElibrarySearch(String value) {
+    return _saveStringSetting(_lastElibrarySearchKey, value);
   }
 
   AppVisualSettings presetForMode(AppThemeMode mode) {
@@ -378,8 +484,71 @@ class AppSettingsService {
     return null;
   }
 
+  String _tagPresentationLayoutKey({
+    required String tagFamily,
+    required String tag,
+  }) {
+    final prefix = _tagPresentationLayoutPrefix(tagFamily: tagFamily, tag: tag);
+    if (prefix.isEmpty) return '';
+    return prefix.substring(0, prefix.length - 1);
+  }
+
+  String _tagPresentationLayoutPrefix({
+    required String tagFamily,
+    required String tag,
+  }) {
+    final normalizedFamily = _normalizeSettingSegment(tagFamily);
+    final normalizedTag = _normalizeSettingSegment(tag);
+    if (normalizedFamily.isEmpty || normalizedTag.isEmpty) return '';
+    return '$_tagPresentationLayoutKeyPrefix$normalizedFamily.$normalizedTag.';
+  }
+
+  String _tagPresentationSlideLayoutPrefix({
+    required String tagFamily,
+    required String tag,
+  }) {
+    return _tagPresentationLayoutPrefix(tagFamily: tagFamily, tag: tag);
+  }
+
+  String _normalizeSettingSegment(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'^[#\$@]+'), '')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+  }
+
   String _hexFromColor(Color color) {
     final argb = color.toARGB32();
     return '#${argb.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
+  }
+
+  Future<String?> _loadStringSetting(String key) async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final value = rows.first['value']?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
+  Future<void> _saveStringSetting(String key, String value) async {
+    final db = await UserDatabase.instance.database;
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      await db.delete('app_settings', where: 'key = ?', whereArgs: [key]);
+      return;
+    }
+    await db.insert('app_settings', {
+      'key': key,
+      'value': trimmed,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 }

@@ -10,6 +10,7 @@ import 'tag_detail_screen_launcher.dart';
 import 'tag_quick_apply_helper.dart';
 import 'viewer_passage_models.dart';
 import 'viewer_range_selection.dart';
+import 'viewer_search_dialog.dart';
 
 class HashTagDialog extends StatefulWidget {
   const HashTagDialog({
@@ -55,9 +56,11 @@ class _HashTagDialogState extends State<HashTagDialog>
   List<HashTagSummary> _summaries = const <HashTagSummary>[];
   List<String> _categoryOptions = const <String>[];
   Map<String, String?> _summaryCategories = const <String, String?>{};
+  List<MapEntry<String?, List<HashTagSummary>>> _visibleSummaryGroups =
+      const <MapEntry<String?, List<HashTagSummary>>>[];
+  List<HashTagSummary> _selectedCategorySummaries = const <HashTagSummary>[];
   String? _defaultTag;
   String? _selectedCategory;
-  int _categoryFieldRevision = 0;
   String? _categoryFilter;
   int _browseStateRevision = 0;
   TagSortMode _sortMode = TagSortMode.verseCount;
@@ -117,7 +120,7 @@ class _HashTagDialogState extends State<HashTagDialog>
       _categoryController.clear();
       _categoryFilter = null;
       _searchController.clear();
-      _categoryFieldRevision += 1;
+      _recomputeBrowseViews();
       _loading = false;
     });
   }
@@ -211,6 +214,11 @@ class _HashTagDialogState extends State<HashTagDialog>
     return sections;
   }
 
+  void _recomputeBrowseViews() {
+    _visibleSummaryGroups = _groupedVisibleSummaries();
+    _selectedCategorySummaries = _summariesInSelectedCategory();
+  }
+
   Future<void> _saveCurrentCategory() async {
     final tag = _currentTag;
     if (tag.isEmpty) {
@@ -224,18 +232,62 @@ class _HashTagDialogState extends State<HashTagDialog>
   }
 
   Future<String?> _resolveTagForSelection() async {
-    final tag = _currentTag;
-    if (tag.isEmpty) {
-      await _showNoTagSelectedDialog();
-      return null;
+    final currentTag = _currentTag;
+    if (currentTag.isNotEmpty) {
+      return currentTag;
     }
-    return tag;
+
+    final defaultTag =
+        _defaultTag?.trim() ??
+        _repository.normalizeTagName(await _repository.loadDefaultTag() ?? '');
+    if (defaultTag.isNotEmpty) {
+      return defaultTag;
+    }
+
+    await _showNoTagSelectedDialog();
+    return null;
   }
 
   Future<void> _applySelectionToTargets(String tag) async {
+    final targets = widget.selectionTargets;
+    if (targets.length > 1) {
+      final book = targets.first.bookNumber;
+      final chapter = targets.first.chapter;
+      final crossChapter = targets.any(
+        (t) => t.bookNumber != book || t.chapter != chapter,
+      );
+      if (crossChapter) {
+        _showSnack(
+          'Multi-chapter ranges are not supported for tagging. '
+          'Select verses within one chapter.',
+        );
+        return;
+      }
+      setState(() => _working = true);
+      final result = await _repository.addBibleRangeToTag(
+        tag: tag,
+        bookNumber: book,
+        chapter: chapter,
+        verseStart: targets.first.verse,
+        verseEnd: targets.last.verse,
+      );
+      if (!mounted) return;
+      setState(() => _working = false);
+      if (result.tag == null) {
+        await _showNoTagSelectedDialog();
+        return;
+      }
+      await _repository.saveTagCategory(result.tag!, _selectedCategory ?? '');
+      await _reloadSelectedTag(result.tag!);
+      _showSnack(
+        'Tagged ${result.inserted} verse(s) with ${result.tag}'
+        '${result.skipped > 0 ? ' (${result.skipped} already in this tag)' : ''}.',
+      );
+      return;
+    }
     setState(() => _working = true);
     final result = await _repository.quickApplyTargets(
-      targets: widget.selectionTargets,
+      targets: targets,
       tag: tag,
     );
     if (!mounted) return;
@@ -281,7 +333,7 @@ class _HashTagDialogState extends State<HashTagDialog>
       _selectedCategory = resolvedSelected;
       _categoryController.text = resolvedSelected ?? '';
       _categoryFilter = resolvedFilter;
-      _categoryFieldRevision += 1;
+      _recomputeBrowseViews();
     });
   }
 
@@ -304,6 +356,7 @@ class _HashTagDialogState extends State<HashTagDialog>
     if (!mounted) return;
     setState(() {
       _summaryCategories = summaryCategories;
+      _recomputeBrowseViews();
     });
   }
 
@@ -394,6 +447,7 @@ class _HashTagDialogState extends State<HashTagDialog>
       } else {
         _categoryFilter = null;
       }
+      _recomputeBrowseViews();
     });
   }
 
@@ -411,6 +465,7 @@ class _HashTagDialogState extends State<HashTagDialog>
       _clearSelectedTagOnly();
       _categoryFilter = null;
       _browseStateRevision += 1;
+      _recomputeBrowseViews();
     });
   }
 
@@ -430,12 +485,14 @@ class _HashTagDialogState extends State<HashTagDialog>
 
     setState(() {
       _searchController.text = _repository.normalizeTagName(tag);
+      _recomputeBrowseViews();
     });
   }
 
   Future<void> _reloadSelectedTag(
     String tag, {
     int? expectedBrowseStateRevision,
+    bool syncBrowseFilter = false,
   }) async {
     final normalizedTag = _repository.normalizeTagName(tag);
     if (normalizedTag.isEmpty) {
@@ -455,27 +512,85 @@ class _HashTagDialogState extends State<HashTagDialog>
     final tagStillExists = summaries.any(
       (summary) => summary.tag == normalizedTag,
     );
+    final resolvedCategoryRaw = category?.trim();
+    String? resolvedCategory = resolvedCategoryRaw;
+    if (resolvedCategory?.isEmpty ?? true) {
+      resolvedCategory = null;
+    }
+    final shouldShowMissingRowSnack = !tagStillExists;
     setState(() {
       _summaries = summaries;
       _summaryCategories = summaryCategories;
-      if (tagStillExists) {
-        _tagController.text = normalizedTag;
-        _selectedCategory = category;
-        _categoryController.text = category ?? '';
-      } else {
-        _clearSelectedTagOnly();
-      }
+      _tagController.text = normalizedTag;
+      _selectedCategory = resolvedCategory;
+      _categoryController.text = resolvedCategory ?? '';
+      _searchController.clear();
+      _recomputeBrowseViews();
     });
+    if (shouldShowMissingRowSnack) {
+      _showMissingDefaultTagSnack(normalizedTag);
+    }
     await _refreshCategoryOptions(
-      selectedCategory: tagStillExists ? category : null,
+      selectedCategory: resolvedCategory,
       expectedBrowseStateRevision: expectedBrowseStateRevision,
     );
+    if (!mounted || !syncBrowseFilter) return;
+    setState(() {
+      _categoryFilter = resolvedCategory ?? _uncategorizedCategoryFilterValue;
+    });
   }
 
   Future<void> _useDefaultTag() async {
-    final defaultTag = _defaultTag;
-    if (defaultTag == null) return;
-    await _reloadSelectedTag(defaultTag);
+    final defaultTag = _defaultTag?.trim().isNotEmpty == true
+        ? _defaultTag!.trim()
+        : _repository.normalizeTagName(
+            await _repository.loadDefaultTag() ?? '',
+          );
+    if (defaultTag.isEmpty) {
+      _showSnack('No default $_tagName is set yet.');
+      return;
+    }
+    final defaultCategory = await _repository.loadTagCategory(defaultTag);
+    if (!mounted) return;
+    setState(() {
+      _tagController.text = defaultTag;
+      final resolvedCategoryRaw = defaultCategory?.trim();
+      String? resolvedCategory = resolvedCategoryRaw;
+      if (resolvedCategory?.isEmpty ?? true) {
+        resolvedCategory = null;
+      }
+      _selectedCategory = resolvedCategory;
+      _categoryController.text = resolvedCategory ?? '';
+      _categoryFilter = resolvedCategory ?? _uncategorizedCategoryFilterValue;
+      _recomputeBrowseViews();
+    });
+    await _reloadSelectedTag(defaultTag, syncBrowseFilter: true);
+  }
+
+  void _showMissingDefaultTagSnack(String tag) {
+    if (!mounted) return;
+    _showSnack('$tag has no saved row yet. It is ready to tag with.');
+  }
+
+  Future<String?> _resolveFindTextTargetTag() async {
+    final selectedTag = _currentTag;
+    if (selectedTag.isNotEmpty) {
+      return selectedTag;
+    }
+
+    final shownDefaultTag = _defaultTag?.trim() ?? '';
+    if (shownDefaultTag.isNotEmpty) {
+      return _repository.normalizeTagName(shownDefaultTag);
+    }
+
+    final activeDefaultTag = _repository.normalizeTagName(
+      await _repository.loadActiveDefaultTag() ?? '',
+    );
+    if (activeDefaultTag.isNotEmpty) {
+      return activeDefaultTag;
+    }
+
+    return null;
   }
 
   Future<void> _saveDefaultTag() async {
@@ -565,21 +680,38 @@ class _HashTagDialogState extends State<HashTagDialog>
   }
 
   Future<void> _showFindText() async {
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Find Text'),
-          content: const Text(
-            'This keeps the old popup layout first. We can wire the full find-text flow next.',
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: TagDialogStyles.fittedButtonLabel('Done'),
+    final currentTag = await _resolveFindTextTargetTag();
+    if (!mounted) return;
+    if (currentTag == null || currentTag.isEmpty) {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Choose or create a #tag'),
+            content: const Text(
+              'Choose or create a #tag before adding search results.',
             ),
-          ],
-        );
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: TagDialogStyles.fittedButtonLabel('OK'),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    await showViewerSearchDialog(
+      context,
+      fontScale: 1.0,
+      currentTag: currentTag,
+      onBibleResultAdded: (tag) async {
+        if (!mounted) return;
+        await _reloadSelectedTag(tag);
       },
     );
   }
@@ -769,7 +901,7 @@ class _HashTagDialogState extends State<HashTagDialog>
     _tagController.clear();
     _selectedCategory = null;
     _categoryController.clear();
-    _categoryFieldRevision += 1;
+    _recomputeBrowseViews();
   }
 
   Future<void> _handleCategoryChanged(String? value) async {
@@ -783,7 +915,7 @@ class _HashTagDialogState extends State<HashTagDialog>
         setState(() {
           _selectedCategory = previousSelection;
           _categoryController.text = previousSelection ?? '';
-          _categoryFieldRevision += 1;
+          _recomputeBrowseViews();
         });
       }
       return;
@@ -793,46 +925,67 @@ class _HashTagDialogState extends State<HashTagDialog>
       _selectedCategory = _categoryLabel(value);
       _categoryController.text = _selectedCategory ?? '';
       _syncCategoryBrowseFilterToSelection();
-      _categoryFieldRevision += 1;
+      _recomputeBrowseViews();
     });
   }
 
   Future<String?> _showNewCategoryDialog() async {
     final currentTag = _currentTag;
     final controller = TextEditingController();
-    final categoryName = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text('New Category'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(
-              labelText: 'Category name',
-              border: OutlineInputBorder(),
-            ),
-            onSubmitted: (_) {
-              Navigator.of(dialogContext).pop(controller.text.trim());
+    String? errorText;
+    String? categoryName;
+    try {
+      categoryName = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              void submit() {
+                final value = controller.text.trim();
+                if (value.isEmpty) {
+                  setDialogState(() {
+                    errorText = 'Enter a category name.';
+                  });
+                  return;
+                }
+                Navigator.of(dialogContext).pop(value);
+              }
+
+              return AlertDialog(
+                title: const Text('New Category'),
+                content: TextField(
+                  controller: controller,
+                  autofocus: true,
+                  textInputAction: TextInputAction.done,
+                  decoration: InputDecoration(
+                    labelText: 'Category name',
+                    border: const OutlineInputBorder(),
+                    errorText: errorText,
+                  ),
+                  onChanged: (_) {
+                    if (errorText == null) return;
+                    setDialogState(() {
+                      errorText = null;
+                    });
+                  },
+                  onSubmitted: (_) => submit(),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(onPressed: submit, child: const Text('Add')),
+                ],
+              );
             },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop(controller.text.trim());
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        );
-      },
-    );
-    controller.dispose();
+          );
+        },
+      );
+    } finally {
+      await WidgetsBinding.instance.endOfFrame;
+      controller.dispose();
+    }
 
     final normalized = categoryName?.trim() ?? '';
     if (normalized.isEmpty) return null;
@@ -848,7 +1001,6 @@ class _HashTagDialogState extends State<HashTagDialog>
         _selectedCategory = existing;
         _categoryController.text = existing;
         _syncCategoryBrowseFilterToSelection();
-        _categoryFieldRevision += 1;
       });
       return existing;
     }
@@ -951,9 +1103,7 @@ class _HashTagDialogState extends State<HashTagDialog>
                         onImportClipboard: _showClipboardImport,
                         onRenameCurrentTag: _renameCurrentTag,
                         defaultTag: _defaultTag,
-                        onUseDefault: _defaultTag == null
-                            ? null
-                            : _useDefaultTag,
+                        onUseDefault: _useDefaultTag,
                         onSaveDefault: _saveDefaultTag,
                         legacyStyle: isLegacy,
                       ),
@@ -961,14 +1111,13 @@ class _HashTagDialogState extends State<HashTagDialog>
                         child: TagDialogHashTab(
                           tagSymbol: _tagLabel,
                           loading: _loading,
-                          groupedSummaries: _groupedVisibleSummaries(),
-                          searchSummaries: _summariesInSelectedCategory(),
+                          groupedSummaries: _visibleSummaryGroups,
+                          searchSummaries: _selectedCategorySummaries,
                           tagController: _tagController,
                           categoryController: _categoryController,
                           searchController: _searchController,
                           selectedCategory: _selectedCategory,
                           categoryOptions: _categoryOptions,
-                          categoryFieldRevision: _categoryFieldRevision,
                           categoryFilter: _categoryFilter,
                           sortMode: _sortMode,
                           working: _working,
@@ -979,8 +1128,10 @@ class _HashTagDialogState extends State<HashTagDialog>
                               _toggleSelectedCategoryBrowseFilter,
                           onResetBrowseState: _resetBrowseState,
                           onSearchSelected: _selectTagFromSearch,
-                          onSortModeChanged: (mode) =>
-                              setState(() => _sortMode = mode),
+                          onSortModeChanged: (mode) => setState(() {
+                            _sortMode = mode;
+                            _recomputeBrowseViews();
+                          }),
                           onOpenSummaryDetails: _openSummaryDetails,
                         ),
                       ),

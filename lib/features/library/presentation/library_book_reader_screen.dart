@@ -9,6 +9,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/user_database.dart';
+import '../data/library_citation_display_helper.dart';
 import '../../reader/data/commentary_research_library_service.dart';
 import '../../reader/presentation/reader_search_mode_picker.dart';
 import '../../reader/presentation/viewer_search_dialog.dart';
@@ -1691,8 +1692,16 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         r'''title\s*=\s*["'](\d{1,4})["']''',
         caseSensitive: false,
       ).firstMatch(attrs);
-      if (titleMatch == null) continue;
-      final pageNumber = int.tryParse(titleMatch.group(1)!);
+      int? pageNumber;
+      if (titleMatch != null) {
+        pageNumber = int.tryParse(titleMatch.group(1)!);
+      } else {
+        final inner = (match.group(2) ?? '').trim();
+        final innerMatch = RegExp(r'^\[(\d{1,4})\]$').firstMatch(inner);
+        if (innerMatch != null) {
+          pageNumber = int.tryParse(innerMatch.group(1)!);
+        }
+      }
       if (pageNumber == null) continue;
       final textBefore = _stripHtmlForRefCode(html.substring(0, match.start));
       final isInsideParagraph = textBefore.trim().isNotEmpty;
@@ -1837,8 +1846,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                       item: item,
                       sectionTitle: currentSection?.title ?? '',
                       block: block,
-                      fallbackParagraphCount:
-                          devotionalFallbackParagraphCount,
+                      fallbackParagraphCount: devotionalFallbackParagraphCount,
+                    )
+                  : item.isPeriodical
+                  ? libraryReaderPeriodicalRefCode(
+                      item: item,
+                      sectionTitle: currentSection?.title ?? '',
+                      paragraphIndex: paragraphIndex,
                     )
                   : _refCodeByLocation[_refCodeLocationKey(
                           libraryItemId: item.id,
@@ -2003,38 +2017,40 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                                   ),
                                 ),
                               )
-                            : SingleChildScrollView(
-                                controller: _bodyScrollController,
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    if (showSectionTitle) ...[
-                                      Text(
-                                        currentSection?.title ??
-                                            item.displayTitle,
-                                        style: theme.textTheme.headlineSmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w800,
-                                              color: textColor,
-                                              fontSize: titleFontSize,
-                                            ),
-                                      ),
-                                      const SizedBox(height: 12),
+                            : SelectionArea(
+                                child: SingleChildScrollView(
+                                  controller: _bodyScrollController,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      if (showSectionTitle) ...[
+                                        Text(
+                                          currentSection?.title ??
+                                              item.displayTitle,
+                                          style: theme.textTheme.headlineSmall
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w800,
+                                                color: textColor,
+                                                fontSize: titleFontSize,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                      ],
+                                      if (sectionBlocks.isEmpty)
+                                        Text(
+                                          'No readable text in this section.',
+                                          style: theme.textTheme.bodyLarge
+                                              ?.copyWith(
+                                                color: textColor,
+                                                fontSize: bodyFontSize,
+                                                height: 1.6,
+                                              ),
+                                        )
+                                      else
+                                        ...sectionBlockWidgets,
                                     ],
-                                    if (sectionBlocks.isEmpty)
-                                      Text(
-                                        'No readable text in this section.',
-                                        style: theme.textTheme.bodyLarge
-                                            ?.copyWith(
-                                              color: textColor,
-                                              fontSize: bodyFontSize,
-                                              height: 1.6,
-                                            ),
-                                      )
-                                    else
-                                      ...sectionBlockWidgets,
-                                  ],
+                                  ),
                                 ),
                               ),
                       ),

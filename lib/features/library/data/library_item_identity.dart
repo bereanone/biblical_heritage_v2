@@ -17,7 +17,11 @@ bool isManagedEgwCollectionName(String? collectionName) {
   final normalized = _normalizedText(collectionName ?? '');
   return normalized == 'egw books' ||
       normalized == 'egw devotionals' ||
-      normalized == 'egw commentaries';
+      normalized == 'egw commentaries' ||
+      normalized == 'egw misc collections' ||
+      normalized == 'egw pamphlets' ||
+      normalized == 'egw periodicals' ||
+      normalized == 'egw manuscript releases';
 }
 
 Future<void> migrateManagedLibraryItemId({

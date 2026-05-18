@@ -4,8 +4,6 @@ class _LibraryHeader extends StatelessWidget {
   const _LibraryHeader({
     required this.hasRoot,
     required this.rootPath,
-    required this.currentFolderFilter,
-    required this.currentFolderLabel,
     required this.onOpenBible,
     required this.onOpenLibraryRootSetup,
     required this.onOpenELibrarySetup,
@@ -14,8 +12,6 @@ class _LibraryHeader extends StatelessWidget {
 
   final bool hasRoot;
   final String? rootPath;
-  final String currentFolderFilter;
-  final String currentFolderLabel;
   final VoidCallback onOpenBible;
   final VoidCallback onOpenLibraryRootSetup;
   final VoidCallback onOpenELibrarySetup;
@@ -57,9 +53,7 @@ class _LibraryHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        _FolderRootMenu(
-          currentValue: currentFolderFilter,
-          currentLabel: currentFolderLabel,
+        _LibraryActionsMenu(
           onSelected: (value) {
             switch (value) {
               case 'root':
@@ -71,21 +65,8 @@ class _LibraryHeader extends StatelessWidget {
               case 'refresh':
                 onRefresh();
                 break;
-              case 'ePubs':
-              case 'PDFs':
-              case 'all':
-                break;
             }
           },
-          customMenuItems: const [
-            PopupMenuItem(value: 'root', child: Text('Choose Library Folder')),
-            PopupMenuItem(value: 'setup', child: Text('Open eLibrary Setup')),
-            PopupMenuItem(value: 'refresh', child: Text('Refresh Folders')),
-            PopupMenuDivider(),
-            PopupMenuItem(value: 'ePubs', child: Text('ePubs')),
-            PopupMenuItem(value: 'PDFs', child: Text('PDFs')),
-            PopupMenuItem(value: 'all', child: Text('All')),
-          ],
         ),
         const SizedBox(width: 8),
       ],
@@ -93,32 +74,21 @@ class _LibraryHeader extends StatelessWidget {
   }
 }
 
-class _FolderRootMenu extends StatelessWidget {
-  const _FolderRootMenu({
-    required this.currentValue,
-    required this.currentLabel,
-    required this.onSelected,
-    this.customMenuItems,
-  });
+class _LibraryActionsMenu extends StatelessWidget {
+  const _LibraryActionsMenu({required this.onSelected});
 
-  final String currentValue;
-  final String currentLabel;
   final ValueChanged<String> onSelected;
-  final List<PopupMenuEntry<String>>? customMenuItems;
 
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
-      tooltip: 'Choose folder root',
+      tooltip: 'Library actions',
       onSelected: onSelected,
-      initialValue: currentValue,
-      itemBuilder: (context) =>
-          customMenuItems ??
-          const [
-            PopupMenuItem<String>(value: 'ePubs', child: Text('ePubs')),
-            PopupMenuItem<String>(value: 'PDFs', child: Text('PDFs')),
-            PopupMenuItem<String>(value: 'all', child: Text('All')),
-          ],
+      itemBuilder: (context) => const [
+        PopupMenuItem(value: 'root', child: Text('Choose Library Folder')),
+        PopupMenuItem(value: 'setup', child: Text('Open eLibrary Setup')),
+        PopupMenuItem(value: 'refresh', child: Text('Refresh Folders')),
+      ],
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
@@ -130,13 +100,13 @@ class _FolderRootMenu extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.folder_outlined,
+              Icons.more_horiz,
               size: 18,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
             const SizedBox(width: 6),
             Text(
-              currentLabel,
+              'Menu',
               style: Theme.of(
                 context,
               ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),

@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "collections": [
+    {
+      "category": "EGW_Books",
+      "display_name": "Books",
+      "collection_page_url": "https://text.egwwritings.org/allCollection/4",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/4",
+      "folder_root": "Research",
+      "folder_name": "EGW_Books",
+      "modern": false,
+      "adapted": false,
+      "search_scope": "Books"
+    },
+    {
+      "category": "EGW_Devotionals",
+      "display_name": "Devotionals",
+      "collection_page_url": "https://text.egwwritings.org/allCollection/1227",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/1227",
+      "folder_root": "Research",
+      "folder_name": "EGW_Devotionals",
+      "modern": false,
+      "adapted": false,
+      "search_scope": "Devotionals"
+    },
+    {
+      "category": "EGW_Commentaries",
+      "display_name": "Commentaries",
+      "collection_page_url": "https://text.egwwritings.org/allCollection/1371",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/1371",
+      "folder_root": "Commentaries",
+      "folder_name": "EGW_Commentaries",
+      "modern": false,
+      "adapted": false,
+      "search_scope": "Commentaries"
+    },
+    {
+      "category": "EGW_Letters_Manuscripts",
+      "display_name": "Letters & Manuscripts",
+      "collection_page_url": "https://text.egwwritings.org/allCollection/1277",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/1277",
+      "folder_root": "Research",
+      "folder_name": "EGW_Letters_Manuscripts",
+      "modern": false,
+      "adapted": false,
+      "search_scope": "Letters & Manuscripts"
+    },
+    {
+      "category": "EGW_Manuscript_Releases",
+      "display_name": "Manuscript Releases",
+      "collection_page_url": "https://text.egwwritings.org/allCollection/en/1376",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/en/1376",
+      "folder_root": "Research",
+      "folder_name": "EGW_Manuscript_Releases",
+      "modern": false,
+      "adapted": false,
+      "search_scope": "Manuscript Releases"
+    },
+    {
+      "category": "EGW_Misc_Collections",
+      "display_name": "Misc Collections",
+      "collection_page_url": "https://text.egwwritings.org/allCollection/en/10",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/en/10",
+      "folder_root": "Research",
+      "folder_name": "EGW_Misc_Collections",
+      "modern": false,
+      "adapted": false,
+      "search_scope": "Misc Collections"
+    },
+    {
+      "category": "EGW_Pamphlets",
+      "display_name": "Pamphlets",
+      "collection_page_url": "https://text.egwwritings.org/allCollection/en/8",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/en/8",
+      "folder_root": "Research",
+      "folder_name": "EGW_Pamphlets",
+      "modern": false,
+      "adapted": false,
+      "search_scope": "Pamphlets"
+    },
+    {
+      "category": "EGW_Periodicals",
+      "display_name": "Periodicals",
+      "collection_page_url": "https://text.egwwritings.org/allCollection/en/5",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/en/5",
+      "folder_root": "Research",
+      "folder_name": "EGW_Periodicals",
+      "modern": false,
+      "adapted": false,
+      "search_scope": "Periodicals"
+    },
+    {
+      "category": "EGW_Modern_English",
+      "display_name": "Modern English",
+      "collection_page_url": "https://m.egwwritings.org/en/folders/218",
+      "fallback_collection_page_url": "https://m.egwwritings.org/en/folders/218",
+      "folder_root": "Research",
+      "folder_name": "EGW_Modern_English",
+      "modern": true,
+      "adapted": true,
+      "search_scope": "Modern"
+    },
+    {
+      "category": "EGW_Conflict",
+      "display_name": "The Conflict",
+      "collection_page_url": "https://text.egwwritings.org/allCollection/1469",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/1469",
+      "folder_root": "Research",
+      "folder_name": "EGW_Conflict",
+      "modern": false,
+      "adapted": false,
+      "search_scope": "Conflict"
+    }
+  ]
+}

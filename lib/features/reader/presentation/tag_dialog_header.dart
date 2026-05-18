@@ -118,7 +118,7 @@ class TagDialogHeader extends StatelessWidget {
                       ),
                       _TagHeaderChip(
                         icon: Icons.search,
-                        label: 'Find',
+                        label: 'Find Text',
                         onPressed: onFindText,
                         compact: compact,
                       ),
@@ -221,7 +221,9 @@ class TagDialogHeader extends StatelessWidget {
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        child: TagDialogStyles.fittedButtonLabel('Make Default'),
+                        child: TagDialogStyles.fittedButtonLabel(
+                          'Make Default',
+                        ),
                       ),
                     ],
                   ),

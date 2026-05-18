@@ -1,11 +1,24 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_paste_input/flutter_paste_input.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
+import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../../core/theme/app_settings_service.dart';
+import '../../library/data/library_citation_display_helper.dart';
+import '../data/presentation/presentation_models.dart';
+import '../data/presentation/presentation_text_format.dart';
 import 'tag_dialog_styles.dart';
 import 'tag_quick_apply_helper.dart';
 import 'viewer_presentation_launcher.dart';
+
+part 'tag_detail_screen_dialogs.dart';
 
 class HashTagDetailScreen extends StatefulWidget {
   const HashTagDetailScreen({
@@ -31,6 +44,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   String? _defaultTag;
   List<HashTagEntry> _entries = const <HashTagEntry>[];
   int _focusedIndex = 0;
+  bool _hasChanges = false;
 
   @override
   void initState() {
@@ -74,13 +88,41 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     });
   }
 
+  void _markChanged() {
+    _hasChanges = true;
+  }
+
+  Future<void> _notifyParentChanged() async {
+    final onSelectTag = widget.onSelectTag;
+    if (onSelectTag == null) return;
+    await onSelectTag(widget.tag);
+  }
+
+  void _closeDetail() {
+    Navigator.of(context).pop(_hasChanges);
+  }
+
   bool get _isDollarRepository => widget.repository is DollarTagRepository;
 
   bool _isNoteOnlyEntry(HashTagEntry entry) {
-    return _isDollarRepository &&
-        entry.bookNumber == 0 &&
-        (entry.contentHtml?.trim().isNotEmpty == true ||
-            entry.verseRef.startsWith('note:'));
+    return entry.bookNumber == 0 &&
+        entry.chapter == 0 &&
+        entry.verse == 0 &&
+        entry.verseRef.startsWith('note:');
+  }
+
+  bool _hasEntryNote(HashTagEntry entry) {
+    if (_isDollarRepository) {
+      return entry.contentHtml?.trim().isNotEmpty == true;
+    }
+    return entry.noteText?.trim().isNotEmpty == true;
+  }
+
+  String _entryNoteText(HashTagEntry entry) {
+    if (_isDollarRepository) {
+      return _cleanStoredHtml(entry.contentHtml ?? '').trim();
+    }
+    return entry.noteText?.trim() ?? '';
   }
 
   int? _bookNumberForName(String rawBook) {
@@ -89,16 +131,6 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       if (_normalizeBookKey(entry.value) == normalized) return entry.key;
     }
     return null;
-  }
-
-  int _noteNumberFor(HashTagEntry entry) {
-    var count = 0;
-    for (final current in _entries) {
-      if (!_isNoteOnlyEntry(current)) continue;
-      count++;
-      if (current.id == entry.id) return count;
-    }
-    return 1;
   }
 
   String _cleanStoredHtml(String input) {
@@ -124,6 +156,55 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
 
   String _normalizeBookKey(String input) {
     return input.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+
+  Future<String?> _mediaBasePath() async {
+    final libraryRoot = await LibraryRootService.instance.libraryRootPath();
+    if (libraryRoot != null && libraryRoot.trim().isNotEmpty) {
+      return libraryRoot;
+    }
+    final support = await getApplicationSupportDirectory();
+    return p.join(support.path, 'studybible_media');
+  }
+
+  String _mimeTypeForMediaPath(String relativePath) {
+    return switch (p.extension(relativePath).toLowerCase()) {
+      '.jpg' || '.jpeg' => 'image/jpeg',
+      '.png' => 'image/png',
+      '.gif' => 'image/gif',
+      '.webp' => 'image/webp',
+      _ => 'image/png',
+    };
+  }
+
+  Future<List<_StagedMediaAttachment>> _loadMediaAttachmentsForRefs(
+    List<String> mediaRefs,
+  ) async {
+    final attachments = <_StagedMediaAttachment>[];
+    final basePath = await _mediaBasePath();
+    if (basePath == null || basePath.trim().isEmpty) return attachments;
+    for (final mediaRef in mediaRefs) {
+      final normalized = mediaRef.trim();
+      if (normalized.isEmpty) continue;
+      final path = p.isAbsolute(normalized)
+          ? normalized
+          : p.join(basePath, p.normalize(normalized));
+      final file = File(path);
+      if (!await file.exists()) continue;
+      try {
+        final bytes = await file.readAsBytes();
+        if (bytes.isEmpty) continue;
+        attachments.add(
+          _StagedMediaAttachment(
+            bytes: bytes,
+            mimeType: _mimeTypeForMediaPath(normalized),
+          ),
+        );
+      } catch (_) {
+        // Skip unreadable media and let the edit dialog proceed.
+      }
+    }
+    return attachments;
   }
 
   Future<void> _makeDefault() async {
@@ -152,6 +233,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
           title: const Text('How this screen works'),
           content: const Text(
             'Use the up and down arrows on each verse row to change slide order. '
+            'Tap the slide label to group rows onto the same presentation slide. '
             'Tap the presentation button to open presentation mode, or a verse row to open that verse in the reader. '
             'Use Make default to set the starting tag, Rename to change the tag name, and Erase to delete it.',
           ),
@@ -269,6 +351,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
 
     await widget.repository.updateEntry(
       id: entry.id,
+      normalized: entry.isNormalized,
       values: {
         'verse_ref': verseRef,
         'book_number': bookNumber,
@@ -278,6 +361,8 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       },
     );
     if (!mounted) return;
+    _markChanged();
+    await _notifyParentChanged();
     await _reload();
     _showSnack('Updated ${_isNoteOnlyEntry(entry) ? 'note' : 'link'}.');
   }
@@ -285,6 +370,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   Future<void> _addNoteSlide() async {
     if (!_isDollarRepository) return;
     final noteController = TextEditingController();
+    final referenceController = TextEditingController();
     final shouldSave = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
@@ -292,15 +378,31 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
           title: const Text('Add Note Slide'),
           content: SizedBox(
             width: 520,
-            child: TextField(
-              controller: noteController,
-              autofocus: true,
-              minLines: 6,
-              maxLines: 12,
-              decoration: const InputDecoration(
-                labelText: 'Slide Note',
-                border: OutlineInputBorder(),
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  controller: referenceController,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(
+                    labelText: 'Reference Code',
+                    hintText: 'Optional, for example GC 623.2',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: noteController,
+                  autofocus: true,
+                  minLines: 6,
+                  maxLines: 12,
+                  decoration: const InputDecoration(
+                    labelText: 'Slide Note',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
             ),
           ),
           actions: [
@@ -316,9 +418,11 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         );
       },
     );
+    referenceController.dispose();
     noteController.dispose();
     if (shouldSave != true) return;
     final clean = _plainTextToHtml(noteController.text);
+    final referenceCode = referenceController.text.trim();
     if (clean == '<p></p>') {
       _showSnack('Add note content for the slide.');
       return;
@@ -326,8 +430,11 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     await widget.repository.insertNoteSlide(
       tag: widget.tag,
       contentHtml: clean,
+      referenceCode: referenceCode,
     );
     if (!mounted) return;
+    _markChanged();
+    await _notifyParentChanged();
     await _reload();
     setState(() {
       _focusedIndex = _entries.isEmpty ? 0 : _entries.length - 1;
@@ -373,8 +480,13 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   }
 
   Future<void> _deleteEntry(HashTagEntry entry) async {
-    await widget.repository.deleteEntry(entry.id);
+    await widget.repository.deleteEntry(
+      entry.id,
+      normalized: entry.isNormalized,
+    );
     if (!mounted) return;
+    _markChanged();
+    await _notifyParentChanged();
     await _reload();
   }
 
@@ -385,6 +497,8 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       delta: delta,
     );
     if (!mounted || !changed) return;
+    _markChanged();
+    await _notifyParentChanged();
     await _reload();
   }
 
@@ -395,7 +509,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         return AlertDialog(
           title: const Text('Delete entire tag?'),
           content: Text(
-            'Delete ${widget.tag} and all ${_entries.length} attached verse(s)? '
+            'Delete ${widget.tag} and all ${_entries.length} attached item(s)? '
             'This cannot be undone.',
           ),
           actions: [
@@ -435,10 +549,12 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
 
   Future<void> _openPresentationMode() async {
     if (_entries.isEmpty) return;
-    await showViewerPresentationScreen(
+    await showPresentationLaunchOptions(
       context,
       entries: _entries,
       initialIndex: _focusedIndex,
+      tag: widget.tag,
+      tagFamily: _isDollarRepository ? 'dollar' : 'hash',
     );
   }
 
@@ -452,10 +568,16 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     ];
 
     for (final entry in _entries) {
-      lines.add(
-        '${_bookNames[entry.bookNumber] ?? 'Book ${entry.bookNumber}'} ${entry.chapter}:${entry.verse}',
+      final citation = _displayCitationForEntry(
+        entry,
+        bookName: _bookNames[entry.bookNumber] ?? 'Book ${entry.bookNumber}',
       );
-      final verseText = entry.verseText.trim();
+      if (citation.isNotEmpty) {
+        lines.add(citation);
+      }
+      final verseText = (entry.displayTextOverride?.trim().isNotEmpty == true)
+          ? entry.displayTextOverride!.trim()
+          : entry.verseText.trim();
       if (verseText.isNotEmpty) {
         lines.add(verseText);
       } else {
@@ -489,24 +611,477 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   }
 
   String _entryTitle(HashTagEntry entry, String bookName) {
+    final eLibraryTitle = _eLibraryNoteTitle(entry);
+    if (eLibraryTitle != null) return eLibraryTitle;
+    final referenceCode = _displayCitationForEntry(entry, bookName: bookName);
+    final userTitle = entry.userTitle?.trim() ?? '';
+    if (userTitle.isNotEmpty) return userTitle;
+    if (referenceCode.isNotEmpty) return referenceCode;
+    final metadata = _eLibraryNoteMetadata(entry);
+    if (metadata != null) return '';
     if (_isNoteOnlyEntry(entry)) {
-      return 'Note ${_noteNumberFor(entry)}';
+      return 'Note';
     }
-    return '$bookName ${entry.chapter}:${entry.verse}';
+    final verseLabel = entry.verseEnd > entry.verse
+        ? '${entry.verse}-${entry.verseEnd}'
+        : '${entry.verse}';
+    return '$bookName ${entry.chapter}:$verseLabel';
   }
 
   String _entryBody(HashTagEntry entry) {
+    if (_isNoteOnlyEntry(entry)) {
+      final noteText = _entryNoteText(entry);
+      if (noteText.isNotEmpty) return noteText;
+      if (entry.hasMedia) return 'Image attached';
+      return 'Note item';
+    }
     final noteHtml = entry.contentHtml?.trim() ?? '';
+    final displayOverride = entry.displayTextOverride?.trim() ?? '';
+    if (displayOverride.isNotEmpty) {
+      if (entry.hasMedia) {
+        return '$displayOverride\nImage attached';
+      }
+      return displayOverride;
+    }
+    final verseText = entry.verseText.trim();
+    if (verseText.isNotEmpty) {
+      if (entry.hasMedia) {
+        return '$verseText\nImage attached';
+      }
+      return verseText;
+    }
     if (noteHtml.isNotEmpty) {
       final noteText = _cleanStoredHtml(noteHtml);
       if (noteText.isNotEmpty) return noteText;
     }
-    final verseText = entry.verseText.trim();
-    if (verseText.isNotEmpty) return verseText;
+    if (entry.hasMedia) {
+      return 'Image attached';
+    }
+    final metadata = _eLibraryNoteMetadata(entry);
+    if (metadata != null) {
+      final detailText = _eLibraryDetailText(metadata);
+      if (detailText.isNotEmpty) return detailText;
+      return '';
+    }
     if (entry.bookNumber == 0 && entry.verseRef.startsWith('note:')) {
       return 'Note slide';
     }
     return entry.verseRef;
+  }
+
+  String _displayCitationForEntry(
+    HashTagEntry entry, {
+    String? bookName,
+  }) {
+    final direct = entry.referenceCode?.trim() ?? '';
+    if (direct.isNotEmpty) return direct;
+    if (entry.bookNumber > 0 && entry.chapter > 0 && entry.verse > 0) {
+      final resolvedBookName = bookName?.trim() ?? '';
+      return bibleRangeReferenceLabel(
+        bookName: resolvedBookName.isNotEmpty
+            ? resolvedBookName
+            : 'Book ${entry.bookNumber}',
+        chapter: entry.chapter,
+        verseStart: entry.verse,
+        verseEnd: entry.verseEnd,
+      );
+    }
+    final verseRef = entry.verseRef.trim();
+    if (verseRef.isEmpty || _looksLikeInternalELibraryText(verseRef)) {
+      return '';
+    }
+    if (_looksLikeRawBibleReference(verseRef)) {
+      return '';
+    }
+    return verseRef;
+  }
+
+  bool _looksLikeRawBibleReference(String value) {
+    return RegExp(r'^\d+:\d+:\d+(?:-\d+)?$').hasMatch(value.trim());
+  }
+
+  String? _entryNotePreview(HashTagEntry entry) {
+    final note = _entryNoteText(entry);
+    if (note.isEmpty) return null;
+    const maxLength = 96;
+    if (note.length <= maxLength) return note;
+    return '${note.substring(0, maxLength - 1)}…';
+  }
+
+  String? _eLibraryNoteTitle(HashTagEntry entry) {
+    final metadata = _eLibraryNoteMetadata(entry);
+    if (metadata == null) return null;
+    final title = _safeELibraryTitle(metadata.sourceTitle);
+    final referenceCode = _referenceCodeForEntry(entry);
+    if (referenceCode.isNotEmpty) {
+      if (title.isNotEmpty) {
+        final lowerTitle = title.toLowerCase();
+        final lowerReference = referenceCode.toLowerCase();
+        if (lowerReference == lowerTitle ||
+            lowerReference.startsWith('$lowerTitle — ')) {
+          return referenceCode;
+        }
+        return '$title — $referenceCode';
+      }
+      return referenceCode;
+    }
+    if (title.isNotEmpty) return title;
+    final abbreviation = metadata.sourceTitleAcronym.trim();
+    if (abbreviation.isNotEmpty) {
+      final paragraphIndex =
+          metadata.sourceParagraphNumber ?? metadata.sourceParagraphIndex;
+      if (paragraphIndex != null && paragraphIndex > 0) {
+        return '$abbreviation ¶$paragraphIndex';
+      }
+      return abbreviation;
+    }
+    return 'eLibrary Quote';
+  }
+
+  String _referenceCodeForEntry(HashTagEntry entry) {
+    final direct = entry.referenceCode?.trim() ?? '';
+    final safeDirect = _safeELibraryReferenceText(direct);
+    if (safeDirect.isNotEmpty) return safeDirect;
+
+    final metadata = _eLibraryNoteMetadata(entry);
+    if (metadata == null) return '';
+
+    final referenceText = _safeELibraryReferenceText(
+      metadata.sourceReferenceText,
+    );
+    if (referenceText.isNotEmpty) {
+      return referenceText;
+    }
+
+    final sourceLocation = _safeELibraryReferenceText(metadata.sourceLocation);
+    if (sourceLocation.isNotEmpty) {
+      return sourceLocation;
+    }
+
+    final sourceTitleAcronym = metadata.sourceTitleAcronym.trim();
+    final citationText = metadata.citationText;
+    if (sourceTitleAcronym.isNotEmpty && citationText.isNotEmpty) {
+      return '$sourceTitleAcronym $citationText';
+    }
+
+    final paragraphIndex =
+        metadata.sourceParagraphNumber ?? metadata.sourceParagraphIndex;
+    if (sourceTitleAcronym.isNotEmpty &&
+        paragraphIndex != null &&
+        paragraphIndex > 0) {
+      return '$sourceTitleAcronym ¶$paragraphIndex';
+    }
+
+    return sourceTitleAcronym;
+  }
+
+  String _safeELibraryTitle(String value) {
+    final cleaned = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (cleaned.isEmpty || _looksLikeInternalELibraryText(cleaned)) {
+      return '';
+    }
+    return cleaned;
+  }
+
+  String _safeELibraryReferenceText(String value) {
+    return librarySafeUserFacingReferenceText(value) ?? '';
+  }
+
+  String _eLibraryDetailText(_ELibraryNoteMetadata metadata) {
+    final fileName = metadata.sourceRelativePath.trim().isNotEmpty
+        ? p.basename(metadata.sourceRelativePath)
+        : '';
+    final officialReferenceText =
+        _safeELibraryReferenceText(metadata.sourceLocation).isNotEmpty
+        ? metadata.sourceLocation
+        : metadata.sourceReferenceText;
+    final friendlyLocation = libraryUserFacingSearchLocationText(
+      title: metadata.sourceTitle,
+      officialReferenceText: officialReferenceText,
+      fileName: fileName,
+      relativePath: metadata.sourceRelativePath,
+      pageCitation: metadata.citationText.isNotEmpty
+          ? metadata.citationText
+          : null,
+      paragraphIndex:
+          metadata.sourceParagraphNumber ?? metadata.sourceParagraphIndex,
+    );
+    if (friendlyLocation.isNotEmpty) return friendlyLocation;
+
+    final safeTitle = _safeELibraryTitle(metadata.sourceTitle);
+    if (safeTitle.isNotEmpty) return safeTitle;
+
+    final abbreviation = metadata.sourceTitleAcronym.trim();
+    if (abbreviation.isNotEmpty) return abbreviation;
+
+    return '';
+  }
+
+  bool _looksLikeInternalELibraryText(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return true;
+    return trimmed.startsWith('elibrary:') ||
+        trimmed.contains('::') ||
+        trimmed.toLowerCase().contains('.xhtml') ||
+        trimmed.toLowerCase().contains('oebps/');
+  }
+
+  _ELibraryNoteMetadata? _eLibraryNoteMetadata(HashTagEntry entry) {
+    final raw = entry.noteFormatJson?.trim() ?? '';
+    if (raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return null;
+      if (decoded['kind']?.toString() != 'elibrary_note') return null;
+      return _ELibraryNoteMetadata(
+        sourceTitle: decoded['source_title']?.toString() ?? '',
+        sourceTitleAcronym: decoded['source_title_acronym']?.toString() ?? '',
+        sourceLocation: decoded['source_location']?.toString() ?? '',
+        sourceReferenceText: decoded['source_reference_text']?.toString() ?? '',
+        sourceHref: decoded['source_href']?.toString() ?? '',
+        sourceAnchorId: decoded['source_anchor_id']?.toString() ?? '',
+        sourceSpineIndex: _intFromJson(decoded['source_spine_index']),
+        sourceParagraphIndex: _intFromJson(decoded['source_paragraph_index']),
+        sourceRelativePath: decoded['source_relative_path']?.toString() ?? '',
+        sourcePageNumber: _intFromJson(decoded['source_page_number']),
+        sourceParagraphNumber: _intFromJson(decoded['source_paragraph_number']),
+        searchQuery: decoded['search_query']?.toString() ?? '',
+        sourceParagraph: decoded['source_paragraph']?.toString() ?? '',
+        excerpt: decoded['excerpt']?.toString() ?? '',
+        stableRef: decoded['stable_ref']?.toString() ?? '',
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  int? _intFromJson(Object? value) {
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value.trim());
+    return null;
+  }
+
+  String _slideAssignmentLabel(HashTagEntry entry) {
+    final slideNumber = entry.presentationSlideNumber;
+    final placement = entry.presentationSlideRegion;
+    final regionLabel = placement == null || placement == PresentationItemPlacement.auto
+        ? ''
+        : ' · ${presentationItemPlacementLabel(placement)}';
+    if (slideNumber == null || slideNumber <= 0) {
+      return 'Auto slide$regionLabel';
+    }
+    return 'Slide $slideNumber$regionLabel';
+  }
+
+  Future<void> _editSlideAssignment(HashTagEntry entry) async {
+    if (_isDollarRepository) return;
+    final controller = TextEditingController(
+      text: entry.presentationSlideNumber?.toString() ?? '',
+    );
+    var selectedPlacement =
+        entry.presentationSlideRegion ?? PresentationItemPlacement.auto;
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Slide assignment'),
+          content: SizedBox(
+            width: 420,
+            child: StatefulBuilder(
+              builder: (context, setDialogState) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: controller,
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: const InputDecoration(
+                        labelText: 'Slide number',
+                        hintText: 'Leave blank for automatic',
+                        helperText: 'Blank or 0 clears the slide number.',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<PresentationItemPlacement>(
+                      initialValue: selectedPlacement,
+                      decoration: const InputDecoration(
+                        labelText: 'Slide region',
+                        helperText: 'Use Auto unless you need a fixed region.',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: presentationItemPlacementOptions
+                          .map(
+                            (placement) => DropdownMenuItem<
+                              PresentationItemPlacement
+                            >(
+                              value: placement,
+                              child: Text(
+                                presentationItemPlacementLabel(placement),
+                              ),
+                            ),
+                          )
+                          .toList(growable: false),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setDialogState(() {
+                          selectedPlacement = value;
+                        });
+                      },
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+    final rawValue = controller.text.trim();
+    controller.dispose();
+    if (shouldSave != true) return;
+
+    int? slideNumber;
+    if (rawValue.isNotEmpty) {
+      final parsed = int.tryParse(rawValue);
+      if (parsed == null) {
+        _showSnack('Enter a whole slide number.');
+        return;
+      }
+      slideNumber = parsed > 0 ? parsed : null;
+    }
+
+    await widget.repository.updateEntry(
+      id: entry.id,
+      normalized: entry.isNormalized,
+      values: {
+        'presentation_slide_number': slideNumber,
+        'presentation_slide_region':
+            slideNumber == null ||
+                    selectedPlacement == PresentationItemPlacement.auto
+                ? null
+                : presentationItemPlacementToJson(selectedPlacement),
+      },
+    );
+    if (!mounted) return;
+    _markChanged();
+    await _notifyParentChanged();
+    await _reload();
+    _showSnack(
+      slideNumber == null
+          ? 'Cleared slide assignment.'
+          : 'Assigned to slide $slideNumber.',
+    );
+  }
+
+  Future<void> _editEntryNote(HashTagEntry entry) async {
+    if (_isDollarRepository) return;
+    final currentNote = entry.noteText?.trim() ?? '';
+    final currentVerseText = _isNoteOnlyEntry(entry)
+        ? ''
+        : (entry.verseText.trim().isNotEmpty
+              ? entry.verseText.trim()
+              : await loadBibleRangeText(
+                  bookNumber: entry.bookNumber,
+                  chapter: entry.chapter,
+                  verseStart: entry.verse,
+                  verseEnd: entry.verseEnd,
+                ));
+    final initialMedia = await _loadMediaAttachmentsForRefs(entry.mediaRefs);
+    if (!mounted) return;
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final bookName =
+            _bookNames[entry.bookNumber] ?? 'Book ${entry.bookNumber}';
+        final canonicalReference = bibleRangeReferenceLabel(
+          bookName: bookName,
+          chapter: entry.chapter,
+          verseStart: entry.verse,
+          verseEnd: entry.verseEnd,
+        );
+        return _EditEntryNoteDialog(
+          repository: widget.repository,
+          entry: entry,
+          title: _isNoteOnlyEntry(entry)
+              ? 'Edit content item'
+              : 'Edit Bible range',
+          noteLabel: _isNoteOnlyEntry(entry)
+              ? 'Note item'
+              : 'Bible range',
+          canonicalReferenceLabel: canonicalReference,
+          verseText: currentVerseText,
+          initialNoteText: currentNote,
+          initialReferenceCode: _isNoteOnlyEntry(entry)
+              ? _referenceCodeForEntry(entry)
+              : _displayCitationForEntry(entry, bookName: bookName),
+          initialUserTitle: entry.userTitle?.trim() ?? '',
+          initialTitleFormatJson: entry.titleFormatJson,
+          initialDisplayTextOverride: entry.displayTextOverride?.trim() ?? '',
+          initialDisplayTextFormatJson: entry.displayTextFormatJson,
+          initialNoteFormatJson: entry.noteFormatJson,
+          referenceFieldLabel: _isNoteOnlyEntry(entry)
+              ? 'User title'
+              : 'Display citation',
+          referenceFieldHint: _isNoteOnlyEntry(entry)
+              ? 'Optional title for this content item'
+              : 'Optional citation for this Bible range',
+          initialMedia: initialMedia,
+        );
+      },
+    );
+    if (shouldSave != true) return;
+    if (!mounted) return;
+    _markChanged();
+    await _notifyParentChanged();
+    await _reload();
+    _showSnack(
+      'Note saved for ${_isNoteOnlyEntry(entry) ? 'content item' : _entryTitle(entry, _bookNames[entry.bookNumber] ?? 'Book ${entry.bookNumber}')}.',
+    );
+  }
+
+  Future<void> _addContentItem() async {
+    if (_isDollarRepository) return;
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return _ContentItemDialog(
+          repository: widget.repository,
+          tag: widget.tag,
+        );
+      },
+    );
+    if (shouldSave != true) return;
+    if (!mounted) return;
+    _markChanged();
+    await _notifyParentChanged();
+    await _reload();
+    if (!mounted) return;
+    setState(() {
+      _focusedIndex = _entries.isEmpty ? 0 : _entries.length - 1;
+    });
+    _showSnack('Added note item to ${widget.tag}.');
+  }
+
+  Future<void> _handleEntryTap(HashTagEntry entry) async {
+    if (_isNoteOnlyEntry(entry) && !_isDollarRepository) {
+      await _editEntryNote(entry);
+      return;
+    }
+    await _openVerse(entry);
   }
 
   void _moveFocusedEntry(int delta) {
@@ -599,6 +1174,21 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                   padding: const EdgeInsets.all(4),
                                   visualDensity: VisualDensity.compact,
                                 ),
+                                if (!_isDollarRepository) ...[
+                                  IconButton(
+                                    tooltip: 'Add Content Item',
+                                    onPressed: _addContentItem,
+                                    icon: const Icon(Icons.note_add_outlined),
+                                    color: headerButtonForeground,
+                                    constraints: const BoxConstraints.tightFor(
+                                      width: 36,
+                                      height: 36,
+                                    ),
+                                    padding: const EdgeInsets.all(4),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  const SizedBox(width: 2),
+                                ],
                                 if (_isDollarRepository) ...[
                                   IconButton(
                                     tooltip: 'Add Note Slide',
@@ -668,7 +1258,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                 ),
                                 IconButton(
                                   tooltip: 'Close',
-                                  onPressed: () => Navigator.of(context).pop(),
+                                  onPressed: _closeDetail,
                                   icon: const Icon(Icons.close),
                                   color: titleColor,
                                   constraints: const BoxConstraints.tightFor(
@@ -895,6 +1485,11 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                           'Book ${entry.bookNumber}';
                       final canMoveUp = index > 0;
                       final canMoveDown = index < _entries.length - 1;
+                      final hasNote = _hasEntryNote(entry);
+                      final citationText = _displayCitationForEntry(
+                        entry,
+                        bookName: bookName,
+                      );
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 6),
                         child: Container(
@@ -909,9 +1504,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                           ),
                           child: InkWell(
                             borderRadius: BorderRadius.circular(12),
-                            onTap: () {
+                            onTap: () async {
                               setState(() => _focusedIndex = index);
-                              _openVerse(entry);
+                              await _handleEntryTap(entry);
                             },
                             child: Padding(
                               padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
@@ -935,24 +1530,236 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        Text(
-                                          _entryTitle(entry, bookName),
-                                          style: theme.textTheme.titleMedium
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w800,
-                                                color: titleColor,
+                                        if (entry.userTitle?.trim().isNotEmpty ==
+                                                true &&
+                                            entry.titleFormatJson
+                                                    ?.trim()
+                                                    .isNotEmpty ==
+                                                true)
+                                          RichText(
+                                            textAlign: TextAlign.left,
+                                            text: TextSpan(
+                                              children: buildPresentationTextSpans(
+                                                text: entry.userTitle!.trim(),
+                                                baseStyle: theme.textTheme
+                                                        .titleMedium
+                                                        ?.copyWith(
+                                                          fontWeight:
+                                                              FontWeight.w800,
+                                                          color: titleColor,
+                                                        ) ??
+                                                    TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color: titleColor,
+                                                    ),
+                                                formatJson:
+                                                    entry.titleFormatJson,
                                               ),
-                                        ),
+                                            ),
+                                          )
+                                        else
+                                          Text(
+                                            _entryTitle(entry, bookName),
+                                            style: theme.textTheme.titleMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w800,
+                                                  color: titleColor,
+                                                ),
+                                          ),
                                         const SizedBox(height: 1),
-                                        Text(
-                                          _entryBody(entry),
-                                          style: theme.textTheme.bodyMedium
-                                              ?.copyWith(
-                                                color: bodyColor,
-                                                height: 1.25,
+                                        if (entry.displayTextOverride
+                                                    ?.trim()
+                                                    .isNotEmpty ==
+                                                true &&
+                                            entry.displayTextFormatJson
+                                                    ?.trim()
+                                                    .isNotEmpty ==
+                                                true &&
+                                            !entry.hasMedia)
+                                          RichText(
+                                            textAlign: TextAlign.left,
+                                            text: TextSpan(
+                                              children: buildPresentationTextSpans(
+                                                text: entry.displayTextOverride!
+                                                    .trim(),
+                                                baseStyle: theme
+                                                    .textTheme
+                                                    .bodyMedium
+                                                    ?.copyWith(
+                                                      color: bodyColor,
+                                                      height: 1.25,
+                                                    ) ??
+                                                    TextStyle(
+                                                      color: bodyColor,
+                                                      height: 1.25,
+                                                    ),
+                                                formatJson:
+                                                    entry.displayTextFormatJson,
                                               ),
-                                          softWrap: true,
-                                        ),
+                                            ),
+                                          )
+                                        else
+                                          Text(
+                                            _entryBody(entry),
+                                            style: theme.textTheme.bodyMedium
+                                                ?.copyWith(
+                                                  color: bodyColor,
+                                                  height: 1.25,
+                                                ),
+                                            softWrap: true,
+                                          ),
+                                        if (citationText.isNotEmpty &&
+                                            entry.bookNumber > 0) ...[
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            citationText,
+                                            style: theme.textTheme.bodySmall
+                                                ?.copyWith(
+                                                  color: bodyColor.withValues(
+                                                    alpha: 0.78,
+                                                  ),
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                          ),
+                                        ],
+                                        if (!_isDollarRepository) ...[
+                                          const SizedBox(height: 8),
+                                          Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: TextButton.icon(
+                                              onPressed: () =>
+                                                  _editSlideAssignment(entry),
+                                              icon: const Icon(
+                                                Icons.slideshow_rounded,
+                                                size: 16,
+                                              ),
+                                              label: Text(
+                                                _slideAssignmentLabel(entry),
+                                              ),
+                                              style: TextButton.styleFrom(
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                                minimumSize: const Size(0, 32),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 6,
+                                                    ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                        if (_isNoteOnlyEntry(entry))
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 2,
+                                            ),
+                                            child: Text(
+                                              'Note-only item',
+                                              style: theme.textTheme.bodySmall
+                                                  ?.copyWith(color: bodyColor),
+                                            ),
+                                          ),
+                                        if (hasNote) ...[
+                                          const SizedBox(height: 6),
+                                          Container(
+                                            width: double.infinity,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: theme.colorScheme.surface
+                                                  .withValues(alpha: 0.75),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              border: Border.all(
+                                                color:
+                                                    TagDialogStyles.outlineColor(
+                                                      theme,
+                                                    ).withValues(alpha: 0.35),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Icon(
+                                                  Icons.edit_note,
+                                                  size: 16,
+                                                  color: TagDialogStyles.accent(
+                                                    theme,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Expanded(
+                                                  child: Text(
+                                                    _entryNotePreview(entry) ??
+                                                        'Note saved',
+                                                    style: theme
+                                                        .textTheme
+                                                        .bodySmall
+                                                        ?.copyWith(
+                                                          color: bodyColor,
+                                                          height: 1.2,
+                                                        ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                        if (entry.hasMedia) ...[
+                                          const SizedBox(height: 6),
+                                          Container(
+                                            width: double.infinity,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: theme.colorScheme.surface
+                                                  .withValues(alpha: 0.72),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              border: Border.all(
+                                                color:
+                                                    TagDialogStyles.outlineColor(
+                                                      theme,
+                                                    ).withValues(alpha: 0.35),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Icon(
+                                                  Icons.image_outlined,
+                                                  size: 16,
+                                                  color: TagDialogStyles.accent(
+                                                    theme,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Expanded(
+                                                  child: Text(
+                                                    entry.mediaRefs.length == 1
+                                                        ? '1 image attached'
+                                                        : '${entry.mediaRefs.length} images attached',
+                                                    style: theme
+                                                        .textTheme
+                                                        .bodySmall
+                                                        ?.copyWith(
+                                                          color: bodyColor,
+                                                          height: 1.2,
+                                                        ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
                                       ],
                                     ),
                                   ),
@@ -962,6 +1769,23 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                     crossAxisAlignment:
                                         WrapCrossAlignment.center,
                                     children: [
+                                      IconButton(
+                                        tooltip: _isDollarRepository
+                                            ? 'Edit item'
+                                            : 'Edit item',
+                                        onPressed: () async {
+                                          if (_isDollarRepository) {
+                                            setState(() => _focusedIndex = index);
+                                            await _editCurrentLink();
+                                          } else {
+                                            await _editEntryNote(entry);
+                                          }
+                                        },
+                                        icon: Icon(
+                                          Icons.edit_outlined,
+                                          color: TagDialogStyles.accent(theme),
+                                        ),
+                                      ),
                                       IconButton(
                                         tooltip: 'Move up',
                                         onPressed: canMoveUp
@@ -981,7 +1805,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                         ),
                                       ),
                                       IconButton(
-                                        tooltip: 'Delete verse',
+                                        tooltip: _isNoteOnlyEntry(entry)
+                                            ? 'Delete note'
+                                            : 'Delete verse',
                                         onPressed: () => _deleteEntry(entry),
                                         icon: Icon(
                                           Icons.delete,
@@ -1003,6 +1829,51 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         ],
       ),
     );
+  }
+}
+
+class _ELibraryNoteMetadata {
+  const _ELibraryNoteMetadata({
+    required this.sourceTitle,
+    required this.sourceTitleAcronym,
+    required this.sourceLocation,
+    required this.sourceReferenceText,
+    required this.sourceHref,
+    required this.sourceAnchorId,
+    required this.sourceSpineIndex,
+    required this.sourceParagraphIndex,
+    required this.sourceRelativePath,
+    required this.sourcePageNumber,
+    required this.sourceParagraphNumber,
+    required this.searchQuery,
+    required this.sourceParagraph,
+    required this.excerpt,
+    required this.stableRef,
+  });
+
+  final String sourceTitle;
+  final String sourceTitleAcronym;
+  final String sourceLocation;
+  final String sourceReferenceText;
+  final String sourceHref;
+  final String sourceAnchorId;
+  final int? sourceSpineIndex;
+  final int? sourceParagraphIndex;
+  final String sourceRelativePath;
+  final int? sourcePageNumber;
+  final int? sourceParagraphNumber;
+  final String searchQuery;
+  final String sourceParagraph;
+  final String excerpt;
+  final String stableRef;
+
+  String get citationText {
+    final page = sourcePageNumber;
+    final paragraph = sourceParagraphNumber;
+    if (page != null && paragraph != null && page > 0 && paragraph > 0) {
+      return '$page.$paragraph';
+    }
+    return '';
   }
 }
 

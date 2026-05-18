@@ -11,6 +11,8 @@ import '../data/commentary_research_filters.dart';
 
 enum _ReaderMode { commentary, research }
 
+const bool _debugCommentaryResearchLogs = false;
+
 class CommentaryResearchScreen extends StatefulWidget {
   const CommentaryResearchScreen({
     super.key,
@@ -45,11 +47,13 @@ class _CommentaryResearchScreenState extends State<CommentaryResearchScreen> {
   }
 
   Future<void> _load({bool refresh = false}) async {
-    debugPrint(
-      '[CommentaryResearch] load mode=${_mode.name} '
-      'bookId=${widget.bookId} ref=${widget.bookName} '
-      '${widget.chapter}:${widget.verse} refresh=$refresh',
-    );
+    if (_debugCommentaryResearchLogs) {
+      debugPrint(
+        '[CommentaryResearch] load mode=${_mode.name} '
+        'bookId=${widget.bookId} ref=${widget.bookName} '
+        '${widget.chapter}:${widget.verse} refresh=$refresh',
+      );
+    }
     setState(() => _loading = true);
     final data = await _service.loadPassage(
       bookId: widget.bookId,
@@ -63,10 +67,12 @@ class _CommentaryResearchScreenState extends State<CommentaryResearchScreen> {
       _data = data;
       _loading = false;
     });
-    debugPrint(
-      '[CommentaryResearch] loaded commentary=${data.commentary.matchCount} '
-      'research=${data.research.matchCount}',
-    );
+    if (_debugCommentaryResearchLogs) {
+      debugPrint(
+        '[CommentaryResearch] loaded commentary=${data.commentary.matchCount} '
+        'research=${data.research.matchCount}',
+      );
+    }
   }
 
   String _passageTitle({required bool includeVerse}) {
@@ -150,11 +156,13 @@ class _CommentaryResearchScreenState extends State<CommentaryResearchScreen> {
                   if (selection.isEmpty) return;
                   final mode = selection.first;
                   if (mode == _mode) return;
-                  debugPrint(
-                    '[CommentaryResearch] tab ${_mode.name} -> ${mode.name} '
-                    'bookId=${widget.bookId} ref=${widget.bookName} '
-                    '${widget.chapter}:${widget.verse}',
-                  );
+                  if (_debugCommentaryResearchLogs) {
+                    debugPrint(
+                      '[CommentaryResearch] tab ${_mode.name} -> ${mode.name} '
+                      'bookId=${widget.bookId} ref=${widget.bookName} '
+                      '${widget.chapter}:${widget.verse}',
+                    );
+                  }
                   setState(() => _mode = mode);
                 },
               ),
@@ -667,14 +675,16 @@ Future<void> _openEpubSource(
     if (sourceTarget.initialSpineIndex != null) 'spine_index',
     if (sourceTarget.initialParagraphIndex != null) 'paragraph_index',
   ];
-  debugPrint(
-    '[CommentaryResearch] EPUB badge tapped '
-    'itemTitle=${match.itemTitle} '
-    'libraryItemId=${sourceTarget.item.id} '
-    'relativePath=${sourceTarget.item.relativePath} '
-    'resolvedFilePath=$resolvedFilePath '
-    'availableJumpMetadata=${metadata.isEmpty ? 'none' : metadata.join(', ')}',
-  );
+  if (_debugCommentaryResearchLogs) {
+    debugPrint(
+      '[CommentaryResearch] EPUB badge tapped '
+      'itemTitle=${match.itemTitle} '
+      'libraryItemId=${sourceTarget.item.id} '
+      'relativePath=${sourceTarget.item.relativePath} '
+      'resolvedFilePath=$resolvedFilePath '
+      'availableJumpMetadata=${metadata.isEmpty ? 'none' : metadata.join(', ')}',
+    );
+  }
 
   try {
     await Navigator.of(context, rootNavigator: true).push(
@@ -689,7 +699,9 @@ Future<void> _openEpubSource(
       ),
     );
   } catch (error) {
-    debugPrint('[CommentaryResearch] EPUB launch failed error=$error');
+    if (_debugCommentaryResearchLogs) {
+      debugPrint('[CommentaryResearch] EPUB launch failed error=$error');
+    }
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -724,22 +736,26 @@ Future<_ResolvedSourceEpubTarget?> _resolveSourceEpubTarget(
     if (candidates.length == 1) {
       item = candidates.first;
     } else if (candidates.length > 1) {
-      debugPrint(
-        '[CommentaryResearch] EPUB source lookup ambiguous '
-        'title=${match.itemTitle} '
-        'candidates=${candidates.map((candidate) => candidate.id).join(', ')}',
-      );
+      if (_debugCommentaryResearchLogs) {
+        debugPrint(
+          '[CommentaryResearch] EPUB source lookup ambiguous '
+          'title=${match.itemTitle} '
+          'candidates=${candidates.map((candidate) => candidate.id).join(', ')}',
+        );
+      }
       return null;
     }
   }
 
   if (item == null) {
-    debugPrint(
-      '[CommentaryResearch] EPUB source lookup failed '
-      'libraryItemId=${match.libraryItemId} '
-      'relativePath=${match.relativePath} '
-      'title=${match.itemTitle}',
-    );
+    if (_debugCommentaryResearchLogs) {
+      debugPrint(
+        '[CommentaryResearch] EPUB source lookup failed '
+        'libraryItemId=${match.libraryItemId} '
+        'relativePath=${match.relativePath} '
+        'title=${match.itemTitle}',
+      );
+    }
     return null;
   }
 

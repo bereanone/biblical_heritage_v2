@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../features/utilities/data/elibrary_folder_policy.dart';
 import 'library_root_native.dart';
 import 'local_settings_store.dart';
 
@@ -46,16 +47,12 @@ class LibraryRootService {
     'legacy_migration_reports',
   ];
 
-  static const elibraryFolders = <String>[
-    'ePubs/Commentaries/EGW_Commentaries',
+  static final elibraryFolders = <String>[
+    for (final folder in ELibraryFolderPolicy.managedEgwFolderDefinitions)
+      folder.relativeFolder,
     'ePubs/Commentaries/User',
-    'ePubs/Research/EGW_Books',
-    'ePubs/Research/EGW_Devotionals',
     'ePubs/Research/User',
-    'PDFs/Commentaries/EGW_Commentaries',
     'PDFs/Commentaries/User',
-    'PDFs/Research/EGW_Books',
-    'PDFs/Research/EGW_Devotionals',
     'PDFs/Research/User',
   ];
 
@@ -121,21 +118,25 @@ class LibraryRootService {
   Future<String?> libraryRootPath() async {
     final selection = await loadSelection();
     if (!selection.exists) return null;
+    final localMirror = await _appManagedLibraryRootPath();
+    if (localMirror != null) return localMirror;
     return selection.path;
   }
 
   Future<String?> accessibleLibraryRootPath() async {
     try {
       final selection = await loadSelection();
-      if (!selection.exists || selection.bookmark == null) return null;
-      final activated = await LibraryRootNative.activateBookmark(
-        selection.bookmark!,
-      );
-      final path = activated?.trim() ?? '';
-      return path.isEmpty ? null : path;
+      if (selection.exists && selection.bookmark != null) {
+        final activated = await LibraryRootNative.activateBookmark(
+          selection.bookmark!,
+        );
+        final path = activated?.trim() ?? '';
+        if (path.isNotEmpty) return path;
+      }
     } catch (_) {
-      return null;
+      // Fall through to the app-managed mirror.
     }
+    return _appManagedLibraryRootPath();
   }
 
   Future<String?> databasesPath() async {
@@ -215,6 +216,19 @@ class LibraryRootService {
     required String rootPath,
   }) async {
     return p.join(p.normalize(rootPath.trim()), relativePath.trim());
+  }
+
+  Future<String?> _appManagedLibraryRootPath() async {
+    final documentsDir = await getApplicationDocumentsDirectory();
+    final candidate = p.join(documentsDir.path, 'BiblicalHeritage', 'v2');
+    final rootDir = Directory(candidate);
+    if (!await rootDir.exists()) return null;
+    final epubDir = Directory(p.join(candidate, 'ePubs'));
+    final databaseDir = Directory(p.join(candidate, 'Databases'));
+    if (await epubDir.exists() || await databaseDir.exists()) {
+      return candidate;
+    }
+    return null;
   }
 
   Future<bool> needsReconnect() async {

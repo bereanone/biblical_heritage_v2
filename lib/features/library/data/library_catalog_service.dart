@@ -7,13 +7,19 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/library_root_service.dart';
+import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/user_database.dart';
+import 'library_citation_display_helper.dart';
 import '../../search/search_highlight_helper.dart';
 import 'library_author_resolver.dart';
 import 'library_epub_metadata.dart';
 import 'library_item_identity.dart';
+import '../../utilities/data/elibrary_folder_policy.dart';
 
 part 'library_navigation_dedupe.dart';
+part 'library_catalog_text_helpers.dart';
+part 'library_catalog_collection_helpers.dart';
+part 'library_catalog_search_result_helpers.dart';
 
 class LibraryCatalogService {
   LibraryCatalogService._();
@@ -140,9 +146,166 @@ class LibraryCatalogService {
     ).where(_isVisibleLibraryItem).toList(growable: false);
   }
 
+  Future<int> refreshManagedItemsFromDisk() async {
+    final selection = await LibraryRootService.instance.loadSelection();
+    final rootPath =
+        (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
+        selection.path;
+    if (rootPath == null || rootPath.trim().isEmpty) {
+      return 0;
+    }
+    if (!Directory(rootPath).existsSync()) {
+      return 0;
+    }
+
+    await LibraryRootService.instance.ensureStructure(rootPath);
+    final db = await UserDatabase.instance.database;
+    final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+    var touched = 0;
+
+    for (final folder in ELibraryFolderPolicy.managedEgwFolderDefinitions) {
+      final directory = Directory(p.join(rootPath, folder.relativeFolder));
+      if (!await directory.exists()) continue;
+
+      await for (final entity in directory.list(
+        recursive: true,
+        followLinks: false,
+      )) {
+        if (entity is! File) continue;
+        final ext = p.extension(entity.path).toLowerCase();
+        if (ext != '.epub' && ext != '.pdf') continue;
+
+        final relativePath = await LibraryRootService.instance.relativePathFor(
+          absolutePath: entity.path,
+          rootPath: rootPath,
+        );
+        final itemId = canonicalLibraryItemId(
+          folderType: folder.folderType,
+          relativePath: relativePath,
+        );
+        final stat = await entity.stat();
+        final isEpub = ext == '.epub';
+        final existingRows = await db.query(
+          'library_items',
+          columns: const ['id', 'collection_name'],
+          where: 'id = ? OR LOWER(relative_path) = ?',
+          whereArgs: [itemId, relativePath.toLowerCase()],
+          limit: 1,
+        );
+        final existingRow = existingRows.isEmpty ? null : existingRows.first;
+        final existingId = existingRow?['id']?.toString().trim() ?? '';
+        final existingCollection =
+            existingRow?['collection_name']?.toString().trim() ?? '';
+        final title = await _resolveManagedTitle(file: entity, isEpub: isEpub);
+        final author = await _resolveManagedAuthor(
+          file: entity,
+          isEpub: isEpub,
+          collectionName: folder.collectionName,
+          relativePath: relativePath,
+        );
+        final now = DateTime.now().toUtc().toIso8601String();
+        final fileHash = '${stat.size}:${stat.modified.millisecondsSinceEpoch}';
+        final updatePayload = <String, Object?>{
+          'title': title,
+          'author': author,
+          'file_name': p.basename(entity.path),
+          'relative_path': relativePath,
+          'file_hash': fileHash,
+          'file_size': stat.size,
+          'modified_at': stat.modified.toUtc().toIso8601String(),
+          'mime_type': isEpub ? 'application/epub+zip' : 'application/pdf',
+          'file_format': isEpub ? 'epub' : 'pdf',
+          'folder_type': folder.folderType,
+          'library_role': folder.folderType,
+          'collection_name': folder.collectionName,
+          'source_site': 'egwwritings.org',
+          'source_type': 'official_download',
+          'updated_at': now,
+          'deleted_at': null,
+        };
+        final insertPayload = <String, Object?>{
+          'id': itemId,
+          ...updatePayload,
+          'source_url': null,
+          'cover_path': null,
+          'date_added': now,
+          'last_opened': null,
+          'index_status': 'metadata_only',
+          'index_error': null,
+          'epub_href': null,
+          'epub_cfi': null,
+          'anchor_id': null,
+          'spine_index': null,
+          'paragraph_index': null,
+          'is_missing': 0,
+          'created_at': now,
+          'device_id': deviceId,
+          'revision': 1,
+          'sync_status': 'pending',
+          'last_synced_at': null,
+          'change_id': null,
+        };
+
+        if (existingId.isEmpty) {
+          await db.insert(
+            'library_items',
+            insertPayload,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        } else {
+          if (existingId != itemId) {
+            await migrateManagedLibraryItemId(
+              db: db,
+              oldId: existingId,
+              newId: itemId,
+            );
+          }
+          await db.update(
+            'library_items',
+            updatePayload,
+            where: 'id = ?',
+            whereArgs: [itemId],
+          );
+        }
+
+        if (existingCollection != folder.collectionName ||
+            existingId.isEmpty ||
+            existingId != itemId) {
+          touched += 1;
+        }
+      }
+    }
+
+    return touched;
+  }
+
+  /// Returns the count of managed EPUB items that have not yet been indexed
+  /// (index_status is not 'indexed' or 'indexed_empty').  These items appear
+  /// in the Library catalog and can be opened in the reader, but their body
+  /// text is absent from the search index until the Commentary/Research panel
+  /// runs an indexing pass.
+  Future<int> countUnindexedManagedItems() async {
+    final db = await UserDatabase.instance.database;
+    final result = await db.rawQuery('''
+      SELECT COUNT(*) AS cnt
+      FROM library_items
+      WHERE deleted_at IS NULL
+        AND LOWER(COALESCE(file_format, '')) = 'epub'
+        AND LOWER(COALESCE(folder_type, '')) IN ('commentary', 'research')
+        AND (
+          LOWER(COALESCE(index_status, '')) NOT IN ('indexed', 'indexed_empty')
+          OR NOT EXISTS (
+            SELECT 1 FROM library_text_blocks WHERE library_item_id = library_items.id
+          )
+        )
+    ''');
+    return (result.first['cnt'] as num?)?.toInt() ?? 0;
+  }
+
   Future<List<LibraryCatalogSearchResult>> searchContent({
     required String query,
     int limit = 50,
+    String? collectionFilter,
   }) async {
     final normalizedTerms = extractLibrarySearchHighlightTerms(query);
     if (normalizedTerms.isEmpty || limit <= 0) {
@@ -150,26 +313,47 @@ class LibraryCatalogService {
     }
 
     final db = await UserDatabase.instance.database;
-    final where = <String>['li.deleted_at IS NULL', 'll.deleted_at IS NULL'];
+    final where = <String>['li.deleted_at IS NULL'];
     final args = <Object?>[];
+    final normalizedCollectionFilter =
+        collectionFilter?.trim().toLowerCase() ?? '';
+    if (normalizedCollectionFilter.isNotEmpty &&
+        normalizedCollectionFilter != 'all') {
+      where.add("LOWER(COALESCE(li.collection_name, '')) = ?");
+      args.add(normalizedCollectionFilter);
+    }
+    // Per-book deduplication: pick the earliest matching paragraph (MIN rowid)
+    // per book using a CTE with GROUP BY.  This is far faster than a correlated
+    // subquery because SQLite resolves GROUP BY + MIN(rowid) in a single scan
+    // rather than re-running the inner query for every candidate row.
+    var termAdded = false;
     for (final term in normalizedTerms) {
       final normalizedTerm = _normalizedLibrarySearchText(term);
       if (normalizedTerm.isEmpty) continue;
+      final pattern = _librarySearchLikePattern(normalizedTerm);
       where.add('(${_librarySearchTermClause()})');
       args.addAll(
-        List<Object?>.filled(
-          _librarySearchClauseFields.length,
-          '%$normalizedTerm%',
-        ),
+        List<Object?>.filled(_librarySearchClauseFields.length, pattern),
       );
+      termAdded = true;
     }
 
-    if (args.isEmpty) {
+    if (!termAdded) {
       return const [];
     }
 
+    final cteWhere = where.join(' AND ');
+
     final rows = await db.rawQuery(
       '''
+      WITH best_hits AS (
+        SELECT ltb.library_item_id, MIN(ltb.rowid) AS best_rowid
+        FROM library_text_blocks ltb
+        INNER JOIN library_items li ON li.id = ltb.library_item_id
+        WHERE $cteWhere
+        GROUP BY ltb.library_item_id
+        LIMIT ?
+      )
       SELECT
         li.id AS item_id,
         li.title,
@@ -194,112 +378,99 @@ class LibraryCatalogService {
         li.anchor_id AS item_anchor_id,
         li.epub_href AS item_epub_href,
         li.paragraph_index AS item_paragraph_index,
-        ll.original_reference_text,
-        ll.full_paragraph,
-        ll.epub_href AS hit_epub_href,
-        ll.anchor_id AS hit_anchor_id,
-        ll.spine_index AS hit_spine_index,
-        ll.paragraph_index AS hit_paragraph_index,
-        ll.book_id,
-        ll.chapter,
-        ll.verse_start,
-        ll.verse_end,
-        ll.anchor,
-        ll.link_type
-      FROM library_links ll
-      INNER JOIN library_items li ON li.id = ll.library_item_id
-      WHERE ${where.join(' AND ')}
-      ORDER BY
-        li.title COLLATE NOCASE ASC,
-        ll.book_id ASC,
-        ll.chapter ASC,
-        ll.verse_start ASC,
-        ll.verse_end ASC
-      LIMIT ?
+        ltb.epub_href AS hit_epub_href,
+        ltb.spine_index AS hit_spine_index,
+        ltb.paragraph_index AS hit_paragraph_index,
+        ltb.section_title,
+        ltb.paragraph_on_section,
+        ltb.plain_text,
+        eri.ref_code AS hit_ref_code
+      FROM best_hits bh
+      INNER JOIN library_text_blocks ltb ON ltb.rowid = bh.best_rowid
+      INNER JOIN library_items li ON li.id = ltb.library_item_id
+      LEFT JOIN elibrary_ref_index eri
+        ON eri.library_item_id = ltb.library_item_id
+        AND LOWER(COALESCE(eri.href, '')) = LOWER(COALESCE(ltb.epub_href, ''))
+        AND eri.paragraph_index = ltb.paragraph_index
+      ORDER BY li.title COLLATE NOCASE ASC
       ''',
       [...args, limit * 4],
     );
 
-    final citationCache = <String, Future<_LibraryCitation?>>{};
-    final results = await Future.wait(
-      rows.map((row) async {
-        final item =
-            LibraryCatalogItem.fromRow({
-              'id': row['item_id'],
-              'title': row['title'],
-              'author': row['author'],
-              'file_name': row['file_name'],
-              'file_hash': row['file_hash'],
-              'relative_path': row['relative_path'],
-              'file_format': row['file_format'],
-              'folder_type': row['folder_type'],
-              'library_role': row['library_role'],
-              'collection_name': row['collection_name'],
-              'source_site': row['source_site'],
-              'source_url': row['source_url'],
-              'source_type': row['source_type'],
-              'cover_path': row['cover_path'],
-              'date_added': row['date_added'],
-              'last_opened': row['last_opened'],
-              'index_status': row['index_status'],
-              'file_size': row['file_size'],
-              'mime_type': row['mime_type'],
-              'spine_index': row['item_spine_index'],
-              'anchor_id': row['item_anchor_id'],
-              'epub_href': row['item_epub_href'],
-              'paragraph_index': row['item_paragraph_index'],
-              'navigation_count': 0,
-            }).copyWith(
-              spineIndex: (row['hit_spine_index'] as num?)?.toInt(),
-              anchorId: row['hit_anchor_id']?.toString(),
-              epubHref: row['hit_epub_href']?.toString(),
-              paragraphIndex: (row['hit_paragraph_index'] as num?)?.toInt(),
-            );
+    final mappedResults = rows.map((row) {
+      final item =
+          LibraryCatalogItem.fromRow({
+            'id': row['item_id'],
+            'title': row['title'],
+            'author': row['author'],
+            'file_name': row['file_name'],
+            'file_hash': row['file_hash'],
+            'relative_path': row['relative_path'],
+            'file_format': row['file_format'],
+            'folder_type': row['folder_type'],
+            'library_role': row['library_role'],
+            'collection_name': row['collection_name'],
+            'source_site': row['source_site'],
+            'source_url': row['source_url'],
+            'source_type': row['source_type'],
+            'cover_path': row['cover_path'],
+            'date_added': row['date_added'],
+            'last_opened': row['last_opened'],
+            'index_status': row['index_status'],
+            'file_size': row['file_size'],
+            'mime_type': row['mime_type'],
+            'spine_index': row['item_spine_index'],
+            'anchor_id': row['item_anchor_id'],
+            'epub_href': row['item_epub_href'],
+            'paragraph_index': row['item_paragraph_index'],
+            'navigation_count': 0,
+          }).copyWith(
+            spineIndex: (row['hit_spine_index'] as num?)?.toInt(),
+            epubHref: row['hit_epub_href']?.toString(),
+            paragraphIndex: (row['paragraph_on_section'] as num?)?.toInt(),
+          );
 
-        final fullParagraph = _firstNonEmpty([
-          row['full_paragraph']?.toString(),
-          row['anchor']?.toString(),
-        ]);
-        final referenceText = row['original_reference_text']?.toString();
-        final locationText = await _buildLibrarySearchLocationText(
-          db: db,
-          citationCache: citationCache,
-          item: item,
-          libraryItemId: row['item_id']?.toString() ?? item.id,
-          spineIndex: (row['hit_spine_index'] as num?)?.toInt(),
-          paragraphIndex: (row['hit_paragraph_index'] as num?)?.toInt(),
-          chapterNumber: (row['chapter'] as num?)?.toInt(),
-          epubHref: row['hit_epub_href']?.toString(),
-          anchorId: row['hit_anchor_id']?.toString(),
-        );
-        final snippet = _buildLibrarySearchSnippet(
-          fullParagraph: fullParagraph,
-          terms: normalizedTerms,
-        );
-        if (snippet == null || snippet.trim().isEmpty) {
-          return null;
-        }
-        final score = _scoreLibrarySearchResult(
-          item: item,
-          referenceText: referenceText,
-          fullParagraph: fullParagraph,
-          queryTerms: normalizedTerms,
-        );
-        return LibraryCatalogSearchResult(
-          item: item,
-          snippet: snippet,
-          locationText: locationText,
-          referenceText: referenceText,
-          fullParagraph: fullParagraph,
-          chapterNumber: (row['chapter'] as num?)?.toInt(),
-          verseStart: (row['verse_start'] as num?)?.toInt(),
-          verseEnd: (row['verse_end'] as num?)?.toInt(),
-          score: score,
-        );
-      }),
-    );
+      final fullParagraph = row['plain_text']?.toString();
+      final sectionTitle = row['section_title']?.toString();
+      final paragraphOnSection = (row['paragraph_on_section'] as num?)?.toInt();
+      final refCode = row['hit_ref_code']?.toString();
 
-    final filteredResults = results
+      final locationText = _buildLibraryTextBlockLocationText(
+        item: item,
+        refCode: refCode,
+        sectionTitle: sectionTitle,
+        paragraphOnSection: paragraphOnSection,
+      );
+
+      final snippet = _buildLibrarySearchSnippet(
+        fullParagraph: fullParagraph,
+        terms: normalizedTerms,
+      );
+      if (snippet == null || snippet.trim().isEmpty) {
+        return null;
+      }
+
+      final score = _scoreLibrarySearchResult(
+        item: item,
+        referenceText: null,
+        fullParagraph: fullParagraph,
+        queryTerms: normalizedTerms,
+      );
+
+      return LibraryCatalogSearchResult(
+        item: item,
+        snippet: snippet,
+        locationText: locationText,
+        referenceText: null,
+        fullParagraph: fullParagraph,
+        chapterNumber: null,
+        verseStart: null,
+        verseEnd: null,
+        score: score,
+      );
+    }).toList(growable: false);
+
+    final filteredResults = mappedResults
         .whereType<LibraryCatalogSearchResult>()
         .toList(growable: false);
 
@@ -310,10 +481,6 @@ class LibraryCatalogService {
         right.item.displayTitle.toLowerCase(),
       );
       if (titleCompare != 0) return titleCompare;
-      final referenceCompare = (left.referenceText ?? '')
-          .toLowerCase()
-          .compareTo((right.referenceText ?? '').toLowerCase());
-      if (referenceCompare != 0) return referenceCompare;
       return left.item.displayAuthor.toLowerCase().compareTo(
         right.item.displayAuthor.toLowerCase(),
       );
@@ -585,6 +752,48 @@ class LibraryCatalogService {
     return results;
   }
 
+  Future<String> _resolveManagedTitle({
+    required File file,
+    required bool isEpub,
+  }) async {
+    if (!isEpub) {
+      return p.basenameWithoutExtension(file.path);
+    }
+
+    final metadata = await readLibraryEpubMetadata(file);
+    final title = metadata?.title?.trim() ?? '';
+    // Accept any non-empty EPUB title unless it is itself a language-prefixed
+    // code (e.g. "en GW") — which would be no better than the filename stem.
+    if (title.isNotEmpty && !_isLanguagePrefixedCodeTitle(title)) {
+      return title;
+    }
+
+    return p.basenameWithoutExtension(file.path).replaceAll('_', ' ').trim();
+  }
+
+  Future<String?> _resolveManagedAuthor({
+    required File file,
+    required bool isEpub,
+    required String collectionName,
+    required String relativePath,
+  }) async {
+    if (!isEpub) {
+      return resolveLibraryAuthor(
+        author: null,
+        collectionName: collectionName,
+        sourceSite: 'egwwritings.org',
+        relativePath: relativePath,
+      );
+    }
+
+    return resolveLibraryAuthorFromEpub(
+      file,
+      collectionName: collectionName,
+      sourceSite: 'egwwritings.org',
+      relativePath: relativePath,
+    );
+  }
+
   Future<List<LibraryCatalogItem>> _queryItems({
     required String where,
     required List<Object?> args,
@@ -673,7 +882,10 @@ class LibraryCatalogService {
       final rootPath =
           (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
           selection.path;
-      if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
+      if (rootPath == null || rootPath.trim().isEmpty) {
+        return null;
+      }
+      if (!Directory(rootPath).existsSync()) {
         return null;
       }
 
@@ -726,7 +938,10 @@ class LibraryCatalogService {
       final rootPath =
           (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
           selection.path;
-      if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
+      if (rootPath == null || rootPath.trim().isEmpty) {
+        return null;
+      }
+      if (!Directory(rootPath).existsSync()) {
         return null;
       }
 
@@ -786,19 +1001,63 @@ class LibraryCatalogService {
     final rootPath =
         (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
         selection.path;
-    if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
+    if (rootPath == null || rootPath.trim().isEmpty) {
+      return results;
+    }
+    if (!Directory(rootPath).existsSync()) {
       return results;
     }
 
     const managedFolders = <({String collectionName, String relativeFolder})>[
-      (collectionName: 'EGW_Books', relativeFolder: 'ePubs/Research/EGW_Books'),
+      (collectionName: 'EGW Books', relativeFolder: 'ePubs/Research/EGW_Books'),
+      (collectionName: 'EGW Books', relativeFolder: 'PDFs/Research/EGW_Books'),
       (
-        collectionName: 'EGW_Devotionals',
+        collectionName: 'EGW Devotionals',
         relativeFolder: 'ePubs/Research/EGW_Devotionals',
       ),
       (
-        collectionName: 'EGW_Commentaries',
+        collectionName: 'EGW Devotionals',
+        relativeFolder: 'PDFs/Research/EGW_Devotionals',
+      ),
+      (
+        collectionName: 'EGW Misc Collections',
+        relativeFolder: 'ePubs/Research/EGW_Misc_Collections',
+      ),
+      (
+        collectionName: 'EGW Misc Collections',
+        relativeFolder: 'PDFs/Research/EGW_Misc_Collections',
+      ),
+      (
+        collectionName: 'EGW Pamphlets',
+        relativeFolder: 'ePubs/Research/EGW_Pamphlets',
+      ),
+      (
+        collectionName: 'EGW Pamphlets',
+        relativeFolder: 'PDFs/Research/EGW_Pamphlets',
+      ),
+      (
+        collectionName: 'EGW Periodicals',
+        relativeFolder: 'ePubs/Research/EGW_Periodicals',
+      ),
+      (
+        collectionName: 'EGW Periodicals',
+        relativeFolder: 'PDFs/Research/EGW_Periodicals',
+      ),
+      (
+        collectionName: 'EGW Manuscript Releases',
+        relativeFolder: 'ePubs/Research/EGW_Manuscript_Releases',
+      ),
+      (
+        collectionName: 'EGW Manuscript Releases',
+        relativeFolder: 'PDFs/Research/EGW_Manuscript_Releases',
+      ),
+      (
+        collectionName: 'EGW Commentaries',
         relativeFolder: 'ePubs/Commentaries/EGW_Commentaries',
+      ),
+      (
+        collectionName: 'EGW Commentaries',
+        relativeFolder: 'PDFs/Commentaries/EGW_Commentaries',
       ),
     ];
 
@@ -890,7 +1149,10 @@ class LibraryCatalogService {
     final rootPath =
         (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
         selection.path;
-    if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
+    if (rootPath == null || rootPath.trim().isEmpty) {
+      return results;
+    }
+    if (!Directory(rootPath).existsSync()) {
       return results;
     }
 
@@ -947,7 +1209,10 @@ class LibraryCatalogService {
       final rootPath =
           (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
           selection.path;
-      if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
+      if (rootPath == null || rootPath.trim().isEmpty) {
+        return null;
+      }
+      if (!Directory(rootPath).existsSync()) {
         return null;
       }
 
@@ -1246,6 +1511,9 @@ class LibraryCatalogService {
     final normalized = title.trim();
     if (normalized.isEmpty) return true;
     if (_looksLikeFilename(normalized)) return true;
+    // Language-prefixed codes like "en GW" or "en 1TT" stored from filename
+    // stems must be replaced with the real EPUB title.
+    if (_isLanguagePrefixedCodeTitle(normalized)) return true;
     if (RegExp(r'\d').hasMatch(normalized)) {
       return true;
     }
@@ -1392,6 +1660,16 @@ class LibraryCatalogItem {
     return false;
   }
 
+  bool get isPeriodical {
+    final normalizedCollection = _normalizedLibraryText(collectionName);
+    if (normalizedCollection.contains('egw periodicals')) return true;
+
+    final normalizedPath = _normalizedLibraryText(relativePath);
+    if (normalizedPath.contains('egw periodicals')) return true;
+
+    return false;
+  }
+
   LibraryCatalogItem copyWith({
     String? title,
     String? author,
@@ -1452,6 +1730,10 @@ class LibraryCatalogItem {
     return 'All';
   }
 
+  String get collectionGroupKey => libraryCollectionFilterValueForItem(this);
+
+  String get collectionGroupLabel => libraryCollectionFilterLabelForItem(this);
+
   String get displayTitle {
     final trimmed = title.trim();
     if (trimmed.isEmpty) {
@@ -1459,6 +1741,10 @@ class LibraryCatalogItem {
     }
     if (_looksLikeFilename(trimmed)) {
       return _humanizeFileName(trimmed);
+    }
+    if (isPeriodical) {
+      final canonical = _canonicalPeriodicalTitle(trimmed);
+      if (canonical != null) return canonical;
     }
     return trimmed;
   }
@@ -1577,73 +1863,6 @@ class _EpubManifestItem {
 
   final String href;
   final String properties;
-}
-
-DateTime? _parseDate(String? value) {
-  final trimmed = value?.trim();
-  if (trimmed == null || trimmed.isEmpty) return null;
-  return DateTime.tryParse(trimmed);
-}
-
-bool _looksLikeFilename(String value) {
-  final base = value.trim();
-  if (base.isEmpty) {
-    return true;
-  }
-
-  return base.contains('_') ||
-      base.contains('-') ||
-      RegExp(r'^\d{4}[_-]').hasMatch(base) ||
-      (RegExp(r'^[A-Za-z0-9._-]+$').hasMatch(base) && !base.contains(' '));
-}
-
-String _humanizeFileName(String value) {
-  final cleaned = value
-      .replaceAll(RegExp(r'[_\-]+'), ' ')
-      .replaceAllMapped(
-        RegExp(r'([a-z])([A-Z])'),
-        (match) => '${match.group(1)} ${match.group(2)}',
-      )
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  if (cleaned.isEmpty) {
-    return value.trim();
-  }
-
-  return cleaned
-      .split(' ')
-      .map((part) {
-        if (part.length <= 2) {
-          return part.toUpperCase();
-        }
-        if (RegExp(r'^\d+$').hasMatch(part)) {
-          return part;
-        }
-        return part[0].toUpperCase() + part.substring(1).toLowerCase();
-      })
-      .join(' ');
-}
-
-String _normalizedLibraryText(String? value) {
-  return (value?.trim() ?? '')
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-}
-
-String _normalizedLibrarySearchText(String value) {
-  return value
-      .replaceAll('“', '"')
-      .replaceAll('”', '"')
-      .replaceAll('„', '"')
-      .replaceAll('‟', '"')
-      .replaceAll('‘', "'")
-      .replaceAll('’', "'")
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
 }
 
 String? _buildLibrarySearchSnippet({
@@ -1772,276 +1991,32 @@ RegExp _buildLibrarySearchSnippetPattern(String term) {
   );
 }
 
-Future<String> _buildLibrarySearchLocationText({
-  required Database db,
-  required Map<String, Future<_LibraryCitation?>> citationCache,
-  required LibraryCatalogItem item,
-  required String libraryItemId,
-  required int? spineIndex,
-  required int? paragraphIndex,
-  required int? chapterNumber,
-  required String? epubHref,
-  required String? anchorId,
-}) async {
-  final abbreviation = _libraryBookAbbreviation(item);
-  final title = item.displayTitle.trim();
-  final citation = paragraphIndex != null && paragraphIndex > 0
-      ? await _resolveLibraryCitation(
-          db: db,
-          cache: citationCache,
-          libraryItemId: libraryItemId,
-          spineIndex: spineIndex,
-          paragraphIndex: paragraphIndex,
-          epubHref: epubHref,
-        )
-      : null;
-
-  if (abbreviation != null) {
-    if (citation != null) {
-      return '$abbreviation ${citation.pageNumber}.${citation.paragraphNumber}';
-    }
-    if (paragraphIndex != null && paragraphIndex > 0) {
-      return '$abbreviation ¶$paragraphIndex';
-    }
-    if (chapterNumber != null && chapterNumber > 0) {
-      return '$abbreviation ch. $chapterNumber';
-    }
-    return abbreviation;
-  }
-
-  if (citation != null) {
-    return '$title ${citation.pageNumber}.${citation.paragraphNumber}';
-  }
-  if (paragraphIndex != null && paragraphIndex > 0) {
-    return '$title ¶$paragraphIndex';
-  }
-  if (chapterNumber != null && chapterNumber > 0) {
-    return '$title ch. $chapterNumber';
-  }
-
-  final cleanHref = epubHref?.trim() ?? '';
-  if (cleanHref.isNotEmpty) {
-    final cleanAnchor = anchorId?.trim() ?? '';
-    final hrefLabel = cleanAnchor.isNotEmpty
-        ? '$cleanHref#$cleanAnchor'
-        : cleanHref;
-    return '$title · $hrefLabel';
-  }
-
-  return title;
-}
-
-String? _firstNonEmpty(List<String?> values) {
-  for (final value in values) {
-    final trimmed = value?.trim() ?? '';
-    if (trimmed.isNotEmpty) return trimmed;
-  }
-  return null;
-}
-
-String? _libraryBookAbbreviation(LibraryCatalogItem item) {
-  final normalizedTitle = _normalizedLibraryText(item.displayTitle);
-  if (normalizedTitle.contains('christ triumphant')) {
-    return 'CTr';
-  }
-  if (normalizedTitle.contains('maranatha')) {
-    return 'Mar';
-  }
-  if (normalizedTitle.contains('radiant religion')) {
-    return 'RRe';
-  }
-
-  final fromFileName = _abbreviationFromPathSegment(item.fileName);
-  if (fromFileName != null) return fromFileName;
-
-  final fromRelativePath = _abbreviationFromPathSegment(item.relativePath);
-  if (fromRelativePath != null) return fromRelativePath;
-
-  final normalized = _normalizedLibraryText(item.displayTitle);
-  if (normalized.isEmpty) return null;
-
-  const rules = <({String needle, String code})>[
-    (needle: 'the great controversy', code: 'GC'),
-    (needle: 'the great controversy 1888', code: 'GC88'),
-    (needle: 'desire of ages', code: 'DA'),
-    (needle: 'christ triumphant', code: 'CTr'),
-    (needle: 'steps to christ', code: 'SC'),
-    (needle: 'patriarchs and prophets', code: 'PP'),
-    (needle: 'prophets and kings', code: 'PK'),
-    (needle: 'acts of the apostles', code: 'AA'),
-    (needle: 'early writings', code: 'EW'),
-    (needle: 'gospel workers', code: 'GW'),
-    (needle: 'life sketches', code: 'LS'),
-    (needle: 'ministry of healing', code: 'MH'),
-    (needle: 'christ s object lessons', code: 'COL'),
-    (needle: 'education', code: 'Ed.'),
-    (needle: 'thoughts from the mount of blessing', code: 'MB'),
-    (needle: 'the faith i live by', code: 'FLB'),
-    (needle: 'homeward bound', code: 'HB'),
-    (needle: 'reflecting christ', code: 'RC'),
-    (needle: 'that i may know him', code: 'TMK'),
-    (needle: 'testimonies for the church vol 1', code: '1T'),
-    (needle: 'testimonies for the church vol 2', code: '2T'),
-    (needle: 'testimonies for the church vol 3', code: '3T'),
-    (needle: 'testimonies for the church vol 4', code: '4T'),
-    (needle: 'testimonies for the church vol 5', code: '5T'),
-    (needle: 'testimonies for the church vol 6', code: '6T'),
-    (needle: 'testimonies for the church vol 7', code: '7T'),
-    (needle: 'testimonies for the church vol 8', code: '8T'),
-    (needle: 'testimonies for the church vol 9', code: '9T'),
-    (needle: 'spiritual gifts vol 1', code: 'SG1'),
-  ];
-
-  for (final rule in rules) {
-    if (normalized.contains(rule.needle)) {
-      return rule.code;
-    }
-  }
-
-  return null;
-}
-
-String? _abbreviationFromPathSegment(String value) {
-  final stem = p.basenameWithoutExtension(value).trim();
-  if (stem.isEmpty) return null;
-  final withoutPrefix = stem.replaceFirst(
-    RegExp(r'^[a-z]{2}[_-]', caseSensitive: false),
-    '',
-  );
-  final candidate = withoutPrefix.trim();
-  if (candidate.isEmpty) return null;
-  if (!RegExp(r'^[A-Za-z0-9]+$').hasMatch(candidate)) return null;
-  if (candidate.length > 10) return null;
-  return candidate.toUpperCase();
-}
-
-Future<_LibraryCitation?> _resolveLibraryCitation({
-  required Database db,
-  required Map<String, Future<_LibraryCitation?>> cache,
-  required String libraryItemId,
-  required int? spineIndex,
-  required int paragraphIndex,
-  required String? epubHref,
-}) {
-  final key = [
-    libraryItemId,
-    spineIndex?.toString() ?? '',
-    paragraphIndex.toString(),
-    epubHref?.trim() ?? '',
-  ].join('|');
-  return cache.putIfAbsent(key, () async {
-    final lowerBound = paragraphIndex > 24 ? paragraphIndex - 24 : 1;
-    final args = <Object?>[libraryItemId, lowerBound, paragraphIndex];
-    final where = StringBuffer('library_item_id = ?');
-    if (spineIndex != null) {
-      where.write(' AND spine_index = ?');
-      args.insert(1, spineIndex);
-    }
-    where.write(' AND paragraph_index BETWEEN ? AND ?');
-    final rows = await db.rawQuery('''
-        SELECT paragraph_index, anchor, full_paragraph
-        FROM library_links
-        WHERE $where
-        ORDER BY paragraph_index ASC
-        ''', args);
-
-    int? pageNumber;
-    int? pageParagraphIndex;
-    for (final row in rows) {
-      final text = _firstNonEmpty([
-        row['anchor']?.toString(),
-        row['full_paragraph']?.toString(),
-      ]);
-      if (text == null) continue;
-      final match = RegExp(r'\[(\d{1,4})\]').firstMatch(text);
-      if (match == null) continue;
-      pageNumber = int.tryParse(match.group(1)!);
-      pageParagraphIndex = (row['paragraph_index'] as num?)?.toInt();
-    }
-
-    if (pageNumber == null || pageParagraphIndex == null) {
-      return null;
-    }
-
-    final paragraphNumber = paragraphIndex - pageParagraphIndex + 1;
-    return _LibraryCitation(
-      pageNumber: pageNumber,
-      paragraphNumber: paragraphNumber > 0 ? paragraphNumber : 1,
-    );
-  });
-}
-
-class _LibraryCitation {
-  const _LibraryCitation({
-    required this.pageNumber,
-    required this.paragraphNumber,
-  });
-
-  final int pageNumber;
-  final int paragraphNumber;
-}
-
-int _scoreLibrarySearchResult({
-  required LibraryCatalogItem item,
-  required String? referenceText,
-  required String? fullParagraph,
-  required List<String> queryTerms,
-}) {
-  final title = _normalizedLibraryText(item.displayTitle);
-  final author = _normalizedLibraryText(item.displayAuthor);
-  final reference = _normalizedLibraryText(referenceText);
-  final paragraph = _normalizedLibrarySearchText(fullParagraph ?? '');
-
-  var bestScore = 6;
-  for (final term in queryTerms) {
-    final normalizedTerm = _normalizedLibrarySearchText(term);
-    if (normalizedTerm.isEmpty) continue;
-    var termScore = 5;
-    if (paragraph.contains(normalizedTerm)) {
-      termScore = 0;
-    } else if (reference.contains(normalizedTerm)) {
-      termScore = 1;
-    } else if (title.contains(normalizedTerm)) {
-      termScore = 2;
-    } else if (author.contains(normalizedTerm)) {
-      termScore = 3;
-    }
-    if (termScore < bestScore) {
-      bestScore = termScore;
-    }
-  }
-  return bestScore;
-}
-
-String _cleanLibrarySearchText(String value) {
-  return value
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .replaceAll('“', '"')
-      .replaceAll('”', '"')
-      .replaceAll('„', '"')
-      .replaceAll('‟', '"')
-      .replaceAll('‘', "'")
-      .replaceAll('’', "'")
-      .trim();
-}
-
 List<String> extractLibrarySearchHighlightTerms(String query) {
   return extractSearchHighlightTerms(query, booleanSyntax: true);
 }
 
 const List<String> _librarySearchClauseFields = <String>[
-  'LOWER(COALESCE(ll.full_paragraph, \'\')) LIKE ?',
-  'LOWER(COALESCE(ll.original_reference_text, \'\')) LIKE ?',
-  'LOWER(COALESCE(ll.anchor, \'\')) LIKE ?',
+  'LOWER(COALESCE(ltb.plain_text, \'\')) LIKE ?',
+  'LOWER(COALESCE(ltb.section_title, \'\')) LIKE ?',
   'LOWER(COALESCE(li.title, \'\')) LIKE ?',
   'LOWER(COALESCE(li.author, \'\')) LIKE ?',
   'LOWER(COALESCE(li.collection_name, \'\')) LIKE ?',
-  'LOWER(COALESCE(li.relative_path, \'\')) LIKE ?',
-  'LOWER(COALESCE(li.file_name, \'\')) LIKE ?',
 ];
 
 String _librarySearchTermClause() {
   return _librarySearchClauseFields.join(' OR ');
+}
+
+// For multi-word phrases, join with % so punctuation between words is
+// absorbed (e.g. "trouble, we" matches pattern %trouble%we%).
+// Single-word terms keep the simpler %word% form.
+String _librarySearchLikePattern(String normalizedTerm) {
+  final words = normalizedTerm
+      .split(RegExp(r'\s+'))
+      .where((w) => w.isNotEmpty)
+      .toList(growable: false);
+  if (words.length <= 1) return '%$normalizedTerm%';
+  return '%${words.join('%')}%';
 }
 
 List<LibraryCatalogItem> _dedupeLibraryItems(List<LibraryCatalogItem> items) {

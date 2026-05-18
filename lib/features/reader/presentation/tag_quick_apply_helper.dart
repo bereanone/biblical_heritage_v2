@@ -1,103 +1,202 @@
+import 'dart:convert';
+
+import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/database/study_bible_database.dart';
+import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/user_database.dart';
+import '../../library/data/library_citation_display_helper.dart';
+import '../../library/data/library_catalog_service.dart'
+    show extractLibrarySearchHighlightTerms;
+import '../data/presentation/presentation_models.dart';
+import '../data/presentation/presentation_text_format.dart';
 import 'viewer_passage_models.dart';
 import 'viewer_range_selection.dart';
 
-class HashTagTarget {
-  const HashTagTarget({
-    required this.bookNumber,
-    required this.chapter,
-    required this.verse,
-    required this.verseRef,
-    this.tokenNumber,
-  });
+part 'tag_quick_apply_helper_models.dart';
 
-  final int bookNumber;
-  final int chapter;
-  final int verse;
-  final String verseRef;
-  final int? tokenNumber;
+String bibleRangeReferenceLabel({
+  required String bookName,
+  required int chapter,
+  required int verseStart,
+  required int verseEnd,
+}) {
+  final normalizedEnd = verseEnd < verseStart ? verseStart : verseEnd;
+  final cleanBookName = bookName.trim();
+  if (cleanBookName.isEmpty || chapter <= 0 || verseStart <= 0) {
+    return '';
+  }
+  final verseLabel = normalizedEnd > verseStart
+      ? '$verseStart-$normalizedEnd'
+      : '$verseStart';
+  return '$cleanBookName $chapter:$verseLabel';
 }
 
-class HashTagSummary {
-  const HashTagSummary({required this.tag, required this.count});
-
-  final String tag;
-  final int count;
+String bibleRangeSourceId({
+  required int bookNumber,
+  required int chapter,
+  required int verseStart,
+  required int verseEnd,
+}) {
+  final normalizedEnd = verseEnd < verseStart ? verseStart : verseEnd;
+  if (bookNumber <= 0 || chapter <= 0 || verseStart <= 0) {
+    return '';
+  }
+  return normalizedEnd > verseStart
+      ? '$bookNumber:$chapter:$verseStart-$normalizedEnd'
+      : '$bookNumber:$chapter:$verseStart';
 }
 
-class HashTagEntry {
-  const HashTagEntry({
-    required this.id,
-    required this.bookNumber,
-    required this.chapter,
-    required this.verse,
-    required this.verseRef,
-    required this.verseText,
-    required this.createdAt,
-    required this.sortOrder,
-    this.contentHtml,
-  });
+Future<String> loadBibleRangeText({
+  required int bookNumber,
+  required int chapter,
+  required int verseStart,
+  required int verseEnd,
+}) async {
+  if (bookNumber <= 0 || chapter <= 0 || verseStart <= 0) return '';
+  final normalizedEnd = verseEnd < verseStart ? verseStart : verseEnd;
+  if (normalizedEnd <= verseStart) {
+    return (await StudyBibleDatabase.instance.loadVerseText(
+          bookNumber: bookNumber,
+          chapter: chapter,
+          verse: verseStart,
+        ))?.trim() ??
+        '';
+  }
 
-  final int id;
-  final int bookNumber;
-  final int chapter;
-  final int verse;
-  final String verseRef;
-  final String verseText;
-  final int createdAt;
-  final int sortOrder;
-  final String? contentHtml;
+  final db = await StudyBibleDatabase.instance.bible;
+  final rows = await db.query(
+    'bible_blocks',
+    columns: ['plain_text'],
+    where: '''
+      book_number = ?
+      AND chapter = ?
+      AND block_index BETWEEN ? AND ?
+    ''',
+    whereArgs: [bookNumber, chapter, verseStart, normalizedEnd],
+    orderBy: 'block_index ASC',
+  );
+  if (rows.isEmpty) {
+    return (await StudyBibleDatabase.instance.loadVerseText(
+          bookNumber: bookNumber,
+          chapter: chapter,
+          verse: verseStart,
+        ))?.trim() ??
+        '';
+  }
+  final verses = rows
+      .map((row) => row['plain_text']?.toString().trim() ?? '')
+      .where((value) => value.isNotEmpty)
+      .toList(growable: false);
+  return verses.join('\n').trim();
 }
 
-enum HashTagEntrySortMode { slideOrder, verseOrder }
-
-class HashTagQuickApplyResult {
-  const HashTagQuickApplyResult({
-    required this.tag,
-    required this.inserted,
-    required this.skipped,
+class BibleItemOverlay {
+  const BibleItemOverlay({
+    this.userTitle,
+    this.displayTextOverride,
+    this.noteFormatJson,
+    this.titleFormatJson,
+    this.displayTextFormatJson,
   });
 
-  final String? tag;
-  final int inserted;
-  final int skipped;
+  final String? userTitle;
+  final String? displayTextOverride;
+  final String? noteFormatJson;
+  final String? titleFormatJson;
+  final String? displayTextFormatJson;
+
+  bool get isEmpty =>
+      (userTitle ?? '').trim().isEmpty &&
+      (displayTextOverride ?? '').trim().isEmpty &&
+      (noteFormatJson ?? '').trim().isEmpty &&
+      (titleFormatJson ?? '').trim().isEmpty &&
+      (displayTextFormatJson ?? '').trim().isEmpty;
 }
 
-class HashTagImportResult {
-  const HashTagImportResult({
-    required this.tag,
-    required this.parsedCount,
-    required this.insertedCount,
-    required this.updatedExistingCount,
-    required this.skippedExistingCount,
-    required this.failedCount,
-    required this.failures,
-  });
-
-  final String tag;
-  final int parsedCount;
-  final int insertedCount;
-  final int updatedExistingCount;
-  final int skippedExistingCount;
-  final int failedCount;
-  final List<HashTagImportFailure> failures;
-
-  int get importedCount => insertedCount;
+BibleItemOverlay? parseBibleItemOverlay(Object? raw) {
+  final text = (raw?.toString() ?? '').trim();
+  if (text.isEmpty) return null;
+  try {
+    final decoded = jsonDecode(text);
+    if (decoded is! Map<String, dynamic>) return null;
+    final kind = decoded['kind']?.toString();
+    if (kind != 'bible_item_overlay' && kind != 'bible_item_meta') {
+      return null;
+    }
+    return BibleItemOverlay(
+      userTitle: decoded['user_title']?.toString().trim(),
+      displayTextOverride: decoded['display_text_override']?.toString().trim(),
+      noteFormatJson: decoded['note_format_json']?.toString().trim(),
+      titleFormatJson: decoded['title_format_json']?.toString().trim(),
+      displayTextFormatJson:
+          decoded['display_text_format_json']?.toString().trim(),
+    );
+  } catch (_) {
+    return null;
+  }
 }
 
-class HashTagImportFailure {
-  const HashTagImportFailure({
-    required this.lineNumber,
-    required this.reason,
-    required this.line,
-  });
+String? bibleItemOverlayUserTitle(Object? raw) {
+  final overlay = parseBibleItemOverlay(raw);
+  final title = overlay?.userTitle?.trim() ?? '';
+  return title.isEmpty ? null : title;
+}
 
-  final int lineNumber;
-  final String reason;
-  final String line;
+String? bibleItemOverlayDisplayTextOverride(Object? raw) {
+  final overlay = parseBibleItemOverlay(raw);
+  final text = overlay?.displayTextOverride?.trim() ?? '';
+  return text.isEmpty ? null : text;
+}
+
+String? bibleItemOverlayNoteFormatJson(Object? raw) {
+  final overlay = parseBibleItemOverlay(raw);
+  if (overlay != null) {
+    final nested = overlay.noteFormatJson?.trim() ?? '';
+    if (nested.isNotEmpty) return nested;
+    return null;
+  }
+  final rawText = (raw?.toString() ?? '').trim();
+  return rawText.isEmpty ? null : rawText;
+}
+
+String? bibleItemOverlayTitleFormatJson(Object? raw) {
+  final overlay = parseBibleItemOverlay(raw);
+  final nested = overlay?.titleFormatJson?.trim() ?? '';
+  return nested.isEmpty ? null : nested;
+}
+
+String? bibleItemOverlayDisplayTextFormatJson(Object? raw) {
+  final overlay = parseBibleItemOverlay(raw);
+  final nested = overlay?.displayTextFormatJson?.trim() ?? '';
+  return nested.isEmpty ? null : nested;
+}
+
+String? buildBibleItemOverlayJson({
+  String? userTitle,
+  String? displayTextOverride,
+  String? noteFormatJson,
+  String? titleFormatJson,
+  String? displayTextFormatJson,
+}) {
+  final title = userTitle?.trim() ?? '';
+  final displayText = displayTextOverride?.trim() ?? '';
+  final noteFormat = noteFormatJson?.trim() ?? '';
+  final titleFormat = titleFormatJson?.trim() ?? '';
+  final displayTextFormat = displayTextFormatJson?.trim() ?? '';
+  final payload = <String, Object?>{
+    'format_version': 1,
+    'kind': 'bible_item_overlay',
+    if (title.isNotEmpty) 'user_title': title,
+    if (displayText.isNotEmpty) 'display_text_override': displayText,
+    if (noteFormat.isNotEmpty) 'note_format_json': noteFormat,
+    if (titleFormat.isNotEmpty) 'title_format_json': titleFormat,
+    if (displayTextFormat.isNotEmpty)
+      'display_text_format_json': displayTextFormat,
+  };
+  if (payload.length <= 2) return null;
+  return jsonEncode(payload);
 }
 
 class HashTagRepository {
@@ -112,7 +211,6 @@ class HashTagRepository {
   final String defaultSettingKey;
   final String categorySettingKeyPrefix;
   final String tagPrefix;
-  static const recentImportCategory = 'Recent Import';
 
   Future<Database> _db() async {
     return UserDatabase.instance.database;
@@ -120,6 +218,22 @@ class HashTagRepository {
 
   Future<void> ensureSchema() async {
     final db = await _db();
+    final referenceCodeColumn =
+        tableName == 'hash_tags' || tableName == 'dollar_tags'
+        ? '        reference_code TEXT,\n'
+        : '';
+    final noteColumn = tableName == 'hash_tags'
+        ? '        note_text TEXT,\n'
+        : '';
+    final noteFormatColumn = tableName == 'hash_tags'
+        ? '        note_format_json TEXT,\n'
+        : '';
+    final presentationSlideColumn = tableName == 'hash_tags'
+        ? '        presentation_slide_number INTEGER,\n'
+        : '';
+    final presentationSlideRegionColumn = tableName == 'hash_tags'
+        ? '        presentation_slide_region TEXT,\n'
+        : '';
     await db.execute('''
       CREATE TABLE IF NOT EXISTS $tableName (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,8 +245,8 @@ class HashTagRepository {
         chapter_number INTEGER NOT NULL,
         verse_number INTEGER NOT NULL,
         token_number INTEGER,
-        sort_order INTEGER,
-        created_at INTEGER NOT NULL
+$referenceCodeColumn$noteColumn$noteFormatColumn        sort_order INTEGER,
+$presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER NOT NULL
       )
     ''');
     await _addColumnIfMissing(
@@ -147,6 +261,74 @@ class HashTagRepository {
       columnName: 'category',
       columnDefinition: 'TEXT',
     );
+    if (tableName == 'hash_tags' || tableName == 'dollar_tags') {
+      await _addColumnIfMissing(
+        db,
+        tableName: tableName,
+        columnName: 'reference_code',
+        columnDefinition: 'TEXT',
+      );
+    }
+    if (tableName == 'hash_tags') {
+      await _addColumnIfMissing(
+        db,
+        tableName: tableName,
+        columnName: 'note_text',
+        columnDefinition: 'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        tableName: tableName,
+        columnName: 'note_format_json',
+        columnDefinition: 'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        tableName: tableName,
+        columnName: 'presentation_slide_number',
+        columnDefinition: 'INTEGER',
+      );
+      await _addColumnIfMissing(
+        db,
+        tableName: tableName,
+        columnName: 'presentation_slide_region',
+        columnDefinition: 'TEXT',
+      );
+    }
+    if (await _tableExists(db, 'tag_items')) {
+      await _addColumnIfMissing(
+        db,
+        tableName: 'tag_items',
+        columnName: 'reference_code',
+        columnDefinition: 'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        tableName: 'tag_items',
+        columnName: 'presentation_slide_number',
+        columnDefinition: 'INTEGER',
+      );
+      await _addColumnIfMissing(
+        db,
+        tableName: 'tag_items',
+        columnName: 'presentation_slide_region',
+        columnDefinition: 'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        tableName: 'tag_items',
+        columnName: 'note_format_json',
+        columnDefinition: 'TEXT',
+      );
+    }
+    if (await _tableExists(db, 'dollar_tags')) {
+      await _addColumnIfMissing(
+        db,
+        tableName: 'dollar_tags',
+        columnName: 'note_format_json',
+        columnDefinition: 'TEXT',
+      );
+    }
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_${tableName}_tag ON $tableName(tag)',
     );
@@ -177,6 +359,14 @@ class HashTagRepository {
         'ALTER TABLE $tableName ADD COLUMN $columnName $columnDefinition',
       );
     }
+  }
+
+  Future<bool> _tableExists(Database db, String tableName) async {
+    final rows = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+      [tableName],
+    );
+    return rows.isNotEmpty;
   }
 
   Future<int> ensureUserId() async {
@@ -240,6 +430,17 @@ class HashTagRepository {
       where: 'key = ?',
       whereArgs: [defaultSettingKey],
     );
+  }
+
+  Future<String?> loadActiveDefaultTag() async {
+    final defaultTag = normalizeTagName(await loadDefaultTag() ?? '');
+    if (defaultTag.isEmpty) return null;
+    if (await _tagExists(defaultTag)) {
+      return defaultTag;
+    }
+
+    await clearDefaultTag();
+    return null;
   }
 
   Future<int> renameTag({
@@ -397,21 +598,51 @@ class HashTagRepository {
   Future<List<HashTagSummary>> loadSummaries() async {
     await ensureSchema();
     final db = await _db();
-    final rows = await db.rawQuery('''
+    final tagKind = _tagKindForTable();
+    final legacyRows = await db.rawQuery('''
       SELECT tag, COUNT(*) AS cnt
       FROM $tableName
       GROUP BY tag
-      ORDER BY tag COLLATE NOCASE ASC
     ''');
-    return rows
-        .map(
-          (row) => HashTagSummary(
-            tag: row['tag']?.toString() ?? '',
-            count: (row['cnt'] as num?)?.toInt() ?? 0,
-          ),
-        )
-        .where((summary) => summary.tag.trim().isNotEmpty)
-        .toList(growable: false);
+    final normalizedRows = await db.rawQuery(
+      '''
+      SELECT groups.name AS tag, COUNT(items.id) AS cnt
+      FROM tag_groups AS groups
+      LEFT JOIN tag_items AS items
+        ON items.tag_group_id = groups.id
+       AND COALESCE(items.deleted_at, '') = ''
+      WHERE groups.tag_kind = ?
+        AND COALESCE(groups.deleted_at, '') = ''
+      GROUP BY groups.id, groups.name
+    ''',
+      [tagKind],
+    );
+
+    final merged = <String, HashTagSummary>{};
+    void addRow(Map<String, Object?> row) {
+      final tag = row['tag']?.toString().trim() ?? '';
+      if (tag.isEmpty) return;
+      final count = (row['cnt'] as num?)?.toInt() ?? 0;
+      final key = tag.toLowerCase();
+      final existing = merged[key];
+      merged[key] = HashTagSummary(
+        tag: existing?.tag ?? tag,
+        count: (existing?.count ?? 0) + count,
+      );
+    }
+
+    for (final row in legacyRows) {
+      addRow(row);
+    }
+    for (final row in normalizedRows) {
+      addRow(row);
+    }
+    final rows = merged.values.toList(growable: false)
+      ..sort(
+        (left, right) =>
+            left.tag.toLowerCase().compareTo(right.tag.toLowerCase()),
+      );
+    return rows;
   }
 
   Future<List<HashTagEntry>> loadEntries(
@@ -422,71 +653,266 @@ class HashTagRepository {
     if (normalized.isEmpty) return const <HashTagEntry>[];
     await ensureSchema();
     final db = await _db();
-    final orderBy = switch (sortMode) {
-      HashTagEntrySortMode.slideOrder =>
-        'sort_order ASC, created_at ASC, id ASC',
-      HashTagEntrySortMode.verseOrder =>
-        'book_number ASC, chapter_number ASC, verse_number ASC, id ASC',
-    };
-    final columns = <String>[
-      'id',
-      'book_number',
-      'chapter_number',
-      'verse_number',
-      'verse_ref',
-      'created_at',
-      'sort_order',
-      if (tableName == 'dollar_tags') 'content_html',
-    ];
-    final rows = await db.query(
-      tableName,
-      columns: columns,
-      where: 'tag = ?',
-      whereArgs: [normalized],
-      orderBy: orderBy,
-    );
-    final baseEntries = rows
-        .map(
-          (row) => (
-            id: (row['id'] as num).toInt(),
-            bookNumber: (row['book_number'] as num).toInt(),
-            chapter: (row['chapter_number'] as num).toInt(),
-            verse: (row['verse_number'] as num).toInt(),
-            verseRef: row['verse_ref']?.toString() ?? '',
-            createdAt: (row['created_at'] as num?)?.toInt() ?? 0,
-            sortOrder:
-                (row['sort_order'] as num?)?.toInt() ??
-                (row['created_at'] as num?)?.toInt() ??
-                0,
-            contentHtml: row['content_html']?.toString(),
-          ),
-        )
-        .toList(growable: false);
-    final verseTexts = await Future.wait(
-      baseEntries
+    final tagKind = _tagKindForTable();
+
+    Future<List<HashTagEntry>> loadLegacyEntries() async {
+      final orderBy = switch (sortMode) {
+        HashTagEntrySortMode.slideOrder =>
+          'sort_order ASC, created_at ASC, id ASC',
+        HashTagEntrySortMode.verseOrder =>
+          'book_number ASC, chapter_number ASC, verse_number ASC, id ASC',
+      };
+      final columns = <String>[
+        'id',
+        'book_number',
+        'chapter_number',
+        'verse_number',
+        'verse_ref',
+        'created_at',
+        'sort_order',
+        if (tableName == 'hash_tags' || tableName == 'dollar_tags')
+          'reference_code',
+        if (tableName == 'hash_tags') 'presentation_slide_number',
+        if (tableName == 'hash_tags') 'presentation_slide_region',
+        if (tableName == 'dollar_tags') 'content_html',
+        if (tableName == 'dollar_tags') 'note_format_json',
+        if (tableName == 'hash_tags') 'note_text',
+        if (tableName == 'hash_tags') 'note_format_json',
+      ];
+      final rows = await db.query(
+        tableName,
+        columns: columns,
+        where: 'tag = ?',
+        whereArgs: [normalized],
+        orderBy: orderBy,
+      );
+      final entries = rows
           .map(
-            (entry) => StudyBibleDatabase.instance.loadVerseText(
-              bookNumber: entry.bookNumber,
-              chapter: entry.chapter,
-              verse: entry.verse,
+            (row) => (
+              id: (row['id'] as num).toInt(),
+              bookNumber: (row['book_number'] as num).toInt(),
+              chapter: (row['chapter_number'] as num).toInt(),
+              verse: (row['verse_number'] as num).toInt(),
+              verseEnd: (row['verse_number'] as num).toInt(),
+              verseRef: row['verse_ref']?.toString() ?? '',
+              createdAt: (row['created_at'] as num?)?.toInt() ?? 0,
+              sortOrder:
+                  (row['sort_order'] as num?)?.toInt() ??
+                  (row['created_at'] as num?)?.toInt() ??
+                  0,
+              presentationSlideNumber: _intValueNullable(
+                row['presentation_slide_number'],
+              ),
+              presentationSlideRegion: presentationItemPlacementFromJson(
+                row['presentation_slide_region']?.toString(),
+              ),
+              referenceCode: row['reference_code']?.toString(),
+              contentHtml: row['content_html']?.toString(),
+              noteText: row['note_text']?.toString(),
+              noteFormatJson: row['note_format_json']?.toString(),
             ),
           )
-          .toList(growable: false),
-    );
-    return [
-      for (var i = 0; i < baseEntries.length; i++)
-        HashTagEntry(
-          id: baseEntries[i].id,
-          bookNumber: baseEntries[i].bookNumber,
-          chapter: baseEntries[i].chapter,
-          verse: baseEntries[i].verse,
-          verseRef: baseEntries[i].verseRef,
-          verseText: verseTexts[i] ?? '',
-          createdAt: baseEntries[i].createdAt,
-          sortOrder: baseEntries[i].sortOrder,
-          contentHtml: baseEntries[i].contentHtml,
-        ),
-    ];
+          .toList(growable: false);
+      final mediaByItemId = await _loadMediaRefsForEntries(
+        db,
+        entries.map((entry) => entry.id).toList(growable: false),
+      );
+      final verseTexts = await Future.wait(
+        entries
+            .map(
+              (entry) => _loadVerseRangeText(
+                bookNumber: entry.bookNumber,
+                chapter: entry.chapter,
+                verseStart: entry.verse,
+                verseEnd: entry.verseEnd,
+              ),
+            )
+            .toList(growable: false),
+      );
+      return [
+        for (var i = 0; i < entries.length; i++)
+          HashTagEntry(
+            id: entries[i].id,
+            bookNumber: entries[i].bookNumber,
+            chapter: entries[i].chapter,
+            verse: entries[i].verse,
+            verseEnd: entries[i].verseEnd,
+            verseRef: entries[i].verseRef,
+            verseText: verseTexts[i],
+            createdAt: entries[i].createdAt,
+            sortOrder: entries[i].sortOrder,
+            isNormalized: false,
+            presentationSlideNumber: entries[i].presentationSlideNumber,
+            referenceCode: entries[i].referenceCode,
+            contentHtml: entries[i].contentHtml,
+            noteText: entries[i].noteText,
+            noteFormatJson: entries[i].noteFormatJson,
+            mediaRefs: List.unmodifiable(
+              mediaByItemId[entries[i].id] ?? const <String>[],
+            ),
+          ),
+      ];
+    }
+
+    Future<List<HashTagEntry>> loadNormalizedEntries() async {
+      final groupRows = await db.query(
+        'tag_groups',
+        columns: ['id'],
+        where: '''
+          tag_kind = ?
+          AND name = ?
+          AND COALESCE(deleted_at, '') = ''
+        ''',
+        whereArgs: [tagKind, normalized],
+        limit: 1,
+      );
+      if (groupRows.isEmpty) return const <HashTagEntry>[];
+      final groupId = groupRows.first['id']?.toString() ?? '';
+      if (groupId.isEmpty) return const <HashTagEntry>[];
+
+      final orderBy = switch (sortMode) {
+        HashTagEntrySortMode.slideOrder =>
+          'sort_order ASC, created_at ASC, id ASC',
+        HashTagEntrySortMode.verseOrder =>
+          'book_id ASC, chapter ASC, verse_start ASC, id ASC',
+      };
+      final rows = await db.query(
+        'tag_items',
+        columns: [
+          'rowid AS numeric_id',
+          'id',
+          'book_id',
+          'chapter',
+          'verse_start',
+          'verse_end',
+          'presentation_slide_number',
+          'reference_code',
+          'presentation_slide_region',
+          'note_format_json',
+          'created_at',
+          'sort_order',
+          'note_text',
+          'legacy_item_id',
+        ],
+        where: 'tag_group_id = ? AND COALESCE(deleted_at, \'\') = \'\'',
+        whereArgs: [groupId],
+        orderBy: orderBy,
+      );
+      final mediaByItemId = await _loadNormalizedMediaRefsForEntries(
+        db,
+        [
+          for (final row in rows) row['id']?.toString() ?? '',
+        ].where((value) => value.isNotEmpty).toList(growable: false),
+      );
+      final books = await StudyBibleDatabase.instance.loadBooks();
+      final bookNames = {
+        for (final book in books) book.bookNumber: book.bookName,
+      };
+      final verseTexts = await Future.wait(
+        rows
+            .map(
+              (row) => _loadVerseRangeText(
+                bookNumber: _i(row['book_id']) ?? 0,
+                chapter: _i(row['chapter']) ?? 0,
+                verseStart: _i(row['verse_start']) ?? 0,
+                verseEnd: _i(row['verse_end']) ?? _i(row['verse_start']) ?? 0,
+              ),
+            )
+            .toList(growable: false),
+      );
+      return [
+        for (var i = 0; i < rows.length; i++)
+          HashTagEntry(
+            id: _i(rows[i]['numeric_id']) ?? i + 1,
+            bookNumber: _i(rows[i]['book_id']) ?? 0,
+            chapter: _i(rows[i]['chapter']) ?? 0,
+            verse: _i(rows[i]['verse_start']) ?? 0,
+            verseEnd:
+                _i(rows[i]['verse_end']) ?? _i(rows[i]['verse_start']) ?? 0,
+            verseRef: _normalizedVerseRef(rows[i], bookNames),
+            verseText: verseTexts[i],
+            createdAt: _i(rows[i]['created_at']) ?? 0,
+            sortOrder:
+                _i(rows[i]['sort_order']) ?? _i(rows[i]['created_at']) ?? 0,
+            isNormalized: true,
+            presentationSlideNumber: _i(rows[i]['presentation_slide_number']),
+            presentationSlideRegion: presentationItemPlacementFromJson(
+              rows[i]['presentation_slide_region']?.toString(),
+            ),
+            userTitle: bibleItemOverlayUserTitle(rows[i]['note_format_json']),
+            referenceCode: _s(rows[i]['reference_code']).trim().isEmpty
+                ? null
+                : _s(rows[i]['reference_code']),
+            displayTextOverride: bibleItemOverlayDisplayTextOverride(
+              rows[i]['note_format_json'],
+            ),
+            titleFormatJson: bibleItemOverlayTitleFormatJson(
+              rows[i]['note_format_json'],
+            ),
+            displayTextFormatJson: bibleItemOverlayDisplayTextFormatJson(
+              rows[i]['note_format_json'],
+            ),
+            contentHtml: null,
+            noteText: _s(rows[i]['note_text']).trim().isEmpty
+                ? null
+                : _s(rows[i]['note_text']),
+            noteFormatJson: bibleItemOverlayNoteFormatJson(
+              rows[i]['note_format_json'],
+            ),
+            mediaRefs: List.unmodifiable(
+              mediaByItemId[_s(rows[i]['id'])] ?? const <String>[],
+            ),
+          ),
+      ];
+    }
+
+    final combined =
+        [...await loadLegacyEntries(), ...await loadNormalizedEntries()]..sort((
+          left,
+          right,
+        ) {
+          switch (sortMode) {
+            case HashTagEntrySortMode.slideOrder:
+              final sortCompare = left.sortOrder.compareTo(right.sortOrder);
+              if (sortCompare != 0) return sortCompare;
+              final createdCompare = left.createdAt.compareTo(right.createdAt);
+              if (createdCompare != 0) return createdCompare;
+              return left.id.compareTo(right.id);
+            case HashTagEntrySortMode.verseOrder:
+              final bookCompare = left.bookNumber.compareTo(right.bookNumber);
+              if (bookCompare != 0) return bookCompare;
+              final chapterCompare = left.chapter.compareTo(right.chapter);
+              if (chapterCompare != 0) return chapterCompare;
+              final verseCompare = left.verse.compareTo(right.verse);
+              if (verseCompare != 0) return verseCompare;
+              return left.id.compareTo(right.id);
+          }
+        });
+
+    return combined;
+  }
+
+  Future<Map<String, List<String>>> _loadNormalizedMediaRefsForEntries(
+    Database db,
+    List<String> itemIds,
+  ) async {
+    if (itemIds.isEmpty) return const <String, List<String>>{};
+    final placeholders = List.filled(itemIds.length, '?').join(', ');
+    final rows = await db.rawQuery('''
+      SELECT tag_item_id, relative_path
+      FROM tag_item_media
+      WHERE tag_item_id IN ($placeholders)
+        AND COALESCE(deleted_at, '') = ''
+      ORDER BY tag_item_id ASC, sort_order ASC, id ASC
+      ''', itemIds);
+    final grouped = <String, List<String>>{};
+    for (final row in rows) {
+      final itemId = row['tag_item_id']?.toString() ?? '';
+      final relativePath = row['relative_path']?.toString().trim() ?? '';
+      if (itemId.isEmpty || relativePath.isEmpty) continue;
+      grouped.putIfAbsent(itemId, () => <String>[]).add(relativePath);
+    }
+    return grouped;
   }
 
   Future<HashTagQuickApplyResult> quickApplyTargets({
@@ -551,24 +977,958 @@ class HashTagRepository {
     );
   }
 
-  Future<void> deleteEntry(int id) async {
+  Future<HashTagResolvedTag?> getOrCreateDefaultSearchResultsTag({
+    String fallbackTag = 'SearchResults',
+    String category = 'Search',
+  }) async {
+    await ensureSchema();
+    final existingDefault = normalizeTagName(await loadDefaultTag() ?? '');
+    if (existingDefault.isNotEmpty) {
+      return HashTagResolvedTag(tag: existingDefault, createdDefaultTag: false);
+    }
+
+    final normalizedFallback = normalizeTagName(fallbackTag);
+    if (normalizedFallback.isEmpty) return null;
+
+    final db = await _db();
+    final existingRows = await db.query(
+      tableName,
+      columns: ['id'],
+      where: 'tag = ?',
+      whereArgs: [normalizedFallback],
+      limit: 1,
+    );
+    final createdDefaultTag = existingRows.isEmpty;
+    await saveDefaultTag(normalizedFallback);
+    if (category.trim().isNotEmpty) {
+      await saveTagCategory(normalizedFallback, category);
+    }
+    return HashTagResolvedTag(
+      tag: normalizedFallback,
+      createdDefaultTag: createdDefaultTag,
+    );
+  }
+
+  Future<HashTagSearchQuickApplyResult> quickApplyBibleSearchResult({
+    required List<HashTagTarget> targets,
+    String? tag,
+  }) async {
+    final resolvedTag = await _resolveSearchResultTag(tag);
+    if (resolvedTag == null) {
+      return const HashTagSearchQuickApplyResult(
+        tag: null,
+        inserted: 0,
+        skipped: 0,
+        createdDefaultTag: false,
+      );
+    }
+
+    var inserted = 0;
+    var skipped = 0;
+    for (final target in targets) {
+      final result = await addBibleSearchResultToTag(
+        tag: resolvedTag.tag,
+        result: PassageSearchResult(
+          blockId: 0,
+          bookNumber: target.bookNumber,
+          bookName: 'Book ${target.bookNumber}',
+          chapter: target.chapter,
+          verse: target.verse,
+          text: '',
+        ),
+      );
+      inserted += result.inserted;
+      skipped += result.skipped;
+    }
+    return HashTagSearchQuickApplyResult(
+      tag: resolvedTag.tag,
+      inserted: inserted,
+      skipped: skipped,
+      createdDefaultTag: resolvedTag.createdDefaultTag,
+    );
+  }
+
+  Future<HashTagSearchQuickApplyResult> addBibleSearchResultToTag({
+    required String tag,
+    required PassageSearchResult result,
+  }) async {
+    final normalizedTag = normalizeTagName(tag);
+    if (normalizedTag.isEmpty) {
+      return const HashTagSearchQuickApplyResult(
+        tag: null,
+        inserted: 0,
+        skipped: 0,
+        createdDefaultTag: false,
+      );
+    }
+
     await ensureSchema();
     final db = await _db();
+    final now = _utcNow();
+    final tagKind = _tagKindForTable();
+    final groupId = await _ensureNormalizedTagGroup(
+      db,
+      normalizedTag: normalizedTag,
+      now: now,
+    );
+    final legacyExists = await db.query(
+      tableName,
+      columns: ['id'],
+      where: '''
+        tag = ?
+        AND book_number = ?
+        AND chapter_number = ?
+        AND verse_number = ?
+      ''',
+      whereArgs: [
+        normalizedTag,
+        result.bookNumber,
+        result.chapter,
+        result.verse,
+      ],
+      limit: 1,
+    );
+    final normalizedExists = await db.query(
+      'tag_items',
+      columns: ['id'],
+      where: '''
+        tag_group_id = ?
+        AND tag_kind = ?
+        AND book_id = ?
+        AND chapter = ?
+        AND verse_start = ?
+        AND verse_end = ?
+        AND COALESCE(deleted_at, '') = ''
+      ''',
+      whereArgs: [
+        groupId,
+        tagKind,
+        result.bookNumber,
+        result.chapter,
+        result.verse,
+        result.verse,
+      ],
+      limit: 1,
+    );
+    if (legacyExists.isNotEmpty || normalizedExists.isNotEmpty) {
+      return HashTagSearchQuickApplyResult(
+        tag: normalizedTag,
+        inserted: 0,
+        skipped: 1,
+        createdDefaultTag: false,
+      );
+    }
+
+    final sortOrder = await _nextSortOrderAcrossTagStores(
+      db,
+      normalizedTag: normalizedTag,
+      groupId: groupId,
+    );
+    await db.insert('tag_items', {
+      'id':
+          'tag_item_${_slug(groupId)}_${result.bookNumber}_${result.chapter}_${result.verse}',
+      'tag_group_id': groupId,
+      'tag_kind': tagKind,
+      'book_id': result.bookNumber,
+      'chapter': result.chapter,
+      'verse_start': result.verse,
+      'verse_end': result.verse,
+      'note_text': null,
+      'sort_order': sortOrder,
+      'source_device_name': null,
+      'legacy_group_id': null,
+      'legacy_item_id': null,
+      'legacy_import_package_id': null,
+      'imported_at': now,
+      'created_at': now,
+      'updated_at': now,
+      'deleted_at': null,
+      'device_id': await LocalSettingsStore.instance.ensureDeviceId(),
+      'revision': 1,
+      'sync_status': 'pending',
+      'last_synced_at': null,
+      'change_id': null,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+
+    return HashTagSearchQuickApplyResult(
+      tag: normalizedTag,
+      inserted: 1,
+      skipped: 0,
+      createdDefaultTag: false,
+    );
+  }
+
+  Future<HashTagSearchQuickApplyResult> addBibleRangeToTag({
+    required String tag,
+    required int bookNumber,
+    required int chapter,
+    required int verseStart,
+    required int verseEnd,
+  }) async {
+    final normalizedTag = normalizeTagName(tag);
+    if (normalizedTag.isEmpty ||
+        bookNumber <= 0 ||
+        chapter <= 0 ||
+        verseStart <= 0) {
+      return const HashTagSearchQuickApplyResult(
+        tag: null,
+        inserted: 0,
+        skipped: 0,
+        createdDefaultTag: false,
+      );
+    }
+
+    final normalizedVerseEnd = verseEnd < verseStart ? verseStart : verseEnd;
+    await ensureSchema();
+    final db = await _db();
+    final now = _utcNow();
+    final tagKind = _tagKindForTable();
+    final groupId = await _ensureNormalizedTagGroup(
+      db,
+      normalizedTag: normalizedTag,
+      now: now,
+    );
+    final legacyExists = await db.query(
+      tableName,
+      columns: ['id'],
+      where: '''
+        tag = ?
+        AND book_number = ?
+        AND chapter_number = ?
+        AND verse_number = ?
+      ''',
+      whereArgs: [normalizedTag, bookNumber, chapter, verseStart],
+      limit: 1,
+    );
+    final normalizedExists = await db.query(
+      'tag_items',
+      columns: ['id'],
+      where: '''
+        tag_group_id = ?
+        AND tag_kind = ?
+        AND book_id = ?
+        AND chapter = ?
+        AND verse_start = ?
+        AND verse_end = ?
+        AND COALESCE(deleted_at, '') = ''
+      ''',
+      whereArgs: [
+        groupId,
+        tagKind,
+        bookNumber,
+        chapter,
+        verseStart,
+        normalizedVerseEnd,
+      ],
+      limit: 1,
+    );
+    if (legacyExists.isNotEmpty || normalizedExists.isNotEmpty) {
+      return HashTagSearchQuickApplyResult(
+        tag: normalizedTag,
+        inserted: 0,
+        skipped: 1,
+        createdDefaultTag: false,
+      );
+    }
+
+    final sortOrder = await _nextSortOrderAcrossTagStores(
+      db,
+      normalizedTag: normalizedTag,
+      groupId: groupId,
+    );
+    final itemId = [
+      'tag_item',
+      _slug(groupId),
+      bookNumber,
+      chapter,
+      verseStart,
+      normalizedVerseEnd,
+    ].join('_');
+    await db.insert('tag_items', {
+      'id': itemId,
+      'tag_group_id': groupId,
+      'tag_kind': tagKind,
+      'book_id': bookNumber,
+      'chapter': chapter,
+      'verse_start': verseStart,
+      'verse_end': normalizedVerseEnd,
+      'note_text': null,
+      'sort_order': sortOrder,
+      'source_device_name': null,
+      'legacy_group_id': null,
+      'legacy_item_id': null,
+      'legacy_import_package_id': null,
+      'imported_at': now,
+      'created_at': now,
+      'updated_at': now,
+      'deleted_at': null,
+      'device_id': await LocalSettingsStore.instance.ensureDeviceId(),
+      'revision': 1,
+      'sync_status': 'pending',
+      'last_synced_at': null,
+      'change_id': null,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+
+    return HashTagSearchQuickApplyResult(
+      tag: normalizedTag,
+      inserted: 1,
+      skipped: 0,
+      createdDefaultTag: false,
+    );
+  }
+
+  Future<HashTagSearchQuickApplyResult> quickApplyELibrarySearchResult({
+    required String bookTitle,
+    required String locationText,
+    required String paragraphText,
+    required String stableRef,
+    String? referenceText,
+    String? sourceHref,
+    String? sourceAnchorId,
+    int? sourceSpineIndex,
+    int? sourceParagraphIndex,
+    String? sourceRelativePath,
+    String? searchQuery,
+    String? tag,
+    String? category,
+  }) async {
+    final resolvedTag = await _resolveSearchResultTag(
+      tag,
+      fallbackCategory: category,
+    );
+    if (resolvedTag == null) {
+      return const HashTagSearchQuickApplyResult(
+        tag: null,
+        inserted: 0,
+        skipped: 0,
+        createdDefaultTag: false,
+      );
+    }
+
+    await ensureSchema();
+    final db = await _db();
+    final userId = await ensureUserId();
+    final normalizedTag = resolvedTag.tag;
+    final cleanStableRef = stableRef.trim();
+    final cleanParagraph = paragraphText.trim();
+    final cleanTitle = bookTitle.trim();
+    final cleanLocation = locationText.trim();
+    final cleanReferenceText = referenceText?.trim() ?? '';
+    final cleanHref = sourceHref?.trim() ?? '';
+    final cleanAnchorId = sourceAnchorId?.trim() ?? '';
+    final cleanRelativePath = sourceRelativePath?.trim() ?? '';
+    final cleanQuery = searchQuery?.trim() ?? '';
+    if (cleanStableRef.isEmpty || cleanParagraph.isEmpty) {
+      return HashTagSearchQuickApplyResult(
+        tag: normalizedTag,
+        inserted: 0,
+        skipped: 0,
+        createdDefaultTag: resolvedTag.createdDefaultTag,
+      );
+    }
+
+    final exists = await db.query(
+      tableName,
+      columns: ['id'],
+      where: 'user_id = ? AND tag = ? AND verse_ref = ?',
+      whereArgs: [userId, normalizedTag, cleanStableRef],
+      limit: 1,
+    );
+    if (exists.isNotEmpty) {
+      return HashTagSearchQuickApplyResult(
+        tag: normalizedTag,
+        inserted: 0,
+        skipped: 1,
+        createdDefaultTag: resolvedTag.createdDefaultTag,
+      );
+    }
+
+    final resolvedCategory = category?.trim().isNotEmpty == true
+        ? category!.trim()
+        : await loadTagCategory(normalizedTag);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final nextSortOrder = await _nextSortOrderForTag(db, normalizedTag);
+    final excerpt = buildFocusedSearchExcerpt(
+      paragraphText: cleanParagraph,
+      searchQuery: cleanQuery,
+    );
+    final noteText = excerpt.isNotEmpty ? excerpt : cleanParagraph;
+    final noteFormatJson = _buildELibraryNoteMetadataJson(
+      sourceTitle: cleanTitle,
+      sourceTitleAcronym: _libraryBookAbbreviation(cleanTitle) ?? '',
+      sourceLocation: cleanLocation,
+      sourceReferenceText: cleanReferenceText,
+      sourceHref: cleanHref,
+      sourceAnchorId: cleanAnchorId,
+      sourceSpineIndex: sourceSpineIndex,
+      sourceParagraphIndex: sourceParagraphIndex,
+      sourceRelativePath: cleanRelativePath,
+      sourcePageNumber: _citationPageNumberFromText(cleanLocation),
+      sourceParagraphNumber:
+          _citationParagraphNumberFromText(cleanLocation) ??
+          sourceParagraphIndex,
+      searchQuery: cleanQuery,
+      sourceParagraph: cleanParagraph,
+      excerpt: noteText,
+      stableRef: cleanStableRef,
+    );
+    final cleanReferenceCode = _normalizeReferenceCode(
+      cleanReferenceText.isNotEmpty ? cleanReferenceText : cleanLocation,
+    );
+
+    await db.insert(tableName, {
+      'user_id': userId,
+      'tag': normalizedTag,
+      if (resolvedCategory != null && resolvedCategory.trim().isNotEmpty)
+        'category': resolvedCategory.trim(),
+      'verse_ref': cleanStableRef,
+      'book_number': 0,
+      'chapter_number': 0,
+      'verse_number': 0,
+      'token_number': null,
+      'reference_code': cleanReferenceCode.isEmpty ? null : cleanReferenceCode,
+      'note_text': noteText,
+      'note_format_json': noteFormatJson,
+      'sort_order': nextSortOrder,
+      'created_at': now,
+    });
+    return HashTagSearchQuickApplyResult(
+      tag: normalizedTag,
+      inserted: 1,
+      skipped: 0,
+      createdDefaultTag: resolvedTag.createdDefaultTag,
+    );
+  }
+
+  String buildFocusedSearchExcerpt({
+    required String paragraphText,
+    required String searchQuery,
+    int targetChars = 650,
+    int maxChars = 1000,
+  }) {
+    final source = paragraphText.trim();
+    if (source.isEmpty) return '';
+
+    final searchTerms = extractLibrarySearchHighlightTerms(searchQuery);
+    if (searchTerms.isEmpty) {
+      return _trimToLength(source, maxChars);
+    }
+
+    final sentences = _splitSentences(source);
+    if (sentences.isEmpty) return _trimToLength(source, maxChars);
+
+    final match = _findFirstSearchMatch(source, searchTerms);
+    var matchStart = match?.$1 ?? 0;
+    var matchEnd = match?.$2 ?? 0;
+    var startIndex = 0;
+    var endIndex = sentences.length - 1;
+    if (match != null) {
+      final sentenceIndex = _sentenceIndexForOffset(sentences, matchStart);
+      if (sentenceIndex >= 0) {
+        startIndex = sentenceIndex > 0 ? sentenceIndex - 1 : sentenceIndex;
+        endIndex = sentenceIndex < sentences.length - 1
+            ? sentenceIndex + 1
+            : sentenceIndex;
+      }
+    }
+
+    String selectedText(int start, int end) {
+      final boundedStart = start.clamp(0, sentences.length - 1).toInt();
+      final boundedEnd = end.clamp(boundedStart, sentences.length - 1).toInt();
+      final buffer = StringBuffer();
+      for (var index = boundedStart; index <= boundedEnd; index++) {
+        if (buffer.isNotEmpty) buffer.write(' ');
+        buffer.write(sentences[index].text.trim());
+      }
+      return buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+    }
+
+    var excerpt = selectedText(startIndex, endIndex);
+    if (excerpt.length < targetChars) {
+      while (excerpt.length < targetChars &&
+          (startIndex > 0 || endIndex < sentences.length - 1)) {
+        final expandBefore = startIndex > 0;
+        final expandAfter = endIndex < sentences.length - 1;
+        if (expandBefore &&
+            (!expandAfter || startIndex >= (sentences.length - endIndex))) {
+          startIndex -= 1;
+        } else if (expandAfter) {
+          endIndex += 1;
+        } else {
+          break;
+        }
+        excerpt = selectedText(startIndex, endIndex);
+      }
+    }
+
+    if (excerpt.length > maxChars) {
+      final trimmed = _trimExcerptAroundMatch(
+        text: source,
+        matchStart: matchStart,
+        matchEnd: matchEnd,
+        maxChars: maxChars,
+      );
+      if (trimmed.isNotEmpty) return trimmed;
+    }
+
+    return excerpt;
+  }
+
+  String _buildELibraryNoteMetadataJson({
+    required String sourceTitle,
+    required String sourceTitleAcronym,
+    required String sourceLocation,
+    required String sourceReferenceText,
+    required String sourceHref,
+    required String sourceAnchorId,
+    required int? sourceSpineIndex,
+    required int? sourceParagraphIndex,
+    required String sourceRelativePath,
+    required int? sourcePageNumber,
+    required int? sourceParagraphNumber,
+    required String searchQuery,
+    required String sourceParagraph,
+    required String excerpt,
+    required String stableRef,
+  }) {
+    final payload = <String, Object?>{
+      'format_version': 1,
+      'base_text_hash': presentationTextFormatHashForText(excerpt),
+      'spans': const <Object?>[],
+      'kind': 'elibrary_note',
+      'source_title': sourceTitle,
+      'source_title_acronym': sourceTitleAcronym,
+      'source_location': sourceLocation,
+      'source_reference_text': sourceReferenceText,
+      'source_href': sourceHref,
+      'source_anchor_id': sourceAnchorId,
+      'source_spine_index': sourceSpineIndex,
+      'source_paragraph_index': sourceParagraphIndex,
+      'source_relative_path': sourceRelativePath,
+      'source_page_number': sourcePageNumber,
+      'source_paragraph_number': sourceParagraphNumber,
+      'search_query': searchQuery,
+      'source_paragraph': sourceParagraph,
+      'excerpt': excerpt,
+      'stable_ref': stableRef,
+    };
+    return jsonEncode(payload);
+  }
+
+  String? _libraryBookAbbreviation(String title) {
+    return libraryUserFacingBookAbbreviation(title: title);
+  }
+
+  String _normalizeReferenceCode(String value) {
+    return value.trim().replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  Future<String> _loadVerseRangeText({
+    required int bookNumber,
+    required int chapter,
+    required int verseStart,
+    required int verseEnd,
+  }) async {
+    return loadBibleRangeText(
+      bookNumber: bookNumber,
+      chapter: chapter,
+      verseStart: verseStart,
+      verseEnd: verseEnd,
+    );
+  }
+
+  String _normalizedVerseRef(
+    Map<String, Object?> row,
+    Map<int, String> bookNames,
+  ) {
+    final book = _i(row['book_id']) ?? 0;
+    final chapter = _i(row['chapter']) ?? 0;
+    final verseStart = _i(row['verse_start']) ?? 0;
+    final verseEnd = _i(row['verse_end']) ?? verseStart;
+    final bookName = bookNames[book]?.trim() ?? '';
+    if (book == 0 && chapter == 0 && verseStart == 0) {
+      final legacyItemId = _s(row['legacy_item_id']);
+      return legacyItemId.isEmpty
+          ? 'note:${_s(row['id'])}'
+          : 'note:$legacyItemId';
+    }
+    if (bookName.isNotEmpty && chapter > 0 && verseStart > 0) {
+      return bibleRangeReferenceLabel(
+        bookName: bookName,
+        chapter: chapter,
+        verseStart: verseStart,
+        verseEnd: verseEnd,
+      );
+    }
+    final verseLabel = verseEnd > verseStart
+        ? '$verseStart-$verseEnd'
+        : '$verseStart';
+    return verseEnd > verseStart
+        ? 'Book $book $chapter:$verseLabel'
+        : 'Book $book $chapter:$verseLabel';
+  }
+
+  int? _citationPageNumberFromText(String text) {
+    final match = RegExp(r'(\d{1,4})\s*[.:]\s*(\d{1,3})').firstMatch(text);
+    if (match == null) return null;
+    return int.tryParse(match.group(1)!);
+  }
+
+  int? _citationParagraphNumberFromText(String text) {
+    final explicit = RegExp(r'(\d{1,4})\s*[.:]\s*(\d{1,3})').firstMatch(text);
+    if (explicit != null) {
+      return int.tryParse(explicit.group(2)!);
+    }
+    final paragraphOnly = RegExp(r'¶\s*(\d{1,3})').firstMatch(text);
+    if (paragraphOnly != null) {
+      return int.tryParse(paragraphOnly.group(1)!);
+    }
+    return null;
+  }
+
+  List<_SentenceSpan> _splitSentences(String text) {
+    final matches = RegExp(r'[^.!?]+(?:[.!?]+|$)').allMatches(text);
+    final sentences = <_SentenceSpan>[];
+    for (final match in matches) {
+      final value = match.group(0)?.trim();
+      if (value == null || value.isEmpty) continue;
+      sentences.add(_SentenceSpan(match.start, match.end, value));
+    }
+    return sentences;
+  }
+
+  int _sentenceIndexForOffset(List<_SentenceSpan> sentences, int offset) {
+    for (var index = 0; index < sentences.length; index++) {
+      final sentence = sentences[index];
+      if (offset >= sentence.start && offset < sentence.end) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  (int, int)? _findFirstSearchMatch(String text, List<String> terms) {
+    final rankedTerms = terms.toSet().toList(growable: false)
+      ..sort((left, right) => right.length.compareTo(left.length));
+    for (final term in rankedTerms) {
+      final cleaned = _normalizeSearchInput(term);
+      if (cleaned.isEmpty) continue;
+      final pattern = _buildSearchPattern(cleaned);
+      final match = pattern.firstMatch(text);
+      if (match != null) {
+        return (match.start, match.end);
+      }
+    }
+    return null;
+  }
+
+  String _trimExcerptAroundMatch({
+    required String text,
+    required int matchStart,
+    required int matchEnd,
+    required int maxChars,
+  }) {
+    if (text.length <= maxChars) return text;
+
+    final targetHalf = maxChars ~/ 2;
+    var start = matchStart - targetHalf;
+    var end = matchEnd + targetHalf;
+    if (start < 0) start = 0;
+    if (end > text.length) end = text.length;
+
+    start = _snapToWordBoundary(text, start, forward: false);
+    end = _snapToWordBoundary(text, end, forward: true);
+
+    if (end - start > maxChars) {
+      end = (start + maxChars).clamp(0, text.length).toInt();
+      end = _snapToWordBoundary(text, end, forward: false);
+      if (end <= start) {
+        end = (start + maxChars).clamp(0, text.length).toInt();
+      }
+    }
+
+    final prefix = start > 0 ? '...' : '';
+    final suffix = end < text.length ? '...' : '';
+    final body = text.substring(start, end).trim();
+    return body.isEmpty ? text : '$prefix$body$suffix';
+  }
+
+  int _snapToWordBoundary(String text, int index, {required bool forward}) {
+    if (index <= 0) return 0;
+    if (index >= text.length) return text.length;
+    var current = index;
+    if (forward) {
+      while (current < text.length && !_isWordBoundary(text[current])) {
+        current++;
+      }
+    } else {
+      while (current > 0 && !_isWordBoundary(text[current - 1])) {
+        current--;
+      }
+    }
+    return current.clamp(0, text.length).toInt();
+  }
+
+  bool _isWordBoundary(String char) {
+    return RegExp(r'\s').hasMatch(char);
+  }
+
+  String _trimToLength(String text, int maxChars) {
+    final cleaned = text.trim();
+    if (cleaned.length <= maxChars) return cleaned;
+    final cutoff = _snapToWordBoundary(cleaned, maxChars, forward: false);
+    return '${cleaned.substring(0, cutoff).trimRight()}...';
+  }
+
+  String _normalizeSearchInput(String value) {
+    return value
+        .replaceAll('“', '"')
+        .replaceAll('”', '"')
+        .replaceAll('„', '"')
+        .replaceAll('‟', '"')
+        .replaceAll('‘', "'")
+        .replaceAll('’', "'")
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  RegExp _buildSearchPattern(String term) {
+    final words = term
+        .split(RegExp(r'\s+'))
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .map(RegExp.escape)
+        .toList(growable: false);
+    if (words.isEmpty) {
+      return RegExp(r'$.');
+    }
+    if (words.length == 1) {
+      return RegExp(r'\b' + words.first + r'\b', caseSensitive: false);
+    }
+    return RegExp(
+      r'\b' + words.join(r'[^a-z0-9]+') + r'\b',
+      caseSensitive: false,
+    );
+  }
+
+  Future<void> deleteEntry(int id, {bool normalized = false}) async {
+    await ensureSchema();
+    final db = await _db();
+    if (normalized) {
+      await db.delete('tag_items', where: 'rowid = ?', whereArgs: [id]);
+      return;
+    }
     await db.delete(tableName, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> updateEntry({
     required int id,
     required Map<String, Object?> values,
+    bool normalized = false,
   }) async {
     await ensureSchema();
     final db = await _db();
+    if (normalized) {
+      final updatedValues = Map<String, Object?>.from(values)
+        ..['updated_at'] = _utcNow();
+      await db.update(
+        'tag_items',
+        updatedValues,
+        where: 'rowid = ?',
+        whereArgs: [id],
+      );
+      return;
+    }
     await db.update(tableName, values, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<int> insertNoteItem({
+    required String tag,
+    required String noteText,
+    String? referenceCode,
+    String? category,
+    String? noteFormatJson,
+    bool allowBlank = false,
+  }) async {
+    await ensureSchema();
+    final db = await _db();
+    final userId = await ensureUserId();
+    final normalizedTag = normalizeTagName(tag);
+    final cleanNote = noteText.trim();
+    final cleanReferenceCode = _normalizeReferenceCode(referenceCode ?? '');
+    if (normalizedTag.isEmpty) return 0;
+    if (cleanNote.isEmpty && cleanReferenceCode.isEmpty && !allowBlank) {
+      return 0;
+    }
+    final resolvedCategory = category?.trim().isNotEmpty == true
+        ? category!.trim()
+        : await loadTagCategory(normalizedTag);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final nextSortOrder = await _nextSortOrderForTag(db, normalizedTag);
+    final values = <String, Object?>{
+      'user_id': userId,
+      'tag': normalizedTag,
+      if (resolvedCategory != null && resolvedCategory.trim().isNotEmpty)
+        'category': resolvedCategory.trim(),
+      'verse_ref': 'note:$now',
+      'book_number': 0,
+      'chapter_number': 0,
+      'verse_number': 0,
+      'token_number': null,
+      'reference_code': cleanReferenceCode.isEmpty ? null : cleanReferenceCode,
+      'created_at': now,
+    };
+    if (tableName == 'dollar_tags') {
+      values.addAll({
+        'content_html': _plainTextToHtml(cleanNote),
+        'source_author': '',
+        'source_work_title': '',
+        'source_title_acronym': '',
+        'source_chapter_title': '',
+        'source_chapter_number': '',
+        'source_page_number': '',
+        'source_paragraph_number': '',
+        'source_year': '',
+        'study_order': nextSortOrder,
+      });
+    } else {
+      values.addAll({
+        'note_text': cleanNote.isEmpty ? null : cleanNote,
+        'note_format_json': noteFormatJson,
+        'sort_order': nextSortOrder,
+      });
+    }
+    return db.insert(tableName, values);
+  }
+
+  Future<HashTagResolvedTag?> _resolveSearchResultTag(
+    String? tag, {
+    String? fallbackCategory,
+  }) async {
+    final explicitTag = normalizeTagName(tag ?? '');
+    if (explicitTag.isNotEmpty) {
+      return HashTagResolvedTag(tag: explicitTag, createdDefaultTag: false);
+    }
+
+    final defaultTag = await loadActiveDefaultTag();
+    if (defaultTag == null) {
+      return null;
+    }
+
+    if (fallbackCategory != null && fallbackCategory.trim().isNotEmpty) {
+      final category = fallbackCategory.trim();
+      final existingCategory = await loadTagCategory(defaultTag);
+      if (existingCategory == null || existingCategory.trim().isEmpty) {
+        await saveTagCategory(defaultTag, category);
+      }
+    }
+
+    return HashTagResolvedTag(tag: defaultTag, createdDefaultTag: false);
+  }
+
+  Future<bool> _tagExists(String normalizedTag) async {
+    final db = await _db();
+    final rows = await db.query(
+      tableName,
+      columns: ['id'],
+      where: 'tag = ?',
+      whereArgs: [normalizedTag],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<void> addMediaAttachment({
+    required int entryId,
+    required String relativePath,
+    required String mimeType,
+    required int fileSize,
+    required String fileHash,
+    String? caption,
+    int sortOrder = 0,
+  }) async {
+    await ensureSchema();
+    final db = await _db();
+    final now = DateTime.now().millisecondsSinceEpoch.toString();
+    await db.insert('tag_item_media', {
+      'id': 'legacy-media-$entryId-$now-${p.basename(relativePath)}',
+      'tag_item_id': entryId.toString(),
+      'media_type': _mediaTypeFromMimeType(mimeType),
+      'relative_path': relativePath,
+      'caption': caption,
+      'file_hash': fileHash,
+      'file_size': fileSize,
+      'sort_order': sortOrder,
+      'source_device_name': null,
+      'legacy_group_id': null,
+      'legacy_item_id': entryId.toString(),
+      'legacy_import_package_id': null,
+      'imported_at': null,
+      'created_at': now,
+      'updated_at': now,
+      'deleted_at': null,
+      'device_id': await LocalSettingsStore.instance.ensureDeviceId(),
+      'revision': 1,
+      'sync_status': 'pending',
+      'last_synced_at': null,
+      'change_id': null,
+    });
+  }
+
+  String _tagKindForTable() {
+    return tableName == 'dollar_tags' ? 'dollar' : 'hash';
+  }
+
+  Future<void> deleteMediaAttachmentsForEntry(int entryId) async {
+    await ensureSchema();
+    final db = await _db();
+    await db.delete(
+      'tag_item_media',
+      where: 'tag_item_id = ?',
+      whereArgs: [entryId.toString()],
+    );
+  }
+
+  Future<Map<int, List<String>>> _loadMediaRefsForEntries(
+    Database db,
+    List<int> entryIds,
+  ) async {
+    if (entryIds.isEmpty) return const <int, List<String>>{};
+    final placeholders = List.filled(entryIds.length, '?').join(', ');
+    final rows = await db.rawQuery(
+      '''
+      SELECT tag_item_id, relative_path, sort_order
+      FROM tag_item_media
+      WHERE tag_item_id IN ($placeholders)
+      ORDER BY tag_item_id ASC, sort_order ASC, id ASC
+      ''',
+      [for (final id in entryIds) id.toString()],
+    );
+    final grouped = <int, List<String>>{};
+    for (final row in rows) {
+      final itemId = int.tryParse(row['tag_item_id']?.toString() ?? '');
+      final relativePath = row['relative_path']?.toString().trim() ?? '';
+      if (itemId == null || relativePath.isEmpty) continue;
+      grouped.putIfAbsent(itemId, () => <String>[]).add(relativePath);
+    }
+    return grouped;
+  }
+
+  String _mediaTypeFromMimeType(String mimeType) {
+    final normalized = mimeType.trim().toLowerCase();
+    if (normalized.startsWith('image/')) return 'image';
+    if (normalized.startsWith('video/')) return 'video';
+    if (normalized.startsWith('audio/')) return 'audio';
+    return normalized.isEmpty ? 'image' : normalized;
   }
 
   Future<int> insertNoteSlide({
     required String tag,
     required String contentHtml,
+    String? referenceCode,
+    String? noteFormatJson,
   }) async {
     await ensureSchema();
     final db = await _db();
@@ -576,6 +1936,7 @@ class HashTagRepository {
     final normalizedTag = normalizeTagName(tag);
     if (normalizedTag.isEmpty) return 0;
     final now = DateTime.now().millisecondsSinceEpoch;
+    final cleanReferenceCode = _normalizeReferenceCode(referenceCode ?? '');
     return db.insert(tableName, {
       'user_id': userId,
       'tag': normalizedTag,
@@ -584,7 +1945,9 @@ class HashTagRepository {
       'chapter_number': 0,
       'verse_number': 0,
       'token_number': null,
+      'reference_code': cleanReferenceCode.isEmpty ? null : cleanReferenceCode,
       'content_html': contentHtml,
+      'note_format_json': noteFormatJson,
       'source_author': '',
       'source_work_title': '',
       'source_title_acronym': '',
@@ -596,6 +1959,125 @@ class HashTagRepository {
       'study_order': now,
       'created_at': now,
     });
+  }
+
+  Future<int> _nextSortOrderForTag(Database db, String normalizedTag) async {
+    final orderColumn = tableName == 'dollar_tags'
+        ? 'study_order'
+        : 'sort_order';
+    final rows = await db.rawQuery(
+      '''
+      SELECT MAX(COALESCE($orderColumn, created_at)) AS max_sort_order
+      FROM $tableName
+      WHERE tag = ?
+      ''',
+      [normalizedTag],
+    );
+    final maxValue =
+        (rows.isNotEmpty ? rows.first['max_sort_order'] : null) as num?;
+    return (maxValue?.toInt() ?? 0) + 1;
+  }
+
+  Future<String> _ensureNormalizedTagGroup(
+    Database db, {
+    required String normalizedTag,
+    required String now,
+  }) async {
+    final tagKind = _tagKindForTable();
+    final rows = await db.query(
+      'tag_groups',
+      columns: ['id'],
+      where: '''
+        tag_kind = ?
+        AND name = ?
+        AND COALESCE(deleted_at, '') = ''
+      ''',
+      whereArgs: [tagKind, normalizedTag],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) {
+      return rows.first['id']?.toString() ?? '';
+    }
+
+    final groupId = 'tag_group_${_slug(normalizedTag)}';
+    final sortOrder = await _nextNormalizedTagGroupSortOrder(db);
+    await db.insert('tag_groups', {
+      'id': groupId,
+      'parent_group_id': null,
+      'tag_kind': tagKind,
+      'name': normalizedTag,
+      'description': null,
+      'sort_order': sortOrder,
+      'source_device_name': null,
+      'legacy_group_id': null,
+      'legacy_item_id': null,
+      'legacy_import_package_id': null,
+      'imported_at': now,
+      'created_at': now,
+      'updated_at': now,
+      'deleted_at': null,
+      'device_id': await LocalSettingsStore.instance.ensureDeviceId(),
+      'revision': 1,
+      'sync_status': 'pending',
+      'last_synced_at': null,
+      'change_id': null,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    return groupId;
+  }
+
+  Future<int> _nextNormalizedTagGroupSortOrder(Database db) async {
+    final tagKind = _tagKindForTable();
+    final rows = await db.rawQuery(
+      '''
+      SELECT COALESCE(MAX(sort_order), 0) AS max_sort_order
+      FROM tag_groups
+      WHERE tag_kind = ?
+        AND COALESCE(deleted_at, '') = ''
+    ''',
+      [tagKind],
+    );
+    final maxValue =
+        (rows.isNotEmpty ? rows.first['max_sort_order'] : null) as num?;
+    return (maxValue?.toInt() ?? 0) + 1;
+  }
+
+  Future<int> _nextSortOrderAcrossTagStores(
+    Database db, {
+    required String normalizedTag,
+    required String groupId,
+  }) async {
+    final tagKind = _tagKindForTable();
+    final legacyRows = await db.rawQuery(
+      '''
+      SELECT COALESCE(MAX(COALESCE(sort_order, created_at)), 0) AS max_sort_order
+      FROM $tableName
+      WHERE tag = ?
+      ''',
+      [normalizedTag],
+    );
+    final normalizedRows = await db.rawQuery(
+      '''
+      SELECT COALESCE(MAX(sort_order), 0) AS max_sort_order
+      FROM tag_items
+      WHERE tag_group_id = ?
+        AND tag_kind = ?
+        AND COALESCE(deleted_at, '') = ''
+      ''',
+      [groupId, tagKind],
+    );
+    final legacyMax =
+        (legacyRows.isNotEmpty ? legacyRows.first['max_sort_order'] : null)
+            as num?;
+    final normalizedMax =
+        (normalizedRows.isNotEmpty
+                ? normalizedRows.first['max_sort_order']
+                : null)
+            as num?;
+    final highest = [
+      legacyMax?.toInt() ?? 0,
+      normalizedMax?.toInt() ?? 0,
+    ].reduce((left, right) => left > right ? left : right);
+    return highest + 1;
   }
 
   Future<HashTagImportResult?> importSharedListFromText(String text) async {
@@ -1247,6 +2729,31 @@ class HashTagRepository {
     return input.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
 
+  int? _intValueNullable(Object? value) {
+    if (value == null) return null;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
+  }
+
+  String _s(Object? value) => value?.toString() ?? '';
+
+  int? _i(Object? value) => _intValueNullable(value);
+
+  String _utcNow() {
+    final now = DateTime.now().toUtc();
+    final iso = now.toIso8601String();
+    return iso.contains('.') ? iso.replaceFirst(RegExp(r'\.\d+Z$'), 'Z') : iso;
+  }
+
+  String _slug(String input) {
+    final normalized = input.trim().toLowerCase();
+    if (normalized.isEmpty) return 'item';
+    return normalized
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+  }
+
   String buildSelectionLabel({
     required PassageData passage,
     required List<HashTagTarget> targets,
@@ -1288,21 +2795,10 @@ class DollarTagRepository extends HashTagRepository {
       );
 }
 
-class _ParsedSharedList {
-  const _ParsedSharedList({required this.tag, required this.slides});
+class _SentenceSpan {
+  const _SentenceSpan(this.start, this.end, this.text);
 
-  final String tag;
-  final List<_ParsedSharedSlide> slides;
-}
-
-class _ParsedSharedSlide {
-  const _ParsedSharedSlide({
-    required this.target,
-    required this.contentText,
-    required this.noteRef,
-  });
-
-  final HashTagTarget? target;
-  final String contentText;
-  final String noteRef;
+  final int start;
+  final int end;
+  final String text;
 }

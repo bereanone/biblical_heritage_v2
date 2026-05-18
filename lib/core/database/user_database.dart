@@ -13,11 +13,20 @@ class UserDatabase {
   static final UserDatabase instance = UserDatabase._();
 
   Database? _database;
+  Future<Database>? _opening;
 
   Future<Database> get database async {
     SandboxBootstrap.ensureSqfliteInitializedOnce();
-    _database ??= await _openDatabase();
-    return _database!;
+    if (_database != null) return _database!;
+    _opening ??= _openDatabase();
+    try {
+      _database = await _opening!;
+      _opening = null;
+      return _database!;
+    } catch (_) {
+      _opening = null;
+      rethrow;
+    }
   }
 
   Future<Database> _openDatabase() async {
@@ -26,7 +35,10 @@ class UserDatabase {
     final db = await openDatabase(
       dbPath,
       version: 1,
-      singleInstance: false,
+      onConfigure: (database) async {
+        await database.execute('PRAGMA journal_mode=WAL');
+        await database.execute('PRAGMA busy_timeout = 5000');
+      },
       onCreate: (database, version) async {
         await UserV2Schema.ensure(database, deviceId: deviceId);
       },
@@ -34,7 +46,6 @@ class UserDatabase {
         await UserV2Schema.ensure(database, deviceId: deviceId);
       },
     );
-    await UserV2Schema.ensure(db, deviceId: deviceId);
     return db;
   }
 

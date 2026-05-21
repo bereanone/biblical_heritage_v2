@@ -105,8 +105,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final initialHref = _initialBookHref(item);
     await Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            LibraryBookReaderScreen(item: item, initialHref: initialHref),
+        builder: (_) => LibraryBookReaderScreen(
+          item: item,
+          initialHref: initialHref,
+          themeMode: widget.themeMode,
+          onThemeChanged: widget.onThemeChanged,
+        ),
       ),
     );
     if (!mounted) return;
@@ -157,6 +161,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   String? _initialBookHref(LibraryCatalogItem item) {
+    if (item.isPeriodical) return null;
     final savedHref = item.epubHref?.trim() ?? '';
     if (savedHref.isNotEmpty) return savedHref;
 
@@ -176,17 +181,37 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  Future<void> _setCollectionFilter(String value) async {
-    if (_collectionFilter == value) return;
+  Future<void> _setCollectionFilter(
+    String value, {
+    bool preserveLetterFilter = false,
+  }) async {
+    final normalizedValue = _normalizeCollectionFilterSelection(value);
+    if (_collectionFilter == normalizedValue) return;
     setState(() {
-      _collectionFilter = value;
-      _selectedInitialLetter = null;
+      _collectionFilter = normalizedValue;
+      if (!preserveLetterFilter) {
+        _selectedInitialLetter = null;
+      }
       _tab = _LibraryTab.books;
     });
     await _syncSelectionAndNavigation(
       _filteredBooks,
       preferExistingSelection: true,
     );
+  }
+
+  Future<void> _resetCollectionFilterToAll() {
+    return _setCollectionFilter(
+      'all',
+      preserveLetterFilter: true,
+    );
+  }
+
+  Future<void> _handleCollectionFilterSelected(String value) {
+    if (_normalizeCollectionFilterSelection(value) == 'all') {
+      return _resetCollectionFilterToAll();
+    }
+    return _setCollectionFilter(value);
   }
 
   void _setSearchQuery(String _) {
@@ -219,6 +244,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
   }
 
+  String _normalizeCollectionFilterSelection(String value) {
+    final trimmed = value.trim();
+    final normalized = trimmed.toLowerCase();
+    if (normalized.isEmpty ||
+        normalized == 'all' ||
+        normalized == 'all collections' ||
+        normalized == 'all_collections') {
+      return 'all';
+    }
+    return trimmed;
+  }
+
   void _setTab(_LibraryTab tab) {
     setState(() => _tab = tab);
     if (tab == _LibraryTab.books) {
@@ -240,8 +277,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   List<LibraryCatalogItem> get _filteredBooks {
-    final query = _searchQuery.trim().toLowerCase();
-    final initial = _selectedInitialLetter?.trim().toUpperCase();
+    final query = compactLibrarySearchText(_searchQuery);
+    final initial =
+        query.isEmpty ? _selectedInitialLetter?.trim().toUpperCase() : null;
     final filtered = _items.where((item) {
       if (!_matchesFileTypeFilter(item, _fileTypeFilter)) return false;
       if (!libraryItemMatchesCollectionFilter(item, _collectionFilter)) {
@@ -249,15 +287,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       }
       if (!_matchesInitialLetter(item, initial)) return false;
       if (query.isEmpty) return true;
-      final haystack = [
-        item.displayTitle,
-        item.author ?? '',
-        item.fileName,
-        item.collectionName ?? '',
-        item.relativePath,
-        item.libraryRole ?? '',
-        item.folderType ?? '',
-      ].join(' ').toLowerCase();
+      final haystack = libraryCatalogSearchTextForItem(item);
       return haystack.contains(query);
     }).toList();
     filtered.sort(_compareBooksForShelf);
@@ -265,22 +295,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   List<LibraryCatalogItem> get _recentBooks {
-    final query = _searchQuery.trim().toLowerCase();
+    final query = compactLibrarySearchText(_searchQuery);
+    final initial =
+        query.isEmpty ? _selectedInitialLetter?.trim().toUpperCase() : null;
     final filtered = _items.where((item) {
       if (!_matchesFileTypeFilter(item, _fileTypeFilter)) return false;
       if (!libraryItemMatchesCollectionFilter(item, _collectionFilter)) {
         return false;
       }
+      if (!_matchesInitialLetter(item, initial)) return false;
       if (query.isEmpty) return true;
-      final haystack = [
-        item.displayTitle,
-        item.author ?? '',
-        item.fileName,
-        item.collectionName ?? '',
-        item.relativePath,
-        item.libraryRole ?? '',
-        item.folderType ?? '',
-      ].join(' ').toLowerCase();
+      final haystack = libraryCatalogSearchTextForItem(item);
       return haystack.contains(query);
     }).toList();
     filtered.sort((a, b) {
@@ -309,6 +334,28 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return RegExp(r'^[0-9]').hasMatch(title);
     }
     return firstChar == selectedInitialLetter;
+  }
+
+  String _booksEmptyMessage() {
+    if (_items.isEmpty) {
+      return 'No library items are indexed yet.';
+    }
+
+    final query = _searchQuery.trim();
+    if (query.isNotEmpty) {
+      return 'No library items match "$query".';
+    }
+
+    final hasCollectionFilter =
+        _collectionFilter.trim().toLowerCase() != 'all';
+    final hasFileTypeFilter = _fileTypeFilter.trim().toLowerCase() != 'all';
+    final hasLetterFilter = _selectedInitialLetter != null &&
+        _selectedInitialLetter!.trim().isNotEmpty;
+    if (hasCollectionFilter || hasFileTypeFilter || hasLetterFilter) {
+      return 'No library items match the current filters.';
+    }
+
+    return 'No library items match the current filters.';
   }
 
   List<String> get _availableInitialLetters {
@@ -405,13 +452,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final selection = _selection;
     final hasRoot = selection?.path != null && selection!.exists;
     final collectionOptions = _availableCollectionFilters;
-    final selectedCollection = collectionOptions.firstWhere(
-      (option) => option.value == _collectionFilter,
-      orElse: () => const LibraryCollectionFilterOption(
-        value: 'all',
-        label: 'All Collections',
-      ),
-    );
 
     return Scaffold(
       backgroundColor: background,
@@ -439,94 +479,111 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(16),
-                    child: _loading
-                        ? const Center(child: CircularProgressIndicator())
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Wrap(
-                                spacing: 10,
-                                runSpacing: 10,
-                                crossAxisAlignment: WrapCrossAlignment.center,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final collectionWidth =
+                            (constraints.maxWidth * 0.42)
+                                .clamp(200.0, 300.0)
+                                .toDouble();
+                        return _loading
+                            ? const Center(child: CircularProgressIndicator())
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    'Library',
-                                    style: theme.textTheme.headlineSmall
-                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                  Wrap(
+                                    spacing: 10,
+                                    runSpacing: 10,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
+                                    children: [
+                                      Text(
+                                        'Library',
+                                        style: theme.textTheme.headlineSmall
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                      ),
+                                      SizedBox(
+                                        width: collectionWidth,
+                                        child: _CollectionFilterMenu(
+                                          currentValue: _collectionFilter,
+                                          options: collectionOptions,
+                                          onSelected:
+                                              _handleCollectionFilterSelected,
+                                        ),
+                                      ),
+                                      _FileTypeFilterMenu(
+                                        currentValue: _fileTypeFilter,
+                                        onSelected: _setFileTypeFilter,
+                                      ),
+                                      _SearchTextButton(
+                                        onPressed: () =>
+                                            showLibraryCatalogSearchDialog(
+                                              context,
+                                            ),
+                                      ),
+                                    ],
                                   ),
-                                  _CollectionFilterMenu(
-                                    currentValue: selectedCollection.value,
-                                    currentLabel: selectedCollection.label,
-                                    options: collectionOptions,
-                                    onSelected: _setCollectionFilter,
+                                  const SizedBox(height: 10),
+                                  _SearchField(
+                                    controller: _searchController,
+                                    focusNode: _searchFocusNode,
+                                    onChanged: _setSearchQuery,
+                                    onSubmitted: (_) =>
+                                        _applySearchQueryFromField(),
+                                    onApply: _applySearchQueryFromField,
+                                    onClear: _clearSearchQuery,
                                   ),
-                                  _FileTypeFilterMenu(
-                                    currentValue: _fileTypeFilter,
-                                    onSelected: _setFileTypeFilter,
+                                  const SizedBox(height: 10),
+                                  _TabSelector(
+                                    selectedTab: _tab,
+                                    onChanged: _setTab,
                                   ),
-                                  _SearchTextButton(
-                                    onPressed: () =>
-                                        showLibraryCatalogSearchDialog(context),
+                                  const SizedBox(height: 10),
+                                  if (_tab == _LibraryTab.books) ...[
+                                    _AlphabetStrip(
+                                      selectedInitialLetter:
+                                          _selectedInitialLetter,
+                                      availableInitialLetters:
+                                          _availableInitialLetters,
+                                      onChanged: _setInitialLetter,
+                                    ),
+                                    const SizedBox(height: 10),
+                                    _ViewToggleRow(
+                                      view: _view,
+                                      onViewChanged: _setView,
+                                    ),
+                                    const SizedBox(height: 10),
+                                  ],
+                                  Expanded(
+                                    child: AnimatedSwitcher(
+                                      duration:
+                                          const Duration(milliseconds: 180),
+                                      child: switch (_tab) {
+                                        _LibraryTab.books => _LibraryPane(
+                                          key: const ValueKey('books'),
+                                          books: _filteredBooks,
+                                          selectedBookId: _selectedBookId,
+                                          view: _view,
+                                          onSelectBook: _selectBook,
+                                          isEmptyMessage:
+                                              _booksEmptyMessage(),
+                                        ),
+                                        _LibraryTab.recent => _RecentPane(
+                                          key: const ValueKey('recent'),
+                                          books: _recentBooks,
+                                          selectedBookId: _selectedBookId,
+                                          onSelectBook: _selectBook,
+                                          isEmptyMessage:
+                                              _booksEmptyMessage(),
+                                        ),
+                                      },
+                                    ),
                                   ),
                                 ],
-                              ),
-                              const SizedBox(height: 10),
-                              _SearchField(
-                                controller: _searchController,
-                                focusNode: _searchFocusNode,
-                                onChanged: _setSearchQuery,
-                                onSubmitted: (_) => _applySearchQueryFromField(),
-                                onApply: _applySearchQueryFromField,
-                                onClear: _clearSearchQuery,
-                              ),
-                              const SizedBox(height: 10),
-                              _TabSelector(
-                                selectedTab: _tab,
-                                onChanged: _setTab,
-                              ),
-                              const SizedBox(height: 10),
-                              if (_tab == _LibraryTab.books) ...[
-                                _AlphabetStrip(
-                                  selectedInitialLetter: _selectedInitialLetter,
-                                  availableInitialLetters:
-                                      _availableInitialLetters,
-                                  onChanged: _setInitialLetter,
-                                ),
-                                const SizedBox(height: 10),
-                                _ViewToggleRow(
-                                  view: _view,
-                                  onViewChanged: _setView,
-                                ),
-                                const SizedBox(height: 10),
-                              ],
-                              Expanded(
-                                child: AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 180),
-                                  child: switch (_tab) {
-                                    _LibraryTab.books => _LibraryPane(
-                                      key: const ValueKey('books'),
-                                      books: _filteredBooks,
-                                      selectedBookId: _selectedBookId,
-                                      view: _view,
-                                      onSelectBook: _selectBook,
-                                      isEmptyMessage:
-                                          selectedCollection.value == 'all'
-                                          ? 'No books are indexed yet.'
-                                          : 'No books found in ${selectedCollection.label}.',
-                                    ),
-                                    _LibraryTab.recent => _RecentPane(
-                                      key: const ValueKey('recent'),
-                                      books: _recentBooks,
-                                      selectedBookId: _selectedBookId,
-                                      onSelectBook: _selectBook,
-                                      isEmptyMessage:
-                                          'No recent books in this filter yet.',
-                                    ),
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
+                              );
+                      },
+                    ),
                   ),
                 ),
               ),

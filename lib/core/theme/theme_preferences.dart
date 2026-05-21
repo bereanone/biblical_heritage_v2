@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'app_settings_service.dart';
@@ -8,6 +9,8 @@ class ThemePreferences {
   ThemePreferences._();
 
   static final ThemePreferences instance = ThemePreferences._();
+  static final ValueNotifier<AppThemeMode> themeModeListenable =
+      ValueNotifier(AppThemeMode.sepia);
 
   static const _themeModeKey = 'theme_mode';
 
@@ -20,8 +23,13 @@ class ThemePreferences {
       whereArgs: [_themeModeKey],
       limit: 1,
     );
-    if (rows.isEmpty) return AppThemeMode.sepia;
-    return AppThemeMode.values.byName(rows.first['value'] as String);
+    if (rows.isEmpty) {
+      themeModeListenable.value = AppThemeMode.sepia;
+      return AppThemeMode.sepia;
+    }
+    final mode = AppThemeMode.values.byName(rows.first['value'] as String);
+    themeModeListenable.value = mode;
+    return mode;
   }
 
   Future<void> saveThemeMode(AppThemeMode mode) async {
@@ -34,6 +42,7 @@ class ThemePreferences {
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+    themeModeListenable.value = mode;
     await AppSettingsService.instance.applyThemePreset(mode);
   }
 }

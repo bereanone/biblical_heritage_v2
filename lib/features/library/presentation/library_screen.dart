@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../core/bootstrap/library_root_service.dart';
+import '../../../core/theme/app_theme_mode.dart';
 import '../data/library_catalog_service.dart';
 import 'library_book_reader_screen.dart';
 import 'library_catalog_search_dialog.dart';
@@ -21,9 +22,16 @@ enum _LibraryTab { books, recent }
 enum _LibraryView { shelf, list }
 
 class LibraryScreen extends StatefulWidget {
-  const LibraryScreen({super.key, this.onOpenBible});
+  const LibraryScreen({
+    super.key,
+    this.onOpenBible,
+    this.themeMode,
+    this.onThemeChanged,
+  });
 
   final VoidCallback? onOpenBible;
+  final AppThemeMode? themeMode;
+  final ValueChanged<AppThemeMode>? onThemeChanged;
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();

@@ -21,7 +21,23 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
   @override
   void initState() {
     super.initState();
+    ThemePreferences.themeModeListenable.addListener(_handleThemeModeChanged);
     _loadThemeMode();
+  }
+
+  @override
+  void dispose() {
+    ThemePreferences.themeModeListenable.removeListener(_handleThemeModeChanged);
+    super.dispose();
+  }
+
+  void _handleThemeModeChanged() {
+    final mode = ThemePreferences.themeModeListenable.value;
+    if (!mounted) return;
+    setState(() {
+      _themeMode = mode;
+      _visualSettings = AppSettingsService.instance.presetForMode(mode);
+    });
   }
 
   Future<void> _loadThemeMode() async {

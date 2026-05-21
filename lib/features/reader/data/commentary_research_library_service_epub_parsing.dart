@@ -570,7 +570,8 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
       final innerHtml = source.substring(frame.contentStart, match.start);
       final text = _stripHtml(innerHtml);
       if (text.isEmpty) continue;
-      if (_isHiddenLikeBlock(attrs: frame.attrs, innerHtml: innerHtml)) {
+      if (_isHiddenLikeBlock(attrs: frame.attrs, innerHtml: innerHtml) ||
+          _isFootnoteOrEndnoteBlock(attrs: frame.attrs)) {
         continue;
       }
       final hasBlockquoteAncestor = stack
@@ -688,6 +689,40 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
       caseSensitive: false,
       dotAll: true,
     ).hasMatch(normalizedInner)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  bool _isFootnoteOrEndnoteBlock({required String attrs}) {
+    final normalizedAttrs = attrs.toLowerCase();
+
+    final classMatch = RegExp(
+      r'''class\s*=\s*["']([^"']+)["']''',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(attrs);
+    if (classMatch != null) {
+      final classValue = classMatch.group(1)!.toLowerCase();
+      final classTokens = classValue.split(RegExp(r'[\s_-]+'));
+      if (classTokens.any((token) =>
+          token.contains('footnote') ||
+          token.contains('endnote') ||
+          token.contains('rearnote') ||
+          token.contains('chapternote') ||
+          token.contains('sourcenote') ||
+          token.contains('sourcecredit') ||
+          token == 'reference')) {
+        return true;
+      }
+    }
+
+    if (RegExp(
+      r'''(?:epub:type|type|role)\s*=\s*["'][^"']*(footnote|endnote|rearnote|reference)[^"']*["']''',
+      caseSensitive: false,
+      dotAll: true,
+    ).hasMatch(normalizedAttrs)) {
       return true;
     }
 

@@ -48,17 +48,27 @@ class CommentaryResearchLibraryService
       includeFrontMatter: includeFrontMatter,
       preserveHeadingBlocks: true,
     );
-    return chunks
-        .map(
-          (chunk) => LibraryBookSection(
-            entryName: chunk.entryName,
-            title: chunk.sectionTitle,
-            paragraphs: List<String>.unmodifiable(chunk.paragraphs),
-            blocks: List<LibraryBookBlock>.unmodifiable(chunk.blocks),
-            spineIndex: chunk.spineIndex,
-          ),
-        )
-        .toList(growable: false);
+    final sectionsWithOrder = chunks.asMap().entries.map((entry) {
+      final chunk = entry.value;
+      return (
+        order: entry.key,
+        section: LibraryBookSection(
+          entryName: chunk.entryName,
+          title: chunk.sectionTitle,
+          paragraphs: List<String>.unmodifiable(chunk.paragraphs),
+          blocks: List<LibraryBookBlock>.unmodifiable(chunk.blocks),
+          spineIndex: chunk.spineIndex,
+        ),
+      );
+    }).toList(growable: false);
+    sectionsWithOrder.sort((left, right) {
+      final leftSpine = left.section.spineIndex ?? 1 << 30;
+      final rightSpine = right.section.spineIndex ?? 1 << 30;
+      final spineCompare = leftSpine.compareTo(rightSpine);
+      if (spineCompare != 0) return spineCompare;
+      return left.order.compareTo(right.order);
+    });
+    return sectionsWithOrder.map((entry) => entry.section).toList(growable: false);
   }
 
   Future<CommentaryResearchPassageData> loadPassage({

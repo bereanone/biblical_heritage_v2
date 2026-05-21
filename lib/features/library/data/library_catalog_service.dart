@@ -2153,8 +2153,7 @@ int _libraryItemSourcePriority(LibraryCatalogItem item) {
 }
 
 bool _isVisibleLibraryItem(LibraryCatalogItem item) {
-  final status = (item.indexStatus ?? '').trim().toLowerCase();
-  return status != 'indexed_empty';
+  return true;
 }
 
 int _compareLibraryCatalogItems(LibraryCatalogItem a, LibraryCatalogItem b) {

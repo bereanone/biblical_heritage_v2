@@ -260,7 +260,14 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
   Future<void> _openLibrary() async {
     await Navigator.of(
       context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const LibraryScreen()));
+    ).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LibraryScreen(
+          themeMode: widget.themeMode,
+          onThemeChanged: widget.onThemeChanged,
+        ),
+      ),
+    );
   }
 
   Future<void> _openMarkupSettings() async {

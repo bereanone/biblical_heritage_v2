@@ -201,28 +201,85 @@ class _SearchField extends StatelessWidget {
 class _CollectionFilterMenu extends StatelessWidget {
   const _CollectionFilterMenu({
     required this.currentValue,
-    required this.currentLabel,
     required this.options,
     required this.onSelected,
   });
 
   final String currentValue;
-  final String currentLabel;
   final List<LibraryCollectionFilterOption> options;
   final ValueChanged<String> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    return _FilterMenuButton(
-      tooltip: 'Choose collection',
-      icon: Icons.folder_outlined,
-      label: currentLabel,
-      onSelected: onSelected,
-      currentValue: currentValue,
-      items: [
-        for (final option in options)
-          PopupMenuItem<String>(value: option.value, child: Text(option.label)),
-      ],
+    final theme = Theme.of(context);
+    final borderRadius = BorderRadius.circular(14);
+    return Tooltip(
+      message: 'Choose collection',
+      child: SizedBox(
+        width: double.infinity,
+        height: 44,
+        child: DropdownButtonFormField<String>(
+          initialValue: currentValue,
+          items: [
+            for (final option in options)
+              DropdownMenuItem<String>(
+                value: option.value,
+                child: Text(option.label),
+              ),
+          ],
+          onChanged: (value) {
+            if (value == null) return;
+            onSelected(value);
+          },
+          isDense: true,
+          isExpanded: true,
+          padding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 0,
+          ),
+          borderRadius: borderRadius,
+          icon: Icon(
+            Icons.arrow_drop_down,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          iconSize: 22,
+          style: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: theme.colorScheme.onSurface,
+          ),
+          dropdownColor: _librarySurfaceHighColor(theme),
+          decoration: InputDecoration(
+            prefixIconConstraints:
+                const BoxConstraints(minWidth: 28, minHeight: 28),
+            prefixIcon: Icon(
+              Icons.folder_outlined,
+              size: 18,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            filled: true,
+            fillColor: _librarySurfaceHighColor(theme),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 0,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: _libraryOutlineColor(theme)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: _libraryOutlineColor(theme)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(
+                color: theme.colorScheme.primary,
+                width: 1.5,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

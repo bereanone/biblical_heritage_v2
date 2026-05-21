@@ -9,6 +9,8 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/user_database.dart';
+import '../../../core/theme/app_theme_mode.dart';
+import '../../../core/theme/theme_preferences.dart';
 import '../data/library_citation_display_helper.dart';
 import '../../reader/data/commentary_research_library_service.dart';
 import '../../reader/presentation/reader_search_mode_picker.dart';
@@ -24,6 +26,7 @@ part 'library_reader_bottom_bar.dart';
 part 'library_book_reader_screen_helpers.dart';
 
 const bool _libraryRefCodeDiagnosticsEnabled = false;
+const bool _librarySectionFallbackDiagnosticsEnabled = false;
 
 class LibraryBookReaderScreen extends StatefulWidget {
   const LibraryBookReaderScreen({
@@ -35,6 +38,8 @@ class LibraryBookReaderScreen extends StatefulWidget {
     this.initialParagraphIndex,
     this.searchQuery,
     this.highlightTerms = const [],
+    this.themeMode,
+    this.onThemeChanged,
   });
 
   final LibraryCatalogItem item;
@@ -44,6 +49,8 @@ class LibraryBookReaderScreen extends StatefulWidget {
   final int? initialParagraphIndex;
   final String? searchQuery;
   final List<String> highlightTerms;
+  final AppThemeMode? themeMode;
+  final ValueChanged<AppThemeMode>? onThemeChanged;
 
   @override
   State<LibraryBookReaderScreen> createState() =>
@@ -74,6 +81,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   @override
   void initState() {
     super.initState();
+    _nightMode = widget.themeMode == AppThemeMode.night;
     final initialSearchTerm = widget.searchQuery?.trim() ?? '';
     _lastSearchTerm = initialSearchTerm.isNotEmpty ? initialSearchTerm : null;
     _load();
@@ -129,8 +137,12 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
       final initialNavigationIndex = widget.item.isPdf
           ? 0
           : _navigationIndexForSectionIndex(initialIndex) ?? 0;
+      // Periodicals generate ref codes inline (libraryReaderPeriodicalRefCode);
+      // skipping the DB scan avoids ~1,900 serial async queries on RH open.
       final paragraphReferenceCodeLoadResult =
-          !widget.item.isPdf && savedShowRefCodes
+          !widget.item.isPdf &&
+              !widget.item.isPeriodical &&
+              savedShowRefCodes
           ? await _loadParagraphReferenceCodes(
               sections: sections,
               libraryItemId: widget.item.id,
@@ -304,10 +316,12 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
       if (initialIndex != null) return initialIndex;
     }
 
-    final savedHref = _splitReaderHref(widget.item.epubHref).href;
-    if (savedHref.isNotEmpty) {
-      final savedIndex = _readableSectionIndexForHref(sections, savedHref);
-      if (savedIndex != null) return savedIndex;
+    if (!widget.item.isPeriodical) {
+      final savedHref = _splitReaderHref(widget.item.epubHref).href;
+      if (savedHref.isNotEmpty) {
+        final savedIndex = _readableSectionIndexForHref(sections, savedHref);
+        if (savedIndex != null) return savedIndex;
+      }
     }
 
     if (devotionalMode) {
@@ -498,6 +512,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     final tree = buildLibraryNavigationTree(
       _navigationItems,
       devotionalMode: _isDevotionalNavigationBook,
+      periodicalMode: widget.item.isPeriodical,
     );
     return tree.items;
   }
@@ -840,6 +855,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     if (_sections.isEmpty) return;
     if (!_bodyScrollController.hasClients) return;
 
+    // Periodicals have one article per spine section; jump directly to the
+    // adjacent section instead of hunting for sub-headings within the page.
+    if (widget.item.isPeriodical) {
+      _selectSection(forward ? _selectedIndex + 1 : _selectedIndex - 1);
+      return;
+    }
+
     final targets = _headingTargetsForCurrentSection();
     if (targets.isEmpty) {
       _selectedHeadingTargetIndex = null;
@@ -847,16 +869,20 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
       final currentSectionTitle =
           _currentSection?.title ?? widget.item.displayTitle;
       if (fallbackIndex < 0 || fallbackIndex >= _sections.length) {
-        debugPrint(
-          '[LibraryBookReader] No subsection headings found in "$currentSectionTitle"; '
-          'no ${forward ? 'next' : 'previous'} chapter fallback is available.',
-        );
+        if (_librarySectionFallbackDiagnosticsEnabled) {
+          debugPrint(
+            '[LibraryBookReader] No subsection headings found in "$currentSectionTitle"; '
+            'no ${forward ? 'next' : 'previous'} chapter fallback is available.',
+          );
+        }
         return;
       }
-      debugPrint(
-        '[LibraryBookReader] No subsection headings found in "$currentSectionTitle"; '
-        'falling back to ${forward ? 'next' : 'previous'} chapter.',
-      );
+      if (_librarySectionFallbackDiagnosticsEnabled) {
+        debugPrint(
+          '[LibraryBookReader] No subsection headings found in "$currentSectionTitle"; '
+          'falling back to ${forward ? 'next' : 'previous'} chapter.',
+        );
+      }
       _selectSection(fallbackIndex);
       return;
     }
@@ -909,16 +935,20 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
       final currentSectionTitle =
           _currentSection?.title ?? widget.item.displayTitle;
       if (fallbackIndex < 0 || fallbackIndex >= _sections.length) {
-        debugPrint(
-          '[LibraryBookReader] No subsection headings found in "$currentSectionTitle"; '
-          'no ${forward ? 'next' : 'previous'} chapter fallback is available.',
-        );
+        if (_librarySectionFallbackDiagnosticsEnabled) {
+          debugPrint(
+            '[LibraryBookReader] No subsection headings found in "$currentSectionTitle"; '
+            'no ${forward ? 'next' : 'previous'} chapter fallback is available.',
+          );
+        }
         return;
       }
-      debugPrint(
-        '[LibraryBookReader] No subsection headings found in "$currentSectionTitle"; '
-        'falling back to ${forward ? 'next' : 'previous'} chapter.',
-      );
+      if (_librarySectionFallbackDiagnosticsEnabled) {
+        debugPrint(
+          '[LibraryBookReader] No subsection headings found in "$currentSectionTitle"; '
+          'falling back to ${forward ? 'next' : 'previous'} chapter.',
+        );
+      }
       _selectSection(fallbackIndex);
       return;
     }
@@ -949,17 +979,6 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
 
     final savedTargetKey = _savedLocationTargetKey();
     if (savedTargetKey != null) return savedTargetKey;
-
-    final selectedNavigationItem = _selectedNavigationItem;
-    if (selectedNavigationItem != null) {
-      final targetKey = _navigationTargetKey(selectedNavigationItem);
-      if (targetKey != null) return targetKey;
-      final fallback = _fallbackTargetKeyForNavigationItem(
-        selectedNavigationItem,
-        section: _currentSection,
-      );
-      if (fallback != null) return fallback;
-    }
 
     return null;
   }
@@ -1171,6 +1190,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     final tree = buildLibraryNavigationTree(
       items,
       devotionalMode: _isDevotionalNavigationBook,
+      periodicalMode: widget.item.isPeriodical,
     );
     final childrenByParent = tree.childrenByParent;
     final roots = childrenByParent[null] ?? const [];
@@ -1244,7 +1264,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   }
 
   Future<void> _ensureParagraphReferenceCodesLoaded() async {
-    if (_refCodesLoaded || widget.item.isPdf || _sections.isEmpty) {
+    if (_refCodesLoaded || widget.item.isPdf || widget.item.isPeriodical || _sections.isEmpty) {
       return;
     }
     final paragraphReferenceCodeLoadResult = await _loadParagraphReferenceCodes(
@@ -1517,6 +1537,25 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     var insideParagraphMarkerCount = 0;
     int? content02InitialPage;
 
+    // Pre-scan to find the first pagebreak marker anywhere in the book.
+    // Sections with no markers that precede the first marker (e.g. content00 in
+    // EGW pamphlets) belong to the page before [N], so paragraphs there can
+    // receive ref codes instead of being silently skipped.
+    int? bookInitialPageNumber;
+    for (final preScanSection in sections) {
+      final firstMarker = _firstPageBreakMarkerOccurrence(
+        preScanSection.blocks
+            .where((b) => b.kind == 'paragraph')
+            .toList(growable: false),
+      );
+      if (firstMarker != null) {
+        bookInitialPageNumber = firstMarker.isInsideParagraph
+            ? (firstMarker.pageNumber > 1 ? firstMarker.pageNumber - 1 : 1)
+            : firstMarker.pageNumber;
+        break;
+      }
+    }
+
     for (final section in sections) {
       final paragraphBlocks = section.blocks
           .where((block) => block.kind == 'paragraph')
@@ -1548,7 +1587,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         final markers = _extractPageBreakMarkers(block.html);
         if (markers.isEmpty) {
           if (currentPageNumber == null) {
-            continue;
+            if (bookInitialPageNumber == null) continue;
+            currentPageNumber = bookInitialPageNumber;
           }
         } else {
           final firstMarkerBeforeText = markers.firstWhere(
@@ -1776,11 +1816,15 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
           itemTitle: widget.item.displayTitle,
           entries: entries,
           sections: _sections,
+          currentSectionEntryName: _currentSection?.entryName,
+          currentSectionTitle: _currentSection?.title,
+          currentSectionSpineIndex: _currentSection?.spineIndex,
           selectedNavigationItemId: _selectedNavigationItem?.id,
           selectedNavigationIndex: _selectedNavigationIndex,
           selectedSectionIndex: _selectedIndex,
           isNightMode: _nightMode,
           isDevotionalNavigation: _isDevotionalNavigationBook,
+          isPeriodical: widget.item.isPeriodical,
         );
       },
     );
@@ -2098,7 +2142,18 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                         ? Icons.wb_sunny_outlined
                         : Icons.nightlight_round,
                     label: isNight ? 'Day' : 'Night',
-                    onPressed: () => setState(() => _nightMode = !_nightMode),
+                    onPressed: () {
+                      final next = isNight
+                          ? AppThemeMode.sepia
+                          : AppThemeMode.night;
+                      setState(() => _nightMode = next == AppThemeMode.night);
+                      final onThemeChanged = widget.onThemeChanged;
+                      if (onThemeChanged != null) {
+                        onThemeChanged(next);
+                      } else {
+                        ThemePreferences.instance.saveThemeMode(next);
+                      }
+                    },
                   ),
                   const SizedBox(width: 12),
                   _ToolbarPillButton(

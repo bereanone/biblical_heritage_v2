@@ -96,3 +96,76 @@ String _cleanLibrarySearchText(String value) {
       .replaceAll('’', "'")
       .trim();
 }
+
+String compactLibrarySearchText(String? value) {
+  return (value?.trim() ?? '')
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+}
+
+String _librarySearchInitials(String? value) {
+  final words = _cleanLibrarySearchText(value ?? '')
+      .split(' ')
+      .where((part) => part.isNotEmpty)
+      .toList(growable: false);
+  if (words.isEmpty) return '';
+
+  final initials = StringBuffer();
+  for (final word in words) {
+    final first = word[0];
+    if (RegExp(r'[a-z0-9]').hasMatch(first.toLowerCase())) {
+      initials.write(first);
+    }
+  }
+  return initials.toString().toLowerCase();
+}
+
+String libraryCatalogSearchTextForItem(LibraryCatalogItem item) {
+  final normalizedRelativePath = item.relativePath.replaceAll('\\', '/');
+  final candidates = <String?>[
+    item.displayTitle,
+    item.title,
+    libraryUserFacingBookAbbreviation(
+      title: item.displayTitle,
+      fileName: item.fileName,
+      relativePath: item.relativePath,
+    ),
+    item.displayAuthor,
+    item.author,
+    item.collectionName,
+    item.fileName,
+    p.basenameWithoutExtension(item.fileName),
+    _stripLanguagePrefix(p.basenameWithoutExtension(item.fileName)),
+    normalizedRelativePath,
+    p.basenameWithoutExtension(normalizedRelativePath),
+    _stripLanguagePrefix(p.basenameWithoutExtension(normalizedRelativePath)),
+    item.id,
+    item.sourceSite,
+    item.sourceUrl,
+    item.sourceType,
+    item.fileHash,
+    item.libraryRole,
+    item.folderType,
+    _librarySearchInitials(item.displayTitle),
+    _librarySearchInitials(item.title),
+  ];
+
+  final buffer = StringBuffer();
+  for (final candidate in candidates) {
+    final normalized = compactLibrarySearchText(candidate);
+    if (normalized.isEmpty) continue;
+    buffer.write(normalized);
+    buffer.write(' ');
+  }
+  return buffer.toString().trim();
+}
+
+String _stripLanguagePrefix(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return trimmed;
+  final stripped = trimmed.replaceFirst(
+    RegExp(r'^[a-z]{2}[_-]', caseSensitive: false),
+    '',
+  );
+  return stripped.isEmpty ? trimmed : stripped;
+}

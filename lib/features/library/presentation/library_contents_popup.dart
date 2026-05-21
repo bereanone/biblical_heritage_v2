@@ -29,28 +29,36 @@ class _ContentsPopupSheet extends StatefulWidget {
     required this.itemTitle,
     required this.entries,
     required this.sections,
+    required this.currentSectionEntryName,
+    required this.currentSectionTitle,
+    required this.currentSectionSpineIndex,
     required this.selectedNavigationItemId,
     required this.selectedNavigationIndex,
     required this.selectedSectionIndex,
     required this.isNightMode,
     required this.isDevotionalNavigation,
+    required this.isPeriodical,
   });
 
   final String itemTitle;
   final List<_NavigationDisplayEntry> entries;
   final List<LibraryBookSection> sections;
+  final String? currentSectionEntryName;
+  final String? currentSectionTitle;
+  final int? currentSectionSpineIndex;
   final String? selectedNavigationItemId;
   final int selectedNavigationIndex;
   final int selectedSectionIndex;
   final bool isNightMode;
   final bool isDevotionalNavigation;
+  final bool isPeriodical;
 
   @override
   State<_ContentsPopupSheet> createState() => _ContentsPopupSheetState();
 }
 
 class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
-  final ScrollController _scrollController = ScrollController();
+  late final ScrollController _scrollController;
   final Map<String, GlobalKey> _itemKeys = <String, GlobalKey>{};
   String? _lastTargetKey;
   String? _expandedMonthId;
@@ -59,6 +67,9 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
   void initState() {
     super.initState();
     _expandedMonthId = _initialExpandedMonthId();
+    _scrollController = ScrollController(
+      initialScrollOffset: _computeInitialScrollOffset(),
+    );
     _scheduleInitialScroll();
   }
 
@@ -87,6 +98,7 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     return buildLibraryNavigationTree(
       widget.entries.map((entry) => entry.item).toList(growable: false),
       devotionalMode: widget.isDevotionalNavigation,
+      periodicalMode: widget.isPeriodical,
     );
   }
 
@@ -111,6 +123,53 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     }
 
     return null;
+  }
+
+  List<_NavigationDisplayEntry> get _popupDisplayEntries {
+    return [
+      for (var i = 0; i < widget.entries.length; i++)
+        _NavigationDisplayEntry(
+          item: widget.entries[i].item,
+          depth: widget.entries[i].depth,
+          displayIndex: i,
+        ),
+    ];
+  }
+
+  bool _isUsableContentsEntry(LibraryCatalogNavigationItem item) {
+    final href = _cleanNavigationHref(item.href);
+    final hrefLabel = p.basenameWithoutExtension(href ?? item.label);
+    final contentKind = item.contentKind?.trim().toLowerCase() ?? '';
+    if (_isPeriodicalDateEntry(item)) {
+      return true;
+    }
+    return !_isReaderFrontMatterLabel(item.label) &&
+        !_isReaderFrontMatterLabel(hrefLabel) &&
+        !_isReaderMetadataHelpLabel(item.label) &&
+        !_isReaderMetadataHelpLabel(hrefLabel) &&
+        !_isNavigationSupportEntry(item) &&
+        contentKind != 'body_subsection';
+  }
+
+  bool _isNavigationSupportEntry(LibraryCatalogNavigationItem item) {
+    final contentKind = item.contentKind?.trim().toLowerCase() ?? '';
+    switch (contentKind) {
+      case 'cover':
+      case 'title_page':
+      case 'about':
+      case 'copyright':
+      case 'foreword':
+      case 'preface':
+      case 'introduction':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  bool _isPeriodicalDateEntry(LibraryCatalogNavigationItem item) {
+    return widget.isPeriodical &&
+        _periodicalArticleDate(item.label) != null;
   }
 
   bool _isDevotionalMonthHeading(LibraryCatalogNavigationItem item) {
@@ -287,80 +346,63 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     return selectedItem.id;
   }
 
+  // Pre-computes the scroll offset so the controller can start at the right
+  // position without waiting for a postFrameCallback.
+  double _computeInitialScrollOffset() {
+    if (_isDevotionalContents) return 0.0;
+    return 0.0;
+  }
+
   void _scheduleInitialScroll() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final targetKey = _initialTargetKey();
       if (targetKey == null || targetKey == _lastTargetKey) return;
+      _lastTargetKey = targetKey;
 
-      if (_isDevotionalContents) {
-        _lastTargetKey = targetKey;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          final targetContext = _itemKeys[targetKey]?.currentContext;
-          if (targetContext == null) return;
-          Scrollable.ensureVisible(
-            targetContext,
-            alignment: 0.08,
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeInOut,
-          );
-        });
+      if (widget.isPeriodical) {
+        _scrollToInitialTarget(targetKey);
         return;
       }
 
-      final targetIndex = _initialTargetIndex();
-      if (targetIndex == null) return;
-
-      final estimatedOffset = (targetIndex * _estimatedRowExtent())
-          .clamp(
-            0.0,
-            _scrollController.hasClients
-                ? _scrollController.position.maxScrollExtent
-                : double.infinity,
-          )
-          .toDouble();
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(estimatedOffset);
+      if (_isDevotionalContents) {
+        _scrollToInitialTarget(targetKey);
+        return;
       }
 
-      _lastTargetKey = targetKey;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        final targetContext = _itemKeys[targetKey]?.currentContext;
-        if (targetContext == null) return;
-        Scrollable.ensureVisible(
-          targetContext,
-          alignment: 0.08,
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeInOut,
-        );
-      });
+      _scrollToInitialTarget(targetKey);
+    });
+  }
+
+  void _scrollToInitialTarget(String targetKey, {int attempt = 0}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final targetContext = _itemKeys[targetKey]?.currentContext;
+      if (targetContext == null) {
+        if (attempt >= 4) return;
+        _scrollToInitialTarget(targetKey, attempt: attempt + 1);
+        return;
+      }
+      Scrollable.ensureVisible(
+        targetContext,
+        alignment: 0.0,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeInOut,
+      );
     });
   }
 
   _NavigationDisplayEntry? _initialTargetEntry() {
-    if (widget.entries.isNotEmpty) {
-      for (final entry in widget.entries) {
-        final href = _cleanNavigationHref(entry.item.href);
-        final entryLabel = p.basenameWithoutExtension(href ?? entry.item.label);
-        if (_isReaderChapterOneLabel(entry.item.label) ||
-            _isReaderChapterOneLabel(entryLabel)) {
+    final displayEntries = _popupDisplayEntries;
+    if (displayEntries.isNotEmpty) {
+      for (final entry in displayEntries) {
+        if (_isUsableContentsEntry(entry.item)) {
           return entry;
         }
       }
 
-      for (final entry in widget.entries) {
-        final href = _cleanNavigationHref(entry.item.href);
-        final entryLabel = p.basenameWithoutExtension(href ?? entry.item.label);
-        if (entry.item.isBodyStart &&
-            !_isReaderMetadataHelpLabel(entry.item.label) &&
-            !_isReaderMetadataHelpLabel(entryLabel)) {
-          return entry;
-        }
-      }
-
-      for (final entry in widget.entries) {
+      for (final entry in displayEntries) {
         final href = _cleanNavigationHref(entry.item.href);
         final entryLabel = p.basenameWithoutExtension(href ?? entry.item.label);
         if (_isReaderMetadataHelpLabel(entry.item.label) ||
@@ -370,7 +412,7 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
         return entry;
       }
 
-      return widget.entries.first;
+      return displayEntries.first;
     }
     return null;
   }
@@ -399,25 +441,6 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     return null;
   }
 
-  int? _initialTargetIndex() {
-    final targetEntry = _initialTargetEntry();
-    if (targetEntry != null) return targetEntry.displayIndex;
-
-    if (widget.sections.isNotEmpty) {
-      if (widget.selectedSectionIndex >= 0 &&
-          widget.selectedSectionIndex < widget.sections.length) {
-        return widget.selectedSectionIndex;
-      }
-
-      final firstRealContentIndex = _firstRealContentSectionIndex(
-        widget.sections,
-      );
-      return firstRealContentIndex ?? 0;
-    }
-
-    return null;
-  }
-
   String? _initialTargetKey() {
     if (_isDevotionalContents) {
       return _targetKeyForDevotionalScroll();
@@ -427,11 +450,6 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     if (targetEntry != null) return targetEntry.item.id;
 
     if (widget.sections.isNotEmpty) {
-      if (widget.selectedSectionIndex >= 0 &&
-          widget.selectedSectionIndex < widget.sections.length) {
-        return 'section:${widget.selectedSectionIndex}';
-      }
-
       final firstRealContentIndex = _firstRealContentSectionIndex(
         widget.sections,
       );
@@ -439,12 +457,6 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     }
 
     return null;
-  }
-
-  double _estimatedRowExtent() {
-    if (_isDevotionalContents) return 54.0;
-    if (widget.entries.isNotEmpty) return 84.0;
-    return 84.0;
   }
 
   GlobalKey _keyFor(String key) {

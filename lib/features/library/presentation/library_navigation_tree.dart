@@ -15,6 +15,7 @@ class LibraryNavigationTreeResult {
 LibraryNavigationTreeResult buildLibraryNavigationTree(
   List<LibraryCatalogNavigationItem> items, {
   bool devotionalMode = false,
+  bool periodicalMode = false,
 }) {
   if (items.isEmpty) {
     return const LibraryNavigationTreeResult(
@@ -83,7 +84,7 @@ LibraryNavigationTreeResult buildLibraryNavigationTree(
   }
 
   final rootItems = childrenByParent[null];
-  if (rootItems != null && rootItems.length > 1) {
+  if (rootItems != null && rootItems.length > 1 && !periodicalMode) {
     rootItems.sort(_compareNavigationDisplayEntries);
   }
 

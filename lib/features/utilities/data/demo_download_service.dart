@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,9 +7,12 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/library_root_service.dart';
+import '../../../core/database/user_database.dart';
+import 'elibrary_install_estimate_repository.dart';
 import 'elibrary_folder_policy.dart';
 
 const bool _debugDemoDownloadLogs = false;
+const Duration _collectionCountTimeout = Duration(seconds: 12);
 
 class DemoDownloadService {
   DemoDownloadService._();
@@ -18,42 +22,49 @@ class DemoDownloadService {
   static const List<_CollectionSpec> _collections = <_CollectionSpec>[
     _CollectionSpec(
       label: 'EGW Books',
+      cacheKey: 'EGW Books',
       url: 'https://egwwritings.org/allCollection/en/4',
       fallbackUrl: 'https://next.egwwritings.org/allCollection/en/4',
       folderName: 'EGW_Books',
     ),
     _CollectionSpec(
       label: 'EGW Devotionals',
+      cacheKey: 'EGW Devotionals',
       url: 'https://egwwritings.org/allCollection/en/1227',
       fallbackUrl: 'https://next.egwwritings.org/allCollection/en/1227',
       folderName: 'EGW_Devotionals',
     ),
     _CollectionSpec(
       label: 'Commentaries',
+      cacheKey: 'EGW Commentaries',
       url: 'https://egwwritings.org/allCollection/en/1371',
       fallbackUrl: 'https://next.egwwritings.org/allCollection/en/1371',
       folderName: 'Commentaries',
     ),
     _CollectionSpec(
       label: 'EGW Misc Collections',
+      cacheKey: 'EGW Misc Collections',
       url: 'https://egwwritings.org/allCollection/en/10',
       fallbackUrl: 'https://next.egwwritings.org/allCollection/en/10',
       folderName: 'EGW_Misc_Collections',
     ),
     _CollectionSpec(
       label: 'EGW Pamphlets',
+      cacheKey: 'EGW Pamphlets',
       url: 'https://egwwritings.org/allCollection/en/8',
       fallbackUrl: 'https://next.egwwritings.org/allCollection/en/8',
       folderName: 'EGW_Pamphlets',
     ),
     _CollectionSpec(
       label: 'EGW Periodicals',
+      cacheKey: 'EGW Periodicals',
       url: 'https://egwwritings.org/allCollection/en/5',
       fallbackUrl: 'https://next.egwwritings.org/allCollection/en/5',
       folderName: 'EGW_Periodicals',
     ),
     _CollectionSpec(
       label: 'EGW Manuscript Releases',
+      cacheKey: 'EGW Manuscript Releases',
       url: 'https://egwwritings.org/allCollection/en/1376',
       fallbackUrl: 'https://next.egwwritings.org/allCollection/en/1376',
       folderName: 'EGW_Manuscript_Releases',
@@ -143,6 +154,76 @@ class DemoDownloadService {
     );
   }
 
+  Future<List<int?>> estimateProductionCollectionCounts() async {
+    final client = HttpClient()..autoUncompress = true;
+    client.userAgent = 'StudyBible2 eLibrary Setup';
+    try {
+      final counts = <int?>[];
+      for (final collection in _collections) {
+        try {
+          final discovery = await _discoverBooks(
+            client: client,
+            collection: collection,
+          ).timeout(_collectionCountTimeout);
+          counts.add(discovery.books.length);
+        } on TimeoutException catch (_) {
+          if (_debugDemoDownloadLogs) {
+            debugPrint(
+              '[DemoDownload] count estimate timed out for ${collection.label}',
+            );
+          }
+          counts.add(null);
+        } catch (error) {
+          if (_debugDemoDownloadLogs) {
+            debugPrint(
+              '[DemoDownload] count estimate failed for ${collection.label}: $error',
+            );
+          }
+          counts.add(null);
+        }
+      }
+      return counts;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<void> refreshProductionCollectionEstimates() async {
+    final counts = await estimateProductionCollectionCounts();
+    final checkedAt = DateTime.now().toUtc();
+    final cacheWrites = <Future<void>>[];
+    for (var index = 0; index < counts.length; index++) {
+      final count = counts[index];
+      if (count == null) continue;
+      final collection = _collections[index];
+      cacheWrites.add(
+        _storeProductionCollectionEstimate(
+          collection: collection,
+          fileCount: count,
+          source: 'refresh_estimates',
+          lastCheckedUtc: checkedAt,
+        ),
+      );
+    }
+    await Future.wait(cacheWrites);
+  }
+
+  Future<void> _storeProductionCollectionEstimate({
+    required _CollectionSpec collection,
+    required int fileCount,
+    required String source,
+    DateTime? lastCheckedUtc,
+  }) {
+    return ELibraryInstallEstimateRepository.instance
+        .upsertCollectionCountForBothFormats(
+          collectionKey: collection.cacheKey,
+          fileCount: fileCount,
+          sizeKnown: false,
+          source: source,
+          lastCheckedUtc: lastCheckedUtc,
+        );
+  }
+
   Future<String?> _writableLibraryRootPath() async {
     final accessible = await LibraryRootService.instance
         .accessibleLibraryRootPath();
@@ -177,6 +258,9 @@ class DemoDownloadService {
     final dryRunRoot = dryRun
         ? await Directory.systemTemp.createTemp('studybible2_elibrary_dryrun_')
         : null;
+    final existingFingerprints = dryRun || refreshExisting
+        ? <String, _ExistingFileFingerprint>{}
+        : await _loadExistingFileFingerprints();
 
     final report = _MutableDemoDownloadReport(
       startedAt: startedAt,
@@ -225,6 +309,13 @@ class DemoDownloadService {
           collection: collection,
         );
         final books = discovery.books;
+        if (productionLayout) {
+          await _storeProductionCollectionEstimate(
+            collection: collection,
+            fileCount: books.length,
+            source: 'production_setup_discovery',
+          );
+        }
         report.usedStaticPageDiscovery = discovery.usedStaticPageDiscovery;
         if (discovery.usedFallbackManifest) {
           report.usedFallbackManifest = true;
@@ -262,6 +353,42 @@ class DemoDownloadService {
                   );
             final destinationPath = p.join(destinationRoot, relativePath);
             final destinationFile = File(destinationPath);
+            final cachedFingerprint =
+                existingFingerprints[_normalizedRelativePath(relativePath)];
+
+            if (!dryRun &&
+                !refreshExisting &&
+                cachedFingerprint != null &&
+                await _isValidExistingFile(
+                  file: destinationFile,
+                  fingerprint: cachedFingerprint,
+                )) {
+              final existingSize = await destinationFile.length();
+              final existingHash =
+                  cachedFingerprint.fileHash ??
+                  await _sha256ForFile(destinationFile);
+              report.skippedExistingCount += 1;
+              report.filesSkipped.add(
+                DemoDownloadFileRecord(
+                  title: book.title,
+                  collection: collection.label,
+                  format: format.name,
+                  sourceUrl: sourceUrl,
+                  relativePath: relativePath,
+                  fileName: p.basename(destinationPath),
+                  fileSize: existingSize,
+                  sha256: existingHash,
+                  status: 'skipped_existing',
+                  error: null,
+                ),
+              );
+              if (_debugDemoDownloadLogs) {
+                debugPrint(
+                  '[DemoDownload] skipped cached ${collection.label} ${book.code} ${format.name}',
+                );
+              }
+              continue;
+            }
 
             final stagingFile = dryRun
                 ? File(
@@ -317,7 +444,9 @@ class DemoDownloadService {
                       fileName: p.basename(destinationPath),
                       fileSize: destinationSize,
                       sha256: destinationHash,
-                      status: dryRun ? 'would_skip_existing' : 'skipped_existing',
+                      status: dryRun
+                          ? 'would_skip_existing'
+                          : 'skipped_existing',
                       error: null,
                     ),
                   );
@@ -325,6 +454,76 @@ class DemoDownloadService {
                   if (_debugDemoDownloadLogs) {
                     debugPrint(
                       '[DemoDownload] skipped existing ${collection.label} ${book.code} ${format.name}',
+                    );
+                  }
+                  continue;
+                }
+
+                final shouldRepairExisting =
+                    destinationSize <= 0 ||
+                    refreshExisting ||
+                    (cachedFingerprint != null &&
+                        !await _isValidExistingFile(
+                          file: destinationFile,
+                          fingerprint: cachedFingerprint,
+                        ));
+                if (shouldRepairExisting) {
+                  if (!dryRun) {
+                    final quarantinePath = _uniqueQuarantinePath(
+                      rootPath: destinationRoot,
+                      sourcePath: destinationPath,
+                      suffix: 'repair',
+                    );
+                    final quarantineFile = File(quarantinePath);
+                    await quarantineFile.parent.create(recursive: true);
+                    if (await quarantineFile.exists()) {
+                      await quarantineFile.delete();
+                    }
+                    await destinationFile.rename(quarantineFile.path);
+                    await destinationFile.parent.create(recursive: true);
+                    await stagingFile.rename(destinationFile.path);
+                    report.quarantinedCount += 1;
+                    report.filesQuarantined.add(
+                      DemoDownloadFileRecord(
+                        title: book.title,
+                        collection: collection.label,
+                        format: format.name,
+                        sourceUrl: sourceUrl,
+                        relativePath: p.relative(
+                          quarantinePath,
+                          from: destinationRoot,
+                        ),
+                        fileName: p.basename(quarantinePath),
+                        fileSize: destinationSize,
+                        sha256: destinationHash,
+                        status: 'replaced_existing',
+                        error:
+                            'Existing file was zero-byte or failed validation.',
+                      ),
+                    );
+                  } else {
+                    await stagingFile.delete();
+                  }
+                  report.downloadedCount += 1;
+                  report.filesDownloaded.add(
+                    DemoDownloadFileRecord(
+                      title: book.title,
+                      collection: collection.label,
+                      format: format.name,
+                      sourceUrl: sourceUrl,
+                      relativePath: relativePath,
+                      fileName: p.basename(destinationPath),
+                      fileSize: stagedSize,
+                      sha256: stagedHash,
+                      status: dryRun
+                          ? 'would_repair_existing'
+                          : 'repaired_existing',
+                      error: null,
+                    ),
+                  );
+                  if (_debugDemoDownloadLogs) {
+                    debugPrint(
+                      '[DemoDownload] repaired existing ${collection.label} ${book.code} ${format.name}',
                     );
                   }
                   continue;
@@ -363,7 +562,8 @@ class DemoDownloadService {
                     status: dryRun
                         ? 'would_quarantine_conflict'
                         : 'quarantined_conflict',
-                    error: 'Destination file already exists with different content.',
+                    error:
+                        'Destination file already exists with different content.',
                   ),
                 );
                 if (_debugDemoDownloadLogs) {
@@ -670,6 +870,55 @@ class DemoDownloadService {
     }
   }
 
+  Future<Map<String, _ExistingFileFingerprint>>
+  _loadExistingFileFingerprints() async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.rawQuery('''
+      SELECT relative_path, file_size, file_hash
+      FROM library_items
+      WHERE deleted_at IS NULL
+        AND LOWER(COALESCE(file_format, '')) IN ('epub', 'pdf')
+        AND (
+          LOWER(COALESCE(relative_path, '')) LIKE 'epubs/%'
+          OR LOWER(COALESCE(relative_path, '')) LIKE 'pdfs/%'
+        )
+    ''');
+
+    final fingerprints = <String, _ExistingFileFingerprint>{};
+    for (final row in rows) {
+      final relativePath = row['relative_path']?.toString().trim() ?? '';
+      if (relativePath.isEmpty) continue;
+      fingerprints[_normalizedRelativePath(
+        relativePath,
+      )] = _ExistingFileFingerprint(
+        fileSize: (row['file_size'] as num?)?.toInt(),
+        fileHash: row['file_hash']?.toString().trim(),
+      );
+    }
+    return fingerprints;
+  }
+
+  Future<bool> _isValidExistingFile({
+    required File file,
+    required _ExistingFileFingerprint fingerprint,
+  }) async {
+    if (!await file.exists()) return false;
+    final size = await file.length();
+    if (size <= 0) return false;
+
+    final expectedSize = fingerprint.fileSize;
+    final expectedHash = fingerprint.fileHash?.trim() ?? '';
+    if (expectedSize != null && expectedSize != size) {
+      return false;
+    }
+    if (expectedHash.isEmpty) {
+      return true;
+    }
+
+    final hash = await _sha256ForFile(file);
+    return hash == expectedHash;
+  }
+
   String _uniqueQuarantinePath({
     required String rootPath,
     required String sourcePath,
@@ -695,6 +944,10 @@ class DemoDownloadService {
   Future<String> _sha256ForFile(File file) async {
     final digest = await sha256.bind(file.openRead()).first;
     return digest.toString();
+  }
+
+  String _normalizedRelativePath(String relativePath) {
+    return p.normalize(relativePath.trim()).replaceAll('\\', '/').toLowerCase();
   }
 
   Future<String> _fetchText(HttpClient client, String url) async {
@@ -969,15 +1222,27 @@ class _MutableDemoDownloadReport {
   }
 }
 
+class _ExistingFileFingerprint {
+  const _ExistingFileFingerprint({
+    required this.fileSize,
+    required this.fileHash,
+  });
+
+  final int? fileSize;
+  final String? fileHash;
+}
+
 class _CollectionSpec {
   const _CollectionSpec({
     required this.label,
+    required this.cacheKey,
     required this.url,
     required this.fallbackUrl,
     required this.folderName,
   });
 
   final String label;
+  final String cacheKey;
   final String url;
   final String fallbackUrl;
   final String folderName;

@@ -411,6 +411,18 @@ class UserV2Schema {
       )
     ''');
     await db.execute('''
+      CREATE TABLE IF NOT EXISTS elibrary_install_estimates (
+        collection_key TEXT NOT NULL,
+        format TEXT NOT NULL,
+        file_count INTEGER NOT NULL,
+        total_size_bytes INTEGER,
+        size_known INTEGER NOT NULL DEFAULT 0,
+        last_checked_utc TEXT,
+        source TEXT,
+        PRIMARY KEY (collection_key, format)
+      )
+    ''');
+    await db.execute('''
       CREATE TABLE IF NOT EXISTS library_items (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,

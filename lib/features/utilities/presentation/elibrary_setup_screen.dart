@@ -9,6 +9,7 @@ import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/user_database.dart';
 import '../../reader/data/commentary_research_library_service.dart';
 import '../data/elibrary_duplicate_cleanup_service.dart';
+import '../data/elibrary_install_estimate_repository.dart';
 import '../data/elibrary_migration_service.dart';
 import '../data/demo_download_service.dart';
 
@@ -34,12 +35,17 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   bool _installManuscriptReleases = true;
   bool _installEpub = true;
   bool _installPdf = true;
+  bool _refreshingEstimateCache = false;
+  Map<String, Map<String, ELibraryInstallEstimateRecord>>
+  _estimateCacheByCollection =
+      <String, Map<String, ELibraryInstallEstimateRecord>>{};
   DemoDownloadProgress? _progress;
   DemoDownloadReport? _downloadReport;
   LegacyELibraryMigrationReport? _migrationReport;
   ELibraryDuplicateCleanupReport? _cleanupReport;
   String? _setupReportPath;
   String? _indexReportPath;
+  String? _setupStatusMessage;
   String? _error;
   int _indexedCount = 0;
   int _indexingErrors = 0;
@@ -53,6 +59,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   void initState() {
     super.initState();
     _load();
+    _loadEstimateCache();
   }
 
   @override
@@ -70,11 +77,60 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     });
   }
 
-  Future<void> _runManualIndex() async {
-    if (_manualIndexing) return;
+  Future<void> _loadEstimateCache() async {
+    try {
+      final cache = await ELibraryInstallEstimateRepository.instance
+          .loadByCollectionAndFormat();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _estimateCacheByCollection = cache;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _estimateCacheByCollection =
+            <String, Map<String, ELibraryInstallEstimateRecord>>{};
+      });
+    }
+  }
+
+  Future<void> _refreshEstimateCache() async {
+    if (_refreshingEstimateCache) return;
+    setState(() => _refreshingEstimateCache = true);
+    try {
+      await DemoDownloadService.instance.refreshProductionCollectionEstimates();
+      await _loadEstimateCache();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Estimate cache refreshed.')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Estimate refresh failed: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _refreshingEstimateCache = false);
+      }
+    }
+  }
+
+  Future<({int indexed, int skipped, int failed})> _runManualIndex() async {
+    if (_manualIndexing) {
+      return (indexed: 0, skipped: 0, failed: 0);
+    }
     setState(() {
       _manualIndexing = true;
-      _manualIndexStatus = null;
+      _manualIndexStatus = 'Indexing new/changed books...';
       _manualIndexCompleted = 0;
       _manualIndexTotal = 0;
       _manualIndexCurrentTitle = null;
@@ -91,7 +147,9 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
               });
             },
           );
-      if (!mounted) return;
+      if (!mounted) {
+        return (indexed: 0, skipped: 0, failed: 0);
+      }
       final String status;
       if (result.indexed == 0 && result.skipped == 0 && result.failed == 0) {
         status = 'Library is already indexed';
@@ -100,9 +158,13 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
             'Indexing complete — ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed';
       }
       setState(() => _manualIndexStatus = status);
+      return result;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) {
+        return (indexed: 0, skipped: 0, failed: 0);
+      }
       setState(() => _manualIndexStatus = 'Indexing failed: $error');
+      return (indexed: 0, skipped: 0, failed: 1);
     } finally {
       if (mounted) setState(() => _manualIndexing = false);
     }
@@ -184,6 +246,99 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     });
   }
 
+  int _selectedFormatCount() {
+    var count = 0;
+    if (_installEpub) count += 1;
+    if (_installPdf) count += 1;
+    return count;
+  }
+
+  bool _isCollectionSelected(int index) {
+    switch (index) {
+      case 0:
+        return _installBooks;
+      case 1:
+        return _installDevotionals;
+      case 2:
+        return _installCommentaries;
+      case 3:
+        return _installMiscCollections;
+      case 4:
+        return _installPamphlets;
+      case 5:
+        return _installPeriodicals;
+      case 6:
+        return _installManuscriptReleases;
+      default:
+        return false;
+    }
+  }
+
+  String _fileCountLabel(int count) {
+    return count == 1 ? '1 file' : '$count files';
+  }
+
+  static const List<String> _collectionKeys = <String>[
+    'EGW Books',
+    'EGW Devotionals',
+    'EGW Commentaries',
+    'EGW Misc Collections',
+    'EGW Pamphlets',
+    'EGW Periodicals',
+    'EGW Manuscript Releases',
+  ];
+
+  Map<String, ELibraryInstallEstimateRecord>? _collectionCache(int index) {
+    if (index < 0 || index >= _collectionKeys.length) return null;
+    return _estimateCacheByCollection[_collectionKeys[index]];
+  }
+
+  ELibraryInstallEstimateRecord? _bestCachedRecord(int index) {
+    final cache = _collectionCache(index);
+    if (cache == null || cache.isEmpty) return null;
+    return cache['epub'] ?? cache['pdf'] ?? cache.values.first;
+  }
+
+  String _estimateLineForCollection(int index) {
+    final record = _bestCachedRecord(index);
+    if (record == null) {
+      return 'file count not cached yet • size unknown';
+    }
+    final count = record.fileCount * _selectedFormatCount();
+    if (count == 0) {
+      return '0 files found • size unknown';
+    }
+    return '${_fileCountLabel(count)} • size unknown';
+  }
+
+  String _selectedDownloadSummary() {
+    final formatCount = _selectedFormatCount();
+    if (formatCount == 0) {
+      return 'Selected download: 0 files found • size unknown';
+    }
+    var totalCount = 0;
+    var knownCount = 0;
+    var selectedCount = 0;
+    for (var index = 0; index < _collectionKeys.length; index++) {
+      if (!_isCollectionSelected(index)) continue;
+      selectedCount += 1;
+      final record = _bestCachedRecord(index);
+      if (record == null) continue;
+      knownCount += 1;
+      totalCount += record.fileCount * formatCount;
+    }
+    if (selectedCount == 0) {
+      return 'Selected download: 0 files found • size unknown';
+    }
+    if (knownCount == 0) {
+      return 'Selected download: file count not cached yet • size unknown';
+    }
+    if (knownCount < selectedCount) {
+      return 'Selected download: partial count available • size unknown';
+    }
+    return 'Selected download: ${_fileCountLabel(totalCount)} • size unknown';
+  }
+
   Future<void> _startSetup() async {
     if (_running) return;
     final selection = _selection;
@@ -205,6 +360,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       _cleanupReport = null;
       _setupReportPath = null;
       _indexReportPath = null;
+      _setupStatusMessage = null;
       _progress = null;
       _indexedCount = 0;
       _indexingErrors = 0;
@@ -242,23 +398,33 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
               setState(() => _progress = progress);
             },
             isCancelled: () => _cancelRequested,
-          );
+      );
 
       if (!mounted) return;
       setState(() {
         _downloadReport = downloadReport;
-        _indexing = true;
+        _setupStatusMessage = 'Updating estimates...';
+      });
+      await _loadEstimateCache();
+      if (!mounted) return;
+      setState(() {
+        _setupStatusMessage = 'Refreshing catalog...';
       });
 
       final cleanupReport = await ELibraryDuplicateCleanupService.instance
-          .quarantineDuplicates(
-            isCancelled: () => _cancelRequested,
-          );
+          .quarantineDuplicates(isCancelled: () => _cancelRequested);
 
       if (!mounted) return;
       setState(() {
         _cleanupReport = cleanupReport;
+        _setupStatusMessage = 'Indexing new/changed books...';
         _indexing = true;
+      });
+
+      final indexResult = await _runManualIndex();
+      if (!mounted) return;
+      setState(() {
+        _setupStatusMessage = 'Finalizing setup...';
       });
 
       final passageData = await CommentaryResearchLibraryService.instance
@@ -267,7 +433,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
             chapter: 1,
             verse: 1,
             bookName: 'Genesis',
-            refresh: true,
+            refresh: false,
           );
       if (!mounted) return;
       final db = await UserDatabase.instance.database;
@@ -279,10 +445,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
           AND deleted_at IS NULL
       ''');
       final indexingErrors = (failedRows.first['count'] as num?)?.toInt() ?? 0;
-      final indexedCount = [
-        passageData.commentary.discoveredCount,
-        passageData.research.discoveredCount,
-      ].fold<int>(0, (sum, value) => sum + value);
+      final indexedCount = indexResult.indexed;
 
       final completedAt = DateTime.now().toUtc();
       final report = <String, Object?>{
@@ -311,6 +474,11 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         'failed_count': downloadReport.failedCount,
         'indexed_count': indexedCount,
         'indexing_errors': indexingErrors,
+        'auto_index_result': {
+          'indexed': indexResult.indexed,
+          'skipped': indexResult.skipped,
+          'failed': indexResult.failed,
+        },
         'migration_report_path': _migrationReport?.reportFilePath,
         'files_downloaded': downloadReport.filesDownloaded
             .map((item) => item.toJson())
@@ -344,6 +512,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         _indexReportPath = passageData.indexReportPath;
         _indexedCount = indexedCount;
         _indexingErrors = indexingErrors;
+        _setupStatusMessage = 'Done';
         _indexing = false;
       });
 
@@ -365,6 +534,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         setState(() {
           _running = false;
           _indexing = false;
+          _setupStatusMessage ??= 'Done';
         });
       }
     }
@@ -439,8 +609,18 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                                   : _runManualIndex,
                               child: Text(
                                 _manualIndexing
-                                    ? 'Indexing eLibrary books...'
+                                    ? 'Indexing new/changed books...'
                                     : 'Index New/Changed Books',
+                              ),
+                            ),
+                            OutlinedButton(
+                              onPressed: (_running || _refreshingEstimateCache)
+                                  ? null
+                                  : _refreshEstimateCache,
+                              child: Text(
+                                _refreshingEstimateCache
+                                    ? 'Refreshing estimates...'
+                                    : 'Refresh estimates',
                               ),
                             ),
                           ],
@@ -456,7 +636,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                           Text(
                             _manualIndexTotal > 0
                                 ? 'Indexing $_manualIndexCompleted of $_manualIndexTotal'
-                                : 'Preparing...',
+                                : 'Indexing new/changed books...',
                           ),
                           if (_manualIndexCurrentTitle != null) ...[
                             const SizedBox(height: 4),
@@ -533,6 +713,12 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                                   () => _installBooks = value ?? false,
                                 ),
                           title: const Text('Install EGW Books'),
+                          subtitle: Text(
+                            _estimateLineForCollection(0),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
                           contentPadding: EdgeInsets.zero,
                         ),
                         CheckboxListTile(
@@ -543,6 +729,12 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                                   () => _installDevotionals = value ?? false,
                                 ),
                           title: const Text('Install EGW Devotionals'),
+                          subtitle: Text(
+                            _estimateLineForCollection(1),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
                           contentPadding: EdgeInsets.zero,
                         ),
                         CheckboxListTile(
@@ -553,6 +745,12 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                                   () => _installCommentaries = value ?? false,
                                 ),
                           title: const Text('Install EGW Commentaries'),
+                          subtitle: Text(
+                            _estimateLineForCollection(2),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
                           contentPadding: EdgeInsets.zero,
                         ),
                         CheckboxListTile(
@@ -564,6 +762,12 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                                       _installMiscCollections = value ?? false,
                                 ),
                           title: const Text('Install EGW Misc Collections'),
+                          subtitle: Text(
+                            _estimateLineForCollection(3),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
                           contentPadding: EdgeInsets.zero,
                         ),
                         CheckboxListTile(
@@ -574,6 +778,12 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                                   () => _installPamphlets = value ?? false,
                                 ),
                           title: const Text('Install EGW Pamphlets'),
+                          subtitle: Text(
+                            _estimateLineForCollection(4),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
                           contentPadding: EdgeInsets.zero,
                         ),
                         CheckboxListTile(
@@ -584,6 +794,12 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                                   () => _installPeriodicals = value ?? false,
                                 ),
                           title: const Text('Install EGW Periodicals'),
+                          subtitle: Text(
+                            _estimateLineForCollection(5),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
                           contentPadding: EdgeInsets.zero,
                         ),
                         CheckboxListTile(
@@ -591,12 +807,25 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                           onChanged: _running
                               ? null
                               : (value) => setState(
-                                  () =>
-                                      _installManuscriptReleases =
-                                          value ?? false,
+                                  () => _installManuscriptReleases =
+                                      value ?? false,
                                 ),
                           title: const Text('Install EGW Manuscript Releases'),
+                          subtitle: Text(
+                            _estimateLineForCollection(6),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
                           contentPadding: EdgeInsets.zero,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _selectedDownloadSummary(),
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: scheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         const Divider(height: 24),
                         CheckboxListTile(
@@ -641,12 +870,16 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                           if (_indexing) ...[
                             const LinearProgressIndicator(),
                             const SizedBox(height: 12),
-                            const Text('Indexing library files...'),
+                            Text(
+                              _setupStatusMessage ??
+                                  'Indexing new/changed books...',
+                            ),
                           ] else ...[
                             const LinearProgressIndicator(),
                             const SizedBox(height: 12),
                             Text(
-                              _progress?.statusMessage ??
+                              _setupStatusMessage ??
+                                  _progress?.statusMessage ??
                                   'Preparing download...',
                             ),
                           ],

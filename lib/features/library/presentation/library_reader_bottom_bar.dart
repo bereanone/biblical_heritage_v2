@@ -22,7 +22,17 @@ class _ToolbarPillButton extends StatelessWidget {
     return FilledButton.tonalIcon(
       onPressed: onPressed,
       icon: Icon(icon, size: 18),
-      label: Text(label),
+      label: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: libraryControlTextStyle(
+          context,
+          theme.textTheme.labelLarge,
+          fontWeight: FontWeight.w800,
+          color: foreground,
+        ),
+      ),
       style: FilledButton.styleFrom(
         foregroundColor: foreground,
         backgroundColor: background,
@@ -78,7 +88,9 @@ class _ZoomCluster extends StatelessWidget {
             ),
             Text(
               valueLabel,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              style: libraryControlTextStyle(
+                context,
+                theme.textTheme.labelLarge,
                 fontWeight: FontWeight.w800,
                 color: foreground,
               ),

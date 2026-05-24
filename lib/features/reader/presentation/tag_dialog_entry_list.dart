@@ -13,12 +13,14 @@ class TagDialogEntryList extends StatelessWidget {
     required this.currentTag,
     required this.entries,
     required this.formatEntry,
+    required this.fontScale,
     this.onEntryTap,
   });
 
   final String currentTag;
   final List<HashTagEntry> entries;
   final String Function(HashTagEntry entry) formatEntry;
+  final double fontScale;
   final ValueChanged<HashTagEntry>? onEntryTap;
 
   @override
@@ -29,16 +31,25 @@ class TagDialogEntryList extends StatelessWidget {
       children: [
         Text(
           currentTag.isEmpty ? 'Selected tag entries' : currentTag,
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w800,
+          style: TagDialogStyles.titleTextStyle(
+            theme,
+            fontScale,
             color: TagDialogStyles.title(theme),
+            fontWeight: FontWeight.w800,
           ),
         ),
         const SizedBox(height: 12),
         if (entries.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 10),
-            child: Text('No entries for the selected tag.'),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Text(
+              'No entries for the selected tag.',
+              style: TagDialogStyles.bodyTextStyle(
+                theme,
+                fontScale,
+                color: TagDialogStyles.body(theme),
+              ),
+            ),
           )
         else
           ...entries.map(
@@ -55,14 +66,18 @@ class TagDialogEntryList extends StatelessWidget {
                 tileColor: TagDialogStyles.card(theme),
                 title: Text(
                   formatEntry(entry),
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                  style: TagDialogStyles.titleTextStyle(
+                    theme,
+                    fontScale,
                     color: TagDialogStyles.title(theme),
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 subtitle: Text(
                   _subtitleForEntry(entry),
-                  style: theme.textTheme.bodySmall?.copyWith(
+                  style: TagDialogStyles.bodyTextStyle(
+                    theme,
+                    fontScale,
                     color: TagDialogStyles.body(theme),
                   ),
                 ),

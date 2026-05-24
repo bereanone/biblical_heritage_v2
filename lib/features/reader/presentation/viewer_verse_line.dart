@@ -6,6 +6,9 @@ import 'highlight_render.dart';
 import 'viewer_markup_span_builder.dart';
 import 'viewer_range_selection.dart';
 import 'viewer_selection_style.dart';
+import 'text_range_geometry.dart';
+
+const bool _enableTextRangeGeometry = false;
 
 class ViewerVerseLine extends StatelessWidget {
   const ViewerVerseLine({
@@ -23,6 +26,10 @@ class ViewerVerseLine extends StatelessWidget {
     this.onVerseNumberLongPress,
     this.rangeSelection,
     this.onTokenLongPress,
+    this.onTokenLongPressMove,
+    this.geometryRegistry,
+    this.geometryScopeId,
+    this.geometryRevision = 0,
   });
 
   final VerseLine line;
@@ -38,6 +45,10 @@ class ViewerVerseLine extends StatelessWidget {
   final VoidCallback? onVerseNumberLongPress;
   final ViewerRangeSelection? rangeSelection;
   final ValueChanged<int>? onTokenLongPress;
+  final ValueChanged<int>? onTokenLongPressMove;
+  final TextRangeGeometryRegistry? geometryRegistry;
+  final String? geometryScopeId;
+  final int geometryRevision;
 
   @override
   Widget build(BuildContext context) {
@@ -66,9 +77,80 @@ class ViewerVerseLine extends StatelessWidget {
         : resolveHighlightRender(
             highlight!.color,
             brightness == Brightness.dark,
+            layerType: HighlightLayerType.savedVerse,
           );
     final baseTextColor =
         highlightSpec?.textColor ?? theme.colorScheme.onSurface;
+    final rangeSelectionSpec = resolveHighlightRender(
+      theme.colorScheme.primary,
+      brightness == Brightness.dark,
+      layerType: HighlightLayerType.temporarySelection,
+    );
+    final verseBackground = highlightSpec?.backgroundColor;
+    final rangeSelectionBackground = isRangeSelected
+        ? (rangeSelection?.hasTokenSelection == true
+              ? verseBackground
+              : Color.alphaBlend(
+                  rangeSelectionSpec.backgroundColor,
+                  verseBackground ?? Colors.transparent,
+                ))
+        : verseBackground;
+    final geometrySeeds = <TextRangeLayoutSeed>[];
+    final textSpan = TextSpan(
+      children: [
+        buildViewerMarkupSpan(
+          html: line.html,
+          fallbackText: line.text,
+          baseStyle: style.copyWith(color: baseTextColor),
+          redLetterColor: redLetterColor,
+          startsInRedLetter: startsInRedLetter,
+          blockId: line.blockId,
+          rangeSelection: rangeSelection,
+          onTokenLongPress: onTokenLongPress,
+          persistedHighlights: tokenHighlights,
+        ),
+      ],
+    );
+
+    final registry = geometryRegistry;
+    final textWidget = _enableTextRangeGeometry && registry != null
+        ? GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onLongPressStart: (details) {
+              final anchor = _nearestAnchorForGlobalPosition(
+                registry: registry,
+                scopeId: geometryScopeId ?? 'viewer:${line.blockId ?? 0}',
+                globalPosition: details.globalPosition,
+              );
+              if (anchor == null) return;
+              onTokenLongPress?.call(anchor.tokenIndex);
+            },
+            onLongPressMoveUpdate: (details) {
+              final anchor = _nearestAnchorForGlobalPosition(
+                registry: registry,
+                scopeId: geometryScopeId ?? 'viewer:${line.blockId ?? 0}',
+                globalPosition: details.globalPosition,
+              );
+              if (anchor == null) return;
+              onTokenLongPressMove?.call(anchor.tokenIndex);
+            },
+            child: TextRangeGeometryReporter(
+              registry: registry,
+              scopeId: geometryScopeId ?? 'viewer:${line.blockId ?? 0}',
+              sourceKind: TextRangeSourceKind.bible,
+              text: textSpan,
+              seeds: geometrySeeds,
+              geometryRevision: geometryRevision,
+              textDirection: textDirection,
+              textAlign: TextAlign.start,
+              child: RichText(
+                text: textSpan,
+              ),
+            ),
+          )
+        : RichText(
+            text: textSpan,
+          );
 
     return Material(
       color: Colors.transparent,
@@ -86,9 +168,7 @@ class ViewerVerseLine extends StatelessWidget {
           decoration: BoxDecoration(
             color: isSelected
                 ? viewerSelectedVerseColor(context)
-                : isRangeSelected
-                ? theme.colorScheme.primary.withValues(alpha: 0.10)
-                : highlightSpec?.backgroundColor ?? Colors.transparent,
+                : rangeSelectionBackground ?? Colors.transparent,
             borderRadius: BorderRadius.circular(isSelected ? 3 : 6),
           ),
           child: Row(
@@ -106,23 +186,7 @@ class ViewerVerseLine extends StatelessWidget {
                 onLongPress: onVerseNumberLongPress,
               ),
               Expanded(
-                child: RichText(
-                  text: TextSpan(
-                    children: [
-                      buildViewerMarkupSpan(
-                        html: line.html,
-                        fallbackText: line.text,
-                        baseStyle: style.copyWith(color: baseTextColor),
-                        redLetterColor: redLetterColor,
-                        startsInRedLetter: startsInRedLetter,
-                        blockId: line.blockId,
-                        rangeSelection: rangeSelection,
-                        onTokenLongPress: onTokenLongPress,
-                        persistedHighlights: tokenHighlights,
-                      ),
-                    ],
-                  ),
-                ),
+                child: textWidget,
               ),
             ],
           ),
@@ -130,6 +194,18 @@ class ViewerVerseLine extends StatelessWidget {
       ),
     );
   }
+}
+
+TextRangeAnchor? _nearestAnchorForGlobalPosition({
+  required TextRangeGeometryRegistry registry,
+  required String scopeId,
+  required Offset globalPosition,
+}) {
+  return registry.nearestAnchorToGlobalPoint(
+    globalPosition,
+    sourceKind: TextRangeSourceKind.bible,
+    scopeId: scopeId,
+  );
 }
 
 double fontScaleFromStyle(TextStyle style) {

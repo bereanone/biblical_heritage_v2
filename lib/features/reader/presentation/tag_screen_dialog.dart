@@ -19,10 +19,13 @@ class HashTagDialog extends StatefulWidget {
     required this.passage,
     required this.selection,
     required this.selectionTargets,
+    required this.fontScale,
     required this.initialTabIndex,
     required this.tagSymbol,
     this.onTagTabChanged,
     this.initialTag,
+    this.selectionLabelOverride,
+    this.onApplySelectionOverride,
     this.onSelectBlockId,
     this.legacyStyle = false,
   });
@@ -31,10 +34,14 @@ class HashTagDialog extends StatefulWidget {
   final PassageData passage;
   final ViewerRangeSelection selection;
   final List<HashTagTarget> selectionTargets;
+  final double fontScale;
   final int initialTabIndex;
   final String tagSymbol;
   final ValueChanged<int>? onTagTabChanged;
   final String? initialTag;
+  final String? selectionLabelOverride;
+  final Future<HashTagQuickApplyResult> Function(String tag)?
+  onApplySelectionOverride;
   final Future<void> Function(int blockId)? onSelectBlockId;
   final bool legacyStyle;
 
@@ -128,6 +135,8 @@ class _HashTagDialogState extends State<HashTagDialog>
   String get _currentTag => _repository.normalizeTagName(_tagController.text);
 
   String get _selectionLabel {
+    final override = widget.selectionLabelOverride?.trim() ?? '';
+    if (override.isNotEmpty) return override;
     if (widget.selectionTargets.isEmpty) return 'No verse selected';
     if (widget.selectionTargets.length == 1) {
       final target = widget.selectionTargets.first;
@@ -249,6 +258,24 @@ class _HashTagDialogState extends State<HashTagDialog>
   }
 
   Future<void> _applySelectionToTargets(String tag) async {
+    final applyOverride = widget.onApplySelectionOverride;
+    if (applyOverride != null) {
+      setState(() => _working = true);
+      final result = await applyOverride(tag);
+      if (!mounted) return;
+      setState(() => _working = false);
+      if (result.tag == null) {
+        await _showNoTagSelectedDialog();
+        return;
+      }
+      await _repository.saveTagCategory(result.tag!, _selectedCategory ?? '');
+      await _reloadSelectedTag(result.tag!);
+      _showSnack(
+        'Tagged ${result.inserted} verse(s) with ${result.tag}'
+        '${result.skipped > 0 ? ' (${result.skipped} already in this tag)' : ''}.',
+      );
+      return;
+    }
     final targets = widget.selectionTargets;
     if (targets.length > 1) {
       final book = targets.first.bookNumber;
@@ -616,25 +643,65 @@ class _HashTagDialogState extends State<HashTagDialog>
     final renamed = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
+        final theme = Theme.of(dialogContext);
         return AlertDialog(
-          title: const Text('Rename current tag'),
+          title: Text(
+            'Rename current tag',
+            style: TagDialogStyles.titleTextStyle(
+              theme,
+              widget.fontScale,
+              color: TagDialogStyles.title(theme),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
           content: TextField(
             controller: controller,
             autofocus: true,
             decoration: InputDecoration(
               labelText: '$_tagLabel tag',
               border: OutlineInputBorder(),
+              labelStyle: TagDialogStyles.labelTextStyle(
+                theme,
+                widget.fontScale,
+                color: TagDialogStyles.body(theme),
+              ),
+              floatingLabelStyle: TagDialogStyles.labelTextStyle(
+                theme,
+                widget.fontScale,
+                color: TagDialogStyles.title(theme),
+              ),
+            ),
+            style: TagDialogStyles.titleTextStyle(
+              theme,
+              widget.fontScale,
+              color: TagDialogStyles.title(theme),
+              fontWeight: FontWeight.w700,
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: TagDialogStyles.fittedButtonLabel('Cancel'),
+              child: TagDialogStyles.fittedButtonLabel(
+                'Cancel',
+                style: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  widget.fontScale,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
             FilledButton(
               onPressed: () =>
                   Navigator.of(dialogContext).pop(controller.text.trim()),
-              child: TagDialogStyles.fittedButtonLabel('Rename'),
+              child: TagDialogStyles.fittedButtonLabel(
+                'Rename',
+                style: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  widget.fontScale,
+                  color: theme.colorScheme.onPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ],
         );
@@ -658,8 +725,17 @@ class _HashTagDialogState extends State<HashTagDialog>
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
+        final theme = Theme.of(dialogContext);
         return AlertDialog(
-          title: const Text('Instructions'),
+          title: Text(
+            'Instructions',
+            style: TagDialogStyles.titleTextStyle(
+              theme,
+              widget.fontScale,
+              color: TagDialogStyles.title(theme),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
           content: Text(
             '$_tagLabel tags collect verse references into reusable lists. '
             'Use Tag Verse to add the current verse or range. '
@@ -667,11 +743,24 @@ class _HashTagDialogState extends State<HashTagDialog>
             'Use Save to set the rapid-tag default. '
             'Use the Rapid Tag Session controls when you want to tag many verses without extra prompts. '
             'A verse can appear in multiple different $_tagName lists; duplicates are only blocked inside the same tag.',
+            style: TagDialogStyles.bodyTextStyle(
+              theme,
+              widget.fontScale,
+              color: TagDialogStyles.body(theme),
+            ),
           ),
           actions: [
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: TagDialogStyles.fittedButtonLabel('Done'),
+              child: TagDialogStyles.fittedButtonLabel(
+                'Done',
+                style: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  widget.fontScale,
+                  color: theme.colorScheme.onPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ],
         );
@@ -687,15 +776,37 @@ class _HashTagDialogState extends State<HashTagDialog>
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) {
+          final theme = Theme.of(dialogContext);
           return AlertDialog(
-            title: const Text('Choose or create a #tag'),
-            content: const Text(
+            title: Text(
+              'Choose or create a #tag',
+              style: TagDialogStyles.titleTextStyle(
+                theme,
+                widget.fontScale,
+                color: TagDialogStyles.title(theme),
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            content: Text(
               'Choose or create a #tag before adding search results.',
+              style: TagDialogStyles.bodyTextStyle(
+                theme,
+                widget.fontScale,
+                color: TagDialogStyles.body(theme),
+              ),
             ),
             actions: [
               FilledButton(
                 onPressed: () => Navigator.of(dialogContext).pop(),
-                child: TagDialogStyles.fittedButtonLabel('OK'),
+                child: TagDialogStyles.fittedButtonLabel(
+                  'OK',
+                  style: TagDialogStyles.buttonTextStyle(
+                    theme,
+                    widget.fontScale,
+                    color: theme.colorScheme.onPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ],
           );
@@ -707,7 +818,7 @@ class _HashTagDialogState extends State<HashTagDialog>
     if (!mounted) return;
     await showViewerSearchDialog(
       context,
-      fontScale: 1.0,
+      fontScale: widget.fontScale,
       currentTag: currentTag,
       onBibleResultAdded: (tag) async {
         if (!mounted) return;
@@ -732,8 +843,17 @@ class _HashTagDialogState extends State<HashTagDialog>
     final imported = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
+        final theme = Theme.of(dialogContext);
         return AlertDialog(
-          title: Text('Import $_tagLabel list from Clipboard'),
+          title: Text(
+            'Import $_tagLabel list from Clipboard',
+            style: TagDialogStyles.titleTextStyle(
+              theme,
+              widget.fontScale,
+              color: TagDialogStyles.title(theme),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
           content: SizedBox(
             width: 560,
             child: TextField(
@@ -744,17 +864,42 @@ class _HashTagDialogState extends State<HashTagDialog>
                 hintText:
                     'Paste the $_tagLabel list text here. Verse + text blocks are preferred.',
                 border: OutlineInputBorder(),
+                hintStyle: TagDialogStyles.bodyTextStyle(
+                  theme,
+                  widget.fontScale,
+                  color: TagDialogStyles.mutedBody(theme),
+                ),
+              ),
+              style: TagDialogStyles.bodyTextStyle(
+                theme,
+                widget.fontScale,
+                color: TagDialogStyles.title(theme),
               ),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
+              child: TagDialogStyles.fittedButtonLabel(
+                'Cancel',
+                style: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  widget.fontScale,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-              child: const Text('Import'),
+              child: TagDialogStyles.fittedButtonLabel(
+                'Import',
+                style: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  widget.fontScale,
+                  color: theme.colorScheme.onPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ],
         );
@@ -784,14 +929,17 @@ class _HashTagDialogState extends State<HashTagDialog>
       barrierDismissible: true,
       builder: (resultCtx) {
         final media = MediaQuery.of(resultCtx);
+        final theme = Theme.of(resultCtx);
         return MediaQuery(
           data: media.copyWith(textScaler: MediaQuery.textScalerOf(resultCtx)),
           child: AlertDialog(
             title: Text(
               'Import Results',
-              style: Theme.of(resultCtx).textTheme.titleLarge?.copyWith(
-                fontSize: 24,
-                fontWeight: FontWeight.w800,
+              style: TagDialogStyles.titleTextStyle(
+                theme,
+                widget.fontScale,
+                color: TagDialogStyles.title(theme),
+                fontWeight: FontWeight.w900,
                 letterSpacing: -0.3,
                 height: 1.0,
               ),
@@ -806,17 +954,65 @@ class _HashTagDialogState extends State<HashTagDialog>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('Tag: ${result.tag}'),
-                    Text('$parsedLabel: ${result.parsedCount}'),
-                    Text('Inserted: ${result.insertedCount}'),
-                    Text('Reordered existing: ${result.updatedExistingCount}'),
-                    Text('Skipped existing: ${result.skippedExistingCount}'),
-                    Text('Failed lines: ${result.failedCount}'),
+                    Text(
+                      'Tag: ${result.tag}',
+                      style: TagDialogStyles.bodyTextStyle(
+                        theme,
+                        widget.fontScale,
+                        color: TagDialogStyles.title(theme),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      '$parsedLabel: ${result.parsedCount}',
+                      style: TagDialogStyles.bodyTextStyle(
+                        theme,
+                        widget.fontScale,
+                        color: TagDialogStyles.body(theme),
+                      ),
+                    ),
+                    Text(
+                      'Inserted: ${result.insertedCount}',
+                      style: TagDialogStyles.bodyTextStyle(
+                        theme,
+                        widget.fontScale,
+                        color: TagDialogStyles.body(theme),
+                      ),
+                    ),
+                    Text(
+                      'Reordered existing: ${result.updatedExistingCount}',
+                      style: TagDialogStyles.bodyTextStyle(
+                        theme,
+                        widget.fontScale,
+                        color: TagDialogStyles.body(theme),
+                      ),
+                    ),
+                    Text(
+                      'Skipped existing: ${result.skippedExistingCount}',
+                      style: TagDialogStyles.bodyTextStyle(
+                        theme,
+                        widget.fontScale,
+                        color: TagDialogStyles.body(theme),
+                      ),
+                    ),
+                    Text(
+                      'Failed lines: ${result.failedCount}',
+                      style: TagDialogStyles.bodyTextStyle(
+                        theme,
+                        widget.fontScale,
+                        color: TagDialogStyles.body(theme),
+                      ),
+                    ),
                     if (result.failures.isNotEmpty) ...[
                       const SizedBox(height: 10),
-                      const Text(
+                      Text(
                         'Failures',
-                        style: TextStyle(fontWeight: FontWeight.w700),
+                        style: TagDialogStyles.bodyTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.title(theme),
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       ...result.failures.map(
@@ -824,6 +1020,11 @@ class _HashTagDialogState extends State<HashTagDialog>
                           padding: const EdgeInsets.only(bottom: 6),
                           child: Text(
                             'Line ${failure.lineNumber}: ${failure.reason}${failure.line.isNotEmpty ? ' — ${failure.line}' : ''}',
+                            style: TagDialogStyles.bodyTextStyle(
+                              theme,
+                              widget.fontScale,
+                              color: TagDialogStyles.body(theme),
+                            ),
                           ),
                         ),
                       ),
@@ -835,7 +1036,14 @@ class _HashTagDialogState extends State<HashTagDialog>
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(resultCtx).pop(),
-                child: const Text('OK'),
+                child: TagDialogStyles.fittedButtonLabel(
+                  'OK',
+                  style: TagDialogStyles.buttonTextStyle(
+                    theme,
+                    widget.fontScale,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ],
           ),
@@ -854,6 +1062,7 @@ class _HashTagDialogState extends State<HashTagDialog>
       context,
       repository: _repository,
       tag: summary.tag,
+      fontScale: widget.fontScale,
       onSelectBlockId: widget.onSelectBlockId,
       onSelectTag: (tag) async {
         await _reloadSelectedTag(tag);
@@ -882,13 +1091,37 @@ class _HashTagDialogState extends State<HashTagDialog>
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
+        final theme = Theme.of(dialogContext);
         return AlertDialog(
-          title: const Text('No Tag Selected'),
-          content: Text('Enter or select a $_tagName before tagging a verse.'),
+          title: Text(
+            'No Tag Selected',
+            style: TagDialogStyles.titleTextStyle(
+              theme,
+              widget.fontScale,
+              color: TagDialogStyles.title(theme),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          content: Text(
+            'Enter or select a $_tagName before tagging a verse.',
+            style: TagDialogStyles.bodyTextStyle(
+              theme,
+              widget.fontScale,
+              color: TagDialogStyles.body(theme),
+            ),
+          ),
           actions: [
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('OK'),
+              child: TagDialogStyles.fittedButtonLabel(
+                'OK',
+                style: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  widget.fontScale,
+                  color: theme.colorScheme.onPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ],
         );
@@ -938,6 +1171,7 @@ class _HashTagDialogState extends State<HashTagDialog>
       categoryName = await showDialog<String>(
         context: context,
         builder: (dialogContext) {
+          final theme = Theme.of(dialogContext);
           return StatefulBuilder(
             builder: (context, setDialogState) {
               void submit() {
@@ -952,7 +1186,15 @@ class _HashTagDialogState extends State<HashTagDialog>
               }
 
               return AlertDialog(
-                title: const Text('New Category'),
+                title: Text(
+                  'New Category',
+                  style: TagDialogStyles.titleTextStyle(
+                    theme,
+                    widget.fontScale,
+                    color: TagDialogStyles.title(theme),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
                 content: TextField(
                   controller: controller,
                   autofocus: true,
@@ -961,6 +1203,27 @@ class _HashTagDialogState extends State<HashTagDialog>
                     labelText: 'Category name',
                     border: const OutlineInputBorder(),
                     errorText: errorText,
+                    labelStyle: TagDialogStyles.labelTextStyle(
+                      theme,
+                      widget.fontScale,
+                      color: TagDialogStyles.body(theme),
+                    ),
+                    floatingLabelStyle: TagDialogStyles.labelTextStyle(
+                      theme,
+                      widget.fontScale,
+                      color: TagDialogStyles.title(theme),
+                    ),
+                    errorStyle: TagDialogStyles.bodyTextStyle(
+                      theme,
+                      widget.fontScale,
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+                  style: TagDialogStyles.titleTextStyle(
+                    theme,
+                    widget.fontScale,
+                    color: TagDialogStyles.title(theme),
+                    fontWeight: FontWeight.w700,
                   ),
                   onChanged: (_) {
                     if (errorText == null) return;
@@ -973,9 +1236,27 @@ class _HashTagDialogState extends State<HashTagDialog>
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: const Text('Cancel'),
+                    child: TagDialogStyles.fittedButtonLabel(
+                      'Cancel',
+                      style: TagDialogStyles.buttonTextStyle(
+                        theme,
+                        widget.fontScale,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
-                  FilledButton(onPressed: submit, child: const Text('Add')),
+                  FilledButton(
+                    onPressed: submit,
+                    child: TagDialogStyles.fittedButtonLabel(
+                      'Add',
+                      style: TagDialogStyles.buttonTextStyle(
+                        theme,
+                        widget.fontScale,
+                        color: theme.colorScheme.onPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
                 ],
               );
             },
@@ -1097,6 +1378,7 @@ class _HashTagDialogState extends State<HashTagDialog>
                     children: [
                       TagDialogHeader(
                         title: '$_tagLabel Tags for $_selectionLabel',
+                        fontScale: widget.fontScale,
                         onClose: () => Navigator.of(context).pop(),
                         onShowInstructions: _showInstructions,
                         onFindText: _showFindText,
@@ -1110,6 +1392,7 @@ class _HashTagDialogState extends State<HashTagDialog>
                       Expanded(
                         child: TagDialogHashTab(
                           tagSymbol: _tagLabel,
+                          fontScale: widget.fontScale,
                           loading: _loading,
                           groupedSummaries: _visibleSummaryGroups,
                           searchSummaries: _selectedCategorySummaries,

@@ -23,7 +23,11 @@ class _LibraryPane extends StatelessWidget {
         child: Text(
           isEmptyMessage,
           textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodyLarge,
+          style: libraryBodyTextStyle(
+            context,
+            Theme.of(context).textTheme.bodyLarge,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
         ),
       );
     }
@@ -87,7 +91,11 @@ class _RecentPane extends StatelessWidget {
         child: Text(
           isEmptyMessage,
           textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodyLarge,
+          style: libraryBodyTextStyle(
+            context,
+            Theme.of(context).textTheme.bodyLarge,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
         ),
       );
     }
@@ -139,9 +147,19 @@ class _SearchField extends StatelessWidget {
           onChanged: onChanged,
           onSubmitted: onSubmitted,
           textInputAction: TextInputAction.search,
+          style: libraryBodyTextStyle(
+            context,
+            theme.textTheme.bodyMedium,
+            color: theme.colorScheme.onSurface,
+          ),
           decoration: InputDecoration(
             prefixIcon: const Icon(Icons.search),
             hintText: 'Find book/title',
+            hintStyle: libraryCaptionTextStyle(
+              context,
+              theme.textTheme.bodySmall,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
             suffixIcon: hasText
                 ? Row(
                     mainAxisSize: MainAxisSize.min,
@@ -171,7 +189,10 @@ class _SearchField extends StatelessWidget {
                     ],
                   )
                 : null,
-            suffixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+            suffixIconConstraints: const BoxConstraints(
+              minWidth: 0,
+              minHeight: 0,
+            ),
             filled: true,
             fillColor: _librarySurfaceHighestColor(theme),
             border: OutlineInputBorder(
@@ -184,12 +205,19 @@ class _SearchField extends StatelessWidget {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(18),
-              borderSide:
-                  BorderSide(color: theme.colorScheme.primary, width: 1.5),
+              borderSide: BorderSide(
+                color: theme.colorScheme.primary,
+                width: 1.5,
+              ),
             ),
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 14,
               vertical: 14,
+            ),
+            labelStyle: libraryControlTextStyle(
+              context,
+              theme.textTheme.bodyMedium,
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
         );
@@ -233,24 +261,25 @@ class _CollectionFilterMenu extends StatelessWidget {
           },
           isDense: true,
           isExpanded: true,
-          padding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 0,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
           borderRadius: borderRadius,
           icon: Icon(
             Icons.arrow_drop_down,
             color: theme.colorScheme.onSurfaceVariant,
           ),
           iconSize: 22,
-          style: theme.textTheme.labelLarge?.copyWith(
+          style: libraryControlTextStyle(
+            context,
+            theme.textTheme.labelLarge,
             fontWeight: FontWeight.w800,
             color: theme.colorScheme.onSurface,
           ),
           dropdownColor: _librarySurfaceHighColor(theme),
           decoration: InputDecoration(
-            prefixIconConstraints:
-                const BoxConstraints(minWidth: 28, minHeight: 28),
+            prefixIconConstraints: const BoxConstraints(
+              minWidth: 28,
+              minHeight: 28,
+            ),
             prefixIcon: Icon(
               Icons.folder_outlined,
               size: 18,
@@ -357,9 +386,12 @@ class _FilterMenuButton extends StatelessWidget {
             const SizedBox(width: 6),
             Text(
               label,
-              style: Theme.of(
+              style: libraryControlTextStyle(
                 context,
-              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+                Theme.of(context).textTheme.labelLarge,
+                fontWeight: FontWeight.w800,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
             ),
             const SizedBox(width: 2),
             Icon(
@@ -392,16 +424,24 @@ class _SearchTextButton extends StatelessWidget {
           decoration: BoxDecoration(
             color: _librarySurfaceHighColor(theme),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.4)),
+            border: Border.all(
+              color: theme.colorScheme.primary.withValues(alpha: 0.4),
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.manage_search_rounded, size: 18, color: theme.colorScheme.primary),
+              Icon(
+                Icons.manage_search_rounded,
+                size: 18,
+                color: theme.colorScheme.primary,
+              ),
               const SizedBox(width: 6),
               Text(
                 'Search Text',
-                style: theme.textTheme.labelLarge?.copyWith(
+                style: libraryControlTextStyle(
+                  context,
+                  theme.textTheme.labelLarge,
                   fontWeight: FontWeight.w800,
                   color: theme.colorScheme.primary,
                 ),
@@ -423,16 +463,32 @@ class _TabSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SegmentedButton<_LibraryTab>(
-      segments: const [
+      segments: [
         ButtonSegment(
           value: _LibraryTab.books,
           icon: Icon(Icons.auto_stories_outlined),
-          label: Text('Books'),
+          label: Text(
+            'Books',
+            style: libraryControlTextStyle(
+              context,
+              Theme.of(context).textTheme.labelLarge,
+              fontWeight: FontWeight.w800,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
         ),
         ButtonSegment(
           value: _LibraryTab.recent,
           icon: Icon(Icons.history_rounded),
-          label: Text('Recent'),
+          label: Text(
+            'Recent',
+            style: libraryControlTextStyle(
+              context,
+              Theme.of(context).textTheme.labelLarge,
+              fontWeight: FontWeight.w800,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
         ),
       ],
       selected: {selectedTab},
@@ -455,16 +511,32 @@ class _ViewToggleRow extends StatelessWidget {
     return Align(
       alignment: Alignment.centerLeft,
       child: SegmentedButton<_LibraryView>(
-        segments: const [
+        segments: [
           ButtonSegment(
             value: _LibraryView.shelf,
             icon: Icon(Icons.grid_view_rounded),
-            label: Text('Shelf'),
+            label: Text(
+              'Shelf',
+              style: libraryControlTextStyle(
+                context,
+                Theme.of(context).textTheme.labelLarge,
+                fontWeight: FontWeight.w800,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
           ),
           ButtonSegment(
             value: _LibraryView.list,
             icon: Icon(Icons.view_list_rounded),
-            label: Text('List'),
+            label: Text(
+              'List',
+              style: libraryControlTextStyle(
+                context,
+                Theme.of(context).textTheme.labelLarge,
+                fontWeight: FontWeight.w800,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
           ),
         ],
         selected: {view},
@@ -533,9 +605,12 @@ class _LetterChip extends StatelessWidget {
       onSelected: (_) => onPressed(),
       selectedColor: _librarySelectedColor(Theme.of(context)),
       backgroundColor: _librarySurfaceHighestColor(Theme.of(context)),
-      labelStyle: Theme.of(
+      labelStyle: libraryControlTextStyle(
         context,
-      ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+        Theme.of(context).textTheme.labelLarge,
+        fontWeight: FontWeight.w800,
+        color: Theme.of(context).colorScheme.onSurface,
+      ),
       side: BorderSide(color: _libraryOutlineColor(Theme.of(context))),
       shape: StadiumBorder(
         side: BorderSide(color: _libraryOutlineColor(Theme.of(context))),
@@ -557,24 +632,19 @@ Widget _bookCoverFrame({
   final fillColor = _libraryFallbackCoverColor(theme);
   final accentColor = _placeholderAccentColor(title);
   final monogram = _thumbnailMonogram(title);
-  final titleStyle = compact
-      ? theme.textTheme.labelMedium?.copyWith(
-          fontWeight: FontWeight.w800,
-          color: theme.colorScheme.onSurface,
-          height: 1.05,
-        )
-      : theme.textTheme.titleSmall?.copyWith(
-          fontWeight: FontWeight.w800,
-          color: theme.colorScheme.onSurface,
-          height: 1.05,
-        );
-  final subtitleStyle = compact
-      ? theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        )
-      : theme.textTheme.bodySmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        );
+  final fontScale = libraryFontScaleOf(context);
+  final titleStyle = libraryScaledTextStyle(
+    compact ? theme.textTheme.labelMedium : theme.textTheme.titleSmall,
+    libraryTitleScale(fontScale),
+    fontWeight: FontWeight.w800,
+    color: theme.colorScheme.onSurface,
+    height: 1.05,
+  );
+  final subtitleStyle = libraryScaledTextStyle(
+    compact ? theme.textTheme.labelSmall : theme.textTheme.bodySmall,
+    libraryCaptionScale(fontScale),
+    color: theme.colorScheme.onSurfaceVariant,
+  );
   final captionInsets = EdgeInsets.symmetric(
     horizontal: compact ? 6 : 8,
     vertical: compact ? 4 : 6,
@@ -702,8 +772,9 @@ Widget _bookCoverFrame({
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.w900,
                               letterSpacing: 1.1,
-                              color: theme.colorScheme.onSurface
-                                  .withValues(alpha: 0.78),
+                              color: theme.colorScheme.onSurface.withValues(
+                                alpha: 0.78,
+                              ),
                             ),
                           ),
                         ),
@@ -804,7 +875,9 @@ class _BookCoverCard extends StatelessWidget {
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                style: libraryControlTextStyle(
+                  context,
+                  Theme.of(context).textTheme.bodyMedium,
                   fontWeight: FontWeight.w800,
                   color: textColor,
                 ),
@@ -813,9 +886,11 @@ class _BookCoverCard extends StatelessWidget {
                 subtitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(
+                style: libraryCaptionTextStyle(
                   context,
-                ).textTheme.bodySmall?.copyWith(color: subduedColor),
+                  Theme.of(context).textTheme.bodySmall,
+                  color: subduedColor,
+                ),
               ),
             ],
           ),
@@ -942,7 +1017,9 @@ class _BookListTile extends StatelessWidget {
             item.displayTitle,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+            style: libraryControlTextStyle(
+              context,
+              Theme.of(context).textTheme.titleSmall,
               fontWeight: FontWeight.w800,
               color: textColor,
             ),
@@ -951,9 +1028,11 @@ class _BookListTile extends StatelessWidget {
             '${item.subtitle}${item.lastOpened == null ? '' : ' • ${_stamp(item.lastOpened!)}'}',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(
+            style: libraryCaptionTextStyle(
               context,
-            ).textTheme.bodySmall?.copyWith(color: subduedColor),
+              Theme.of(context).textTheme.bodySmall,
+              color: subduedColor,
+            ),
           ),
           trailing: trailing,
         ),
@@ -992,7 +1071,9 @@ class _RecentStamp extends StatelessWidget {
     if (stamp == null) return const SizedBox.shrink();
     return Text(
       _stamp(stamp),
-      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+      style: libraryCaptionTextStyle(
+        context,
+        Theme.of(context).textTheme.bodySmall,
         color: Theme.of(context).colorScheme.onSurfaceVariant,
       ),
     );

@@ -8,6 +8,7 @@ class TagDialogHashTab extends StatelessWidget {
   const TagDialogHashTab({
     super.key,
     required this.tagSymbol,
+    required this.fontScale,
     required this.loading,
     required this.groupedSummaries,
     required this.searchSummaries,
@@ -30,6 +31,7 @@ class TagDialogHashTab extends StatelessWidget {
   });
 
   final String tagSymbol;
+  final double fontScale;
   final bool loading;
   final List<MapEntry<String?, List<HashTagSummary>>> groupedSummaries;
   final List<HashTagSummary> searchSummaries;
@@ -85,7 +87,9 @@ class TagDialogHashTab extends StatelessWidget {
             final isNarrow = constraints.maxWidth < 460;
             final tagField = TextField(
               controller: tagController,
-              style: theme.textTheme.titleLarge?.copyWith(
+              style: TagDialogStyles.titleTextStyle(
+                theme,
+                fontScale,
                 color: TagDialogStyles.title(theme),
                 fontWeight: FontWeight.w800,
               ),
@@ -94,6 +98,16 @@ class TagDialogHashTab extends StatelessWidget {
                 border: const OutlineInputBorder(),
                 filled: true,
                 fillColor: TagDialogStyles.surface(theme),
+                labelStyle: TagDialogStyles.labelTextStyle(
+                  theme,
+                  fontScale,
+                  color: TagDialogStyles.body(theme),
+                ),
+                floatingLabelStyle: TagDialogStyles.labelTextStyle(
+                  theme,
+                  fontScale,
+                  color: TagDialogStyles.title(theme),
+                ),
               ),
               onSubmitted: (_) => onTagSubmitted(tagController.text),
             );
@@ -107,9 +121,13 @@ class TagDialogHashTab extends StatelessWidget {
                   foregroundColor: theme.brightness == Brightness.dark
                       ? theme.colorScheme.onPrimary
                       : Colors.white,
-                  textStyle: theme.textTheme.titleMedium?.copyWith(
+                  textStyle: TagDialogStyles.buttonTextStyle(
+                    theme,
+                    fontScale,
+                    color: theme.brightness == Brightness.dark
+                        ? theme.colorScheme.onPrimary
+                        : Colors.white,
                     fontWeight: FontWeight.w800,
-                    fontSize: 16,
                   ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
@@ -119,6 +137,14 @@ class TagDialogHashTab extends StatelessWidget {
                 child: TagDialogStyles.fittedButtonLabel(
                   'Tag\nVerse',
                   maxLines: 2,
+                  style: TagDialogStyles.buttonTextStyle(
+                    theme,
+                    fontScale,
+                    color: theme.brightness == Brightness.dark
+                        ? theme.colorScheme.onPrimary
+                        : Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             );
@@ -154,7 +180,9 @@ class TagDialogHashTab extends StatelessWidget {
                     padding: const EdgeInsets.only(left: 2, bottom: 5),
                     child: Text(
                       'Category',
-                      style: theme.textTheme.labelLarge?.copyWith(
+                      style: TagDialogStyles.labelTextStyle(
+                        theme,
+                        fontScale,
                         color: TagDialogStyles.body(theme),
                         fontWeight: FontWeight.w700,
                       ),
@@ -180,7 +208,9 @@ class TagDialogHashTab extends StatelessWidget {
                             : effectiveCategoryValue,
                         isDense: true,
                         isExpanded: true,
-                        style: theme.textTheme.titleMedium?.copyWith(
+                        style: TagDialogStyles.titleTextStyle(
+                          theme,
+                          fontScale,
                           color: TagDialogStyles.title(theme),
                           fontWeight: FontWeight.w700,
                         ),
@@ -232,13 +262,13 @@ class TagDialogHashTab extends StatelessWidget {
                         ),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Icon(
-                        categoryFilter == null
-                            ? Icons.filter_alt_outlined
-                            : Icons.filter_alt,
-                        size: 18,
-                        color: TagDialogStyles.body(theme),
-                      ),
+                        child: Icon(
+                          categoryFilter == null
+                              ? Icons.filter_alt_outlined
+                              : Icons.filter_alt,
+                          size: 18,
+                          color: TagDialogStyles.title(theme),
+                        ),
                     ),
                   ),
                 ),
@@ -267,7 +297,7 @@ class TagDialogHashTab extends StatelessWidget {
                       child: Icon(
                         Icons.refresh,
                         size: 18,
-                        color: TagDialogStyles.body(theme),
+                        color: TagDialogStyles.title(theme),
                       ),
                     ),
                   ),
@@ -287,7 +317,15 @@ class TagDialogHashTab extends StatelessWidget {
                   .map(
                     (summary) => PopupMenuItem<String>(
                       value: summary.tag,
-                      child: Text(summary.tag, maxLines: 1),
+                      child: Text(
+                        summary.tag,
+                        maxLines: 1,
+                        style: TagDialogStyles.buttonTextStyle(
+                          theme,
+                          fontScale,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                   )
                   .toList(growable: false),
@@ -302,7 +340,11 @@ class TagDialogHashTab extends StatelessWidget {
                   ),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.search, size: 18),
+                child: Icon(
+                  Icons.search,
+                  size: 18,
+                  color: TagDialogStyles.title(theme),
+                ),
               ),
             ),
             const SizedBox(width: 6),
@@ -313,11 +355,25 @@ class TagDialogHashTab extends StatelessWidget {
               itemBuilder: (_) => [
                 PopupMenuItem(
                   value: TagSortMode.categoryAlpha,
-                  child: TagDialogStyles.fittedButtonLabel('A→Z'),
+                  child: TagDialogStyles.fittedButtonLabel(
+                    'A→Z',
+                    style: TagDialogStyles.buttonTextStyle(
+                      theme,
+                      fontScale,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
                 PopupMenuItem(
                   value: TagSortMode.verseCount,
-                  child: TagDialogStyles.fittedButtonLabel('Count'),
+                  child: TagDialogStyles.fittedButtonLabel(
+                    'Count',
+                    style: TagDialogStyles.buttonTextStyle(
+                      theme,
+                      fontScale,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ],
               child: Container(
@@ -347,7 +403,11 @@ class TagDialogHashTab extends StatelessWidget {
             child: Text(
               'No tags in this category yet.',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
+              style: TagDialogStyles.bodyTextStyle(
+                theme,
+                fontScale,
+                color: TagDialogStyles.body(theme),
+              ),
             ),
           )
         else
@@ -360,9 +420,11 @@ class TagDialogHashTab extends StatelessWidget {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       _displayCategoryLabel(group.key),
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
+                      style: TagDialogStyles.titleTextStyle(
+                        theme,
+                        fontScale,
                         color: TagDialogStyles.title(theme),
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
                   ),
@@ -383,9 +445,11 @@ class TagDialogHashTab extends StatelessWidget {
                           '${summary.tag}  ·  ${summary.count}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
+                          style: TagDialogStyles.titleTextStyle(
+                            theme,
+                            fontScale,
                             color: TagDialogStyles.title(theme),
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
                         trailing: IconButton(
@@ -393,7 +457,7 @@ class TagDialogHashTab extends StatelessWidget {
                           tooltip: 'Open verses',
                           icon: Icon(
                             Icons.menu_book_outlined,
-                            color: TagDialogStyles.body(theme),
+                            color: TagDialogStyles.title(theme),
                           ),
                         ),
                         onTap: () => onOpenSummaryDetails(summary),

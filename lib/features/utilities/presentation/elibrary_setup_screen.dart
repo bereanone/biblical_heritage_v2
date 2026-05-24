@@ -3,10 +3,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../../core/bootstrap/library_root_native.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/user_database.dart';
+import '../../library/data/library_catalog_service.dart';
 import '../../reader/data/commentary_research_library_service.dart';
 import '../data/elibrary_duplicate_cleanup_service.dart';
 import '../data/elibrary_install_estimate_repository.dart';
@@ -171,17 +173,50 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   }
 
   Future<void> _chooseRoot() async {
-    final selectedPath = await _pickRootFolder();
-    if (!mounted || selectedPath == null || selectedPath.path.trim().isEmpty) {
+    final currentSelection = _selection;
+    if (currentSelection?.path != null && currentSelection?.exists == true) {
+      if (!mounted) return;
+      setState(() {
+        _setupStatusMessage = 'Library Root already selected.';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Library Root already selected.')),
+      );
       return;
     }
-    await LibraryRootService.instance.setLibraryRoot(
-      path: selectedPath.path,
-      bookmark: selectedPath.bookmark,
-    );
+
+    final selectedPath = await _pickRootFolder();
+    final chosenPath = selectedPath?.path.trim() ?? '';
+    if (chosenPath.isNotEmpty) {
+      await LibraryRootService.instance.setLibraryRoot(
+        path: chosenPath,
+        bookmark: selectedPath?.bookmark,
+      );
+      if (!mounted) return;
+      setState(() {
+        _setupStatusMessage = 'Library root saved and folders created.';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Library root saved and folders created.')),
+      );
+      await _load();
+      return;
+    }
+
+    if (!Platform.isIOS) {
+      return;
+    }
+
+    final fallbackPath = await _defaultIosLibraryRootPath();
+    await LibraryRootService.instance.setLibraryRoot(path: fallbackPath);
     if (!mounted) return;
+    setState(() {
+      _setupStatusMessage = 'Using app documents library root for iOS.';
+    });
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Library root saved and folders created.')),
+      const SnackBar(
+        content: Text('Using app documents library root for iOS.'),
+      ),
     );
     await _load();
   }
@@ -197,6 +232,11 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       }
       return null;
     }
+  }
+
+  Future<String> _defaultIosLibraryRootPath() async {
+    final documentsDir = await getApplicationDocumentsDirectory();
+    return p.join(documentsDir.path, 'BiblicalHeritage', 'v2');
   }
 
   void _setPresetAll() {
@@ -407,9 +447,6 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       });
       await _loadEstimateCache();
       if (!mounted) return;
-      setState(() {
-        _setupStatusMessage = 'Refreshing catalog...';
-      });
 
       final cleanupReport = await ELibraryDuplicateCleanupService.instance
           .quarantineDuplicates(isCancelled: () => _cancelRequested);
@@ -417,6 +454,20 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       if (!mounted) return;
       setState(() {
         _cleanupReport = cleanupReport;
+        _setupStatusMessage = 'Refreshing catalog...';
+      });
+
+      final catalogTouched = await LibraryCatalogService.instance
+          .refreshManagedItemsFromDisk();
+      if (!mounted) return;
+      setState(() {
+        _setupStatusMessage = catalogTouched == 0
+            ? 'Catalog already up to date.'
+            : 'Catalog refreshed ($catalogTouched items).';
+      });
+
+      if (!mounted) return;
+      setState(() {
         _setupStatusMessage = 'Indexing new/changed books...';
         _indexing = true;
       });
@@ -625,6 +676,16 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                             ),
                           ],
                         ),
+                        if (_setupStatusMessage != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            _setupStatusMessage!,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: scheme.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                         if (_manualIndexing) ...[
                           const SizedBox(height: 12),
                           LinearProgressIndicator(

@@ -23,6 +23,7 @@ InlineSpan buildViewerMarkupSpan({
   required String fallbackText,
   required TextStyle baseStyle,
   required Color redLetterColor,
+  bool isNightMode = false,
   bool startsInRedLetter = false,
   int? blockId,
   ViewerRangeSelection? rangeSelection,

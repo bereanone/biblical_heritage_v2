@@ -103,6 +103,33 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
     );
   }
 
+  void _dragTokenAnchor(VerseLine line, int tokenIndex) {
+    final blockId = line.blockId ?? 0;
+    if (blockId <= 0 || tokenIndex <= 0) return;
+    if (!_rangeSelection.hasSelection) {
+      setState(() {
+        _rangeSelection = _rangeSelection.beginTokenRange(blockId, tokenIndex);
+      });
+      return;
+    }
+    if (_rangeSelection.hasTokenSelection &&
+        !_rangeSelection.hasCompletedRange) {
+      setState(() {
+        _rangeSelection = _rangeSelection.completeTokenRange(
+          blockId,
+          tokenIndex,
+        );
+      });
+      return;
+    }
+    setState(() {
+      _rangeSelection = _rangeSelection.completeTokenRange(
+        blockId,
+        tokenIndex,
+      );
+    });
+  }
+
   Future<void> _openRangeActions() async {
     final passage = await _currentPassageOrLoad();
     if (!mounted) return;
@@ -145,6 +172,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         startLabel: verseRefs.first,
         endLabel: verseRefs.last,
       ),
+      fontScale: _fontScale,
       enableStrongs: selectedStrongs != null,
     );
     if (!mounted || action == null) return;
@@ -194,7 +222,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         await _applyHashTagToSelection(selectedLines, passage);
         break;
       case ViewerRangeAction.addDollarTag:
-        _showRangeActionMessage(r'$ tags are not wired in yet.');
+        await _openHashTagScreenForSelection(selectedLines, passage);
         return;
       case ViewerRangeAction.addToMemory:
         await _addRangeToMemory(passage.bookName, selectedLines);
@@ -240,15 +268,18 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
             ),
           )
           .toList(growable: false);
-      final defaultTag = await repository.loadDefaultTag();
+      final defaultTag = repository.normalizeTagName(
+        await repository.loadDefaultTag() ?? '',
+      );
       if (!mounted) return;
-      if (defaultTag == null) {
+      if (defaultTag.isEmpty) {
         _resetRapidTagArmed();
         await showHashTagScreen(
           navigator,
           passage: passage,
           selection: _rangeSelection,
           selectionTargets: targets,
+          fontScale: _fontScale,
           initialTabIndex: _lastTagTabIndex,
           onTagTabChanged: _saveLastTagTabIndex,
           onSelectBlockId: _openBlockId,
@@ -282,6 +313,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
           passage: passage,
           selection: _rangeSelection,
           selectionTargets: targets,
+          fontScale: _fontScale,
           initialTabIndex: _lastTagTabIndex,
           onTagTabChanged: _saveLastTagTabIndex,
           initialTag: defaultTag,
@@ -292,6 +324,39 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       _showRangeActionMessage(
         'Tagged $inserted verse(s) with $defaultTag'
         '${skipped > 0 ? ' ($skipped already in this tag)' : ''}.',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      _showRangeActionMessage('Could not open # tags: $error');
+    }
+  }
+
+  Future<void> _openHashTagScreenForSelection(
+    List<VerseLine> selectedLines,
+    PassageData passage,
+  ) async {
+    if (selectedLines.isEmpty) return;
+    try {
+      final navigator = Navigator.of(context);
+      final targets = selectedLines
+          .map(
+            (line) => HashTagTarget(
+              bookNumber: line.bookNumber,
+              chapter: line.chapter,
+              verse: line.verse,
+              verseRef: '${line.bookNumber}:${line.chapter}:${line.verse}',
+            ),
+          )
+          .toList(growable: false);
+      await showHashTagScreen(
+        navigator,
+        passage: passage,
+        selection: _rangeSelection,
+        selectionTargets: targets,
+        fontScale: _fontScale,
+        initialTabIndex: _lastTagTabIndex,
+        onTagTabChanged: _saveLastTagTabIndex,
+        onSelectBlockId: _openBlockId,
       );
     } catch (error) {
       if (!mounted) return;

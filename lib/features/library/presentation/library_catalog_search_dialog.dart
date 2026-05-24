@@ -5,15 +5,22 @@ import 'package:flutter/material.dart';
 import '../data/library_catalog_service.dart';
 import 'library_book_reader_screen.dart';
 import 'library_catalog_search_panel.dart';
+import 'library_font_scale.dart';
 import '../../reader/presentation/tag_quick_apply_helper.dart';
 
-Future<void> showLibraryCatalogSearchDialog(BuildContext context) {
+Future<void> showLibraryCatalogSearchDialog(
+  BuildContext context, {
+  required double fontScale,
+}) {
   return showDialog<void>(
     context: context,
     barrierDismissible: true,
     barrierLabel: 'eLibrary Search',
     barrierColor: Colors.black54,
-    builder: (context) => const _LibraryCatalogSearchDialog(),
+    builder: (context) => LibraryFontScaleScope(
+      scale: fontScale,
+      child: const _LibraryCatalogSearchDialog(),
+    ),
   );
 }
 
@@ -67,8 +74,8 @@ class _LibraryCatalogSearchDialog extends StatelessWidget {
     try {
       final paragraphText =
           (await LibraryCatalogService.instance.loadSearchResultParagraph(
-                result,
-              ))?.trim() ??
+            result,
+          ))?.trim() ??
           '';
       if (paragraphText.isEmpty) {
         throw StateError('Missing paragraph text.');
@@ -90,25 +97,26 @@ class _LibraryCatalogSearchDialog extends StatelessWidget {
       final tagLabel = response.tag!;
       final message = response.inserted > 0
           ? (response.createdDefaultTag
-              ? 'Created SearchResults and added result'
-              : 'Added to $tagLabel')
+                ? 'Created SearchResults and added result'
+                : 'Added to $tagLabel')
           : response.skipped > 0
           ? 'Already in $tagLabel'
           : 'Could not add to $tagLabel';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } catch (error) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not add to #tag: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not add to #tag: $error')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final fontScale = libraryFontScaleOf(context);
 
     return Dialog(
       insetPadding: const EdgeInsets.all(16),
@@ -133,8 +141,12 @@ class _LibraryCatalogSearchDialog extends StatelessWidget {
                   Expanded(
                     child: Text(
                       'eLibrary Search',
-                      style: theme.textTheme.titleMedium?.copyWith(
+                      style: libraryScaledTextStyle(
+                        theme.textTheme.titleMedium,
+                        fontScale,
+                        multiplier: 1.0,
                         fontWeight: FontWeight.w700,
+                        color: theme.colorScheme.onSurface,
                       ),
                       textAlign: TextAlign.center,
                     ),

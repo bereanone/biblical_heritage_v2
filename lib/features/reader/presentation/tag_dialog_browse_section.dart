@@ -10,6 +10,7 @@ class TagDialogBrowseSection extends StatelessWidget {
     required this.summaries,
     required this.categoryController,
     required this.searchController,
+    required this.fontScale,
     required this.sortMode,
     required this.onSortModeChanged,
     required this.onOpenSummaryDetails,
@@ -19,6 +20,7 @@ class TagDialogBrowseSection extends StatelessWidget {
   final List<HashTagSummary> summaries;
   final TextEditingController categoryController;
   final TextEditingController searchController;
+  final double fontScale;
   final TagSortMode sortMode;
   final ValueChanged<TagSortMode> onSortModeChanged;
   final ValueChanged<HashTagSummary> onOpenSummaryDetails;
@@ -44,8 +46,20 @@ class TagDialogBrowseSection extends StatelessWidget {
                   isDense: true,
                   filled: true,
                   fillColor: TagDialogStyles.surfaceHigh(theme),
+                  labelStyle: TagDialogStyles.labelTextStyle(
+                    theme,
+                    fontScale,
+                    color: TagDialogStyles.body(theme),
+                  ),
+                  floatingLabelStyle: TagDialogStyles.labelTextStyle(
+                    theme,
+                    fontScale,
+                    color: TagDialogStyles.title(theme),
+                  ),
                 ),
-                style: theme.textTheme.titleMedium?.copyWith(
+                style: TagDialogStyles.titleTextStyle(
+                  theme,
+                  fontScale,
                   color: TagDialogStyles.title(theme),
                   fontWeight: FontWeight.w700,
                 ),
@@ -54,10 +68,17 @@ class TagDialogBrowseSection extends StatelessWidget {
             const SizedBox(width: 6),
             PopupMenuButton<String?>(
               tooltip: 'Category filter',
-              itemBuilder: (_) => const [
+              itemBuilder: (_) => [
                 PopupMenuItem<String?>(
                   value: null,
-                  child: Text('All categories'),
+                  child: Text(
+                    'All categories',
+                    style: TagDialogStyles.buttonTextStyle(
+                      theme,
+                      fontScale,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ],
               onSelected: (_) {},
@@ -90,11 +111,29 @@ class TagDialogBrowseSection extends StatelessWidget {
                 onSearchChanged();
               },
               itemBuilder: (_) => [
-                const PopupMenuItem<String>(value: '', child: Text('All tags')),
+                PopupMenuItem<String>(
+                  value: '',
+                  child: Text(
+                    'All tags',
+                    style: TagDialogStyles.buttonTextStyle(
+                      theme,
+                      fontScale,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
                 ...summaries.map(
                   (summary) => PopupMenuItem<String>(
                     value: summary.tag,
-                    child: Text(summary.tag, maxLines: 1),
+                    child: Text(
+                      summary.tag,
+                      maxLines: 1,
+                      style: TagDialogStyles.buttonTextStyle(
+                        theme,
+                        fontScale,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -124,11 +163,25 @@ class TagDialogBrowseSection extends StatelessWidget {
               itemBuilder: (_) => [
                 PopupMenuItem(
                   value: TagSortMode.categoryAlpha,
-                  child: TagDialogStyles.fittedButtonLabel('A→Z'),
+                  child: TagDialogStyles.fittedButtonLabel(
+                    'A→Z',
+                    style: TagDialogStyles.buttonTextStyle(
+                      theme,
+                      fontScale,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
                 PopupMenuItem(
                   value: TagSortMode.verseCount,
-                  child: TagDialogStyles.fittedButtonLabel('Count'),
+                  child: TagDialogStyles.fittedButtonLabel(
+                    'Count',
+                    style: TagDialogStyles.buttonTextStyle(
+                      theme,
+                      fontScale,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ],
               child: Container(
@@ -158,7 +211,11 @@ class TagDialogBrowseSection extends StatelessWidget {
             child: Text(
               'No tags in this category yet.',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
+              style: TagDialogStyles.bodyTextStyle(
+                theme,
+                fontScale,
+                color: TagDialogStyles.body(theme),
+              ),
             ),
           )
         else
@@ -178,9 +235,11 @@ class TagDialogBrowseSection extends StatelessWidget {
                     '${summary.tag}  ·  ${summary.count}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
+                    style: TagDialogStyles.titleTextStyle(
+                      theme,
+                      fontScale,
                       color: TagDialogStyles.title(theme),
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                   trailing: IconButton(

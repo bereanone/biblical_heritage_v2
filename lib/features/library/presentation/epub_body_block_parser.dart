@@ -11,6 +11,10 @@ class _SectionBlockView extends StatelessWidget {
   const _SectionBlockView({
     super.key,
     required this.block,
+    required this.blockIndex,
+    required this.geometryRegistry,
+    required this.geometryScopeId,
+    required this.geometryRevision,
     required this.sectionTitle,
     required this.sectionEntryName,
     required this.paragraphIndex,
@@ -24,10 +28,21 @@ class _SectionBlockView extends StatelessWidget {
     required this.isNightMode,
     required this.showRefCodes,
     required this.referenceCode,
+    required this.selectionHighlightSpec,
+    required this.rangeSelection,
+    required this.persistedHighlights,
+    required this.onBlockTap,
+    required this.onWordLongPress,
+    required this.onWordLongPressMove,
+    required this.onWordTap,
     required this.diagnosticLoggingEnabled,
   });
 
   final LibraryBookBlock block;
+  final int blockIndex;
+  final TextRangeGeometryRegistry geometryRegistry;
+  final String geometryScopeId;
+  final int geometryRevision;
   final String sectionTitle;
   final String sectionEntryName;
   final int? paragraphIndex;
@@ -41,6 +56,13 @@ class _SectionBlockView extends StatelessWidget {
   final bool isNightMode;
   final bool showRefCodes;
   final String? referenceCode;
+  final HighlightRenderSpec selectionHighlightSpec;
+  final LibraryRangeSelection rangeSelection;
+  final List<ElibraryMarkupRecord> persistedHighlights;
+  final VoidCallback? onBlockTap;
+  final ValueChanged<int> onWordLongPress;
+  final ValueChanged<int> onWordLongPressMove;
+  final ValueChanged<int> onWordTap;
   final bool diagnosticLoggingEnabled;
 
   @override
@@ -97,20 +119,32 @@ class _SectionBlockView extends StatelessWidget {
     final cleanReferenceCode = showRefCodes
         ? cleanDisplayRefCode(referenceCode)
         : null;
-    final appendedRefString = cleanReferenceCode != null &&
-            cleanReferenceCode.isNotEmpty
+    final appendedRefString =
+        cleanReferenceCode != null && cleanReferenceCode.isNotEmpty
         ? '{$cleanReferenceCode}'
         : null;
     final hasRefCodeSpan = appendedRefString != null;
+    final geometrySeeds = <TextRangeLayoutSeed>[];
     final textSpan = TextSpan(
       style: resolvedStyle,
       children: [
-        ..._buildEpubInlineSpans(
+        ...buildLibraryInteractiveEpubSpans(
           html: block.html,
           fallbackText: block.text,
           baseStyle: resolvedStyle,
+          selectionHighlightSpec: selectionHighlightSpec,
+          isNightMode: isNightMode,
+          blockIndex: blockIndex,
+          rangeSelection: rangeSelection,
+          persistedHighlights: persistedHighlights,
+          onWordLongPress: onWordLongPress,
+          onWordTap: onWordTap,
+          enableWordLongPressRecognizers: true,
           highlightQuery: searchQuery,
           highlightTerms: highlightTerms,
+          geometryScopeId: geometryScopeId,
+          geometryContentKey: _geometryContentKeyForBlock(block, blockIndex),
+          geometrySeeds: _enableTextRangeGeometry ? geometrySeeds : null,
         ),
         if (appendedRefString != null) ...[
           const TextSpan(text: ' '),
@@ -127,9 +161,7 @@ class _SectionBlockView extends StatelessWidget {
     );
 
     if (diagnosticLoggingEnabled && kDebugMode) {
-      final rawPreview = block.text
-          .replaceAll(RegExp(r'\s+'), ' ')
-          .trim();
+      final rawPreview = block.text.replaceAll(RegExp(r'\s+'), ' ').trim();
       final preview = rawPreview.length > 60
           ? rawPreview.substring(0, 60)
           : rawPreview;
@@ -148,27 +180,86 @@ class _SectionBlockView extends StatelessWidget {
       );
     }
 
+    final bodyChild = _enableTextRangeGeometry
+        ? GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onLongPressStart: (details) {
+              final anchor = geometryRegistry.nearestAnchorToGlobalPoint(
+                details.globalPosition,
+                sourceKind: TextRangeSourceKind.elibrary,
+                scopeId: geometryScopeId,
+              );
+              if (anchor == null) return;
+              onWordLongPress(anchor.tokenIndex);
+            },
+            onLongPressMoveUpdate: (details) {
+              final anchor = geometryRegistry.nearestAnchorToGlobalPoint(
+                details.globalPosition,
+                sourceKind: TextRangeSourceKind.elibrary,
+                scopeId: geometryScopeId,
+              );
+              if (anchor == null) return;
+              onWordLongPressMove(anchor.tokenIndex);
+            },
+            child: TextRangeGeometryReporter(
+              registry: geometryRegistry,
+              scopeId: geometryScopeId,
+              sourceKind: TextRangeSourceKind.elibrary,
+              text: textSpan,
+              seeds: geometrySeeds,
+              geometryRevision: geometryRevision,
+              textDirection: Directionality.of(context),
+              textAlign: textAlign,
+              child: Text.rich(textSpan, textAlign: textAlign),
+            ),
+          )
+        : Text.rich(textSpan, textAlign: textAlign);
+
     return Padding(
       padding: EdgeInsets.only(top: topPadding, bottom: bottomPadding),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: isBlockquote
-              ? Border(
-                  left: BorderSide(
-                    color: _readerBorderColor(
-                      theme,
-                      isNightMode,
-                    ).withValues(alpha: 0.65),
-                    width: 2,
-                  ),
-                )
-              : null,
-        ),
-        child: Padding(
-          padding: EdgeInsets.only(left: isBlockquote ? 12 : 0),
-          child: Text.rich(textSpan, textAlign: textAlign),
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: onBlockTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: isBlockquote
+                ? Border(
+                    left: BorderSide(
+                      color: _readerBorderColor(
+                        theme,
+                        isNightMode,
+                      ).withValues(alpha: 0.65),
+                      width: 2,
+                    ),
+                  )
+                : null,
+          ),
+          child: Padding(
+            padding: EdgeInsets.only(left: isBlockquote ? 12 : 0),
+            child: bodyChild,
+          ),
         ),
       ),
     );
   }
+}
+
+String _geometryContentKeyForBlock(LibraryBookBlock block, int index) {
+  final anchorId = block.anchorId?.trim();
+  if (anchorId != null && anchorId.isNotEmpty) {
+    return 'anchor:${_normalizeBlockKeyStandalone(anchorId)}';
+  }
+  final bodyOrder = block.bodyOrder;
+  if (bodyOrder != null) {
+    return 'body:$bodyOrder';
+  }
+  return 'block:$index';
+}
+
+String _normalizeBlockKeyStandalone(String value) {
+  return value
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'_+'), '_')
+      .replaceAll(RegExp(r'^_|_$'), '');
 }

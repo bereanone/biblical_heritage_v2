@@ -27,7 +27,11 @@ class _TocPane extends StatelessWidget {
       return Center(
         child: Text(
           'Select a book to see its contents.',
-          style: Theme.of(context).textTheme.bodyLarge,
+          style: libraryBodyTextStyle(
+            context,
+            Theme.of(context).textTheme.bodyLarge,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
         ),
       );
     }
@@ -48,7 +52,11 @@ class _TocPane extends StatelessWidget {
               ? Center(
                   child: Text(
                     'No TOC entries available for this title.',
-                    style: Theme.of(context).textTheme.bodyLarge,
+                    style: libraryBodyTextStyle(
+                      context,
+                      Theme.of(context).textTheme.bodyLarge,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
                   ),
                 )
               : _NavigationTree(
@@ -88,7 +96,9 @@ class _SelectedBookSummary extends StatelessWidget {
                     item.displayTitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleLarge?.copyWith(
+                    style: libraryTitleTextStyle(
+                      context,
+                      theme.textTheme.titleLarge,
                       fontWeight: FontWeight.w800,
                       color: textColor,
                     ),
@@ -100,22 +110,44 @@ class _SelectedBookSummary extends StatelessWidget {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: theme.colorScheme.onSurface,
                     side: BorderSide(color: _libraryOutlineColor(theme)),
+                    textStyle: libraryControlTextStyle(
+                      context,
+                      theme.textTheme.labelLarge,
+                      fontWeight: FontWeight.w800,
+                      color: theme.colorScheme.onSurface,
+                    ),
                   ),
-                  child: const Text('Open'),
+                  child: Text(
+                    'Open',
+                    style: libraryControlTextStyle(
+                      context,
+                      theme.textTheme.labelLarge,
+                      fontWeight: FontWeight.w800,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
               item.subtitle,
-              style: theme.textTheme.bodyMedium?.copyWith(color: subduedColor),
+              style: libraryBodyTextStyle(
+                context,
+                theme.textTheme.bodyMedium,
+                color: subduedColor,
+              ),
             ),
             const SizedBox(height: 4),
             Text(
               item.relativePath,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(color: subduedColor),
+              style: libraryCaptionTextStyle(
+                context,
+                theme.textTheme.bodySmall,
+                color: subduedColor,
+              ),
             ),
           ],
         ),
@@ -308,7 +340,9 @@ class _NavigationTreeNode extends StatelessWidget {
         collapsedBackgroundColor: _librarySurfaceLowColor(theme),
         title: Text(
           navigationDisplayLabel(item, devotionalMode: isDevotionalNavigation),
-          style: theme.textTheme.titleMedium?.copyWith(
+          style: libraryTitleTextStyle(
+            context,
+            theme.textTheme.titleMedium,
             fontWeight: FontWeight.w700,
             color: textColor,
           ),
@@ -364,7 +398,9 @@ class _NavigationTile extends StatelessWidget {
               item,
               devotionalMode: isDevotionalNavigation,
             ),
-            style: theme.textTheme.bodyLarge?.copyWith(
+            style: libraryBodyTextStyle(
+              context,
+              theme.textTheme.bodyLarge,
               fontWeight: FontWeight.w600,
               color: textColor,
             ),

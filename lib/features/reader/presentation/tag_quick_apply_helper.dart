@@ -1288,6 +1288,14 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     int? sourceSpineIndex,
     int? sourceParagraphIndex,
     String? sourceRelativePath,
+    String? sourceLibraryItemId,
+    String? selectedTextSnapshot,
+    int? selectionStartBlockIndex,
+    int? selectionStartCharOffset,
+    int? selectionEndBlockIndex,
+    int? selectionEndCharOffset,
+    int? selectionStartTokenIndex,
+    int? selectionEndTokenIndex,
     String? searchQuery,
     String? tag,
     String? category,
@@ -1317,6 +1325,11 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final cleanHref = sourceHref?.trim() ?? '';
     final cleanAnchorId = sourceAnchorId?.trim() ?? '';
     final cleanRelativePath = sourceRelativePath?.trim() ?? '';
+    final cleanLibraryItemId = sourceLibraryItemId?.trim() ?? '';
+    final cleanSelectedText = (selectedTextSnapshot?.trim().isNotEmpty == true
+            ? selectedTextSnapshot!
+            : paragraphText)
+        .trimRight();
     final cleanQuery = searchQuery?.trim() ?? '';
     if (cleanStableRef.isEmpty || cleanParagraph.isEmpty) {
       return HashTagSearchQuickApplyResult(
@@ -1352,7 +1365,17 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       paragraphText: cleanParagraph,
       searchQuery: cleanQuery,
     );
-    final noteText = excerpt.isNotEmpty ? excerpt : cleanParagraph;
+    final isRangeSelection =
+        selectedTextSnapshot?.trim().isNotEmpty == true ||
+        selectionStartBlockIndex != null ||
+        selectionStartCharOffset != null ||
+        selectionEndBlockIndex != null ||
+        selectionEndCharOffset != null ||
+        selectionStartTokenIndex != null ||
+        selectionEndTokenIndex != null;
+    final noteText = isRangeSelection
+        ? cleanSelectedText
+        : (excerpt.isNotEmpty ? excerpt : cleanParagraph);
     final noteFormatJson = _buildELibraryNoteMetadataJson(
       sourceTitle: cleanTitle,
       sourceTitleAcronym: _libraryBookAbbreviation(cleanTitle) ?? '',
@@ -1368,9 +1391,18 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           _citationParagraphNumberFromText(cleanLocation) ??
           sourceParagraphIndex,
       searchQuery: cleanQuery,
-      sourceParagraph: cleanParagraph,
+      sourceParagraph: cleanSelectedText,
       excerpt: noteText,
       stableRef: cleanStableRef,
+      sourceType: 'elibrary',
+      sourceLibraryItemId: cleanLibraryItemId,
+      selectedTextSnapshot: cleanSelectedText,
+      selectionStartBlockIndex: selectionStartBlockIndex,
+      selectionStartCharOffset: selectionStartCharOffset,
+      selectionEndBlockIndex: selectionEndBlockIndex,
+      selectionEndCharOffset: selectionEndCharOffset,
+      selectionStartTokenIndex: selectionStartTokenIndex,
+      selectionEndTokenIndex: selectionEndTokenIndex,
     );
     final cleanReferenceCode = _normalizeReferenceCode(
       cleanReferenceText.isNotEmpty ? cleanReferenceText : cleanLocation,
@@ -1490,17 +1522,30 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     required String sourceParagraph,
     required String excerpt,
     required String stableRef,
+    String? sourceType,
+    String? sourceLibraryItemId,
+    String? selectedTextSnapshot,
+    int? selectionStartBlockIndex,
+    int? selectionStartCharOffset,
+    int? selectionEndBlockIndex,
+    int? selectionEndCharOffset,
+    int? selectionStartTokenIndex,
+    int? selectionEndTokenIndex,
   }) {
     final payload = <String, Object?>{
       'format_version': 1,
       'base_text_hash': presentationTextFormatHashForText(excerpt),
       'spans': const <Object?>[],
       'kind': 'elibrary_note',
+      if (sourceType != null && sourceType.trim().isNotEmpty)
+        'source_type': sourceType.trim(),
       'source_title': sourceTitle,
       'source_title_acronym': sourceTitleAcronym,
       'source_location': sourceLocation,
       'source_reference_text': sourceReferenceText,
       'source_href': sourceHref,
+      if (sourceLibraryItemId != null && sourceLibraryItemId.trim().isNotEmpty)
+        'source_library_item_id': sourceLibraryItemId.trim(),
       'source_anchor_id': sourceAnchorId,
       'source_spine_index': sourceSpineIndex,
       'source_paragraph_index': sourceParagraphIndex,
@@ -1509,6 +1554,20 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       'source_paragraph_number': sourceParagraphNumber,
       'search_query': searchQuery,
       'source_paragraph': sourceParagraph,
+      if (selectedTextSnapshot != null && selectedTextSnapshot.trim().isNotEmpty)
+        'selected_text_snapshot': selectedTextSnapshot.trimRight(),
+      if (selectionStartBlockIndex != null)
+        'selection_start_block_index': selectionStartBlockIndex,
+      if (selectionStartCharOffset != null)
+        'selection_start_char_offset': selectionStartCharOffset,
+      if (selectionEndBlockIndex != null)
+        'selection_end_block_index': selectionEndBlockIndex,
+      if (selectionEndCharOffset != null)
+        'selection_end_char_offset': selectionEndCharOffset,
+      if (selectionStartTokenIndex != null)
+        'selection_start_token_index': selectionStartTokenIndex,
+      if (selectionEndTokenIndex != null)
+        'selection_end_token_index': selectionEndTokenIndex,
       'excerpt': excerpt,
       'stable_ref': stableRef,
     };
@@ -1965,17 +2024,53 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final orderColumn = tableName == 'dollar_tags'
         ? 'study_order'
         : 'sort_order';
-    final rows = await db.rawQuery(
+    final legacyRows = await db.rawQuery(
       '''
-      SELECT MAX(COALESCE($orderColumn, created_at)) AS max_sort_order
+      SELECT COALESCE(MAX(COALESCE($orderColumn, created_at)), 0) AS max_sort_order
       FROM $tableName
       WHERE tag = ?
       ''',
       [normalizedTag],
     );
-    final maxValue =
-        (rows.isNotEmpty ? rows.first['max_sort_order'] : null) as num?;
-    return (maxValue?.toInt() ?? 0) + 1;
+    final legacyMax =
+        (legacyRows.isNotEmpty ? legacyRows.first['max_sort_order'] : null)
+            as num?;
+
+    final tagKind = _tagKindForTable();
+    final groupRows = await db.query(
+      'tag_groups',
+      columns: ['id'],
+      where: '''
+        tag_kind = ?
+        AND name = ?
+        AND COALESCE(deleted_at, '') = ''
+      ''',
+      whereArgs: [tagKind, normalizedTag],
+      limit: 1,
+    );
+    var normalizedMax = 0;
+    if (groupRows.isNotEmpty) {
+      final normalizedRows = await db.rawQuery(
+        '''
+        SELECT COALESCE(MAX(sort_order), 0) AS max_sort_order
+        FROM tag_items
+        WHERE tag_group_id = ?
+          AND tag_kind = ?
+          AND COALESCE(deleted_at, '') = ''
+        ''',
+        [groupRows.first['id']?.toString() ?? '', tagKind],
+      );
+      final value = normalizedRows.isNotEmpty
+          ? normalizedRows.first['max_sort_order']
+          : null;
+      normalizedMax = value is num ? value.toInt() : 0;
+    }
+
+    final highest = [
+      legacyMax?.toInt() ?? 0,
+      normalizedMax.toInt(),
+    ].reduce((left, right) => left > right ? left : right);
+    return highest + 1;
   }
 
   Future<String> _ensureNormalizedTagGroup(

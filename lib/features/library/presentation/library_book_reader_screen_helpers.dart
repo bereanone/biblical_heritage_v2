@@ -448,6 +448,55 @@ String? cleanDisplayRefCode(String? value) {
   return librarySafeUserFacingReferenceText(value);
 }
 
+String libraryCompactReferenceRangeLabel(
+  String? startRef,
+  String? endRef,
+) {
+  final start = cleanDisplayRefCode(startRef);
+  final end = cleanDisplayRefCode(endRef);
+  if (start == null || start.isEmpty) return end ?? '';
+  if (end == null || end.isEmpty) return start;
+  if (start == end) return start;
+
+  final startTokens = start.split(RegExp(r'\s+'));
+  final endTokens = end.split(RegExp(r'\s+'));
+  if (startTokens.length == endTokens.length && startTokens.length >= 2) {
+    var sharedPrefix = true;
+    for (var index = 0; index < startTokens.length - 1; index++) {
+      if (startTokens[index] != endTokens[index]) {
+        sharedPrefix = false;
+        break;
+      }
+    }
+    if (sharedPrefix) {
+      final startTail = startTokens.last;
+      final endTail = endTokens.last;
+      if (_referenceTailIsCompatible(startTail, endTail)) {
+        return '$start - $endTail';
+      }
+    }
+  }
+
+  return '$start - $end';
+}
+
+bool _referenceTailIsCompatible(String startTail, String endTail) {
+  if (startTail == endTail) return true;
+  if (RegExp(r'^\d+$').hasMatch(startTail) &&
+      RegExp(r'^\d+$').hasMatch(endTail)) {
+    return true;
+  }
+
+  final startParts = startTail.split('.');
+  final endParts = endTail.split('.');
+  if (startParts.length < 2 || endParts.length < 2) return false;
+  final startRoot = startParts.sublist(0, startParts.length - 1).join('.');
+  final endRoot = endParts.sublist(0, endParts.length - 1).join('.');
+  if (startRoot.isEmpty || startRoot != endRoot) return false;
+  return RegExp(r'^[0-9]+$').hasMatch(startParts.last) &&
+      RegExp(r'^[0-9]+$').hasMatch(endParts.last);
+}
+
 String? libraryReaderBookAbbreviation(LibraryCatalogItem item) {
   return libraryUserFacingBookAbbreviation(
     title: item.displayTitle,

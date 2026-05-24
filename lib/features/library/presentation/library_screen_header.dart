@@ -20,6 +20,7 @@ class _LibraryHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final fontScale = libraryFontScaleOf(context);
     final chipColor = hasRoot
         ? theme.colorScheme.primary
         : theme.colorScheme.onSurfaceVariant;
@@ -31,14 +32,26 @@ class _LibraryHeader extends StatelessWidget {
           child: FilledButton.tonalIcon(
             onPressed: onOpenBible,
             icon: const Icon(Icons.arrow_back),
-            label: const Text('Bible'),
+            label: Text(
+              'Bible',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: libraryControlTextStyle(
+                context,
+                theme.textTheme.labelLarge,
+                color: theme.colorScheme.onSurface,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
             style: _libraryTonalButtonStyle(context),
           ),
         ),
         const SizedBox(width: 12),
         Text(
           'eLibrary',
-          style: theme.textTheme.headlineMedium?.copyWith(
+          style: libraryScaledTextStyle(
+            theme.textTheme.headlineMedium,
+            libraryTitleScale(fontScale),
             fontWeight: FontWeight.w800,
             color: theme.colorScheme.onSurface,
           ),
@@ -107,9 +120,12 @@ class _LibraryActionsMenu extends StatelessWidget {
             const SizedBox(width: 6),
             Text(
               'Menu',
-              style: Theme.of(
+              style: libraryControlTextStyle(
                 context,
-              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+                Theme.of(context).textTheme.labelLarge,
+                fontWeight: FontWeight.w800,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
             ),
             const SizedBox(width: 2),
             Icon(
@@ -150,7 +166,9 @@ class _StatusPill extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            style: libraryControlTextStyle(
+              context,
+              Theme.of(context).textTheme.labelLarge,
               fontWeight: FontWeight.w800,
               color: color,
             ),

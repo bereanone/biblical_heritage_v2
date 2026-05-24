@@ -6,6 +6,7 @@ class TagDialogActions extends StatelessWidget {
   const TagDialogActions({
     super.key,
     required this.selectionLabel,
+    required this.fontScale,
     required this.currentTag,
     required this.defaultTag,
     required this.categoryController,
@@ -24,6 +25,7 @@ class TagDialogActions extends StatelessWidget {
   });
 
   final String selectionLabel;
+  final double fontScale;
   final String currentTag;
   final String? defaultTag;
   final TextEditingController categoryController;
@@ -62,10 +64,11 @@ class TagDialogActions extends StatelessWidget {
             Expanded(
               child: Text(
                 selectionLabel,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 18,
+                style: TagDialogStyles.titleTextStyle(
+                  theme,
+                  fontScale,
                   color: TagDialogStyles.title(theme),
+                  fontWeight: FontWeight.w800,
                 ),
               ),
             ),
@@ -75,9 +78,11 @@ class TagDialogActions extends StatelessWidget {
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
                   'Default: $defaultTag',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                  style: TagDialogStyles.bodyTextStyle(
+                    theme,
+                    fontScale,
                     color: TagDialogStyles.body(theme),
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
@@ -93,9 +98,20 @@ class TagDialogActions extends StatelessWidget {
                   vertical: 8,
                 ),
                 visualDensity: VisualDensity.compact,
-                textStyle: const TextStyle(fontWeight: FontWeight.w700),
+                textStyle: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  fontScale,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-              child: TagDialogStyles.fittedButtonLabel('Use'),
+              child: TagDialogStyles.fittedButtonLabel(
+                'Use',
+                style: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  fontScale,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
             const SizedBox(width: 8),
             OutlinedButton(
@@ -109,9 +125,20 @@ class TagDialogActions extends StatelessWidget {
                   vertical: 8,
                 ),
                 visualDensity: VisualDensity.compact,
-                textStyle: const TextStyle(fontWeight: FontWeight.w700),
+                textStyle: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  fontScale,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-              child: TagDialogStyles.fittedButtonLabel('Save'),
+              child: TagDialogStyles.fittedButtonLabel(
+                'Save',
+                style: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  fontScale,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ],
         ),
@@ -129,17 +156,21 @@ class TagDialogActions extends StatelessWidget {
                     Expanded(
                       child: Text(
                         'Rapid Tag Session',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
+                        style: TagDialogStyles.titleTextStyle(
+                          theme,
+                          fontScale,
                           color: TagDialogStyles.title(theme),
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
                     ),
                     Text(
                       rapidSummary,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+                      style: TagDialogStyles.bodyTextStyle(
+                        theme,
+                        fontScale,
                         color: TagDialogStyles.body(theme),
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],
@@ -148,7 +179,9 @@ class TagDialogActions extends StatelessWidget {
                 Text(
                   'Turn this on to tag multiple verses without extra prompts. '
                   'Use End Session to stop rapid tagging.',
-                  style: theme.textTheme.bodyMedium?.copyWith(
+                  style: TagDialogStyles.bodyTextStyle(
+                    theme,
+                    fontScale,
                     color: TagDialogStyles.body(theme),
                   ),
                 ),
@@ -161,25 +194,55 @@ class TagDialogActions extends StatelessWidget {
                       onPressed: working
                           ? null
                           : () => onStartRapidTagSession(5),
-                      child: const Text('5 tags'),
+                      child: Text(
+                        '5 tags',
+                        style: TagDialogStyles.buttonTextStyle(
+                          theme,
+                          fontScale,
+                          color: TagDialogStyles.accent(theme),
+                        ),
+                      ),
                     ),
                     FilledButton.tonal(
                       onPressed: working
                           ? null
                           : () => onStartRapidTagSession(10),
-                      child: const Text('10 tags'),
+                      child: Text(
+                        '10 tags',
+                        style: TagDialogStyles.buttonTextStyle(
+                          theme,
+                          fontScale,
+                          color: TagDialogStyles.accent(theme),
+                        ),
+                      ),
                     ),
                     FilledButton.tonal(
                       onPressed: working
                           ? null
                           : () => onStartRapidTagSession(null),
-                      child: const Text('Unlimited'),
+                      child: Text(
+                        'Unlimited',
+                        style: TagDialogStyles.buttonTextStyle(
+                          theme,
+                          fontScale,
+                          color: TagDialogStyles.accent(theme),
+                        ),
+                      ),
                     ),
                     OutlinedButton(
                       onPressed: rapidTagSessionActive
                           ? onEndRapidTagSession
                           : null,
-                      child: const Text('End rapid tag session'),
+                      child: Text(
+                        'End rapid tag session',
+                        style: TagDialogStyles.buttonTextStyle(
+                          theme,
+                          fontScale,
+                          color: rapidTagSessionActive
+                              ? TagDialogStyles.accent(theme)
+                              : TagDialogStyles.disabledBody(theme),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -193,7 +256,9 @@ class TagDialogActions extends StatelessWidget {
             final isNarrow = constraints.maxWidth < 460;
             final tagField = TextField(
               controller: tagController,
-              style: theme.textTheme.titleLarge?.copyWith(
+              style: TagDialogStyles.titleTextStyle(
+                theme,
+                fontScale,
                 color: TagDialogStyles.title(theme),
                 fontWeight: FontWeight.w800,
               ),
@@ -202,6 +267,16 @@ class TagDialogActions extends StatelessWidget {
                 border: const OutlineInputBorder(),
                 filled: true,
                 fillColor: TagDialogStyles.surface(theme),
+                labelStyle: TagDialogStyles.labelTextStyle(
+                  theme,
+                  fontScale,
+                  color: TagDialogStyles.body(theme),
+                ),
+                floatingLabelStyle: TagDialogStyles.labelTextStyle(
+                  theme,
+                  fontScale,
+                  color: TagDialogStyles.title(theme),
+                ),
               ),
               onSubmitted: (_) => onTagSubmitted(),
             );
@@ -213,9 +288,11 @@ class TagDialogActions extends StatelessWidget {
                 style: FilledButton.styleFrom(
                   backgroundColor: accent,
                   foregroundColor: accentText,
-                  textStyle: theme.textTheme.titleMedium?.copyWith(
+                  textStyle: TagDialogStyles.buttonTextStyle(
+                    theme,
+                    fontScale,
+                    color: accentText,
                     fontWeight: FontWeight.w800,
-                    fontSize: 16,
                   ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
@@ -225,6 +302,12 @@ class TagDialogActions extends StatelessWidget {
                 child: TagDialogStyles.fittedButtonLabel(
                   'Tag\nVerse',
                   maxLines: 2,
+                  style: TagDialogStyles.buttonTextStyle(
+                    theme,
+                    fontScale,
+                    color: accentText,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             );
@@ -256,8 +339,20 @@ class TagDialogActions extends StatelessWidget {
             border: const OutlineInputBorder(),
             filled: true,
             fillColor: TagDialogStyles.surfaceHigh(theme),
+            labelStyle: TagDialogStyles.labelTextStyle(
+              theme,
+              fontScale,
+              color: TagDialogStyles.body(theme),
+            ),
+            floatingLabelStyle: TagDialogStyles.labelTextStyle(
+              theme,
+              fontScale,
+              color: TagDialogStyles.title(theme),
+            ),
           ),
-          style: theme.textTheme.titleMedium?.copyWith(
+          style: TagDialogStyles.titleTextStyle(
+            theme,
+            fontScale,
             color: TagDialogStyles.title(theme),
             fontWeight: FontWeight.w700,
           ),
@@ -270,7 +365,14 @@ class TagDialogActions extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: onShowInstructions,
               icon: const Icon(Icons.help_outline, size: 18),
-              label: TagDialogStyles.fittedButtonLabel('Instructions'),
+              label: TagDialogStyles.fittedButtonLabel(
+                'Instructions',
+                style: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  fontScale,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               style: OutlinedButton.styleFrom(
                 foregroundColor: TagDialogStyles.accent(theme),
                 side: BorderSide(color: TagDialogStyles.outlineColor(theme)),
@@ -280,13 +382,24 @@ class TagDialogActions extends StatelessWidget {
                   vertical: 8,
                 ),
                 visualDensity: VisualDensity.compact,
-                textStyle: const TextStyle(fontWeight: FontWeight.w700),
+                textStyle: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  fontScale,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
             OutlinedButton.icon(
               onPressed: onRenameCurrentTag,
               icon: const Icon(Icons.drive_file_rename_outline, size: 18),
-              label: TagDialogStyles.fittedButtonLabel('Rename current tag'),
+              label: TagDialogStyles.fittedButtonLabel(
+                'Rename current tag',
+                style: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  fontScale,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               style: OutlinedButton.styleFrom(
                 foregroundColor: TagDialogStyles.accent(theme),
                 side: BorderSide(color: TagDialogStyles.outlineColor(theme)),
@@ -296,7 +409,11 @@ class TagDialogActions extends StatelessWidget {
                   vertical: 8,
                 ),
                 visualDensity: VisualDensity.compact,
-                textStyle: const TextStyle(fontWeight: FontWeight.w700),
+                textStyle: TagDialogStyles.buttonTextStyle(
+                  theme,
+                  fontScale,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ],

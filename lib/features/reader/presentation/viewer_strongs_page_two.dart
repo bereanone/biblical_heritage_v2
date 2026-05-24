@@ -174,6 +174,7 @@ class _ViewerStrongsPageTwoState extends State<ViewerStrongsPageTwo> {
                         color: theme.colorScheme.onSurface,
                       ),
                       redLetterColor: theme.colorScheme.error,
+                      isNightMode: theme.brightness == Brightness.dark,
                       highlightedStrongs: {canonical},
                     ),
                     maxLines: 3,

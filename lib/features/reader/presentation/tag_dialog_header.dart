@@ -6,6 +6,7 @@ class TagDialogHeader extends StatelessWidget {
   const TagDialogHeader({
     super.key,
     required this.title,
+    required this.fontScale,
     required this.onClose,
     required this.onShowInstructions,
     required this.onFindText,
@@ -18,6 +19,7 @@ class TagDialogHeader extends StatelessWidget {
   });
 
   final String title;
+  final double fontScale;
   final VoidCallback onClose;
   final VoidCallback onShowInstructions;
   final VoidCallback onFindText;
@@ -72,13 +74,14 @@ class TagDialogHeader extends StatelessWidget {
                   title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontSize: legacyStyle ? 24 : 22,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.2,
+                  style: TagDialogStyles.titleTextStyle(
+                    theme,
+                    fontScale,
                     color: legacyStyle
                         ? const Color(0xFF4A2B12)
                         : TagDialogStyles.title(theme),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.2,
                   ),
                 ),
               ),
@@ -114,6 +117,7 @@ class TagDialogHeader extends StatelessWidget {
                         label: '',
                         onPressed: onShowInstructions,
                         compact: compact,
+                        fontScale: fontScale,
                         showLabel: false,
                       ),
                       _TagHeaderChip(
@@ -121,6 +125,7 @@ class TagDialogHeader extends StatelessWidget {
                         label: 'Find Text',
                         onPressed: onFindText,
                         compact: compact,
+                        fontScale: fontScale,
                       ),
                       OutlinedButton(
                         onPressed: onImportClipboard,
@@ -135,12 +140,18 @@ class TagDialogHeader extends StatelessWidget {
                             vertical: compact ? 10 : 12,
                           ),
                           visualDensity: VisualDensity.compact,
-                          textStyle: const TextStyle(
+                          textStyle: TagDialogStyles.buttonTextStyle(
+                            theme,
+                            fontScale,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
                         child: compact
-                            ? const Icon(Icons.arrow_downward_rounded, size: 18)
+                            ? Icon(
+                                Icons.arrow_downward_rounded,
+                                size: 18,
+                                color: TagDialogStyles.body(theme),
+                              )
                             : const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -161,11 +172,20 @@ class TagDialogHeader extends StatelessWidget {
                             vertical: 8,
                           ),
                           visualDensity: VisualDensity.compact,
-                          textStyle: const TextStyle(
+                          textStyle: TagDialogStyles.buttonTextStyle(
+                            theme,
+                            fontScale,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        child: TagDialogStyles.fittedButtonLabel('Rename'),
+                        child: TagDialogStyles.fittedButtonLabel(
+                          'Rename',
+                          style: TagDialogStyles.buttonTextStyle(
+                            theme,
+                            fontScale,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -179,9 +199,11 @@ class TagDialogHeader extends StatelessWidget {
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
                             'Default: $defaultTag',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
+                            style: TagDialogStyles.bodyTextStyle(
+                              theme,
+                              fontScale,
                               color: TagDialogStyles.body(theme),
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
@@ -198,11 +220,20 @@ class TagDialogHeader extends StatelessWidget {
                             vertical: 8,
                           ),
                           visualDensity: VisualDensity.compact,
-                          textStyle: const TextStyle(
+                          textStyle: TagDialogStyles.buttonTextStyle(
+                            theme,
+                            fontScale,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        child: TagDialogStyles.fittedButtonLabel('Use'),
+                        child: TagDialogStyles.fittedButtonLabel(
+                          'Use',
+                          style: TagDialogStyles.buttonTextStyle(
+                            theme,
+                            fontScale,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
                       OutlinedButton(
                         onPressed: onSaveDefault,
@@ -217,12 +248,19 @@ class TagDialogHeader extends StatelessWidget {
                             vertical: 8,
                           ),
                           visualDensity: VisualDensity.compact,
-                          textStyle: const TextStyle(
+                          textStyle: TagDialogStyles.buttonTextStyle(
+                            theme,
+                            fontScale,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
                         child: TagDialogStyles.fittedButtonLabel(
                           'Make Default',
+                          style: TagDialogStyles.buttonTextStyle(
+                            theme,
+                            fontScale,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ],
@@ -243,6 +281,7 @@ class _TagHeaderChip extends StatelessWidget {
     required this.label,
     required this.onPressed,
     required this.compact,
+    required this.fontScale,
     this.showLabel = true,
   });
 
@@ -250,6 +289,7 @@ class _TagHeaderChip extends StatelessWidget {
   final String label;
   final VoidCallback onPressed;
   final bool compact;
+  final double fontScale;
   final bool showLabel;
 
   @override
@@ -266,7 +306,11 @@ class _TagHeaderChip extends StatelessWidget {
           vertical: compact ? 10 : 14,
         ),
         minimumSize: Size(compact ? 38 : 0, 38),
-        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        textStyle: TagDialogStyles.buttonTextStyle(
+          theme,
+          fontScale,
+          fontWeight: FontWeight.w700,
+        ),
       ),
       child: compact
           ? Icon(icon, size: 18)
@@ -276,7 +320,14 @@ class _TagHeaderChip extends StatelessWidget {
                 Icon(icon, size: 18),
                 if (showLabel) ...[
                   const SizedBox(width: 6),
-                  TagDialogStyles.fittedButtonLabel(label),
+                  TagDialogStyles.fittedButtonLabel(
+                    label,
+                    style: TagDialogStyles.buttonTextStyle(
+                      theme,
+                      fontScale,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ],
               ],
             ),

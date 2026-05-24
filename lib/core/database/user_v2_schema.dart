@@ -11,6 +11,7 @@ class UserV2Schema {
       await _ensureLibraryNavigationColumns(db);
       await _ensureElibraryRefIndex(db);
       await _ensureLibraryTextBlocks(db);
+      await _ensureElibraryMarkups(db);
       await _seedDevicesTable(db, deviceId: deviceId);
       await _seedSyncState(db, deviceId: deviceId);
     });
@@ -911,6 +912,40 @@ class UserV2Schema {
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_library_text_blocks_item_href
       ON library_text_blocks (library_item_id, epub_href)
+    ''');
+  }
+
+  static Future<void> _ensureElibraryMarkups(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS elibrary_markups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        library_item_id TEXT NOT NULL,
+        epub_href TEXT NOT NULL,
+        start_block_index INTEGER NOT NULL,
+        start_char_offset INTEGER NOT NULL,
+        end_block_index INTEGER NOT NULL,
+        end_char_offset INTEGER NOT NULL,
+        start_token_index INTEGER,
+        end_token_index INTEGER,
+        ref_start TEXT,
+        ref_end TEXT,
+        compact_ref TEXT,
+        selected_text_snapshot TEXT NOT NULL,
+        markup_type TEXT NOT NULL,
+        color TEXT NOT NULL,
+        note_text TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_elibrary_markups_item_href
+      ON elibrary_markups (library_item_id, epub_href, deleted_at)
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_elibrary_markups_item_type
+      ON elibrary_markups (library_item_id, markup_type, deleted_at)
     ''');
   }
 

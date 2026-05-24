@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_settings_service.dart';
 import '../data/library_catalog_service.dart';
+import 'library_font_scale.dart';
 import '../../search/search_highlight_helper.dart';
 import '../../search/search_result_quick_apply_button.dart';
 
@@ -81,8 +82,8 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
   }
 
   Future<void> _loadUnindexedCount() async {
-    final count =
-        await LibraryCatalogService.instance.countUnindexedManagedItems();
+    final count = await LibraryCatalogService.instance
+        .countUnindexedManagedItems();
     if (!mounted) return;
     setState(() => _unindexedCount = count);
   }
@@ -116,7 +117,8 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
     setState(() {
       _selectedCollection = filterValue;
     });
-    final hasQuery = _controller.text.trim().isNotEmpty ||
+    final hasQuery =
+        _controller.text.trim().isNotEmpty ||
         (_lastSearchTerm?.trim().isNotEmpty ?? false);
     if (hasQuery) {
       _performSearch();
@@ -156,8 +158,9 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
       final results = await LibraryCatalogService.instance.searchContent(
         query: query,
         limit: 50,
-        collectionFilter:
-            _selectedCollection == 'all' ? null : _selectedCollection,
+        collectionFilter: _selectedCollection == 'all'
+            ? null
+            : _selectedCollection,
       );
       if (!mounted || requestId != _searchRequestId) return;
       setState(() {
@@ -197,10 +200,26 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                 controller: _controller,
                 focusNode: _focusNode,
                 textInputAction: TextInputAction.search,
+                style: libraryBodyTextStyle(
+                  context,
+                  theme.textTheme.bodyMedium,
+                  color: scheme.onSurface,
+                ),
                 decoration: InputDecoration(
                   labelText: 'Search eLibrary',
                   hintText: 'Search book text, titles, or authors',
                   border: const OutlineInputBorder(),
+                  labelStyle: libraryControlTextStyle(
+                    context,
+                    theme.textTheme.bodyMedium,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  hintStyle: libraryCaptionTextStyle(
+                    context,
+                    theme.textTheme.bodySmall,
+                    color: scheme.onSurfaceVariant,
+                  ),
                   suffixIcon: hasQuery
                       ? Row(
                           mainAxisSize: MainAxisSize.min,
@@ -236,7 +255,9 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
             alignment: Alignment.centerLeft,
             child: Text(
               'Searches the indexed eLibrary text and opens the selected hit.',
-              style: theme.textTheme.bodySmall?.copyWith(
+              style: libraryCaptionTextStyle(
+                context,
+                theme.textTheme.bodySmall,
                 color: scheme.onSurfaceVariant,
               ),
             ),
@@ -267,15 +288,19 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                     children: [
                       TextSpan(
                         text: 'Last search: ',
-                        style: theme.textTheme.bodySmall?.copyWith(
+                        style: libraryCaptionTextStyle(
+                          context,
+                          theme.textTheme.bodySmall,
                           color: scheme.onSurfaceVariant,
                         ),
                       ),
                       TextSpan(
                         text: stripWrappingSearchQuotes(displaySearchTerm),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.w700,
+                        style: libraryCaptionTextStyle(
+                          context,
+                          theme.textTheme.bodySmall,
                           color: scheme.onSurface,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
@@ -294,7 +319,11 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                     child: Text(
                       _error!,
                       textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium,
+                      style: libraryBodyTextStyle(
+                        context,
+                        theme.textTheme.bodyMedium,
+                        color: scheme.onSurface,
+                      ),
                     ),
                   )
                 : !_hasSearched
@@ -316,7 +345,9 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                               Text(
                                 message,
                                 textAlign: TextAlign.center,
-                                style: theme.textTheme.bodyMedium?.copyWith(
+                                style: libraryBodyTextStyle(
+                                  context,
+                                  theme.textTheme.bodyMedium,
                                   color: scheme.onSurfaceVariant,
                                 ),
                               ),
@@ -328,7 +359,15 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                                       overrideQuery: rememberedSearch,
                                     ),
                                     icon: const Icon(Icons.history),
-                                    label: const Text('Resume last search'),
+                                    label: Text(
+                                      'Resume last search',
+                                      style: libraryControlTextStyle(
+                                        context,
+                                        theme.textTheme.labelLarge,
+                                        fontWeight: FontWeight.w800,
+                                        color: scheme.primary,
+                                      ),
+                                    ),
                                   ),
                                 ),
                             ],
@@ -347,7 +386,11 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                           Text(
                             'No eLibrary matches found.',
                             textAlign: TextAlign.center,
-                            style: theme.textTheme.bodyMedium,
+                            style: libraryBodyTextStyle(
+                              context,
+                              theme.textTheme.bodyMedium,
+                              color: scheme.onSurface,
+                            ),
                           ),
                           if (_unindexedCount > 0) ...[
                             const SizedBox(height: 10),
@@ -357,7 +400,9 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                               'not been indexed yet and cannot be searched. '
                               'Open the Commentary panel and tap Refresh to index them.',
                               textAlign: TextAlign.center,
-                              style: theme.textTheme.bodySmall?.copyWith(
+                              style: libraryCaptionTextStyle(
+                                context,
+                                theme.textTheme.bodySmall,
                                 color: scheme.onSurfaceVariant,
                               ),
                             ),
@@ -413,6 +458,12 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                           item.displayTitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
+                          style: libraryTitleTextStyle(
+                            context,
+                            theme.textTheme.titleMedium,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onSurface,
+                          ),
                         ),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -422,7 +473,9 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                                 locationText,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodySmall?.copyWith(
+                                style: libraryCaptionTextStyle(
+                                  context,
+                                  theme.textTheme.bodySmall,
                                   color: scheme.onSurfaceVariant,
                                 ),
                               ),
@@ -430,7 +483,11 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                               const SizedBox(height: 3),
                               _HighlightedSearchText(
                                 text: snippetText,
-                                baseStyle: theme.textTheme.bodyMedium,
+                                baseStyle: libraryBodyTextStyle(
+                                  context,
+                                  theme.textTheme.bodyMedium,
+                                  color: scheme.onSurface,
+                                ),
                                 highlightTerms: highlightTerms,
                               ),
                             ],
@@ -481,11 +538,17 @@ class _EgwCategoryFilterField extends StatelessWidget {
         if (result != null) onChanged(result);
       },
       child: InputDecorator(
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           labelText: 'Category Filter',
           border: OutlineInputBorder(),
           isDense: true,
           contentPadding: EdgeInsets.fromLTRB(10, 10, 8, 8),
+          labelStyle: libraryControlTextStyle(
+            context,
+            theme.textTheme.bodyMedium,
+            fontWeight: FontWeight.w700,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
         child: Row(
           children: [
@@ -493,7 +556,11 @@ class _EgwCategoryFilterField extends StatelessWidget {
               child: Text(
                 selected.label,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium,
+                style: libraryBodyTextStyle(
+                  context,
+                  theme.textTheme.bodyMedium,
+                  color: theme.colorScheme.onSurface,
+                ),
               ),
             ),
             Icon(
@@ -535,8 +602,11 @@ class _EgwCategoryFilterDialog extends StatelessWidget {
             children: [
               Text(
                 'Category Filter',
-                style: theme.textTheme.titleMedium?.copyWith(
+                style: libraryTitleTextStyle(
+                  context,
+                  theme.textTheme.titleMedium,
                   fontWeight: FontWeight.w700,
+                  color: theme.colorScheme.onSurface,
                 ),
               ),
               const SizedBox(height: 10),
@@ -557,11 +627,13 @@ class _EgwCategoryFilterDialog extends StatelessWidget {
                           ? theme.colorScheme.surfaceContainerHigh
                           : null,
                       title: Text(filter.label),
+                      titleTextStyle: libraryBodyTextStyle(
+                        context,
+                        theme.textTheme.bodyMedium,
+                        color: theme.colorScheme.onSurface,
+                      ),
                       trailing: isSelected
-                          ? Icon(
-                              Icons.check,
-                              color: theme.colorScheme.primary,
-                            )
+                          ? Icon(Icons.check, color: theme.colorScheme.primary)
                           : null,
                       onTap: () => Navigator.of(context).pop(filter.value),
                     );

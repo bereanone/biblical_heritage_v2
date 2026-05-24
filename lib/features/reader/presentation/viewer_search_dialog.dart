@@ -7,6 +7,7 @@ import '../../../core/database/study_bible_database.dart';
 import '../../library/presentation/library_book_reader_screen.dart';
 import '../../library/data/library_catalog_service.dart';
 import '../../library/presentation/library_catalog_search_panel.dart';
+import '../../library/presentation/library_font_scale.dart';
 import '../data/highlight_groups_repository.dart';
 import 'viewer_book_group_colors.dart';
 import 'reader_search_mode_picker.dart';
@@ -753,9 +754,12 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
               ),
             );
 
-            final libraryBody = LibraryCatalogSearchPanel(
-              onSelectItem: _openLibraryItem,
-              onQuickApplyItem: _quickApplyLibrarySearchResult,
+            final libraryBody = LibraryFontScaleScope(
+              scale: widget.fontScale,
+              child: LibraryCatalogSearchPanel(
+                onSelectItem: _openLibraryItem,
+                onQuickApplyItem: _quickApplyLibrarySearchResult,
+              ),
             );
 
             return Column(

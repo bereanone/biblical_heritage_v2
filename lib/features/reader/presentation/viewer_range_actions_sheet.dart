@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'tag_dialog_styles.dart';
+
 enum ViewerRangeAction {
   copyNoCitation,
   copyWithCitation,
@@ -29,6 +31,7 @@ class ViewerRangeActionsPayload {
 Future<ViewerRangeAction?> showViewerRangeActionsSheet(
   BuildContext context, {
   required ViewerRangeActionsPayload payload,
+  required double fontScale,
   bool enableStrongs = false,
 }) {
   final theme = Theme.of(context);
@@ -54,15 +57,21 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                 children: [
                   Text(
                     'Range Actions',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
+                    style: TagDialogStyles.titleTextStyle(
+                      theme,
+                      fontScale,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.15,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     payload.label,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onSurface.withValues(alpha: 0.74),
+                    style: TagDialogStyles.bodyTextStyle(
+                      theme,
+                      fontScale,
+                      color: TagDialogStyles.mutedBody(theme),
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -78,15 +87,21 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                       children: [
                         Text(
                           payload.previewText,
-                          style: theme.textTheme.bodyLarge?.copyWith(
+                          style: TagDialogStyles.bodyTextStyle(
+                            theme,
+                            fontScale,
+                            color: TagDialogStyles.title(theme),
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                         const SizedBox(height: 6),
                         Text(
                           payload.label,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: colorScheme.onSurface.withValues(alpha: 0.74),
+                          style: TagDialogStyles.bodyTextStyle(
+                            theme,
+                            fontScale,
+                            color: TagDialogStyles.mutedBody(theme),
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
@@ -100,6 +115,7 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                       _ActionButton(
                         icon: Icons.copy_outlined,
                         label: 'Copy No Citation',
+                        fontScale: fontScale,
                         onTap: () => Navigator.of(sheetContext).pop(
                           ViewerRangeAction.copyNoCitation,
                         ),
@@ -107,6 +123,7 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                       _ActionButton(
                         icon: Icons.assignment_outlined,
                         label: 'Copy With Citation',
+                        fontScale: fontScale,
                         onTap: () => Navigator.of(sheetContext).pop(
                           ViewerRangeAction.copyWithCitation,
                         ),
@@ -114,6 +131,7 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                       _ActionButton(
                         icon: Icons.format_paint_outlined,
                         label: 'Highlight',
+                        fontScale: fontScale,
                         onTap: () => Navigator.of(sheetContext).pop(
                           ViewerRangeAction.highlight,
                         ),
@@ -121,6 +139,7 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                       _ActionButton(
                         icon: Icons.layers_clear_outlined,
                         label: 'Clear Markup',
+                        fontScale: fontScale,
                         onTap: () => Navigator.of(sheetContext).pop(
                           ViewerRangeAction.clearMarkup,
                         ),
@@ -128,13 +147,15 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                       _ActionButton(
                         icon: Icons.tag_outlined,
                         label: 'Add # Tag',
+                        fontScale: fontScale,
                         onTap: () => Navigator.of(sheetContext).pop(
                           ViewerRangeAction.addHashTag,
                         ),
                       ),
                       _ActionButton(
                         icon: Icons.attach_money_outlined,
-                        label: 'Add \$ Tag',
+                        label: 'Choose # Tag',
+                        fontScale: fontScale,
                         onTap: () => Navigator.of(sheetContext).pop(
                           ViewerRangeAction.addDollarTag,
                         ),
@@ -142,6 +163,7 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                       _ActionButton(
                         icon: Icons.menu_book_outlined,
                         label: 'Add to Memory',
+                        fontScale: fontScale,
                         onTap: () => Navigator.of(sheetContext).pop(
                           ViewerRangeAction.addToMemory,
                         ),
@@ -149,6 +171,7 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                       _ActionButton(
                         icon: Icons.translate_outlined,
                         label: "Strong's",
+                        fontScale: fontScale,
                         enabled: enableStrongs,
                         onTap: enableStrongs
                             ? () => Navigator.of(sheetContext).pop(
@@ -159,6 +182,7 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                       _ActionButton(
                         icon: Icons.close_rounded,
                         label: 'Reset Range',
+                        fontScale: fontScale,
                         onTap: () => Navigator.of(sheetContext).pop(
                           ViewerRangeAction.resetRange,
                         ),
@@ -179,12 +203,14 @@ class _ActionButton extends StatelessWidget {
   const _ActionButton({
     required this.icon,
     required this.label,
+    required this.fontScale,
     required this.onTap,
     this.enabled = true,
   });
 
   final IconData icon;
   final String label;
+  final double fontScale;
   final VoidCallback? onTap;
   final bool enabled;
 
@@ -195,11 +221,21 @@ class _ActionButton extends StatelessWidget {
     return OutlinedButton.icon(
       onPressed: enabled ? onTap : null,
       icon: Icon(icon, size: 18),
-      label: Text(label),
+      label: Text(
+        label,
+        style: TagDialogStyles.buttonTextStyle(
+          theme,
+          fontScale,
+          color: enabled
+              ? colorScheme.primary
+              : TagDialogStyles.disabledBody(theme),
+          fontWeight: FontWeight.w700,
+        ),
+      ),
       style: OutlinedButton.styleFrom(
         foregroundColor: enabled
             ? colorScheme.primary
-            : colorScheme.onSurface.withValues(alpha: 0.35),
+            : TagDialogStyles.disabledBody(theme),
         side: BorderSide(
           color: enabled
               ? colorScheme.outline.withValues(alpha: 0.45)

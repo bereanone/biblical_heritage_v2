@@ -54,7 +54,10 @@ class AppSettingsService {
   static const _bottomBarKey = 'theme.color.bottombar';
   static const _accentKey = 'theme.color.accent';
   static const _viewerFontSizeKey = 'viewer.font_size';
+  static const _elibraryZoomScaleKey = 'viewer.elibrary.zoom_scale';
   static const _defaultHighlightGroupKey = 'viewer.markup.default_group_id';
+  static const _defaultElibraryHighlightColorKey =
+      'viewer.elibrary.highlight.color_hex';
   static const _interlinearEnabledKey = 'viewer.interlinear.enabled';
   static const _interlinearEnglishOrderKey = 'viewer.interlinear.english_order';
   static const _interlinearShowEnglishGlossKey =
@@ -147,6 +150,59 @@ class AppSettingsService {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  Future<double> loadViewerFontScale() async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_viewerFontSizeKey],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) {
+      final value = double.tryParse(rows.first['value']?.toString() ?? '');
+      if (value != null && value.isFinite && value > 0) {
+        return value;
+      }
+    }
+    return presetForMode(AppThemeMode.sepia).viewerFontScale;
+  }
+
+  Future<void> saveElibraryZoomScale(double value) async {
+    final db = await UserDatabase.instance.database;
+    final normalized = value.isFinite
+        ? value.clamp(0.85, 1.60).toDouble()
+        : 1.0;
+    await db.insert('app_settings', {
+      'key': _elibraryZoomScaleKey,
+      'value': normalized.toStringAsFixed(2),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<double> loadElibraryZoomScale() async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_elibraryZoomScaleKey],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) {
+      final value = double.tryParse(rows.first['value']?.toString() ?? '');
+      if (value != null && value.isFinite && value > 0) {
+        // The older eLibrary reader treated 170% as the implicit baseline.
+        // Normalize that exact legacy value back to the new honest 100% base.
+        if ((value - 1.70).abs() < 0.005) {
+          await saveElibraryZoomScale(1.0);
+          return 1.0;
+        }
+        return value.clamp(0.85, 1.60).toDouble();
+      }
+    }
+    return 1.0;
+  }
+
   Future<int?> loadDefaultHighlightGroupId() async {
     final db = await UserDatabase.instance.database;
     final rows = await db.query(
@@ -165,6 +221,30 @@ class AppSettingsService {
     await db.insert('app_settings', {
       'key': _defaultHighlightGroupKey,
       'value': id.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<String?> loadDefaultElibraryHighlightColorHex() async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_defaultElibraryHighlightColorKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final value = rows.first['value']?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
+  Future<void> saveDefaultElibraryHighlightColorHex(String hex) async {
+    final db = await UserDatabase.instance.database;
+    final value = hex.trim();
+    if (value.isEmpty) return;
+    await db.insert('app_settings', {
+      'key': _defaultElibraryHighlightColorKey,
+      'value': value,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 

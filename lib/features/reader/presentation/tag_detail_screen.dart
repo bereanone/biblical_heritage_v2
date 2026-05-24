@@ -11,7 +11,9 @@ import 'package:path_provider/path_provider.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../../core/theme/app_settings_service.dart';
+import '../../library/data/library_catalog_service.dart';
 import '../../library/data/library_citation_display_helper.dart';
+import '../../library/presentation/library_book_reader_screen.dart';
 import '../data/presentation/presentation_models.dart';
 import '../data/presentation/presentation_text_format.dart';
 import 'tag_dialog_styles.dart';
@@ -25,12 +27,14 @@ class HashTagDetailScreen extends StatefulWidget {
     super.key,
     required this.repository,
     required this.tag,
+    required this.fontScale,
     this.onSelectBlockId,
     this.onSelectTag,
   });
 
   final HashTagRepository repository;
   final String tag;
+  final double fontScale;
   final Future<void> Function(int blockId)? onSelectBlockId;
   final Future<void> Function(String tag)? onSelectTag;
 
@@ -849,6 +853,22 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         sourceParagraph: decoded['source_paragraph']?.toString() ?? '',
         excerpt: decoded['excerpt']?.toString() ?? '',
         stableRef: decoded['stable_ref']?.toString() ?? '',
+        sourceLibraryItemId:
+            decoded['source_library_item_id']?.toString() ?? '',
+        selectedTextSnapshot:
+            decoded['selected_text_snapshot']?.toString() ?? '',
+        selectionStartBlockIndex:
+            _intFromJson(decoded['selection_start_block_index']),
+        selectionStartCharOffset:
+            _intFromJson(decoded['selection_start_char_offset']),
+        selectionEndBlockIndex:
+            _intFromJson(decoded['selection_end_block_index']),
+        selectionEndCharOffset:
+            _intFromJson(decoded['selection_end_char_offset']),
+        selectionStartTokenIndex:
+            _intFromJson(decoded['selection_start_token_index']),
+        selectionEndTokenIndex:
+            _intFromJson(decoded['selection_end_token_index']),
       );
     } catch (_) {
       return null;
@@ -1016,6 +1036,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         return _EditEntryNoteDialog(
           repository: widget.repository,
           entry: entry,
+          fontScale: widget.fontScale,
           title: _isNoteOnlyEntry(entry)
               ? 'Edit content item'
               : 'Edit Bible range',
@@ -1061,6 +1082,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         return _ContentItemDialog(
           repository: widget.repository,
           tag: widget.tag,
+          fontScale: widget.fontScale,
         );
       },
     );
@@ -1080,6 +1102,37 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     if (_isNoteOnlyEntry(entry) && !_isDollarRepository) {
       await _editEntryNote(entry);
       return;
+    }
+    final metadata = _eLibraryNoteMetadata(entry);
+    if (metadata != null && metadata.sourceLibraryItemId.trim().isNotEmpty) {
+      final item = await LibraryCatalogService.instance.loadItemById(
+        metadata.sourceLibraryItemId.trim(),
+      );
+      if (item != null) {
+        if (!mounted) return;
+        final navigator = Navigator.of(context, rootNavigator: true);
+        navigator.pop();
+        await Future<void>.microtask(() {
+          if (!navigator.mounted) return;
+          navigator.push(
+            MaterialPageRoute<void>(
+              builder: (_) => LibraryBookReaderScreen(
+                item: item,
+                initialHref: metadata.sourceHref.trim().isNotEmpty
+                    ? metadata.sourceHref.trim()
+                    : item.epubHref,
+                initialAnchorId: metadata.sourceAnchorId.trim().isNotEmpty
+                    ? metadata.sourceAnchorId.trim()
+                    : item.anchorId,
+                initialSpineIndex: metadata.sourceSpineIndex ?? item.spineIndex,
+                initialParagraphIndex:
+                    metadata.sourceParagraphIndex ?? item.paragraphIndex,
+              ),
+            ),
+          );
+        });
+        return;
+      }
     }
     await _openVerse(entry);
   }
@@ -1849,6 +1902,14 @@ class _ELibraryNoteMetadata {
     required this.sourceParagraph,
     required this.excerpt,
     required this.stableRef,
+    required this.sourceLibraryItemId,
+    required this.selectedTextSnapshot,
+    required this.selectionStartBlockIndex,
+    required this.selectionStartCharOffset,
+    required this.selectionEndBlockIndex,
+    required this.selectionEndCharOffset,
+    required this.selectionStartTokenIndex,
+    required this.selectionEndTokenIndex,
   });
 
   final String sourceTitle;
@@ -1866,6 +1927,14 @@ class _ELibraryNoteMetadata {
   final String sourceParagraph;
   final String excerpt;
   final String stableRef;
+  final String sourceLibraryItemId;
+  final String selectedTextSnapshot;
+  final int? selectionStartBlockIndex;
+  final int? selectionStartCharOffset;
+  final int? selectionEndBlockIndex;
+  final int? selectionEndCharOffset;
+  final int? selectionStartTokenIndex;
+  final int? selectionEndTokenIndex;
 
   String get citationText {
     final page = sourcePageNumber;

@@ -3,11 +3,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../core/bootstrap/library_root_service.dart';
+import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/app_theme_mode.dart';
 import '../data/library_catalog_service.dart';
 import 'library_book_reader_screen.dart';
 import 'library_catalog_search_dialog.dart';
 import 'library_navigation_tree.dart';
+import 'library_font_scale.dart';
 import '../../utilities/presentation/elibrary_setup_screen.dart';
 import '../../utilities/presentation/library_root_setup_screen.dart';
 

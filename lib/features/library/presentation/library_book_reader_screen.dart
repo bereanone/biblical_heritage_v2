@@ -1,8 +1,12 @@
 // ignore_for_file: unused_element, dead_code
 
+import 'dart:async';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -10,23 +14,37 @@ import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/user_database.dart';
 import '../../../core/theme/app_theme_mode.dart';
+import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/theme_preferences.dart';
+import '../data/elibrary_markup_repository.dart';
 import '../data/library_citation_display_helper.dart';
 import '../../reader/data/commentary_research_library_service.dart';
+import '../../reader/presentation/highlight_render.dart';
+import '../../reader/presentation/tag_quick_apply_helper.dart';
+import '../../reader/presentation/tag_screen_launcher.dart';
+import '../../reader/presentation/tag_dialog_styles.dart';
 import '../../reader/presentation/reader_search_mode_picker.dart';
 import '../../reader/presentation/viewer_search_dialog.dart';
+import '../../reader/presentation/viewer_passage_models.dart';
+import '../../reader/presentation/viewer_range_selection.dart';
 import '../../search/search_highlight_helper.dart';
 import '../data/library_catalog_service.dart';
+import 'elibrary_highlight_color_picker.dart';
+import 'library_font_scale.dart';
 import 'library_navigation_tree.dart';
+import '../../reader/presentation/text_range_geometry.dart';
 
 part 'epub_inline_span_builder.dart';
 part 'epub_body_block_parser.dart';
 part 'library_contents_popup.dart';
 part 'library_reader_bottom_bar.dart';
+part 'library_book_reader_range_selection.dart';
+part 'library_book_reader_selection_menu.dart';
 part 'library_book_reader_screen_helpers.dart';
 
 const bool _libraryRefCodeDiagnosticsEnabled = false;
 const bool _librarySectionFallbackDiagnosticsEnabled = false;
+const bool _enableTextRangeGeometry = false;
 
 class LibraryBookReaderScreen extends StatefulWidget {
   const LibraryBookReaderScreen({
@@ -61,12 +79,18 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   final _service = CommentaryResearchLibraryService.instance;
   final ScrollController _bodyScrollController = ScrollController();
   final Map<String, GlobalKey> _bodyBlockKeys = <String, GlobalKey>{};
+  final TextRangeGeometryRegistry _geometryRegistry =
+      TextRangeGeometryRegistry();
   String? _lastSearchTerm;
+  LibraryRangeSelection _rangeSelection = const LibraryRangeSelection();
+  bool _librarySelectionActionsOpen = false;
   bool _loading = true;
   bool _nightMode = false;
   bool _showRefCodes = false;
   bool _refCodesLoaded = false;
-  double _fontScale = 1.0;
+  double _fontScale = 1.3;
+  double _zoomScale = 1.0;
+  final int _geometryTick = 0;
   String? _error;
   List<LibraryBookSection> _sections = const [];
   List<LibraryCatalogNavigationItem> _navigationItems = const [];
@@ -77,6 +101,15 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   Map<String, String> _refCodeByLocation = <String, String>{};
   Map<String, Map<int, String>> _paragraphReferenceCodesBySection =
       <String, Map<int, String>>{};
+  Map<String, List<ElibraryMarkupRecord>> _elibraryMarkupsByHref =
+      <String, List<ElibraryMarkupRecord>>{};
+
+  String get _geometryScopeId {
+    final section = _sections.isEmpty
+        ? null
+        : _sections[_selectedIndex.clamp(0, _sections.length - 1)];
+    return 'elibrary:${widget.item.id}:${section?.entryName ?? '(none)'}';
+  }
 
   @override
   void initState() {
@@ -84,16 +117,28 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     _nightMode = widget.themeMode == AppThemeMode.night;
     final initialSearchTerm = widget.searchQuery?.trim() ?? '';
     _lastSearchTerm = initialSearchTerm.isNotEmpty ? initialSearchTerm : null;
+    _bodyScrollController.addListener(_onBodyScroll);
     _load();
   }
 
   @override
   void dispose() {
+    _geometryDebounce?.cancel();
+    _bodyScrollController.removeListener(_onBodyScroll);
     _bodyScrollController.dispose();
     super.dispose();
   }
 
+  Timer? _geometryDebounce;
+
+  void _onBodyScroll() {
+  }
+
   Future<void> _load() async {
+    final savedFontScale =
+        await AppSettingsService.instance.loadViewerFontScale();
+    final savedZoomScale =
+        await AppSettingsService.instance.loadElibraryZoomScale();
     final savedShowRefCodes = await LocalSettingsStore.instance
         .loadLibraryReaderShowRefCodes();
     final selection = await LibraryRootService.instance.loadSelection();
@@ -140,9 +185,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
       // Periodicals generate ref codes inline (libraryReaderPeriodicalRefCode);
       // skipping the DB scan avoids ~1,900 serial async queries on RH open.
       final paragraphReferenceCodeLoadResult =
-          !widget.item.isPdf &&
-              !widget.item.isPeriodical &&
-              savedShowRefCodes
+          !widget.item.isPdf && !widget.item.isPeriodical && savedShowRefCodes
           ? await _loadParagraphReferenceCodes(
               sections: sections,
               libraryItemId: widget.item.id,
@@ -152,8 +195,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
               bySection: <String, Map<int, String>>{},
               byLocation: <String, String>{},
             );
+      final elibraryMarkupsByHref = await _loadElibraryMarkupHighlights(
+        widget.item.id,
+      );
       if (!mounted) return;
       setState(() {
+        _fontScale = savedFontScale;
+        _zoomScale = savedZoomScale;
         _sections = sections;
         _navigationItems = navigationItems;
         _selectedIndex = initialIndex;
@@ -163,6 +211,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         _refCodeByLocation = paragraphReferenceCodeLoadResult.byLocation;
         _paragraphReferenceCodesBySection =
             paragraphReferenceCodeLoadResult.bySection;
+        _elibraryMarkupsByHref = elibraryMarkupsByHref;
         _loading = false;
       });
       final targetKey = _initialScrollTargetKey();
@@ -191,6 +240,757 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     if (selectedSearchTerm.isNotEmpty) {
       _lastSearchTerm = selectedSearchTerm;
     }
+  }
+
+  void _beginLibraryRangeSelection(int blockIndex, int tokenIndex) {
+    if (!mounted) return;
+    setState(() {
+      _rangeSelection = _rangeSelection.beginAt(blockIndex, tokenIndex);
+    });
+  }
+
+  void _completeLibraryRangeSelection(int blockIndex, int tokenIndex) {
+    if (!mounted) return;
+    setState(() {
+      _rangeSelection = _rangeSelection.completeAt(blockIndex, tokenIndex);
+    });
+  }
+
+  void _clearLibraryRangeSelection() {
+    if (!mounted) return;
+    setState(() {
+      _rangeSelection = _rangeSelection.clear();
+    });
+  }
+
+  void _handleLibraryWordLongPress({
+    required int blockIndex,
+    required int tokenIndex,
+  }) {
+    if (_rangeSelection.isPendingRange) {
+      _completeLibraryRangeSelection(blockIndex, tokenIndex);
+      return;
+    }
+    _beginLibraryRangeSelection(blockIndex, tokenIndex);
+  }
+
+  void _handleLibraryWordLongPressMove({
+    required int blockIndex,
+    required int tokenIndex,
+  }) {
+    if (!_rangeSelection.hasSelection) {
+      _beginLibraryRangeSelection(blockIndex, tokenIndex);
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _rangeSelection = _rangeSelection.completeAt(blockIndex, tokenIndex);
+    });
+  }
+
+  String? _referenceCodeForSectionBlock({
+    required LibraryCatalogItem item,
+    required LibraryBookSection? section,
+    required LibraryBookBlock block,
+    required int blockIndex,
+    required int paragraphIndex,
+    required int devotionalFallbackParagraphCount,
+    required Map<int, String> sectionReferenceCodes,
+  }) {
+    if (block.kind != 'paragraph') return null;
+    final sectionTitle = section?.title ?? '';
+    if (item.isDevotional) {
+      return libraryReaderDevotionalFallbackRefCodeForBlock(
+        item: item,
+        sectionTitle: sectionTitle,
+        block: block,
+        fallbackParagraphCount: devotionalFallbackParagraphCount,
+      );
+    }
+    if (item.isPeriodical) {
+      return libraryReaderPeriodicalRefCode(
+        item: item,
+        sectionTitle: sectionTitle,
+        paragraphIndex: paragraphIndex,
+      );
+    }
+
+    return _refCodeByLocation[_refCodeLocationKey(
+          libraryItemId: item.id,
+          href: section?.entryName ?? '',
+          paragraphIndex: paragraphIndex,
+        )] ??
+        sectionReferenceCodes[paragraphIndex];
+  }
+
+  String _buildLibrarySelectionReferenceLabel({
+    required LibraryCatalogItem item,
+    required LibraryBookSection? section,
+    required List<LibraryBookBlock> sectionBlocks,
+  }) {
+    return _buildLibrarySelectionReferenceEndpoints(
+      item: item,
+      section: section,
+      sectionBlocks: sectionBlocks,
+    ).compactRef;
+  }
+
+  ({String refStart, String refEnd, String compactRef})
+  _buildLibrarySelectionReferenceEndpoints({
+    required LibraryCatalogItem item,
+    required LibraryBookSection? section,
+    required List<LibraryBookBlock> sectionBlocks,
+  }) {
+    final low = _rangeSelection.lowerAnchor;
+    final high = _rangeSelection.upperAnchor;
+    if (low == null || high == null) {
+      final fallback = _buildEpubSelectionFallbackReference(
+        item: item,
+        section: section,
+      );
+      return (refStart: fallback, refEnd: fallback, compactRef: fallback);
+    }
+
+    final sectionReferenceCodes = section == null
+        ? const <int, String>{}
+        : item.isDevotional
+        ? const <int, String>{}
+        : _paragraphReferenceCodesBySection[_sectionKey(section.entryName)] ??
+              const <int, String>{};
+
+    final refs = <String>[];
+    var paragraphIndex = 0;
+    var devotionalFallbackParagraphCount = 0;
+    for (var index = 0; index < sectionBlocks.length; index++) {
+      final block = sectionBlocks[index];
+      final isParagraph = block.kind == 'paragraph';
+      if (isParagraph) {
+        paragraphIndex += 1;
+      }
+
+      final referenceCode = _referenceCodeForSectionBlock(
+        item: item,
+        section: section,
+        block: block,
+        blockIndex: index,
+        paragraphIndex: paragraphIndex,
+        devotionalFallbackParagraphCount: devotionalFallbackParagraphCount,
+        sectionReferenceCodes: sectionReferenceCodes,
+      );
+      if (item.isDevotional && referenceCode != null) {
+        devotionalFallbackParagraphCount += 1;
+      }
+
+      if (index < low.blockIndex || index > high.blockIndex) continue;
+      if (referenceCode == null) continue;
+      final ref = cleanDisplayRefCode(referenceCode);
+      if (ref != null && ref.trim().isNotEmpty) {
+        refs.add(ref);
+      }
+    }
+
+    if (refs.isEmpty) {
+      final fallback = _buildEpubSelectionFallbackReference(
+        item: item,
+        section: section,
+      );
+      return (refStart: fallback, refEnd: fallback, compactRef: fallback);
+    }
+    final refStart = refs.first;
+    final refEnd = refs.last;
+    final compactRef = refs.length == 1
+        ? refStart
+        : libraryCompactReferenceRangeLabel(refStart, refEnd);
+    return (refStart: refStart, refEnd: refEnd, compactRef: compactRef);
+  }
+
+  String _buildEpubSelectionFallbackReference({
+    required LibraryCatalogItem item,
+    required LibraryBookSection? section,
+  }) {
+    final title = item.displayTitle.trim();
+    final sectionTitle = section?.title.trim() ?? '';
+
+    if (title.isNotEmpty && sectionTitle.isNotEmpty) {
+      return '$title, $sectionTitle';
+    }
+    if (title.isNotEmpty) {
+      return title;
+    }
+    if (sectionTitle.isNotEmpty) {
+      return sectionTitle;
+    }
+    return 'eLibrary';
+  }
+
+  Future<void> _showLibrarySelectionActionsMenu({
+    required LibraryCatalogItem item,
+    required LibraryBookSection? section,
+    required List<LibraryBookBlock> sectionBlocks,
+  }) async {
+    if (_librarySelectionActionsOpen) return;
+    final selectedText = buildLibrarySelectionText(
+      blocks: sectionBlocks,
+      selection: _rangeSelection,
+    );
+    if (selectedText.trim().isEmpty) return;
+
+    final referenceLabel = _buildLibrarySelectionReferenceLabel(
+      item: item,
+      section: section,
+      sectionBlocks: sectionBlocks,
+    );
+    _librarySelectionActionsOpen = true;
+    final action = await showLibrarySelectionRangeActionsSheet(
+      context,
+      payload: LibrarySelectionRangeActionsPayload(
+        referenceLabel: referenceLabel,
+        previewText: selectedText,
+        enableClearMarkup: _hasElibraryMarkupOverlapForSelection(
+          section: section,
+          sectionBlocks: sectionBlocks,
+        ),
+      ),
+      fontScale: _fontScale,
+    );
+    _librarySelectionActionsOpen = false;
+    if (!mounted || action == null) return;
+
+    switch (action) {
+      case LibrarySelectionRangeAction.copyNoCitation:
+        await _copyLibrarySelectionToClipboard(selectedText);
+        return;
+      case LibrarySelectionRangeAction.copyWithCitation:
+        await _copyLibrarySelectionWithReferenceToClipboard(
+          selectedText: selectedText,
+          item: item,
+          section: section,
+          sectionBlocks: sectionBlocks,
+        );
+        return;
+      case LibrarySelectionRangeAction.copyWithMarkup:
+        await _copyLibrarySelectionWithMarkupToClipboard(selectedText);
+        return;
+      case LibrarySelectionRangeAction.copyWithMarkupAndCitation:
+        await _copyLibrarySelectionWithMarkupAndReferenceToClipboard(
+          selectedText: selectedText,
+          item: item,
+          section: section,
+          sectionBlocks: sectionBlocks,
+        );
+        return;
+      case LibrarySelectionRangeAction.highlight:
+        final chosenColor = await showElibraryHighlightColorPicker(context);
+        if (!mounted || chosenColor == null) return;
+        await AppSettingsService.instance.saveDefaultElibraryHighlightColorHex(
+          chosenColor,
+        );
+        await _saveElibraryHighlightForSelection(
+          item: item,
+          section: section,
+          sectionBlocks: sectionBlocks,
+          referenceLabel: referenceLabel,
+          selectedText: selectedText,
+          colorHex: chosenColor,
+        );
+        return;
+      case LibrarySelectionRangeAction.addHashTag:
+        await _addElibraryHashTagForSelection(
+          item: item,
+          section: section,
+          sectionBlocks: sectionBlocks,
+          selectedText: selectedText,
+        );
+        return;
+      case LibrarySelectionRangeAction.clearMarkup:
+        await _clearElibraryMarkupForSelection(
+          item: item,
+          section: section,
+          sectionBlocks: sectionBlocks,
+        );
+        return;
+      case LibrarySelectionRangeAction.resetRange:
+        _clearLibraryRangeSelection();
+        return;
+    }
+  }
+
+  Future<void> _copyLibrarySelectionToClipboard(String selectedText) async {
+    await _copyLibrarySelectionPayloadToClipboard(selectedText: selectedText);
+  }
+
+  Future<void> _copyLibrarySelectionWithReferenceToClipboard({
+    required String selectedText,
+    required LibraryCatalogItem item,
+    required LibraryBookSection? section,
+    required List<LibraryBookBlock> sectionBlocks,
+  }) async {
+    final referenceLabel = _buildLibrarySelectionReferenceLabel(
+      item: item,
+      section: section,
+      sectionBlocks: sectionBlocks,
+    );
+    await _copyLibrarySelectionPayloadToClipboard(
+      selectedText: selectedText,
+      referenceLabel: referenceLabel,
+    );
+  }
+
+  Future<void> _copyLibrarySelectionWithMarkupToClipboard(
+    String selectedText,
+  ) async {
+    // Rich clipboard export is not available yet, so markup copies intentionally
+    // fall back to plain text until a safe rich path exists.
+    await _copyLibrarySelectionPayloadToClipboard(selectedText: selectedText);
+  }
+
+  Future<void> _copyLibrarySelectionWithMarkupAndReferenceToClipboard({
+    required String selectedText,
+    required LibraryCatalogItem item,
+    required LibraryBookSection? section,
+    required List<LibraryBookBlock> sectionBlocks,
+  }) async {
+    final referenceLabel = _buildLibrarySelectionReferenceLabel(
+      item: item,
+      section: section,
+      sectionBlocks: sectionBlocks,
+    );
+    // Rich clipboard export is not available yet, so markup copies intentionally
+    // fall back to plain text until a safe rich path exists.
+    await _copyLibrarySelectionPayloadToClipboard(
+      selectedText: selectedText,
+      referenceLabel: referenceLabel,
+    );
+  }
+
+  Future<void> _copyLibrarySelectionPayloadToClipboard({
+    required String selectedText,
+    String? referenceLabel,
+  }) async {
+    final trimmedText = selectedText.trimRight();
+    final payload = referenceLabel == null
+        ? trimmedText
+        : trimmedText.isEmpty
+        ? referenceLabel
+        : '$trimmedText\n— $referenceLabel';
+    if (payload.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: payload));
+  }
+
+  Future<Map<String, List<ElibraryMarkupRecord>>> _loadElibraryMarkupHighlights(
+    String libraryItemId,
+  ) async {
+    try {
+      return await ElibraryMarkupRepository().loadHighlightsBySectionForItem(
+        libraryItemId,
+      );
+    } catch (error) {
+      debugPrint(
+        '[LibraryBookReader] Failed to load eLibrary highlights: $error',
+      );
+      return const <String, List<ElibraryMarkupRecord>>{};
+    }
+  }
+
+  ({
+    int startBlockIndex,
+    int startCharOffset,
+    int endBlockIndex,
+    int endCharOffset,
+  })?
+  _librarySelectionCharRange({required List<LibraryBookBlock> sectionBlocks}) {
+    final low = _rangeSelection.lowerAnchor;
+    final high = _rangeSelection.upperAnchor;
+    if (low == null || high == null) return null;
+    if (low.blockIndex < 0 ||
+        high.blockIndex < low.blockIndex ||
+        high.blockIndex >= sectionBlocks.length) {
+      return null;
+    }
+
+    final startBlock = sectionBlocks[low.blockIndex];
+    final endBlock = sectionBlocks[high.blockIndex];
+    final startSpan = _libraryTokenSpanForIndex(
+      startBlock.text,
+      low.tokenIndex,
+    );
+    final endSpan = _libraryTokenSpanForIndex(endBlock.text, high.tokenIndex);
+    if (startSpan == null || endSpan == null) return null;
+
+    return (
+      startBlockIndex: low.blockIndex,
+      startCharOffset: startSpan.startOffset,
+      endBlockIndex: high.blockIndex,
+      endCharOffset: endSpan.endOffset,
+    );
+  }
+
+  int? _libraryParagraphIndexForBlockIndex(
+    List<LibraryBookBlock> sectionBlocks,
+    int blockIndex,
+  ) {
+    if (blockIndex < 0 || blockIndex >= sectionBlocks.length) return null;
+    var paragraphIndex = 0;
+    for (var index = 0; index <= blockIndex; index++) {
+      if (sectionBlocks[index].kind == 'paragraph') {
+        paragraphIndex += 1;
+      }
+    }
+    return paragraphIndex > 0 ? paragraphIndex : null;
+  }
+
+  bool _elibraryMarkupOverlapsSelection(
+    ElibraryMarkupRecord record, {
+    required int startBlockIndex,
+    required int startCharOffset,
+    required int endBlockIndex,
+    required int endCharOffset,
+  }) {
+    if (record.deletedAt != null || !record.isHighlight) return false;
+    if (record.endBlockIndex < startBlockIndex) return false;
+    if (record.endBlockIndex == startBlockIndex &&
+        record.endCharOffset <= startCharOffset) {
+      return false;
+    }
+    if (record.startBlockIndex > endBlockIndex) return false;
+    if (record.startBlockIndex == endBlockIndex &&
+        record.startCharOffset >= endCharOffset) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _hasElibraryMarkupOverlapForSelection({
+    required LibraryBookSection? section,
+    required List<LibraryBookBlock> sectionBlocks,
+  }) {
+    if (section == null) return false;
+    final selectionRange = _librarySelectionCharRange(
+      sectionBlocks: sectionBlocks,
+    );
+    if (selectionRange == null) return false;
+    final highlights =
+        _elibraryMarkupsByHref[section.entryName] ??
+        const <ElibraryMarkupRecord>[];
+    for (final record in highlights) {
+      if (_elibraryMarkupOverlapsSelection(
+        record,
+        startBlockIndex: selectionRange.startBlockIndex,
+        startCharOffset: selectionRange.startCharOffset,
+        endBlockIndex: selectionRange.endBlockIndex,
+        endCharOffset: selectionRange.endCharOffset,
+      )) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Future<void> _saveElibraryHighlightForSelection({
+    required LibraryCatalogItem item,
+    required LibraryBookSection? section,
+    required List<LibraryBookBlock> sectionBlocks,
+    required String referenceLabel,
+    required String selectedText,
+    required String colorHex,
+  }) async {
+    if (section == null) return;
+    final selectionRange = _librarySelectionCharRange(
+      sectionBlocks: sectionBlocks,
+    );
+    if (selectionRange == null) return;
+
+    final endpoints = _buildLibrarySelectionReferenceEndpoints(
+      item: item,
+      section: section,
+      sectionBlocks: sectionBlocks,
+    );
+
+    try {
+      final saved = await ElibraryMarkupRepository().saveHighlight(
+        libraryItemId: item.id,
+        epubHref: section.entryName,
+        startBlockIndex: selectionRange.startBlockIndex,
+        startCharOffset: selectionRange.startCharOffset,
+        endBlockIndex: selectionRange.endBlockIndex,
+        endCharOffset: selectionRange.endCharOffset,
+        startTokenIndex: _rangeSelection.lowerAnchor?.tokenIndex,
+        endTokenIndex: _rangeSelection.upperAnchor?.tokenIndex,
+        refStart: endpoints.refStart,
+        refEnd: endpoints.refEnd,
+        compactRef: referenceLabel,
+        selectedTextSnapshot: selectedText,
+        color: colorHex,
+      );
+      if (saved == null) {
+        throw StateError('Unable to save eLibrary highlight.');
+      }
+      if (!mounted) return;
+      setState(() {
+        final sectionKey = section.entryName;
+        final existing = List<ElibraryMarkupRecord>.of(
+          _elibraryMarkupsByHref[sectionKey] ?? const <ElibraryMarkupRecord>[],
+        );
+        existing.removeWhere((record) {
+          return record.markupType == ElibraryMarkupRepository.highlightType &&
+              record.startBlockIndex == saved.startBlockIndex &&
+              record.startCharOffset == saved.startCharOffset &&
+              record.endBlockIndex == saved.endBlockIndex &&
+              record.endCharOffset == saved.endCharOffset;
+        });
+        existing.add(saved);
+        existing.sort((left, right) {
+          final blockCompare = left.startBlockIndex.compareTo(
+            right.startBlockIndex,
+          );
+          if (blockCompare != 0) return blockCompare;
+          final charCompare = left.startCharOffset.compareTo(
+            right.startCharOffset,
+          );
+          if (charCompare != 0) return charCompare;
+          return left.id.compareTo(right.id);
+        });
+        _elibraryMarkupsByHref = <String, List<ElibraryMarkupRecord>>{
+          ..._elibraryMarkupsByHref,
+          sectionKey: existing,
+        };
+        _rangeSelection = _rangeSelection.clear();
+      });
+    } catch (error) {
+      debugPrint(
+        '[LibraryBookReader] Failed to save eLibrary highlight: $error',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save highlight for $referenceLabel.'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _clearElibraryMarkupForSelection({
+    required LibraryCatalogItem item,
+    required LibraryBookSection? section,
+    required List<LibraryBookBlock> sectionBlocks,
+  }) async {
+    if (section == null) return;
+    final selectionRange = _librarySelectionCharRange(
+      sectionBlocks: sectionBlocks,
+    );
+    if (selectionRange == null) return;
+
+    final existing =
+        _elibraryMarkupsByHref[section.entryName] ??
+        const <ElibraryMarkupRecord>[];
+    final overlapping = existing
+        .where((record) {
+          return _elibraryMarkupOverlapsSelection(
+            record,
+            startBlockIndex: selectionRange.startBlockIndex,
+            startCharOffset: selectionRange.startCharOffset,
+            endBlockIndex: selectionRange.endBlockIndex,
+            endCharOffset: selectionRange.endCharOffset,
+          );
+        })
+        .toList(growable: false);
+    if (overlapping.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No saved eLibrary markup overlaps this selection.'),
+        ),
+      );
+      return;
+    }
+
+    final cleared = await ElibraryMarkupRepository()
+        .clearHighlightsOverlappingSelection(
+          libraryItemId: item.id,
+          epubHref: section.entryName,
+          startBlockIndex: selectionRange.startBlockIndex,
+          startCharOffset: selectionRange.startCharOffset,
+          endBlockIndex: selectionRange.endBlockIndex,
+          endCharOffset: selectionRange.endCharOffset,
+        );
+    if (!mounted) return;
+    if (cleared <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No saved eLibrary markup overlaps this selection.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      final sectionKey = section.entryName;
+      final updated =
+          List<ElibraryMarkupRecord>.of(
+            _elibraryMarkupsByHref[sectionKey] ??
+                const <ElibraryMarkupRecord>[],
+          )..removeWhere((record) {
+            return _elibraryMarkupOverlapsSelection(
+              record,
+              startBlockIndex: selectionRange.startBlockIndex,
+              startCharOffset: selectionRange.startCharOffset,
+              endBlockIndex: selectionRange.endBlockIndex,
+              endCharOffset: selectionRange.endCharOffset,
+            );
+          });
+      _elibraryMarkupsByHref = <String, List<ElibraryMarkupRecord>>{
+        ..._elibraryMarkupsByHref,
+        sectionKey: updated,
+      };
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Markup cleared for selected eLibrary range.'),
+      ),
+    );
+  }
+
+  Future<void> _addElibraryHashTagForSelection({
+    required LibraryCatalogItem item,
+    required LibraryBookSection? section,
+    required List<LibraryBookBlock> sectionBlocks,
+    required String selectedText,
+  }) async {
+    if (section == null) return;
+    final selectionRange = _librarySelectionCharRange(
+      sectionBlocks: sectionBlocks,
+    );
+    if (selectionRange == null) return;
+
+    final endpoints = _buildLibrarySelectionReferenceEndpoints(
+      item: item,
+      section: section,
+      sectionBlocks: sectionBlocks,
+    );
+    final passage = PassageData(
+      bookNumber: null,
+      bookName: item.displayTitle,
+      chapter: 0,
+      lines: const <VerseLine>[],
+    );
+
+    final repository = HashTagRepository();
+    final defaultTag = repository.normalizeTagName(
+      await repository.loadDefaultTag() ?? '',
+    );
+    if (!mounted) return;
+    if (defaultTag.isNotEmpty) {
+      final result = await _applyElibraryHashTagSelectionToTag(
+        repository: repository,
+        item: item,
+        section: section,
+        sectionBlocks: sectionBlocks,
+        selectedText: selectedText,
+        startBlockIndex: selectionRange.startBlockIndex,
+        startCharOffset: selectionRange.startCharOffset,
+        endBlockIndex: selectionRange.endBlockIndex,
+        endCharOffset: selectionRange.endCharOffset,
+        compactRef: endpoints.compactRef,
+        tag: defaultTag,
+      );
+      if (!mounted) return;
+      if (result.tag != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Tagged selected range with ${result.tag}'
+              '${result.skipped > 0 ? ' (${result.skipped} already in this tag)' : ''}.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
+    await showHashTagScreen(
+      Navigator.of(context),
+      passage: passage,
+      selection: const ViewerRangeSelection(),
+      selectionTargets: const <HashTagTarget>[],
+      fontScale: _fontScale,
+      selectionLabelOverride: endpoints.compactRef,
+      onApplySelectionOverride: (tag) => _applyElibraryHashTagSelectionToTag(
+        repository: repository,
+        item: item,
+        section: section,
+        sectionBlocks: sectionBlocks,
+        selectedText: selectedText,
+        startBlockIndex: selectionRange.startBlockIndex,
+        startCharOffset: selectionRange.startCharOffset,
+        endBlockIndex: selectionRange.endBlockIndex,
+        endCharOffset: selectionRange.endCharOffset,
+        compactRef: endpoints.compactRef,
+        tag: tag,
+      ),
+    );
+  }
+
+  Future<HashTagQuickApplyResult> _applyElibraryHashTagSelectionToTag({
+    required HashTagRepository repository,
+    required LibraryCatalogItem item,
+    required LibraryBookSection? section,
+    required List<LibraryBookBlock> sectionBlocks,
+    required String selectedText,
+    required int startBlockIndex,
+    required int startCharOffset,
+    required int endBlockIndex,
+    required int endCharOffset,
+    required String compactRef,
+    required String tag,
+  }) async {
+    if (section == null) {
+      return const HashTagQuickApplyResult(tag: null, inserted: 0, skipped: 0);
+    }
+    final result = await repository.quickApplyELibrarySearchResult(
+      bookTitle: item.displayTitle,
+      locationText: compactRef,
+      paragraphText: selectedText,
+      stableRef:
+          'elibrary-range:${item.id}:${section.entryName}:$startBlockIndex:$startCharOffset:$endBlockIndex:$endCharOffset',
+      referenceText: compactRef,
+      sourceHref: section.entryName,
+      sourceAnchorId: item.anchorId,
+      sourceSpineIndex: section.spineIndex,
+      sourceParagraphIndex: _libraryParagraphIndexForBlockIndex(
+        sectionBlocks,
+        startBlockIndex,
+      ),
+      sourceRelativePath: item.relativePath,
+      sourceLibraryItemId: item.id,
+      selectedTextSnapshot: selectedText,
+      selectionStartBlockIndex: startBlockIndex,
+      selectionStartCharOffset: startCharOffset,
+      selectionEndBlockIndex: endBlockIndex,
+      selectionEndCharOffset: endCharOffset,
+      selectionStartTokenIndex: _rangeSelection.lowerAnchor?.tokenIndex,
+      selectionEndTokenIndex: _rangeSelection.upperAnchor?.tokenIndex,
+      tag: tag,
+    );
+    return HashTagQuickApplyResult(
+      tag: result.tag,
+      inserted: result.inserted,
+      skipped: result.skipped,
+    );
+  }
+
+  ({int startOffset, int endOffset})? _libraryTokenSpanForIndex(
+    String text,
+    int tokenIndex,
+  ) {
+    final runs = _splitLibraryTextRuns(text);
+    for (final run in runs) {
+      if (run.tokenIndex != tokenIndex) continue;
+      final startOffset = run.startOffset;
+      final endOffset = run.endOffset;
+      if (startOffset == null || endOffset == null) return null;
+      return (startOffset: startOffset, endOffset: endOffset);
+    }
+    return null;
   }
 
   void _close() {
@@ -1242,14 +2042,16 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
 
   void _zoomIn() {
     setState(() {
-      _fontScale = (_fontScale + 0.1).clamp(0.85, 1.6).toDouble();
+      _zoomScale = (_zoomScale + 0.1).clamp(0.85, 1.6).toDouble();
     });
+    unawaited(AppSettingsService.instance.saveElibraryZoomScale(_zoomScale));
   }
 
   void _zoomOut() {
     setState(() {
-      _fontScale = (_fontScale - 0.1).clamp(0.85, 1.6).toDouble();
+      _zoomScale = (_zoomScale - 0.1).clamp(0.85, 1.6).toDouble();
     });
+    unawaited(AppSettingsService.instance.saveElibraryZoomScale(_zoomScale));
   }
 
   Future<void> _toggleShowRefCodes() async {
@@ -1264,7 +2066,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   }
 
   Future<void> _ensureParagraphReferenceCodesLoaded() async {
-    if (_refCodesLoaded || widget.item.isPdf || widget.item.isPeriodical || _sections.isEmpty) {
+    if (_refCodesLoaded ||
+        widget.item.isPdf ||
+        widget.item.isPeriodical ||
+        _sections.isEmpty) {
       return;
     }
     final paragraphReferenceCodeLoadResult = await _loadParagraphReferenceCodes(
@@ -1812,19 +2617,22 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (sheetContext) {
-        return _ContentsPopupSheet(
-          itemTitle: widget.item.displayTitle,
-          entries: entries,
-          sections: _sections,
-          currentSectionEntryName: _currentSection?.entryName,
-          currentSectionTitle: _currentSection?.title,
-          currentSectionSpineIndex: _currentSection?.spineIndex,
-          selectedNavigationItemId: _selectedNavigationItem?.id,
-          selectedNavigationIndex: _selectedNavigationIndex,
-          selectedSectionIndex: _selectedIndex,
-          isNightMode: _nightMode,
-          isDevotionalNavigation: _isDevotionalNavigationBook,
-          isPeriodical: widget.item.isPeriodical,
+        return LibraryFontScaleScope(
+          scale: _fontScale,
+          child: _ContentsPopupSheet(
+            itemTitle: widget.item.displayTitle,
+            entries: entries,
+            sections: _sections,
+            currentSectionEntryName: _currentSection?.entryName,
+            currentSectionTitle: _currentSection?.title,
+            currentSectionSpineIndex: _currentSection?.spineIndex,
+            selectedNavigationItemId: _selectedNavigationItem?.id,
+            selectedNavigationIndex: _selectedNavigationIndex,
+            selectedSectionIndex: _selectedIndex,
+            isNightMode: _nightMode,
+            isDevotionalNavigation: _isDevotionalNavigationBook,
+            isPeriodical: widget.item.isPeriodical,
+          ),
         );
       },
     );
@@ -1868,17 +2676,29 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
       sectionBlocks,
       currentSection?.title ?? '',
     );
+    final sectionMarkups = currentSection == null
+        ? const <ElibraryMarkupRecord>[]
+        : _elibraryMarkupsByHref[currentSection.entryName] ??
+              const <ElibraryMarkupRecord>[];
+    final geometryScopeId = _geometryScopeId;
 
     final bodyFontSize =
-        (theme.textTheme.bodyLarge?.fontSize ?? 16) * _fontScale;
-    final titleFontSize =
-        (theme.textTheme.headlineSmall?.fontSize ?? 24) * _fontScale;
+        (theme.textTheme.bodyLarge?.fontSize ?? 16) * _fontScale * _zoomScale;
+    final titleFontSize = (theme.textTheme.headlineSmall?.fontSize ?? 24) *
+        _fontScale *
+        _zoomScale;
     final sectionBlockWidgets = <Widget>[];
+    final selectionHighlightSpec = resolveHighlightRender(
+      theme.colorScheme.primary,
+      isNight,
+      layerType: HighlightLayerType.temporarySelection,
+    );
     if (sectionBlocks.isNotEmpty) {
       var paragraphIndex = 0;
       var devotionalFallbackParagraphCount = 0;
       for (var index = 0; index < sectionBlocks.length; index++) {
         final block = sectionBlocks[index];
+        final blockIndex = index;
         final isParagraph = block.kind == 'paragraph';
         if (isParagraph) {
           paragraphIndex += 1;
@@ -1908,10 +2728,15 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         if (item.isDevotional && referenceCode != null) {
           devotionalFallbackParagraphCount += 1;
         }
+        final blockKey = _keyForBlock(_blockTargetKey(block, blockIndex));
         sectionBlockWidgets.add(
           _SectionBlockView(
-            key: _keyForBlock(_blockTargetKey(block, index)),
+            key: blockKey,
             block: block,
+            blockIndex: blockIndex,
+            geometryRegistry: _geometryRegistry,
+            geometryScopeId: geometryScopeId,
+            geometryRevision: _enableTextRangeGeometry ? _geometryTick : 0,
             sectionTitle: currentSection?.title ?? '',
             sectionEntryName: currentSection?.entryName ?? '',
             paragraphIndex: isParagraph ? paragraphIndex : null,
@@ -1920,270 +2745,365 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
             bodyFontSize: bodyFontSize,
             searchQuery: widget.searchQuery,
             highlightTerms: widget.highlightTerms,
-            topPadding: index == 0 ? 0 : (block.isHeading ? 18 : 6),
+            topPadding: blockIndex == 0 ? 0 : (block.isHeading ? 18 : 6),
             bottomPadding: block.isHeading ? 12 : 14,
             isNightMode: isNight,
             showRefCodes: _showRefCodes,
             referenceCode: referenceCode,
+            selectionHighlightSpec: selectionHighlightSpec,
+            rangeSelection: _rangeSelection,
+            persistedHighlights: sectionMarkups,
+            onBlockTap:
+                _rangeSelection.hasCompletedRange &&
+                    _rangeSelection.containsBlock(blockIndex)
+                ? () => _showLibrarySelectionActionsMenu(
+                    item: item,
+                    section: currentSection,
+                    sectionBlocks: sectionBlocks,
+                  )
+                : null,
+            onWordLongPress: (tokenIndex) {
+              _handleLibraryWordLongPress(
+                blockIndex: blockIndex,
+                tokenIndex: tokenIndex,
+              );
+            },
+            onWordLongPressMove: (tokenIndex) {
+              _handleLibraryWordLongPressMove(
+                blockIndex: blockIndex,
+                tokenIndex: tokenIndex,
+              );
+            },
+            onWordTap: (tokenIndex) {
+              if (_rangeSelection.hasCompletedRange &&
+                  _rangeSelection.containsTokenPosition(
+                    blockIndex,
+                    tokenIndex,
+                  )) {
+                _showLibrarySelectionActionsMenu(
+                  item: item,
+                  section: currentSection,
+                  sectionBlocks: sectionBlocks,
+                );
+                return;
+              }
+              if (_rangeSelection.hasCompletedRange) {
+                _clearLibraryRangeSelection();
+              }
+            },
             diagnosticLoggingEnabled: shouldLogRefCodeDiagnostics,
           ),
         );
       }
     }
 
-    return Scaffold(
-      backgroundColor: background,
-      body: PopScope(
-        canPop: true,
-        onPopInvokedWithResult: (didPop, _) {
-          if (didPop) {
-            _saveCurrentLocation();
-          }
-        },
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    FilledButton.tonalIcon(
-                      onPressed: _close,
-                      icon: const Icon(Icons.arrow_back),
-                      label: const Text('Back to Bible'),
-                      style: FilledButton.styleFrom(
-                        foregroundColor: textColor,
-                        backgroundColor: cardBackground,
-                        side: BorderSide(color: cardBorder),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      'eLibrary',
-                      style: theme.textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: textColor,
-                      ),
-                    ),
-                    const Spacer(),
-                    FilledButton.tonalIcon(
-                      onPressed: _openSearch,
-                      icon: const Icon(Icons.search),
-                      label: const Text('Search'),
-                      style: FilledButton.styleFrom(
-                        foregroundColor: textColor,
-                        backgroundColor: cardBackground,
-                        side: BorderSide(color: cardBorder),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    FilledButton.tonalIcon(
-                      onPressed: _close,
-                      icon: const Icon(Icons.library_books_outlined),
-                      label: const Text('Library'),
-                      style: FilledButton.styleFrom(
-                        foregroundColor: textColor,
-                        backgroundColor: cardBackground,
-                        side: BorderSide(color: cardBorder),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Material(
-                  color: summaryBackground,
-                  borderRadius: BorderRadius.circular(18),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 14,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          item.displayTitle,
-                          maxLines: 2,
+    return LibraryFontScaleScope(
+      scale: _fontScale,
+      child: Scaffold(
+        backgroundColor: background,
+        body: PopScope(
+          canPop: true,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) {
+              _saveCurrentLocation();
+            }
+          },
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      FilledButton.tonalIcon(
+                        onPressed: _close,
+                        icon: const Icon(Icons.arrow_back),
+                        label: Text(
+                          'Back to Bible',
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleLarge?.copyWith(
+                          style: libraryControlTextStyle(
+                            context,
+                            theme.textTheme.labelLarge,
                             fontWeight: FontWeight.w800,
                             color: textColor,
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _currentSubtitle,
+                        style: FilledButton.styleFrom(
+                          foregroundColor: textColor,
+                          backgroundColor: cardBackground,
+                          side: BorderSide(color: cardBorder),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'eLibrary',
+                        style: libraryScaledTextStyle(
+                          theme.textTheme.headlineMedium,
+                          libraryTitleScale(_fontScale),
+                          fontWeight: FontWeight.w800,
+                          color: textColor,
+                        ),
+                      ),
+                      const Spacer(),
+                      FilledButton.tonalIcon(
+                        onPressed: _openSearch,
+                        icon: const Icon(Icons.search),
+                        label: Text(
+                          'Search',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: subduedColor,
+                          style: libraryControlTextStyle(
+                            context,
+                            theme.textTheme.labelLarge,
+                            fontWeight: FontWeight.w800,
+                            color: textColor,
                           ),
                         ),
-                      ],
+                        style: FilledButton.styleFrom(
+                          foregroundColor: textColor,
+                          backgroundColor: cardBackground,
+                          side: BorderSide(color: cardBorder),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton.tonalIcon(
+                        onPressed: _close,
+                        icon: const Icon(Icons.library_books_outlined),
+                        label: Text(
+                          'Library',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: libraryControlTextStyle(
+                            context,
+                            theme.textTheme.labelLarge,
+                            fontWeight: FontWeight.w800,
+                            color: textColor,
+                          ),
+                        ),
+                        style: FilledButton.styleFrom(
+                          foregroundColor: textColor,
+                          backgroundColor: cardBackground,
+                          side: BorderSide(color: cardBorder),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Material(
+                    color: summaryBackground,
+                    borderRadius: BorderRadius.circular(18),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.displayTitle,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: libraryTitleTextStyle(
+                              context,
+                              theme.textTheme.titleLarge,
+                              fontWeight: FontWeight.w800,
+                              color: textColor,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _currentSubtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: libraryBodyTextStyle(
+                              context,
+                              theme.textTheme.bodyMedium,
+                              color: subduedColor,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: Material(
-                    color: cardBackground,
-                    borderRadius: BorderRadius.circular(26),
-                    borderOnForeground: true,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(26),
-                        border: Border.all(color: cardBorder),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(18),
-                        child: _loading
-                            ? const Center(child: CircularProgressIndicator())
-                            : _error != null
-                            ? Center(
-                                child: Text(
-                                  _error!,
-                                  textAlign: TextAlign.center,
-                                  style: theme.textTheme.bodyLarge?.copyWith(
-                                    color: textColor,
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: Material(
+                      color: cardBackground,
+                      borderRadius: BorderRadius.circular(26),
+                      borderOnForeground: true,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(26),
+                          border: Border.all(color: cardBorder),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: _loading
+                              ? const Center(child: CircularProgressIndicator())
+                              : _error != null
+                              ? Center(
+                                  child: Text(
+                                    _error!,
+                                    textAlign: TextAlign.center,
+                                    style: libraryBodyTextStyle(
+                                      context,
+                                      theme.textTheme.bodyLarge,
+                                      color: textColor,
+                                    ),
                                   ),
-                                ),
-                              )
-                            : _sections.isEmpty
-                            ? Center(
-                                child: Text(
-                                  item.isPdf
-                                      ? 'PDF reading is not wired yet.'
-                                      : 'This book does not expose readable sections yet.',
-                                  textAlign: TextAlign.center,
-                                  style: theme.textTheme.bodyLarge?.copyWith(
-                                    color: textColor,
+                                )
+                              : _sections.isEmpty
+                              ? Center(
+                                  child: Text(
+                                    item.isPdf
+                                        ? 'PDF reading is not wired yet.'
+                                        : 'This book does not expose readable sections yet.',
+                                    textAlign: TextAlign.center,
+                                    style: libraryBodyTextStyle(
+                                      context,
+                                      theme.textTheme.bodyLarge,
+                                      color: textColor,
+                                    ),
                                   ),
-                                ),
-                              )
-                            : SelectionArea(
-                                child: SingleChildScrollView(
-                                  controller: _bodyScrollController,
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                      if (showSectionTitle) ...[
-                                        Text(
-                                          currentSection?.title ??
-                                              item.displayTitle,
-                                          style: theme.textTheme.headlineSmall
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w800,
-                                                color: textColor,
-                                                fontSize: titleFontSize,
-                                              ),
-                                        ),
-                                        const SizedBox(height: 12),
+                                )
+                              : GestureDetector(
+                                  behavior: HitTestBehavior.translucent,
+                                  onTap: _rangeSelection.hasCompletedRange
+                                      ? _clearLibraryRangeSelection
+                                      : null,
+                                  child: SingleChildScrollView(
+                                    controller: _bodyScrollController,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        if (showSectionTitle) ...[
+                                          Text(
+                                            currentSection?.title ??
+                                                item.displayTitle,
+                                            style: libraryScaledTextStyle(
+                                              theme.textTheme.headlineSmall,
+                                              _fontScale * _zoomScale,
+                                              fontWeight: FontWeight.w800,
+                                              color: textColor,
+                                              fontSize: titleFontSize,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 12),
+                                        ],
+                                        if (sectionBlocks.isEmpty)
+                                          Text(
+                                            'No readable text in this section.',
+                                            style: libraryScaledTextStyle(
+                                              theme.textTheme.bodyLarge,
+                                              _fontScale * _zoomScale,
+                                              color: textColor,
+                                              fontSize: bodyFontSize,
+                                              height: 1.6,
+                                            ),
+                                          )
+                                        else
+                                          ...sectionBlockWidgets,
                                       ],
-                                      if (sectionBlocks.isEmpty)
-                                        Text(
-                                          'No readable text in this section.',
-                                          style: theme.textTheme.bodyLarge
-                                              ?.copyWith(
-                                                color: textColor,
-                                                fontSize: bodyFontSize,
-                                                height: 1.6,
-                                              ),
-                                        )
-                                      else
-                                        ...sectionBlockWidgets,
-                                    ],
+                                    ),
                                   ),
                                 ),
-                              ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
-      ),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: _readerSurfaceHighColor(theme, isNight),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: cardBorder),
-            ),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _ToolbarPillButton(
-                    isNightMode: isNight,
-                    icon: Icons.list_alt_outlined,
-                    label: 'Contents',
-                    onPressed: _sections.isEmpty ? null : _openContentsPopup,
-                  ),
-                  const SizedBox(width: 12),
-                  _ToolbarPillButton(
-                    isNightMode: isNight,
-                    icon: Icons.library_books_outlined,
-                    label: 'Library',
-                    onPressed: _close,
-                  ),
-                  const SizedBox(width: 12),
-                  _ToolbarPillButton(
-                    isNightMode: isNight,
-                    icon: isNight
-                        ? Icons.wb_sunny_outlined
-                        : Icons.nightlight_round,
-                    label: isNight ? 'Day' : 'Night',
-                    onPressed: () {
-                      final next = isNight
-                          ? AppThemeMode.sepia
-                          : AppThemeMode.night;
-                      setState(() => _nightMode = next == AppThemeMode.night);
-                      final onThemeChanged = widget.onThemeChanged;
-                      if (onThemeChanged != null) {
-                        onThemeChanged(next);
-                      } else {
-                        ThemePreferences.instance.saveThemeMode(next);
-                      }
-                    },
-                  ),
-                  const SizedBox(width: 12),
-                  _ToolbarPillButton(
-                    isNightMode: isNight,
-                    icon: _showRefCodes
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                    label: _showRefCodes ? 'Hide Ref Codes' : 'Show Ref Codes',
-                    onPressed: _sections.isEmpty ? null : _toggleShowRefCodes,
-                  ),
-                  const SizedBox(width: 12),
-                  _ZoomCluster(
-                    isNightMode: isNight,
-                    valueLabel: '${(_fontScale * 100).round()}%',
-                    onZoomOut: _zoomOut,
-                    onZoomIn: _zoomIn,
-                  ),
-                  const SizedBox(width: 12),
-                  _NavCluster(
-                    isNightMode: isNight,
-                    canGoFirst: _sections.isNotEmpty,
-                    canGoPrevious: _sections.isNotEmpty,
-                    canGoNext: _sections.isNotEmpty,
-                    canGoLast: _sections.isNotEmpty,
-                    onGoFirst: () => _scrollToAdjacentHeading(forward: false),
-                    onGoPrevious: _scrollPageUp,
-                    onGoNext: _scrollPageDown,
-                    onGoLast: () => _scrollToAdjacentHeading(forward: true),
-                  ),
-                ],
+        bottomNavigationBar: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: _readerSurfaceHighColor(theme, isNight),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: cardBorder),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _ToolbarPillButton(
+                      isNightMode: isNight,
+                      icon: Icons.list_alt_outlined,
+                      label: 'Contents',
+                      onPressed: _sections.isEmpty ? null : _openContentsPopup,
+                    ),
+                    const SizedBox(width: 12),
+                    _ToolbarPillButton(
+                      isNightMode: isNight,
+                      icon: Icons.library_books_outlined,
+                      label: 'Library',
+                      onPressed: _close,
+                    ),
+                    const SizedBox(width: 12),
+                    _ToolbarPillButton(
+                      isNightMode: isNight,
+                      icon: isNight
+                          ? Icons.wb_sunny_outlined
+                          : Icons.nightlight_round,
+                      label: isNight ? 'Day' : 'Night',
+                      onPressed: () {
+                        final next = isNight
+                            ? AppThemeMode.sepia
+                            : AppThemeMode.night;
+                        setState(() => _nightMode = next == AppThemeMode.night);
+                        final onThemeChanged = widget.onThemeChanged;
+                        if (onThemeChanged != null) {
+                          onThemeChanged(next);
+                        } else {
+                          ThemePreferences.instance.saveThemeMode(next);
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 12),
+                    _ToolbarPillButton(
+                      isNightMode: isNight,
+                      icon: _showRefCodes
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      label: _showRefCodes
+                          ? 'Hide Ref Codes'
+                          : 'Show Ref Codes',
+                      onPressed: _sections.isEmpty ? null : _toggleShowRefCodes,
+                    ),
+                    const SizedBox(width: 12),
+                    _ZoomCluster(
+                      isNightMode: isNight,
+                      valueLabel: '${(_zoomScale * 100).round()}%',
+                      onZoomOut: _zoomOut,
+                      onZoomIn: _zoomIn,
+                    ),
+                    const SizedBox(width: 12),
+                    _NavCluster(
+                      isNightMode: isNight,
+                      canGoFirst: _sections.isNotEmpty,
+                      canGoPrevious: _sections.isNotEmpty,
+                      canGoNext: _sections.isNotEmpty,
+                      canGoLast: _sections.isNotEmpty,
+                      onGoFirst: () => _scrollToAdjacentHeading(forward: false),
+                      onGoPrevious: _scrollPageUp,
+                      onGoNext: _scrollPageDown,
+                      onGoLast: () => _scrollToAdjacentHeading(forward: true),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

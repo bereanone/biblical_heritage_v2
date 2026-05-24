@@ -17,6 +17,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _loading = true;
   _LibraryTab _tab = _LibraryTab.books;
   _LibraryView _view = _LibraryView.shelf;
+  double _viewerFontScale = 1.3;
   String _fileTypeFilter = 'ePubs';
   String _collectionFilter = 'all';
   String _searchQuery = '';
@@ -39,11 +40,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Future<void> _load() async {
     final selection = await LibraryRootService.instance.loadSelection();
+    final viewerFontScale = await AppSettingsService.instance
+        .loadViewerFontScale();
     final items = await _service.loadItems();
     if (!mounted) return;
     setState(() {
       _selection = selection;
       _items = items;
+      _viewerFontScale = viewerFontScale;
       _loading = false;
     });
     await _syncSelectionAndNavigation(
@@ -133,7 +137,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (!mounted) return;
     final message = unindexed > 0
         ? 'Library refreshed — $unindexed book${unindexed == 1 ? '' : 's'} '
-            'not yet indexed. Open eLibrary Setup and tap Index New/Changed Books.'
+              'not yet indexed. Open eLibrary Setup and tap Index New/Changed Books.'
         : 'Library folders refreshed.';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -201,10 +205,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _resetCollectionFilterToAll() {
-    return _setCollectionFilter(
-      'all',
-      preserveLetterFilter: true,
-    );
+    return _setCollectionFilter('all', preserveLetterFilter: true);
   }
 
   Future<void> _handleCollectionFilterSelected(String value) {
@@ -278,8 +279,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   List<LibraryCatalogItem> get _filteredBooks {
     final query = compactLibrarySearchText(_searchQuery);
-    final initial =
-        query.isEmpty ? _selectedInitialLetter?.trim().toUpperCase() : null;
+    final initial = query.isEmpty
+        ? _selectedInitialLetter?.trim().toUpperCase()
+        : null;
     final filtered = _items.where((item) {
       if (!_matchesFileTypeFilter(item, _fileTypeFilter)) return false;
       if (!libraryItemMatchesCollectionFilter(item, _collectionFilter)) {
@@ -296,8 +298,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   List<LibraryCatalogItem> get _recentBooks {
     final query = compactLibrarySearchText(_searchQuery);
-    final initial =
-        query.isEmpty ? _selectedInitialLetter?.trim().toUpperCase() : null;
+    final initial = query.isEmpty
+        ? _selectedInitialLetter?.trim().toUpperCase()
+        : null;
     final filtered = _items.where((item) {
       if (!_matchesFileTypeFilter(item, _fileTypeFilter)) return false;
       if (!libraryItemMatchesCollectionFilter(item, _collectionFilter)) {
@@ -346,10 +349,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return 'No library items match "$query".';
     }
 
-    final hasCollectionFilter =
-        _collectionFilter.trim().toLowerCase() != 'all';
+    final hasCollectionFilter = _collectionFilter.trim().toLowerCase() != 'all';
     final hasFileTypeFilter = _fileTypeFilter.trim().toLowerCase() != 'all';
-    final hasLetterFilter = _selectedInitialLetter != null &&
+    final hasLetterFilter =
+        _selectedInitialLetter != null &&
         _selectedInitialLetter!.trim().isNotEmpty;
     if (hasCollectionFilter || hasFileTypeFilter || hasLetterFilter) {
       return 'No library items match the current filters.';
@@ -455,139 +458,147 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
     return Scaffold(
       backgroundColor: background,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _LibraryHeader(
-                hasRoot: hasRoot,
-                rootPath: selection?.path,
-                onOpenBible: _openBibleApp,
-                onOpenLibraryRootSetup: _openLibraryRootSetup,
-                onOpenELibrarySetup: _openELibrarySetup,
-                onRefresh: _refreshFolders,
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: cardBackground,
-                    borderRadius: BorderRadius.circular(26),
-                    border: Border.all(color: _libraryOutlineColor(theme)),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final collectionWidth =
-                            (constraints.maxWidth * 0.42)
-                                .clamp(200.0, 300.0)
-                                .toDouble();
-                        return _loading
-                            ? const Center(child: CircularProgressIndicator())
-                            : Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Wrap(
-                                    spacing: 10,
-                                    runSpacing: 10,
-                                    crossAxisAlignment:
-                                        WrapCrossAlignment.center,
-                                    children: [
-                                      Text(
-                                        'Library',
-                                        style: theme.textTheme.headlineSmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w800,
+      body: LibraryFontScaleScope(
+        scale: _viewerFontScale,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _LibraryHeader(
+                  hasRoot: hasRoot,
+                  rootPath: selection?.path,
+                  onOpenBible: _openBibleApp,
+                  onOpenLibraryRootSetup: _openLibraryRootSetup,
+                  onOpenELibrarySetup: _openELibrarySetup,
+                  onRefresh: _refreshFolders,
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: cardBackground,
+                      borderRadius: BorderRadius.circular(26),
+                      border: Border.all(color: _libraryOutlineColor(theme)),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final collectionWidth = (constraints.maxWidth * 0.42)
+                              .clamp(200.0, 300.0)
+                              .toDouble();
+                          return _loading
+                              ? const Center(child: CircularProgressIndicator())
+                              : Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Wrap(
+                                      spacing: 10,
+                                      runSpacing: 10,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
+                                      children: [
+                                        Text(
+                                          'Library',
+                                          style: libraryScaledTextStyle(
+                                            theme.textTheme.headlineSmall,
+                                            libraryTitleScale(
+                                              libraryFontScaleOf(context),
                                             ),
-                                      ),
-                                      SizedBox(
-                                        width: collectionWidth,
-                                        child: _CollectionFilterMenu(
-                                          currentValue: _collectionFilter,
-                                          options: collectionOptions,
-                                          onSelected:
-                                              _handleCollectionFilterSelected,
+                                            fontWeight: FontWeight.w800,
+                                            color: theme.colorScheme.onSurface,
+                                          ),
                                         ),
+                                        SizedBox(
+                                          width: collectionWidth,
+                                          child: _CollectionFilterMenu(
+                                            currentValue: _collectionFilter,
+                                            options: collectionOptions,
+                                            onSelected:
+                                                _handleCollectionFilterSelected,
+                                          ),
+                                        ),
+                                        _FileTypeFilterMenu(
+                                          currentValue: _fileTypeFilter,
+                                          onSelected: _setFileTypeFilter,
+                                        ),
+                                        _SearchTextButton(
+                                          onPressed: () =>
+                                              showLibraryCatalogSearchDialog(
+                                                context,
+                                                fontScale: _viewerFontScale,
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 10),
+                                    _SearchField(
+                                      controller: _searchController,
+                                      focusNode: _searchFocusNode,
+                                      onChanged: _setSearchQuery,
+                                      onSubmitted: (_) =>
+                                          _applySearchQueryFromField(),
+                                      onApply: _applySearchQueryFromField,
+                                      onClear: _clearSearchQuery,
+                                    ),
+                                    const SizedBox(height: 10),
+                                    _TabSelector(
+                                      selectedTab: _tab,
+                                      onChanged: _setTab,
+                                    ),
+                                    const SizedBox(height: 10),
+                                    if (_tab == _LibraryTab.books) ...[
+                                      _AlphabetStrip(
+                                        selectedInitialLetter:
+                                            _selectedInitialLetter,
+                                        availableInitialLetters:
+                                            _availableInitialLetters,
+                                        onChanged: _setInitialLetter,
                                       ),
-                                      _FileTypeFilterMenu(
-                                        currentValue: _fileTypeFilter,
-                                        onSelected: _setFileTypeFilter,
+                                      const SizedBox(height: 10),
+                                      _ViewToggleRow(
+                                        view: _view,
+                                        onViewChanged: _setView,
                                       ),
-                                      _SearchTextButton(
-                                        onPressed: () =>
-                                            showLibraryCatalogSearchDialog(
-                                              context,
-                                            ),
-                                      ),
+                                      const SizedBox(height: 10),
                                     ],
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _SearchField(
-                                    controller: _searchController,
-                                    focusNode: _searchFocusNode,
-                                    onChanged: _setSearchQuery,
-                                    onSubmitted: (_) =>
-                                        _applySearchQueryFromField(),
-                                    onApply: _applySearchQueryFromField,
-                                    onClear: _clearSearchQuery,
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _TabSelector(
-                                    selectedTab: _tab,
-                                    onChanged: _setTab,
-                                  ),
-                                  const SizedBox(height: 10),
-                                  if (_tab == _LibraryTab.books) ...[
-                                    _AlphabetStrip(
-                                      selectedInitialLetter:
-                                          _selectedInitialLetter,
-                                      availableInitialLetters:
-                                          _availableInitialLetters,
-                                      onChanged: _setInitialLetter,
+                                    Expanded(
+                                      child: AnimatedSwitcher(
+                                        duration: const Duration(
+                                          milliseconds: 180,
+                                        ),
+                                        child: switch (_tab) {
+                                          _LibraryTab.books => _LibraryPane(
+                                            key: const ValueKey('books'),
+                                            books: _filteredBooks,
+                                            selectedBookId: _selectedBookId,
+                                            view: _view,
+                                            onSelectBook: _selectBook,
+                                            isEmptyMessage:
+                                                _booksEmptyMessage(),
+                                          ),
+                                          _LibraryTab.recent => _RecentPane(
+                                            key: const ValueKey('recent'),
+                                            books: _recentBooks,
+                                            selectedBookId: _selectedBookId,
+                                            onSelectBook: _selectBook,
+                                            isEmptyMessage:
+                                                _booksEmptyMessage(),
+                                          ),
+                                        },
+                                      ),
                                     ),
-                                    const SizedBox(height: 10),
-                                    _ViewToggleRow(
-                                      view: _view,
-                                      onViewChanged: _setView,
-                                    ),
-                                    const SizedBox(height: 10),
                                   ],
-                                  Expanded(
-                                    child: AnimatedSwitcher(
-                                      duration:
-                                          const Duration(milliseconds: 180),
-                                      child: switch (_tab) {
-                                        _LibraryTab.books => _LibraryPane(
-                                          key: const ValueKey('books'),
-                                          books: _filteredBooks,
-                                          selectedBookId: _selectedBookId,
-                                          view: _view,
-                                          onSelectBook: _selectBook,
-                                          isEmptyMessage:
-                                              _booksEmptyMessage(),
-                                        ),
-                                        _LibraryTab.recent => _RecentPane(
-                                          key: const ValueKey('recent'),
-                                          books: _recentBooks,
-                                          selectedBookId: _selectedBookId,
-                                          onSelectBook: _selectBook,
-                                          isEmptyMessage:
-                                              _booksEmptyMessage(),
-                                        ),
-                                      },
-                                    ),
-                                  ),
-                                ],
-                              );
-                      },
+                                );
+                        },
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

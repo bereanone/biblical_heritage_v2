@@ -49,6 +49,18 @@ class TagDialogStyles {
         : brownDark;
   }
 
+  static Color mutedBody(ThemeData theme) {
+    return theme.brightness == Brightness.dark
+        ? theme.colorScheme.onSurface.withValues(alpha: 0.97)
+        : brownDark;
+  }
+
+  static Color disabledBody(ThemeData theme) {
+    return theme.brightness == Brightness.dark
+        ? theme.colorScheme.onSurface.withValues(alpha: 0.80)
+        : brownDark.withValues(alpha: 0.72);
+  }
+
   static Color accent(ThemeData theme) {
     return theme.brightness == Brightness.dark
         ? theme.colorScheme.primary
@@ -61,10 +73,104 @@ class TagDialogStyles {
         : outline;
   }
 
+  static double scaledFontSize(double? baseSize, double fontScale) {
+    return (baseSize ?? 14) * fontScale;
+  }
+
+  static TextStyle scaledTextStyle(
+    TextStyle? base,
+    double fontScale, {
+    Color? color,
+    FontWeight? fontWeight,
+    double? height,
+    double? letterSpacing,
+    double? fontSize,
+  }) {
+    final resolved = base ?? const TextStyle(fontSize: 14);
+    return resolved.copyWith(
+      fontSize: fontSize ?? scaledFontSize(resolved.fontSize, fontScale),
+      color: color ?? resolved.color,
+      fontWeight: fontWeight ?? resolved.fontWeight,
+      height: height ?? resolved.height,
+      letterSpacing: letterSpacing ?? resolved.letterSpacing,
+    );
+  }
+
+  static TextStyle titleTextStyle(
+    ThemeData theme,
+    double fontScale, {
+    Color? color,
+    FontWeight fontWeight = FontWeight.w800,
+    double? height,
+    double? letterSpacing,
+  }) {
+    return scaledTextStyle(
+      theme.textTheme.titleMedium,
+      fontScale,
+      color: color ?? title(theme),
+      fontWeight: fontWeight,
+      height: height,
+      letterSpacing: letterSpacing,
+    );
+  }
+
+  static TextStyle bodyTextStyle(
+    ThemeData theme,
+    double fontScale, {
+    Color? color,
+    FontWeight fontWeight = FontWeight.w400,
+    double? height,
+    double? letterSpacing,
+  }) {
+    return scaledTextStyle(
+      theme.textTheme.bodyMedium,
+      fontScale,
+      color: color ?? body(theme),
+      fontWeight: fontWeight,
+      height: height,
+      letterSpacing: letterSpacing,
+    );
+  }
+
+  static TextStyle labelTextStyle(
+    ThemeData theme,
+    double fontScale, {
+    Color? color,
+    FontWeight fontWeight = FontWeight.w700,
+    double? height,
+    double? letterSpacing,
+  }) {
+    return scaledTextStyle(
+      theme.textTheme.labelLarge ?? theme.textTheme.bodySmall,
+      fontScale,
+      color: color ?? body(theme),
+      fontWeight: fontWeight,
+      height: height,
+      letterSpacing: letterSpacing,
+    );
+  }
+
+  static TextStyle buttonTextStyle(
+    ThemeData theme,
+    double fontScale, {
+    Color? color,
+    FontWeight fontWeight = FontWeight.w700,
+    double? height,
+  }) {
+    return scaledTextStyle(
+      theme.textTheme.titleMedium,
+      fontScale,
+      color: color ?? accent(theme),
+      fontWeight: fontWeight,
+      height: height,
+    );
+  }
+
   static Widget fittedButtonLabel(
     String text, {
     TextAlign textAlign = TextAlign.center,
     int maxLines = 1,
+    TextStyle? style,
   }) {
     return FittedBox(
       fit: BoxFit.scaleDown,
@@ -74,6 +180,7 @@ class TagDialogStyles {
         textAlign: textAlign,
         maxLines: maxLines,
         softWrap: false,
+        style: style,
       ),
     );
   }

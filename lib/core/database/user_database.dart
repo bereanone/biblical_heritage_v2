@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../bootstrap/sandbox_bootstrap.dart';
@@ -36,8 +37,18 @@ class UserDatabase {
       dbPath,
       version: 1,
       onConfigure: (database) async {
-        await database.execute('PRAGMA journal_mode=WAL');
-        await database.execute('PRAGMA busy_timeout = 5000');
+        await _executePragmaNonFatal(
+          database,
+          label: 'user.db',
+          actionLabel: 'enabling WAL',
+          sql: 'PRAGMA journal_mode=WAL',
+        );
+        await _executePragmaNonFatal(
+          database,
+          label: 'user.db',
+          actionLabel: 'setting busy_timeout',
+          sql: 'PRAGMA busy_timeout = 5000',
+        );
       },
       onCreate: (database, version) async {
         await UserV2Schema.ensure(database, deviceId: deviceId);
@@ -47,6 +58,35 @@ class UserDatabase {
       },
     );
     return db;
+  }
+
+  static Future<void> _executePragmaNonFatal(
+    Database database, {
+    required String label,
+    required String actionLabel,
+    required String sql,
+  }) async {
+    try {
+      await database.execute(sql);
+      debugPrint('UserDatabase[$label]: $actionLabel succeeded.');
+    } on DatabaseException catch (error) {
+      if (_isKnownWalFalsePositive(error)) {
+        debugPrint(
+          'UserDatabase[$label]: ignoring known sqflite false-positive while '
+          '$actionLabel: '
+          '$error',
+        );
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  static bool _isKnownWalFalsePositive(DatabaseException error) {
+    final message = error.toString();
+    return message.contains('not an error') &&
+        (message.contains('SqfliteDarwinDatabase') ||
+            message.contains('SqfliteDatabase'));
   }
 
   Future<String> _ensureWritableUserDb() async {

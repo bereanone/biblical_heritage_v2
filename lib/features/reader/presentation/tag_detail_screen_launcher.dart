@@ -8,6 +8,7 @@ Future<bool?> showHashTagDetailPopup(
   BuildContext context, {
   required HashTagRepository repository,
   required String tag,
+  required double fontScale,
   Future<void> Function(int blockId)? onSelectBlockId,
   Future<void> Function(String tag)? onSelectTag,
 }) {
@@ -35,6 +36,7 @@ Future<bool?> showHashTagDetailPopup(
               child: HashTagDetailScreen(
                 repository: repository,
                 tag: tag,
+                fontScale: fontScale,
                 onSelectBlockId: onSelectBlockId,
                 onSelectTag: onSelectTag,
               ),

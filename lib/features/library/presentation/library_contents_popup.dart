@@ -168,8 +168,7 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
   }
 
   bool _isPeriodicalDateEntry(LibraryCatalogNavigationItem item) {
-    return widget.isPeriodical &&
-        _periodicalArticleDate(item.label) != null;
+    return widget.isPeriodical && _periodicalArticleDate(item.label) != null;
   }
 
   bool _isDevotionalMonthHeading(LibraryCatalogNavigationItem item) {
@@ -510,7 +509,9 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                       Expanded(
                         child: Text(
                           'Contents',
-                          style: theme.textTheme.titleLarge?.copyWith(
+                          style: libraryTitleTextStyle(
+                            context,
+                            theme.textTheme.titleLarge,
                             fontWeight: FontWeight.w800,
                             color: sheetTextColor,
                           ),
@@ -533,7 +534,9 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                     widget.itemTitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
+                    style: libraryBodyTextStyle(
+                      context,
+                      theme.textTheme.bodyMedium,
                       color: sheetSubduedColor,
                     ),
                   ),
@@ -570,19 +573,21 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                                           section.title,
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.titleMedium
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w800,
-                                                color: sheetTextColor,
-                                              ),
+                                          style: libraryTitleTextStyle(
+                                            context,
+                                            theme.textTheme.titleMedium,
+                                            fontWeight: FontWeight.w800,
+                                            color: sheetTextColor,
+                                          ),
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
                                           '${section.paragraphs.length} paragraphs',
-                                          style: theme.textTheme.bodySmall
-                                              ?.copyWith(
-                                                color: sheetSubduedColor,
-                                              ),
+                                          style: libraryCaptionTextStyle(
+                                            context,
+                                            theme.textTheme.bodySmall,
+                                            color: sheetSubduedColor,
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -656,11 +661,12 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                                             ),
                                             maxLines: 2,
                                             overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.titleMedium
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.w800,
-                                                  color: sheetTextColor,
-                                                ),
+                                            style: libraryTitleTextStyle(
+                                              context,
+                                              theme.textTheme.titleMedium,
+                                              fontWeight: FontWeight.w800,
+                                              color: sheetTextColor,
+                                            ),
                                           ),
                                         ],
                                       ),
@@ -770,16 +776,18 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                     ),
                     maxLines: row.isMonthHeading ? 1 : 2,
                     overflow: TextOverflow.ellipsis,
-                    style:
-                        (row.isMonthHeading
-                                ? theme.textTheme.titleMedium
-                                : theme.textTheme.bodyLarge)
-                            ?.copyWith(
-                              fontWeight: row.isMonthHeading
-                                  ? FontWeight.w800
-                                  : FontWeight.w600,
-                              color: sheetTextColor,
-                            ),
+                    style: libraryScaledTextStyle(
+                      row.isMonthHeading
+                          ? theme.textTheme.titleMedium
+                          : theme.textTheme.bodyLarge,
+                      row.isMonthHeading
+                          ? libraryTitleScale(libraryFontScaleOf(context))
+                          : libraryBodyScale(libraryFontScaleOf(context)),
+                      fontWeight: row.isMonthHeading
+                          ? FontWeight.w800
+                          : FontWeight.w600,
+                      color: sheetTextColor,
+                    ),
                   ),
                 ),
                 if (row.isMonthHeading)

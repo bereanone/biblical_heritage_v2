@@ -22,6 +22,8 @@ class VerseHighlightRecord {
 
   bool get isTokenLevel => startToken != null && endToken != null;
 
+  bool get isWholeVerse => !isTokenLevel;
+
   Color get color {
     final normalized = colorHex.replaceFirst('#', '');
     return Color(0xFF000000 | int.parse(normalized, radix: 16));
@@ -37,10 +39,7 @@ class HighlightsRepository {
     required int groupId,
     required String verseRef,
   }) async {
-    await applyHighlightToVerseRefs(
-      groupId: groupId,
-      verseRefs: [verseRef],
-    );
+    await applyHighlightToVerseRefs(groupId: groupId, verseRefs: [verseRef]);
   }
 
   Future<void> applyHighlightToVerseRefs({
@@ -51,7 +50,11 @@ class HighlightsRepository {
     final db = await UserDatabase.instance.database;
     final batch = db.batch();
     for (final verseRef in verseRefs) {
-      batch.delete('highlights', where: 'verse_ref = ?', whereArgs: [verseRef]);
+      batch.delete(
+        'highlights',
+        where: 'verse_ref = ? AND start_token IS NULL AND end_token IS NULL',
+        whereArgs: [verseRef],
+      );
       batch.insert('highlights', {
         'group_id': groupId,
         'verse_ref': verseRef,
@@ -70,16 +73,20 @@ class HighlightsRepository {
     final db = await UserDatabase.instance.database;
     final batch = db.batch();
     for (final item in selections) {
-      if (item.startToken != null && item.endToken != null) {
+      if (item.startToken == null || item.endToken == null) {
         batch.delete(
           'highlights',
-          where:
-              'verse_ref = ? AND ((start_token IS NULL AND end_token IS NULL) OR (start_token <= ? AND end_token >= ?))',
-          whereArgs: [item.verseRef, item.endToken, item.startToken],
+          where: 'verse_ref = ? AND start_token IS NULL AND end_token IS NULL',
+          whereArgs: [item.verseRef],
         );
-      } else {
-        batch.delete('highlights', where: 'verse_ref = ?', whereArgs: [item.verseRef]);
+        continue;
       }
+      batch.delete(
+        'highlights',
+        where:
+            'verse_ref = ? AND start_token IS NOT NULL AND end_token IS NOT NULL AND start_token <= ? AND end_token >= ?',
+        whereArgs: [item.verseRef, item.endToken, item.startToken],
+      );
       batch.insert('highlights', {
         'group_id': groupId,
         'verse_ref': item.verseRef,
@@ -99,7 +106,11 @@ class HighlightsRepository {
     final db = await UserDatabase.instance.database;
     final batch = db.batch();
     for (final verseRef in verseRefs) {
-      batch.delete('highlights', where: 'verse_ref = ?', whereArgs: [verseRef]);
+      batch.delete(
+        'highlights',
+        where: 'verse_ref = ? AND start_token IS NULL AND end_token IS NULL',
+        whereArgs: [verseRef],
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -110,16 +121,15 @@ class HighlightsRepository {
     if (verseRefs.isEmpty) return const <String, VerseHighlightRecord>{};
     final db = await UserDatabase.instance.database;
     final placeholders = List.filled(verseRefs.length, '?').join(',');
-    final rows = await db.rawQuery(
-      '''
+    final rows = await db.rawQuery('''
       SELECT h.id, h.group_id, h.verse_ref, g.color_hex
       FROM highlights h
       JOIN highlight_groups g ON g.id = h.group_id
       WHERE h.verse_ref IN ($placeholders)
+        AND h.start_token IS NULL
+        AND h.end_token IS NULL
       ORDER BY h.id ASC
-      ''',
-      verseRefs,
-    );
+      ''', verseRefs);
     final result = <String, VerseHighlightRecord>{};
     for (final row in rows) {
       final verseRef = row['verse_ref']?.toString() ?? '';
@@ -137,22 +147,20 @@ class HighlightsRepository {
     return result;
   }
 
-  Future<Map<String, List<VerseHighlightRecord>>> loadHighlightRangesForVerseRefs(
-    List<String> verseRefs,
-  ) async {
+  Future<Map<String, List<VerseHighlightRecord>>>
+  loadHighlightRangesForVerseRefs(List<String> verseRefs) async {
     if (verseRefs.isEmpty) return const <String, List<VerseHighlightRecord>>{};
     final db = await UserDatabase.instance.database;
     final placeholders = List.filled(verseRefs.length, '?').join(',');
-    final rows = await db.rawQuery(
-      '''
+    final rows = await db.rawQuery('''
       SELECT h.id, h.group_id, h.verse_ref, h.start_token, h.end_token, g.color_hex
       FROM highlights h
       JOIN highlight_groups g ON g.id = h.group_id
       WHERE h.verse_ref IN ($placeholders)
+        AND h.start_token IS NOT NULL
+        AND h.end_token IS NOT NULL
       ORDER BY h.id ASC
-      ''',
-      verseRefs,
-    );
+      ''', verseRefs);
     final result = <String, List<VerseHighlightRecord>>{};
     for (final row in rows) {
       final verseRef = row['verse_ref']?.toString() ?? '';
@@ -160,7 +168,9 @@ class HighlightsRepository {
       final groupIdValue = row['group_id'];
       final idValue = row['id'];
       if (groupIdValue == null || idValue == null) continue;
-      result.putIfAbsent(verseRef, () => <VerseHighlightRecord>[]).add(
+      result
+          .putIfAbsent(verseRef, () => <VerseHighlightRecord>[])
+          .add(
             VerseHighlightRecord(
               id: (idValue as num).toInt(),
               groupId: (groupIdValue as num).toInt(),
@@ -182,15 +192,19 @@ class HighlightsRepository {
     final batch = db.batch();
     for (final item in selections) {
       if (item.startToken == null || item.endToken == null) {
-        batch.delete('highlights', where: 'verse_ref = ?', whereArgs: [item.verseRef]);
-      } else {
         batch.delete(
           'highlights',
-          where:
-              'verse_ref = ? AND start_token IS NOT NULL AND end_token IS NOT NULL AND start_token <= ? AND end_token >= ?',
-          whereArgs: [item.verseRef, item.endToken, item.startToken],
+          where: 'verse_ref = ? AND start_token IS NULL AND end_token IS NULL',
+          whereArgs: [item.verseRef],
         );
+        continue;
       }
+      batch.delete(
+        'highlights',
+        where:
+            'verse_ref = ? AND start_token IS NOT NULL AND end_token IS NOT NULL AND start_token <= ? AND end_token >= ?',
+        whereArgs: [item.verseRef, item.endToken, item.startToken],
+      );
     }
     await batch.commit(noResult: true);
   }

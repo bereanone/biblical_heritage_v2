@@ -8,10 +8,11 @@ List<InlineSpan> _buildEpubInlineSpans({
   List<String> highlightTerms = const [],
 }) {
   final innerHtml = _epubBlockInnerHtml(html);
+  final semanticBaseStyle = _epubSemanticStyleFromHtml(html, baseStyle);
   if (innerHtml.trim().isEmpty) {
     return _buildHighlightedEpubTextSpans(
       fallbackText,
-      baseStyle: baseStyle,
+      baseStyle: semanticBaseStyle,
       highlightQuery: highlightQuery,
       highlightTerms: highlightTerms,
     );
@@ -25,33 +26,12 @@ List<InlineSpan> _buildEpubInlineSpans({
 
   final spans = <InlineSpan>[];
   final buffer = StringBuffer();
+  final styleFrames = <_EpubInlineStyleFrame>[];
   var index = 0;
-  var boldDepth = 0;
-  var italicDepth = 0;
-  var underlineDepth = 0;
-  var superscriptDepth = 0;
-  var subscriptDepth = 0;
 
   TextStyle currentStyle() {
-    var style = baseStyle;
-    if (boldDepth > 0) {
-      style = style.copyWith(fontWeight: FontWeight.w700);
-    }
-    if (italicDepth > 0) {
-      style = style.copyWith(fontStyle: FontStyle.italic);
-    }
-    if (underlineDepth > 0) {
-      style = style.copyWith(
-        decoration: TextDecoration.combine([
-          if (style.decoration != null) style.decoration!,
-          TextDecoration.underline,
-        ]),
-      );
-    }
-    if (superscriptDepth > 0 || subscriptDepth > 0) {
-      style = style.copyWith(fontSize: (style.fontSize ?? 16) * 0.84);
-    }
-    return style;
+    if (styleFrames.isEmpty) return semanticBaseStyle;
+    return styleFrames.last.style;
   }
 
   void flush() {
@@ -92,50 +72,35 @@ List<InlineSpan> _buildEpubInlineSpans({
     flush();
 
     if (isClosing) {
-      switch (tagName) {
-        case 'strong':
-        case 'b':
-          boldDepth = boldDepth > 0 ? boldDepth - 1 : 0;
+      for (
+        var frameIndex = styleFrames.length - 1;
+        frameIndex >= 0;
+        frameIndex--
+      ) {
+        if (styleFrames[frameIndex].tagName == tagName) {
+          styleFrames.removeAt(frameIndex);
           break;
-        case 'em':
-        case 'i':
-          italicDepth = italicDepth > 0 ? italicDepth - 1 : 0;
-          break;
-        case 'u':
-          underlineDepth = underlineDepth > 0 ? underlineDepth - 1 : 0;
-          break;
-        case 'sup':
-          superscriptDepth = superscriptDepth > 0 ? superscriptDepth - 1 : 0;
-          break;
-        case 'sub':
-          subscriptDepth = subscriptDepth > 0 ? subscriptDepth - 1 : 0;
-          break;
+        }
       }
       index = closeIndex + 1;
       continue;
     }
 
-    switch (tagName) {
-      case 'strong':
-      case 'b':
-        boldDepth += 1;
-        break;
-      case 'em':
-      case 'i':
-        italicDepth += 1;
-        break;
-      case 'u':
-        underlineDepth += 1;
-        break;
-      case 'sup':
-        superscriptDepth += 1;
-        break;
-      case 'sub':
-        subscriptDepth += 1;
-        break;
-      case 'br':
-        buffer.write('\n');
-        break;
+    if (tagName == 'br') {
+      buffer.write('\n');
+      index = closeIndex + 1;
+      continue;
+    }
+
+    final updatedStyle = _epubSemanticStyleFromRawTag(
+      rawTag: rawTag,
+      currentStyle: currentStyle(),
+    );
+    if (updatedStyle != currentStyle() ||
+        _epubTagCanCarrySemanticStyle(tagName)) {
+      styleFrames.add(
+        _EpubInlineStyleFrame(tagName: tagName, style: updatedStyle),
+      );
     }
 
     index = closeIndex + 1;
@@ -146,12 +111,192 @@ List<InlineSpan> _buildEpubInlineSpans({
   if (spans.isEmpty) {
     return _buildHighlightedEpubTextSpans(
       fallbackText,
-      baseStyle: baseStyle,
+      baseStyle: semanticBaseStyle,
       highlightQuery: highlightQuery,
       highlightTerms: highlightTerms,
     );
   }
   return spans;
+}
+
+TextStyle _epubSemanticStyleFromHtml(String html, TextStyle baseStyle) {
+  final firstClose = html.indexOf('>');
+  if (firstClose < 0 || html.isEmpty) return baseStyle;
+  final firstTag = html.substring(1, firstClose).trim();
+  return _epubSemanticStyleFromRawTag(
+    rawTag: firstTag,
+    currentStyle: baseStyle,
+  );
+}
+
+TextStyle _epubSemanticStyleFromRawTag({
+  required String rawTag,
+  required TextStyle currentStyle,
+}) {
+  final tagName = _epubTagName(rawTag.toLowerCase());
+  final attrs = _epubParseAttributes(rawTag);
+  final lowerStyle = attrs['style']?.toLowerCase() ?? '';
+  final lowerClass = attrs['class']?.toLowerCase() ?? '';
+
+  var style = currentStyle;
+
+  final shouldBold =
+      tagName == 'strong' ||
+      tagName == 'b' ||
+      _styleSuggestsBold(lowerStyle) ||
+      _classSuggestsBold(lowerClass);
+  if (shouldBold) {
+    style = style.copyWith(fontWeight: FontWeight.w700);
+  }
+
+  final shouldItalic =
+      tagName == 'em' ||
+      tagName == 'i' ||
+      _styleSuggestsItalic(lowerStyle) ||
+      _classSuggestsItalic(lowerClass);
+  if (shouldItalic) {
+    style = style.copyWith(fontStyle: FontStyle.italic);
+  }
+
+  final shouldUnderline =
+      tagName == 'u' ||
+      _styleSuggestsUnderline(lowerStyle) ||
+      _classSuggestsUnderline(lowerClass);
+  if (shouldUnderline) {
+    style = style.copyWith(
+      decoration: TextDecoration.combine([
+        if (style.decoration != null) style.decoration!,
+        TextDecoration.underline,
+      ]),
+    );
+  }
+
+  final shouldSmallCaps =
+      _styleSuggestsSmallCaps(lowerStyle) ||
+      _classSuggestsSmallCaps(lowerClass);
+  if (shouldSmallCaps) {
+    style = style.copyWith(
+      fontFeatures: [
+        ...?style.fontFeatures,
+        FontFeature.enable('smcp'),
+        FontFeature.enable('c2sc'),
+      ],
+    );
+  }
+
+  if (tagName == 'sup' || _styleSuggestsSuperscript(lowerStyle)) {
+    style = style.copyWith(fontSize: (style.fontSize ?? 16) * 0.84);
+  }
+  if (tagName == 'sub' || _styleSuggestsSubscript(lowerStyle)) {
+    style = style.copyWith(fontSize: (style.fontSize ?? 16) * 0.84);
+  }
+
+  return style;
+}
+
+bool _epubTagCanCarrySemanticStyle(String tagName) {
+  switch (tagName) {
+    case 'strong':
+    case 'b':
+    case 'em':
+    case 'i':
+    case 'u':
+    case 'sup':
+    case 'sub':
+    case 'span':
+    case 'a':
+    case 'font':
+      return true;
+    default:
+      return false;
+  }
+}
+
+Map<String, String> _epubParseAttributes(String rawTag) {
+  final attrs = <String, String>{};
+  final pattern = RegExp(
+    r'''([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))''',
+    caseSensitive: false,
+    dotAll: true,
+  );
+  for (final match in pattern.allMatches(rawTag)) {
+    final key = match.group(1)?.trim().toLowerCase();
+    if (key == null || key.isEmpty) continue;
+    final value = match.group(2) ?? match.group(3) ?? match.group(4) ?? '';
+    attrs[key] = value;
+  }
+  return attrs;
+}
+
+bool _styleSuggestsBold(String style) {
+  return style.contains('font-weight:bold') ||
+      style.contains('font-weight: bold') ||
+      RegExp(r'font-weight\s*:\s*(?:[7-9]00|bold|bolder)').hasMatch(style);
+}
+
+bool _styleSuggestsItalic(String style) {
+  return style.contains('font-style:italic') ||
+      style.contains('font-style: italic') ||
+      RegExp(r'font-style\s*:\s*(?:italic|oblique)').hasMatch(style);
+}
+
+bool _styleSuggestsUnderline(String style) {
+  return style.contains('text-decoration:underline') ||
+      style.contains('text-decoration: underline') ||
+      style.contains('text-decoration-line:underline') ||
+      style.contains('text-decoration-line: underline');
+}
+
+bool _styleSuggestsSmallCaps(String style) {
+  return style.contains('font-variant:small-caps') ||
+      style.contains('font-variant: small-caps') ||
+      style.contains('font-variant-caps:small-caps') ||
+      style.contains('font-variant-caps: small-caps');
+}
+
+bool _styleSuggestsSuperscript(String style) {
+  return style.contains('vertical-align:super') ||
+      style.contains('vertical-align: super');
+}
+
+bool _styleSuggestsSubscript(String style) {
+  return style.contains('vertical-align:sub') ||
+      style.contains('vertical-align: sub');
+}
+
+bool _classSuggestsBold(String classValue) {
+  return _classTokens(
+    classValue,
+  ).any((token) => token == 'bold' || token == 'strong' || token == 'b');
+}
+
+bool _classSuggestsItalic(String classValue) {
+  return _classTokens(classValue).any(
+    (token) =>
+        token == 'italic' ||
+        token == 'italics' ||
+        token == 'em' ||
+        token == 'poem',
+  );
+}
+
+bool _classSuggestsUnderline(String classValue) {
+  return _classTokens(classValue).any(
+    (token) => token == 'underline' || token == 'underlined' || token == 'u',
+  );
+}
+
+bool _classSuggestsSmallCaps(String classValue) {
+  return classValue.contains('small-caps') ||
+      classValue.contains('smallcaps') ||
+      _classTokens(classValue).any((token) => token == 'sc');
+}
+
+Iterable<String> _classTokens(String classValue) {
+  return classValue
+      .split(RegExp(r'[\s_]+'))
+      .map((token) => token.trim().toLowerCase())
+      .where((token) => token.isNotEmpty);
 }
 
 String _epubBlockInnerHtml(String html) {
@@ -205,4 +350,11 @@ String _epubTagName(String lowerTag) {
   final name = lowerTag.startsWith('/') ? lowerTag.substring(1) : lowerTag;
   final match = RegExp(r'^([a-z0-9]+)').firstMatch(name);
   return match?.group(1) ?? '';
+}
+
+class _EpubInlineStyleFrame {
+  const _EpubInlineStyleFrame({required this.tagName, required this.style});
+
+  final String tagName;
+  final TextStyle style;
 }

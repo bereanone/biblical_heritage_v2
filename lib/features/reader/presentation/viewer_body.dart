@@ -14,8 +14,11 @@ import 'viewer_markup_span_builder.dart';
 import 'viewer_passage_models.dart';
 import 'viewer_range_selection.dart';
 import 'viewer_verse_line.dart';
+import 'text_range_geometry.dart';
 
 part 'viewer_body_helpers.dart';
+
+const bool _enableTextRangeGeometry = false;
 
 class ViewerBody extends StatefulWidget {
   const ViewerBody({
@@ -30,6 +33,7 @@ class ViewerBody extends StatefulWidget {
     required this.onSelectVerse,
     this.onSelectVerseNumber = _noopVerseSelection,
     this.onSelectTokenLongPress,
+    this.onSelectTokenLongPressMove,
     this.onTapSelectedRange = _noop,
     this.rangeSelection = const ViewerRangeSelection(),
     this.highlightRefreshTick = 0,
@@ -46,6 +50,8 @@ class ViewerBody extends StatefulWidget {
   final ValueChanged<VerseLine> onSelectVerse;
   final ValueChanged<VerseLine> onSelectVerseNumber;
   final void Function(VerseLine line, int tokenIndex)? onSelectTokenLongPress;
+  final void Function(VerseLine line, int tokenIndex)?
+  onSelectTokenLongPressMove;
   final VoidCallback onTapSelectedRange;
   final ViewerRangeSelection rangeSelection;
   final int highlightRefreshTick;
@@ -62,6 +68,8 @@ class _ViewerBodyState extends State<ViewerBody> {
   final ItemScrollController _itemScrollController = ItemScrollController();
   final ItemPositionsListener _itemPositionsListener =
       ItemPositionsListener.create();
+  final TextRangeGeometryRegistry _geometryRegistry =
+      TextRangeGeometryRegistry();
   final Map<String, Map<int, List<String>>> _headingCache =
       <String, Map<int, List<String>>>{};
   final Map<String, Map<int, AcrosticRecord>> _acrosticCache =
@@ -72,11 +80,15 @@ class _ViewerBodyState extends State<ViewerBody> {
   _tokenHighlightCache = <String, Map<String, List<VerseHighlightRecord>>>{};
 
   Timer? _scrollDebounce;
+  Timer? _geometryDebounce;
   int? _lastScrolledBlockId;
   int _recenterToken = 0;
+  final int _geometryTick = 0;
   bool _suppressUserScroll = false;
   bool _userIsScrolling = false;
   bool _selectionVisible = false;
+
+  String get _geometryScopeId => 'viewer:${widget.anchorBlockId}';
 
   @override
   void initState() {
@@ -106,6 +118,7 @@ class _ViewerBodyState extends State<ViewerBody> {
   @override
   void dispose() {
     _scrollDebounce?.cancel();
+    _geometryDebounce?.cancel();
     _itemPositionsListener.itemPositions.removeListener(_onScroll);
     super.dispose();
   }
@@ -150,6 +163,7 @@ class _ViewerBodyState extends State<ViewerBody> {
           ((theme.textTheme.bodyLarge?.fontSize ?? 16) * widget.fontScale),
       height: 1.38,
     );
+    final geometryScopeId = _geometryScopeId;
 
     return ListenableBuilder(
       listenable: widget.data,
@@ -303,6 +317,15 @@ class _ViewerBodyState extends State<ViewerBody> {
                       style: bodyStyle,
                       isSelected: selectedBlockId == blockId,
                       isRangeSelected: rangeSelected,
+                      geometryRegistry: _enableTextRangeGeometry
+                          ? _geometryRegistry
+                          : null,
+                      geometryScopeId: _enableTextRangeGeometry
+                          ? geometryScopeId
+                          : null,
+                      geometryRevision: _enableTextRangeGeometry
+                          ? _geometryTick
+                          : 0,
                       highlight:
                           (cachedHighlights ??
                               const <String, VerseHighlightRecord>{})[verseKey],
@@ -323,6 +346,9 @@ class _ViewerBodyState extends State<ViewerBody> {
                       onTokenLongPress: (tokenIndex) {
                         widget.onSelectTokenLongPress?.call(line, tokenIndex);
                       },
+                      onTokenLongPressMove: (tokenIndex) {
+                        widget.onSelectTokenLongPressMove?.call(line, tokenIndex);
+                      },
                     ),
                   ],
                 ),
@@ -333,4 +359,5 @@ class _ViewerBodyState extends State<ViewerBody> {
       },
     );
   }
+
 }

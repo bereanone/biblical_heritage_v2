@@ -157,8 +157,8 @@ List<InlineSpan> buildLibraryInteractiveEpubSpans({
       final partEndOffset = partStartOffset + part.text.length;
       final persistedHighlight = _persistedLibraryMarkupForToken(
         blockIndex: blockIndex,
-        tokenStartOffset: part.startOffset,
-        tokenEndOffset: part.endOffset,
+        tokenStartOffset: partStartOffset,
+        tokenEndOffset: partEndOffset,
         persistedHighlights: persistedHighlights,
       );
       final currentTokenIndex = isWhitespace ? tokenIndex : ++tokenIndex;

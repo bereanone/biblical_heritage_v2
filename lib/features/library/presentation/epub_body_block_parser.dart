@@ -34,7 +34,9 @@ class _SectionBlockView extends StatelessWidget {
     required this.onBlockTap,
     required this.onWordLongPress,
     required this.onWordLongPressMove,
+    required this.onWordLongPressMoveDetails,
     required this.onWordTap,
+    required this.textKey,
     required this.diagnosticLoggingEnabled,
   });
 
@@ -62,7 +64,9 @@ class _SectionBlockView extends StatelessWidget {
   final VoidCallback? onBlockTap;
   final ValueChanged<int> onWordLongPress;
   final ValueChanged<int> onWordLongPressMove;
+  final ValueChanged<LongPressMoveUpdateDetails>? onWordLongPressMoveDetails;
   final ValueChanged<int> onWordTap;
+  final Key? textKey;
   final bool diagnosticLoggingEnabled;
 
   @override
@@ -139,6 +143,8 @@ class _SectionBlockView extends StatelessWidget {
           persistedHighlights: persistedHighlights,
           onWordLongPress: onWordLongPress,
           onWordTap: onWordTap,
+          onWordLongPressMove: onWordLongPressMove,
+          onWordLongPressMoveDetails: onWordLongPressMoveDetails,
           enableWordLongPressRecognizers: true,
           highlightQuery: searchQuery,
           highlightTerms: highlightTerms,
@@ -210,10 +216,10 @@ class _SectionBlockView extends StatelessWidget {
               geometryRevision: geometryRevision,
               textDirection: Directionality.of(context),
               textAlign: textAlign,
-              child: Text.rich(textSpan, textAlign: textAlign),
+              child: Text.rich(textSpan, textAlign: textAlign, key: textKey),
             ),
           )
-        : Text.rich(textSpan, textAlign: textAlign);
+        : Text.rich(textSpan, textAlign: textAlign, key: textKey);
 
     return Padding(
       padding: EdgeInsets.only(top: topPadding, bottom: bottomPadding),

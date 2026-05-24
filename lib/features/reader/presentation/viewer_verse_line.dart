@@ -27,6 +27,8 @@ class ViewerVerseLine extends StatelessWidget {
     this.rangeSelection,
     this.onTokenLongPress,
     this.onTokenLongPressMove,
+    this.onTokenLongPressMoveDetails,
+    this.textKey,
     this.geometryRegistry,
     this.geometryScopeId,
     this.geometryRevision = 0,
@@ -46,6 +48,8 @@ class ViewerVerseLine extends StatelessWidget {
   final ViewerRangeSelection? rangeSelection;
   final ValueChanged<int>? onTokenLongPress;
   final ValueChanged<int>? onTokenLongPressMove;
+  final ValueChanged<LongPressMoveUpdateDetails>? onTokenLongPressMoveDetails;
+  final Key? textKey;
   final TextRangeGeometryRegistry? geometryRegistry;
   final String? geometryScopeId;
   final int geometryRevision;
@@ -107,6 +111,8 @@ class ViewerVerseLine extends StatelessWidget {
           blockId: line.blockId,
           rangeSelection: rangeSelection,
           onTokenLongPress: onTokenLongPress,
+          onTokenLongPressMove: onTokenLongPressMove,
+          onTokenLongPressMoveDetails: onTokenLongPressMoveDetails,
           persistedHighlights: tokenHighlights,
         ),
       ],
@@ -186,6 +192,7 @@ class ViewerVerseLine extends StatelessWidget {
                 onLongPress: onVerseNumberLongPress,
               ),
               Expanded(
+                key: textKey,
                 child: textWidget,
               ),
             ],

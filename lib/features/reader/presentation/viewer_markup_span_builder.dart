@@ -28,6 +28,8 @@ InlineSpan buildViewerMarkupSpan({
   int? blockId,
   ViewerRangeSelection? rangeSelection,
   ValueChanged<int>? onTokenLongPress,
+  ValueChanged<int>? onTokenLongPressMove,
+  ValueChanged<LongPressMoveUpdateDetails>? onTokenLongPressMoveDetails,
   List<VerseHighlightRecord> persistedHighlights =
       const <VerseHighlightRecord>[],
   Set<String> highlightedStrongs = const <String>{},
@@ -68,10 +70,23 @@ InlineSpan buildViewerMarkupSpan({
       emphasizeWeight: isSelected || isPendingAnchor || isStrongsMatch,
       underline: isStrongsMatch,
     );
+    GestureLongPressMoveUpdateCallback? moveUpdateCallback;
+    if (onTokenLongPressMoveDetails != null) {
+      moveUpdateCallback = (details) {
+        onTokenLongPressMoveDetails(details);
+      };
+    } else if (onTokenLongPressMove != null) {
+      moveUpdateCallback = (_) {
+        onTokenLongPressMove.call(tokenIndex!);
+      };
+    }
     final recognizer =
         blockId != null && tokenIndex != null && onTokenLongPress != null
         ? (LongPressGestureRecognizer()
-            ..onLongPress = () => onTokenLongPress(tokenIndex))
+            ..onLongPress = () {
+              onTokenLongPress(tokenIndex);
+            }
+            ..onLongPressMoveUpdate = moveUpdateCallback)
         : null;
     spans.add(
       TextSpan(text: segment.text, style: style, recognizer: recognizer),
@@ -81,6 +96,63 @@ InlineSpan buildViewerMarkupSpan({
     return TextSpan(text: fallbackText, style: baseStyle);
   }
   return TextSpan(children: spans);
+}
+
+int? hitTestViewerMarkupTokenIndex({
+  required String html,
+  required String fallbackText,
+  required TextStyle baseStyle,
+  required Color redLetterColor,
+  required Offset localPosition,
+  required double maxWidth,
+  required TextDirection textDirection,
+  required TextAlign textAlign,
+  bool startsInRedLetter = false,
+}) {
+  final segments = parseViewerMarkupSegments(
+    html: html,
+    fallbackText: fallbackText,
+    baseStyle: baseStyle,
+    redLetterColor: redLetterColor,
+    startsInRedLetter: startsInRedLetter,
+  );
+  if (segments.isEmpty) return null;
+
+  final painter = TextPainter(
+    text: TextSpan(
+      children: [
+        for (final segment in segments)
+          TextSpan(text: segment.text, style: segment.style),
+      ],
+    ),
+    textDirection: textDirection,
+    textAlign: textAlign,
+  )..layout(maxWidth: maxWidth);
+
+  final textOffset = painter.getPositionForOffset(localPosition).offset;
+  var cursor = 0;
+  int? nearestTokenIndex;
+  var nearestDistance = double.infinity;
+
+  for (final segment in segments) {
+    final start = cursor;
+    final end = cursor + segment.text.length;
+    final tokenIndex = segment.tokenIndex;
+    if (tokenIndex != null && segment.text.isNotEmpty) {
+      if (textOffset >= start && textOffset <= end) {
+        return tokenIndex;
+      }
+      final center = (start + end) / 2.0;
+      final distance = (textOffset - center).abs();
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestTokenIndex = tokenIndex;
+      }
+    }
+    cursor = end;
+  }
+
+  return nearestTokenIndex;
 }
 
 TextStyle _applyViewerSpanStyle(

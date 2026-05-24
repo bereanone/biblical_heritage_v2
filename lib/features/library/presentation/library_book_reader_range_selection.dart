@@ -125,6 +125,8 @@ List<InlineSpan> buildLibraryInteractiveEpubSpans({
   required LibraryRangeSelection rangeSelection,
   required ValueChanged<int> onWordLongPress,
   required ValueChanged<int> onWordTap,
+  required ValueChanged<int> onWordLongPressMove,
+  required ValueChanged<LongPressMoveUpdateDetails>? onWordLongPressMoveDetails,
   required List<ElibraryMarkupRecord> persistedHighlights,
   String? highlightQuery,
   List<String> highlightTerms = const [],
@@ -199,13 +201,26 @@ List<InlineSpan> buildLibraryInteractiveEpubSpans({
             ? FontWeight.w700
             : run.style.fontWeight,
       );
+      GestureLongPressMoveUpdateCallback? moveUpdateCallback;
+      if (onWordLongPressMoveDetails != null) {
+        moveUpdateCallback = (details) {
+          onWordLongPressMoveDetails(details);
+        };
+      } else {
+        moveUpdateCallback = (_) {
+          onWordLongPressMove(currentTokenIndex);
+        };
+      }
       final recognizer = enableWordLongPressRecognizers &&
               isSelected &&
               rangeSelection.hasCompletedRange
           ? (TapGestureRecognizer()..onTap = () => onWordTap(currentTokenIndex))
           : (enableWordLongPressRecognizers && !isWhitespace
               ? (LongPressGestureRecognizer()
-                  ..onLongPress = () => onWordLongPress(currentTokenIndex))
+                  ..onLongPress = () {
+                    onWordLongPress(currentTokenIndex);
+                  }
+                  ..onLongPressMoveUpdate = moveUpdateCallback)
               : null);
       if (geometrySeeds != null &&
           geometryScopeId != null &&
@@ -243,6 +258,78 @@ List<InlineSpan> buildLibraryInteractiveEpubSpans({
     return <InlineSpan>[TextSpan(text: fallbackText, style: baseStyle)];
   }
   return spans;
+}
+
+int? hitTestLibraryInteractiveEpubTokenIndex({
+  required String html,
+  required String fallbackText,
+  required TextStyle baseStyle,
+  required double maxWidth,
+  required Offset localPosition,
+  required TextDirection textDirection,
+  required TextAlign textAlign,
+  String? highlightQuery,
+  List<String> highlightTerms = const [],
+}) {
+  final baseSpans = _buildEpubInlineSpans(
+    html: html,
+    fallbackText: fallbackText,
+    baseStyle: baseStyle,
+    highlightQuery: highlightQuery,
+    highlightTerms: highlightTerms,
+  );
+  final flattenedRuns = _flattenInlineTextRuns(baseSpans, baseStyle);
+  final spans = <InlineSpan>[
+    for (final run in flattenedRuns) TextSpan(text: run.text, style: run.style),
+  ];
+  if (spans.isEmpty) return null;
+
+  final painter = TextPainter(
+    text: TextSpan(children: spans),
+    textDirection: textDirection,
+    textAlign: textAlign,
+  )..layout(maxWidth: maxWidth);
+
+  final textOffset = painter.getPositionForOffset(localPosition).offset;
+  var tokenIndex = 0;
+  var cursor = 0;
+  final tokenRanges = <({int tokenIndex, int start, int end})>[];
+
+  for (final run in flattenedRuns) {
+    if (run.text.isEmpty) continue;
+    final parts = _splitWhitespaceAwarePartsWithOffsets(run.text);
+    for (final part in parts) {
+      if (part.text.isEmpty) continue;
+      final isWhitespace = part.text.trim().isEmpty;
+      final currentTokenIndex = isWhitespace ? tokenIndex : ++tokenIndex;
+      if (!isWhitespace) {
+        tokenRanges.add((
+          tokenIndex: currentTokenIndex,
+          start: cursor,
+          end: cursor + part.text.length,
+        ));
+      }
+      cursor += part.text.length;
+    }
+  }
+
+  if (tokenRanges.isEmpty) return null;
+
+  var nearestTokenIndex = tokenRanges.first.tokenIndex;
+  var nearestDistance = double.infinity;
+  for (final range in tokenRanges) {
+    if (textOffset >= range.start && textOffset <= range.end) {
+      return range.tokenIndex;
+    }
+    final center = (range.start + range.end) / 2.0;
+    final distance = (textOffset - center).abs();
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestTokenIndex = range.tokenIndex;
+    }
+  }
+
+  return nearestTokenIndex;
 }
 
 String buildLibrarySelectionText({

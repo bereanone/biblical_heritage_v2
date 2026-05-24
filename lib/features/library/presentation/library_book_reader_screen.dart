@@ -79,6 +79,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   final _service = CommentaryResearchLibraryService.instance;
   final ScrollController _bodyScrollController = ScrollController();
   final Map<String, GlobalKey> _bodyBlockKeys = <String, GlobalKey>{};
+  final Map<String, GlobalKey> _bodyTextKeys = <String, GlobalKey>{};
   final TextRangeGeometryRegistry _geometryRegistry =
       TextRangeGeometryRegistry();
   String? _lastSearchTerm;
@@ -1965,12 +1966,128 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     return _bodyBlockKeys.putIfAbsent(key, GlobalKey.new);
   }
 
+  GlobalKey _textKeyForBlock(String key) {
+    return _bodyTextKeys.putIfAbsent(key, GlobalKey.new);
+  }
+
+  ({int blockIndex, int tokenIndex})? _resolveLibraryDragTokenHit({
+    required Offset globalPosition,
+    required List<LibraryBookBlock> sectionBlocks,
+    required int preferredBlockIndex,
+    required double bodyFontSize,
+    required Color textColor,
+    required bool isNightMode,
+    required String? highlightQuery,
+    required List<String> highlightTerms,
+    required TextDirection textDirection,
+  }) {
+    ({int blockIndex, int tokenIndex})? bestHit;
+    var bestDistance = double.infinity;
+    final theme = Theme.of(context);
+
+    for (var index = 0; index < sectionBlocks.length; index++) {
+      final block = sectionBlocks[index];
+      final key = _bodyTextKeys[_blockTargetKey(block, index)];
+      final context = key?.currentContext;
+      final renderObject = context?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.hasSize) continue;
+
+      final rect = renderObject.localToGlobal(Offset.zero) & renderObject.size;
+      final distance = _distanceSquaredToRect(globalPosition, rect);
+      if (distance > bestDistance) continue;
+
+      final isHeading = block.isHeading;
+      final className = block.className ?? '';
+      final isChapterTitle =
+          isHeading && _hasEpubClass(className, 'chapterhead');
+      final isSectionTitle =
+          isHeading && _hasEpubClass(className, 'sectionhead');
+      final isDevotionalLead =
+          _hasEpubClass(className, 'devotionaltext') ||
+          _hasEpubClass(className, 'bibletext') ||
+          _hasEpubClass(className, 'center');
+      final fontSize = isChapterTitle
+          ? bodyFontSize * 1.95
+          : isHeading
+          ? bodyFontSize * _headingFontScale(block.headingLevel)
+          : isDevotionalLead
+          ? bodyFontSize * 1.02
+          : bodyFontSize;
+      final textAlign = isChapterTitle || isSectionTitle || isDevotionalLead
+          ? TextAlign.center
+          : TextAlign.start;
+      final style =
+          (isChapterTitle
+                  ? theme.textTheme.headlineSmall
+                  : isHeading
+                  ? theme.textTheme.titleMedium
+                  : theme.textTheme.bodyLarge)
+              ?.copyWith(
+                color: textColor,
+                fontWeight: isChapterTitle || isSectionTitle || isDevotionalLead
+                    ? FontWeight.w800
+                    : isHeading
+                    ? FontWeight.w700
+                    : FontWeight.w400,
+                fontSize: fontSize,
+                height: isChapterTitle
+                    ? 1.12
+                    : isHeading
+                    ? 1.35
+                    : isDevotionalLead
+                    ? 1.45
+                    : block.isBlockquote
+                    ? 1.7
+                    : 1.6,
+                fontStyle: block.isBlockquote ? FontStyle.italic : null,
+              );
+      final resolvedStyle =
+          style ??
+          theme.textTheme.bodyLarge?.copyWith(color: textColor) ??
+          TextStyle(color: textColor, fontSize: bodyFontSize, height: 1.6);
+
+      final localPosition = renderObject.globalToLocal(globalPosition);
+      final tokenIndex = hitTestLibraryInteractiveEpubTokenIndex(
+        html: block.html,
+        fallbackText: block.text,
+        baseStyle: resolvedStyle,
+        maxWidth: renderObject.size.width,
+        localPosition: localPosition,
+        textDirection: textDirection,
+        textAlign: textAlign,
+        highlightQuery: highlightQuery,
+        highlightTerms: highlightTerms,
+      );
+      if (tokenIndex == null || tokenIndex <= 0) continue;
+      bestDistance = distance;
+      bestHit = (blockIndex: index, tokenIndex: tokenIndex);
+    }
+
+    return bestHit;
+  }
+
   String _normalizeBlockKey(String value) {
     return value
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
         .replaceAll(RegExp(r'_+'), '_')
         .replaceAll(RegExp(r'^_|_$'), '');
+  }
+
+  double _distanceSquaredToRect(Offset point, Rect rect) {
+    final clampedX = point.dx < rect.left
+        ? rect.left
+        : point.dx > rect.right
+        ? rect.right
+        : point.dx;
+    final clampedY = point.dy < rect.top
+        ? rect.top
+        : point.dy > rect.bottom
+        ? rect.bottom
+        : point.dy;
+    final dx = point.dx - clampedX;
+    final dy = point.dy - clampedY;
+    return dx * dx + dy * dy;
   }
 
   ({String href, String? anchor}) _splitReaderHref(String? value) {
@@ -2729,6 +2846,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
           devotionalFallbackParagraphCount += 1;
         }
         final blockKey = _keyForBlock(_blockTargetKey(block, blockIndex));
+        final textKey = _textKeyForBlock(_blockTargetKey(block, blockIndex));
         sectionBlockWidgets.add(
           _SectionBlockView(
             key: blockKey,
@@ -2774,6 +2892,25 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                 tokenIndex: tokenIndex,
               );
             },
+            onWordLongPressMoveDetails: (details) {
+              final hit = _resolveLibraryDragTokenHit(
+                globalPosition: details.globalPosition,
+                sectionBlocks: sectionBlocks,
+                preferredBlockIndex: blockIndex,
+                bodyFontSize: bodyFontSize,
+                textColor: textColor,
+                isNightMode: isNight,
+                highlightQuery: widget.searchQuery,
+                highlightTerms: widget.highlightTerms,
+                textDirection: Directionality.of(context),
+              );
+              if (hit == null) return;
+              _handleLibraryWordLongPressMove(
+                blockIndex: hit.blockIndex,
+                tokenIndex: hit.tokenIndex,
+              );
+            },
+            textKey: textKey,
             onWordTap: (tokenIndex) {
               if (_rangeSelection.hasCompletedRange &&
                   _rangeSelection.containsTokenPosition(

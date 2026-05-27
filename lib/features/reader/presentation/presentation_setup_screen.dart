@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../data/presentation/presentation_item_settings_repository.dart';
 import '../data/presentation/presentation_models.dart';
 import '../data/presentation/presentation_slide_settings.dart';
+import 'presentation_prep/tag_presentation_media_path_resolver.dart';
 import 'presentation_slide_canvas.dart';
 import 'viewer_presentation_settings.dart';
 
@@ -39,7 +40,8 @@ class PresentationSetupScreen extends StatefulWidget {
   final Map<String, PresentationSlideSettings> initialSlideSettingsByKey;
 
   @override
-  State<PresentationSetupScreen> createState() => _PresentationSetupScreenState();
+  State<PresentationSetupScreen> createState() =>
+      _PresentationSetupScreenState();
 }
 
 class _PresentationSetupScreenState extends State<PresentationSetupScreen> {
@@ -48,6 +50,7 @@ class _PresentationSetupScreenState extends State<PresentationSetupScreen> {
   late final Map<String, PresentationSlideSettings> _slideSettingsByKey;
   int _index = 0;
   bool _saving = false;
+  List<String> _mediaRootPaths = const <String>[];
 
   @override
   void initState() {
@@ -61,6 +64,17 @@ class _PresentationSetupScreenState extends State<PresentationSetupScreen> {
     _index = widget.slides.isEmpty
         ? 0
         : _index.clamp(0, widget.slides.length - 1);
+    _loadMediaRoots();
+  }
+
+  Future<void> _loadMediaRoots() async {
+    final roots = await TagPresentationMediaPathResolver.collectRootCandidates(
+      preferredRootPath: widget.mediaRootPath,
+    );
+    if (!mounted) return;
+    setState(() {
+      _mediaRootPaths = roots;
+    });
   }
 
   PresentationSlide get _currentSlide => widget.slides[_index];
@@ -89,7 +103,7 @@ class _PresentationSetupScreenState extends State<PresentationSetupScreen> {
 
   Future<void> _updateCurrentSlideSettings(
     PresentationSlideSettings Function(PresentationSlideSettings current)
-        update,
+    update,
   ) async {
     final slide = _currentSlide;
     final current = _settingsForSlide(slide);
@@ -127,10 +141,8 @@ class _PresentationSetupScreenState extends State<PresentationSetupScreen> {
 
   Future<void> _setFontSize(double value) async {
     await _updateCurrentSlideSettings(
-      (current) => current.copyWith(
-        fontSizeOverride: value,
-        autoFitEnabled: false,
-      ),
+      (current) =>
+          current.copyWith(fontSizeOverride: value, autoFitEnabled: false),
     );
   }
 
@@ -143,10 +155,8 @@ class _PresentationSetupScreenState extends State<PresentationSetupScreen> {
 
   Future<void> _resetAutoFit() async {
     await _updateCurrentSlideSettings(
-      (current) => current.copyWith(
-        clearFontSizeOverride: true,
-        autoFitEnabled: true,
-      ),
+      (current) =>
+          current.copyWith(clearFontSizeOverride: true, autoFitEnabled: true),
     );
   }
 
@@ -205,9 +215,9 @@ class _PresentationSetupScreenState extends State<PresentationSetupScreen> {
       children: [
         Text(
           label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 4),
         DropdownButtonFormField<T>(
@@ -258,11 +268,7 @@ class _PresentationSetupScreenState extends State<PresentationSetupScreen> {
               ],
             );
       return filled
-          ? FilledButton(
-              onPressed: onPressed,
-              style: buttonStyle,
-              child: child,
-            )
+          ? FilledButton(onPressed: onPressed, style: buttonStyle, child: child)
           : OutlinedButton(
               onPressed: onPressed,
               style: buttonStyle,
@@ -306,7 +312,9 @@ class _PresentationSetupScreenState extends State<PresentationSetupScreen> {
               compactButton(
                 label: 'A-',
                 icon: Icons.text_decrease_rounded,
-                onPressed: _saving ? null : () => unawaited(_adjustFontSize(-2)),
+                onPressed: _saving
+                    ? null
+                    : () => unawaited(_adjustFontSize(-2)),
               ),
               const SizedBox(width: 8),
               compactButton(
@@ -344,14 +352,15 @@ class _PresentationSetupScreenState extends State<PresentationSetupScreen> {
               const SizedBox(width: 10),
               _compactDropdown<PresentationLayoutPreference>(
                 label: 'Layout',
-                value: settings.layoutOverride ?? PresentationLayoutPreference.auto,
+                value:
+                    settings.layoutOverride ??
+                    PresentationLayoutPreference.auto,
                 items: presentationLayoutPreferenceOptions
                     .map(
-                      (entry) =>
-                          DropdownMenuItem<PresentationLayoutPreference>(
-                            value: entry,
-                            child: Text(presentationLayoutPreferenceLabel(entry)),
-                          ),
+                      (entry) => DropdownMenuItem<PresentationLayoutPreference>(
+                        value: entry,
+                        child: Text(presentationLayoutPreferenceLabel(entry)),
+                      ),
                     )
                     .toList(growable: false),
                 onChanged: (next) {
@@ -363,22 +372,25 @@ class _PresentationSetupScreenState extends State<PresentationSetupScreen> {
               FilterChip(
                 label: const Text('Allow Scroll'),
                 selected: settings.allowScroll,
-                onSelected:
-                    _saving ? null : (value) => unawaited(_setAllowScroll(value)),
+                onSelected: _saving
+                    ? null
+                    : (value) => unawaited(_setAllowScroll(value)),
               ),
               const SizedBox(width: 10),
               compactButton(
                 label: 'Previous',
                 icon: Icons.chevron_left_rounded,
-                onPressed:
-                    canGoPrevious && !_saving ? () => unawaited(_goPrevious()) : null,
+                onPressed: canGoPrevious && !_saving
+                    ? () => unawaited(_goPrevious())
+                    : null,
               ),
               const SizedBox(width: 8),
               compactButton(
                 label: 'Next',
                 icon: Icons.chevron_right_rounded,
-                onPressed:
-                    canGoNext && !_saving ? () => unawaited(_goNext()) : null,
+                onPressed: canGoNext && !_saving
+                    ? () => unawaited(_goNext())
+                    : null,
               ),
               const SizedBox(width: 8),
               compactButton(
@@ -412,7 +424,7 @@ class _PresentationSetupScreenState extends State<PresentationSetupScreen> {
                     aspectRatioPreset: widget.aspectRatioPreset,
                     bookNames: widget.bookNames,
                     settings: _settingsForSlide(slide),
-                    mediaRootPath: widget.mediaRootPath,
+                    mediaRootPaths: _mediaRootPaths,
                   ),
                 ),
               ),

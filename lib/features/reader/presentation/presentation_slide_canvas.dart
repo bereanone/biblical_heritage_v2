@@ -9,6 +9,7 @@ import '../data/presentation/presentation_models.dart';
 import '../data/presentation/presentation_slide_settings.dart';
 import '../data/presentation/presentation_text_format.dart';
 import 'viewer_presentation_settings.dart';
+import 'presentation_prep/tag_presentation_media_path_resolver.dart';
 
 class PresentationSlideCanvas extends StatefulWidget {
   const PresentationSlideCanvas({
@@ -17,14 +18,14 @@ class PresentationSlideCanvas extends StatefulWidget {
     required this.aspectRatioPreset,
     required this.bookNames,
     required this.settings,
-    this.mediaRootPath,
+    required this.mediaRootPaths,
   });
 
   final PresentationSlide slide;
   final PresentationAspectRatioPreset aspectRatioPreset;
   final Map<int, String> bookNames;
   final PresentationSlideSettings settings;
-  final String? mediaRootPath;
+  final List<String> mediaRootPaths;
 
   @override
   State<PresentationSlideCanvas> createState() =>
@@ -78,8 +79,7 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
       }
 
       final verseText = item.displayText.trim();
-      final citationText =
-          item.citationText?.trim().isNotEmpty == true
+      final citationText = item.citationText?.trim().isNotEmpty == true
           ? item.citationText!.trim()
           : _referenceHeadingForItem(item);
       final parts = <String>[];
@@ -221,8 +221,7 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
     final blocks = <String>[];
     for (final item in _verseItems(slide)) {
       final text = item.displayText.trim();
-      final citationText =
-          item.citationText?.trim().isNotEmpty == true
+      final citationText = item.citationText?.trim().isNotEmpty == true
           ? item.citationText!.trim()
           : _referenceHeadingForItem(item);
       final noteText = item.noteText?.trim() ?? '';
@@ -247,12 +246,10 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
   }
 
   String? _resolveMediaPath(String relativePath) {
-    final normalized = relativePath.trim();
-    if (normalized.isEmpty) return null;
-    if (p.isAbsolute(normalized)) return normalized;
-    final basePath = widget.mediaRootPath;
-    if (basePath == null || basePath.trim().isEmpty) return null;
-    return p.join(basePath, normalized);
+    return TagPresentationMediaPathResolver.resolveStoredMediaPath(
+      relativePath,
+      widget.mediaRootPaths,
+    );
   }
 
   Future<_MediaDimensions?> _loadMediaDimensions(String relativePath) async {
@@ -364,6 +361,7 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
           140.0,
           constraints.maxHeight.isFinite ? constraints.maxHeight : 140.0,
         );
+        final shortName = p.basename(relativePath).trim();
 
         return SizedBox(
           width: width,
@@ -390,24 +388,21 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        p.basename(relativePath),
+                        shortName.isEmpty ? 'Image unavailable' : shortName,
                         style: const TextStyle(
                           color: Colors.white70,
                           fontSize: 12,
                         ),
                         textAlign: TextAlign.center,
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        relativePath,
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 10,
+                      if (shortName.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Image unavailable',
+                          style: TextStyle(color: Colors.white54, fontSize: 10),
+                          textAlign: TextAlign.center,
                         ),
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      ],
                     ],
                   ),
                 ),
@@ -534,8 +529,7 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
 
     final verseText = item.displayText.trim();
     final noteText = item.noteText?.trim() ?? '';
-    final citationText =
-        item.citationText?.trim().isNotEmpty == true
+    final citationText = item.citationText?.trim().isNotEmpty == true
         ? item.citationText!.trim()
         : _referenceHeadingForItem(item);
     final showAttachedNote =
@@ -631,7 +625,9 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
         noteText: noteText,
         textStyle: noteTextStyle.copyWith(fontSize: bodyFontSize),
         noteFormatJson: item.noteFormatJson,
-        mediaRefs: renderMedia ? item.mediaRefs ?? const <String>[] : const <String>[],
+        mediaRefs: renderMedia
+            ? item.mediaRefs ?? const <String>[]
+            : const <String>[],
         textAlign: bodyTextAlign,
       );
     }
@@ -1232,8 +1228,9 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
           final bodyHeight = math.max(0.0, bodyConstraints.maxHeight);
           final gap = 18.0;
           final leftShare = switch (layoutPreference) {
-            PresentationLayoutPreference.textLeftThreeQuarterImageRightOneQuarter
-              => 0.75,
+            PresentationLayoutPreference
+                .textLeftThreeQuarterImageRightOneQuarter =>
+              0.75,
             PresentationLayoutPreference.textLeftTwoThirdsImageRightOneThird =>
               0.67,
             PresentationLayoutPreference.imageLeftTextRight => 0.35,
@@ -1263,7 +1260,8 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
             textAlign: bodyTextAlign,
             safetyBuffer: 18.0,
           );
-          final sharedFontSize = widget.settings.fontSizeOverride ??
+          final sharedFontSize =
+              widget.settings.fontSizeOverride ??
               (widget.settings.autoFitEnabled
                   ? math.min(leftFontSize, rightFontSize)
                   : bodyMinFontSize);
@@ -1377,8 +1375,7 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
         slideTitleFormatJson: slide.slideTitleFormatJson,
         legacyGroupKey: slide.legacyGroupKey,
         customLayoutJson: slide.customLayoutJson,
-        items:
-            bottomEntries.map((entry) => entry.item).toList(growable: false),
+        items: bottomEntries.map((entry) => entry.item).toList(growable: false),
       ),
     );
     final bodyTextAlign = _bodyTextAlign(slide);
@@ -1417,7 +1414,8 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
             textAlign: bodyTextAlign,
             safetyBuffer: 18.0,
           );
-          final sharedFontSize = widget.settings.fontSizeOverride ??
+          final sharedFontSize =
+              widget.settings.fontSizeOverride ??
               (widget.settings.autoFitEnabled
                   ? math.min(topFontSize, bottomFontSize)
                   : bodyMinFontSize);
@@ -1506,13 +1504,12 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
               _hasMediaContent(item)),
     );
     final overlayItems = slide.items.where(
-      (item) =>
-          item.itemPlacement == PresentationItemPlacement.auto
-              ? _hasTextContent(item)
-              : item.itemPlacement == PresentationItemPlacement.full ||
-                    item.itemPlacement == PresentationItemPlacement.center ||
-                    item.itemPlacement == PresentationItemPlacement.notes ||
-                    item.itemPlacement == PresentationItemPlacement.citation,
+      (item) => item.itemPlacement == PresentationItemPlacement.auto
+          ? _hasTextContent(item)
+          : item.itemPlacement == PresentationItemPlacement.full ||
+                item.itemPlacement == PresentationItemPlacement.center ||
+                item.itemPlacement == PresentationItemPlacement.notes ||
+                item.itemPlacement == PresentationItemPlacement.citation,
     );
 
     final backgroundRef = backgroundItems
@@ -1560,13 +1557,15 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 920),
                 child: _renderPlacementEntries(
-                  overlayItems.map((item) {
-                    return _PlacementRenderEntry(
-                      item: item,
-                      renderText: true,
-                      renderMedia: false,
-                    );
-                  }).toList(growable: false),
+                  overlayItems
+                      .map((item) {
+                        return _PlacementRenderEntry(
+                          item: item,
+                          renderText: true,
+                          renderMedia: false,
+                        );
+                      })
+                      .toList(growable: false),
                   slideTitle: slide.slideTitle?.trim() ?? '',
                   bodyStyle: bodyStyle,
                   noteTextStyle: noteTextStyle,
@@ -1957,7 +1956,7 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
                                       fontSize: titleSize,
                                     ),
                                   ),
-                          const SizedBox(height: 18),
+                            const SizedBox(height: 18),
                           ],
                           Expanded(
                             child: _isImageOnlyLayout(effectiveLayout)

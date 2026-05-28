@@ -16,6 +16,10 @@ import '../../library/data/library_citation_display_helper.dart';
 import '../../library/presentation/library_book_reader_screen.dart';
 import '../data/presentation/presentation_models.dart';
 import '../data/presentation/presentation_text_format.dart';
+import '../data/tags/unified_tag_models.dart';
+import 'presentation_prep/presentation_ui_helpers.dart';
+import 'presentation_prep/tag_presentation_prep_launcher.dart';
+import 'presentation_prep/tag_presentation_prep_models.dart';
 import 'tag_dialog_styles.dart';
 import 'tag_quick_apply_helper.dart';
 import 'viewer_presentation_launcher.dart';
@@ -559,6 +563,25 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       initialIndex: _focusedIndex,
       tag: widget.tag,
       tagFamily: _isDollarRepository ? 'dollar' : 'hash',
+    );
+  }
+
+  Future<void> _openPresentationPrep() async {
+    await openTagPresentationPrep(
+      context,
+      request: TagPresentationPrepRequest(
+        tagName: widget.tag,
+        preferredStorageKinds: _isDollarRepository
+            ? const [
+                UnifiedTagStorageKind.dollar,
+                UnifiedTagStorageKind.unified,
+              ]
+            : const [
+              UnifiedTagStorageKind.hash,
+              UnifiedTagStorageKind.unified,
+            ],
+      ),
+      dismissSourceRoute: true,
     );
   }
 
@@ -1169,162 +1192,70 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         children: [
           Container(
             decoration: headerDecoration,
-            padding: const EdgeInsets.fromLTRB(12, 6, 8, 4),
+            padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
             child: LayoutBuilder(
               builder: (context, constraints) {
+                final isNarrow = constraints.maxWidth < 860;
+                final headerTitleStyle = presentationTextStyle(
+                  context,
+                  theme.textTheme.titleLarge,
+                  widget.fontScale,
+                  color: titleColor,
+                  fontWeight: FontWeight.w900,
+                  minFontSize: 18,
+                  maxFontSize: 24,
+                );
+
+                final title = Text(
+                  '${widget.tag} · ${_entries.length}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: headerTitleStyle.copyWith(letterSpacing: -0.2, height: 1),
+                );
+
+                final actions = _buildTagDetailHeaderActions(
+                  context,
+                  fontScale: widget.fontScale,
+                  bodyColor: bodyColor,
+                  foregroundColor: headerButtonForeground,
+                  defaultActive: defaultActive,
+                  isDollarRepository: _isDollarRepository,
+                  canMovePrevious: _focusedIndex > 0,
+                  canMoveNext: _focusedIndex < _entries.length - 1,
+                  focusedEntry: focusedEntry,
+                  onMakeDefault: _makeDefault,
+                  onShowInstructions: _showInstructions,
+                  onAddContentItem: _addContentItem,
+                  onAddNoteSlide: _addNoteSlide,
+                  onOpenPresentationPrep: _openPresentationPrep,
+                  onOpenPresentationMode: _openPresentationMode,
+                  onEditCurrentLink: _editCurrentLink,
+                  onMovePrevious: () => _moveFocusedEntry(-1),
+                  onMoveNext: () => _moveFocusedEntry(1),
+                  onDeleteFocusedEntry: focusedEntry == null
+                      ? null
+                      : () => _deleteEntry(focusedEntry),
+                );
+
+                if (isNarrow) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      title,
+                      const SizedBox(height: 8),
+                      actions,
+                    ],
+                  );
+                }
+
                 return Row(
                   children: [
-                    Expanded(
-                      child: Text(
-                        '${widget.tag} · ${_entries.length}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.2,
-                          height: 1.0,
-                          color: titleColor,
-                        ),
-                      ),
-                    ),
+                    Expanded(child: title),
                     const SizedBox(width: 8),
                     Flexible(
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final compactHeader = constraints.maxWidth < 700;
-                          return FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerRight,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _HeaderActionChip(
-                                  icon: defaultActive
-                                      ? Icons.check_circle
-                                      : Icons.check_circle_outline,
-                                  label: defaultActive
-                                      ? 'Default'
-                                      : (compactHeader
-                                            ? 'Set default'
-                                            : 'Make default'),
-                                  tooltip: defaultActive
-                                      ? 'Current default tag'
-                                      : 'Set as default tag',
-                                  onPressed: _makeDefault,
-                                  foregroundColor: headerButtonForeground,
-                                ),
-                                const SizedBox(width: 6),
-                                IconButton(
-                                  tooltip: 'Show instructions',
-                                  onPressed: _showInstructions,
-                                  icon: const Icon(Icons.help_outline),
-                                  color: headerButtonForeground,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                if (!_isDollarRepository) ...[
-                                  IconButton(
-                                    tooltip: 'Add Content Item',
-                                    onPressed: _addContentItem,
-                                    icon: const Icon(Icons.note_add_outlined),
-                                    color: headerButtonForeground,
-                                    constraints: const BoxConstraints.tightFor(
-                                      width: 36,
-                                      height: 36,
-                                    ),
-                                    padding: const EdgeInsets.all(4),
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                  const SizedBox(width: 2),
-                                ],
-                                if (_isDollarRepository) ...[
-                                  IconButton(
-                                    tooltip: 'Add Note Slide',
-                                    onPressed: _addNoteSlide,
-                                    icon: const Icon(Icons.note_add_outlined),
-                                    color: headerButtonForeground,
-                                    constraints: const BoxConstraints.tightFor(
-                                      width: 36,
-                                      height: 36,
-                                    ),
-                                    padding: const EdgeInsets.all(4),
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                  const SizedBox(width: 2),
-                                ],
-                                IconButton(
-                                  tooltip: 'Presentation Mode',
-                                  onPressed: focusedEntry == null
-                                      ? null
-                                      : _openPresentationMode,
-                                  icon: const Icon(Icons.slideshow_rounded),
-                                  color: headerButtonForeground,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                IconButton(
-                                  tooltip: 'Export to clipboard',
-                                  onPressed: _entries.isEmpty
-                                      ? null
-                                      : _exportToClipboard,
-                                  icon: const Icon(Icons.arrow_upward_rounded),
-                                  color: headerButtonForeground,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                IconButton(
-                                  tooltip: 'Rename',
-                                  onPressed: _renameTag,
-                                  icon: const Icon(Icons.edit_outlined),
-                                  color: headerButtonForeground,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                IconButton(
-                                  tooltip: 'Delete entire tag',
-                                  onPressed: _deleteTag,
-                                  icon: const Icon(Icons.delete_forever),
-                                  color: theme.colorScheme.error,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                IconButton(
-                                  tooltip: 'Close',
-                                  onPressed: _closeDetail,
-                                  icon: const Icon(Icons.close),
-                                  color: titleColor,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                              ],
-                            ),
-                          );
-                        },
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: actions,
                       ),
                     ),
                   ],
@@ -1362,7 +1293,13 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                   child: Text(
                                     '${widget.tag} Study Chain',
                                     style: theme.textTheme.titleLarge?.copyWith(
-                                      fontSize: 17,
+                                      fontSize: presentationScaledSize(
+                                        context,
+                                        17,
+                                        widget.fontScale,
+                                        min: 16,
+                                        max: 20,
+                                      ),
                                       fontWeight: FontWeight.w900,
                                       color: titleColor,
                                     ),
@@ -1371,7 +1308,26 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                 TextButton.icon(
                                   onPressed: _editCurrentLink,
                                   icon: const Icon(Icons.edit_outlined),
-                                  label: const Text('Edit Current Link'),
+                                  label: Text(
+                                    'Edit Current Link',
+                                    style: presentationTextStyle(
+                                      context,
+                                      theme.textTheme.labelLarge,
+                                      widget.fontScale,
+                                      color: bodyColor,
+                                      fontWeight: FontWeight.w700,
+                                      minFontSize: 12.5,
+                                      maxFontSize: 16,
+                                    ),
+                                  ),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: bodyColor,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 10,
+                                    ),
+                                    minimumSize: const Size(44, 44),
+                                  ),
                                 ),
                               ],
                             ),
@@ -1384,7 +1340,17 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                       : null,
                                   icon: const Icon(Icons.chevron_left),
                                   color: bodyColor,
-                                  visualDensity: VisualDensity.compact,
+                                  iconSize: presentationScaledSize(
+                                    context,
+                                    22,
+                                    widget.fontScale,
+                                    min: 20,
+                                    max: 26,
+                                  ),
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 44,
+                                    height: 44,
+                                  ),
                                 ),
                                 Expanded(
                                   child: Text(
@@ -1409,7 +1375,17 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                       : null,
                                   icon: const Icon(Icons.chevron_right),
                                   color: bodyColor,
-                                  visualDensity: VisualDensity.compact,
+                                  iconSize: presentationScaledSize(
+                                    context,
+                                    22,
+                                    widget.fontScale,
+                                    min: 20,
+                                    max: 26,
+                                  ),
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 44,
+                                    height: 44,
+                                  ),
                                 ),
                               ],
                             ),
@@ -1486,7 +1462,17 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                   : null,
                               icon: const Icon(Icons.chevron_left),
                               color: bodyColor,
-                              visualDensity: VisualDensity.compact,
+                              iconSize: presentationScaledSize(
+                                context,
+                                22,
+                                widget.fontScale,
+                                min: 20,
+                                max: 26,
+                              ),
+                              constraints: const BoxConstraints.tightFor(
+                                width: 44,
+                                height: 44,
+                              ),
                             ),
                             Expanded(
                               child: Text(
@@ -1511,7 +1497,17 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                   : null,
                               icon: const Icon(Icons.chevron_right),
                               color: bodyColor,
-                              visualDensity: VisualDensity.compact,
+                              iconSize: presentationScaledSize(
+                                context,
+                                22,
+                                widget.fontScale,
+                                min: 20,
+                                max: 26,
+                              ),
+                              constraints: const BoxConstraints.tightFor(
+                                width: 44,
+                                height: 44,
+                              ),
                             ),
                           ],
                         ),
@@ -1838,6 +1834,18 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                           Icons.edit_outlined,
                                           color: TagDialogStyles.accent(theme),
                                         ),
+                                        iconSize: presentationScaledSize(
+                                          context,
+                                          22,
+                                          widget.fontScale,
+                                          min: 20,
+                                          max: 26,
+                                        ),
+                                        constraints:
+                                            const BoxConstraints.tightFor(
+                                          width: 44,
+                                          height: 44,
+                                        ),
                                       ),
                                       IconButton(
                                         tooltip: 'Move up',
@@ -1846,6 +1854,18 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                             : null,
                                         icon: const Icon(
                                           Icons.keyboard_arrow_up,
+                                        ),
+                                        iconSize: presentationScaledSize(
+                                          context,
+                                          22,
+                                          widget.fontScale,
+                                          min: 20,
+                                          max: 26,
+                                        ),
+                                        constraints:
+                                            const BoxConstraints.tightFor(
+                                          width: 44,
+                                          height: 44,
                                         ),
                                       ),
                                       IconButton(
@@ -1856,6 +1876,18 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                         icon: const Icon(
                                           Icons.keyboard_arrow_down,
                                         ),
+                                        iconSize: presentationScaledSize(
+                                          context,
+                                          22,
+                                          widget.fontScale,
+                                          min: 20,
+                                          max: 26,
+                                        ),
+                                        constraints:
+                                            const BoxConstraints.tightFor(
+                                          width: 44,
+                                          height: 44,
+                                        ),
                                       ),
                                       IconButton(
                                         tooltip: _isNoteOnlyEntry(entry)
@@ -1865,6 +1897,18 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                         icon: Icon(
                                           Icons.delete,
                                           color: theme.colorScheme.error,
+                                        ),
+                                        iconSize: presentationScaledSize(
+                                          context,
+                                          22,
+                                          widget.fontScale,
+                                          min: 20,
+                                          max: 26,
+                                        ),
+                                        constraints:
+                                            const BoxConstraints.tightFor(
+                                          width: 44,
+                                          height: 44,
                                         ),
                                       ),
                                     ],
@@ -1883,6 +1927,153 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       ),
     );
   }
+}
+
+Widget _buildTagDetailHeaderActions(
+  BuildContext context, {
+  required double fontScale,
+  required Color bodyColor,
+  required Color foregroundColor,
+  required bool defaultActive,
+  required bool isDollarRepository,
+  required bool canMovePrevious,
+  required bool canMoveNext,
+  required HashTagEntry? focusedEntry,
+  required VoidCallback onMakeDefault,
+  required VoidCallback onShowInstructions,
+  required VoidCallback onAddContentItem,
+  required VoidCallback onAddNoteSlide,
+  required VoidCallback onOpenPresentationPrep,
+  required VoidCallback onOpenPresentationMode,
+  required VoidCallback onEditCurrentLink,
+  required VoidCallback onMovePrevious,
+  required VoidCallback onMoveNext,
+  required VoidCallback? onDeleteFocusedEntry,
+}) {
+  final theme = Theme.of(context);
+  final isWide = MediaQuery.sizeOf(context).width >= 720;
+  final minControlSize = presentationScaledSize(
+    context,
+    isWide ? 46 : 42,
+    fontScale,
+    min: 40,
+    max: 54,
+  );
+  final iconSize = presentationScaledSize(
+    context,
+    isWide ? 22 : 20,
+    fontScale,
+    min: 18,
+    max: 26,
+  );
+  final selectedForeground = theme.colorScheme.onPrimaryContainer;
+  final defaultBackground = defaultActive
+      ? theme.colorScheme.primaryContainer
+      : Colors.transparent;
+  final defaultForeground = defaultActive ? selectedForeground : foregroundColor;
+
+  Widget iconAction({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+    Color? color,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: Icon(icon, size: iconSize, color: color ?? bodyColor),
+        constraints: BoxConstraints.tightFor(
+          width: minControlSize,
+          height: minControlSize,
+        ),
+        padding: EdgeInsets.zero,
+        visualDensity: VisualDensity.standard,
+      ),
+    );
+  }
+
+  final buttons = <Widget>[
+    _HeaderActionChip(
+      icon: defaultActive ? Icons.star : Icons.star_border,
+      label: 'Default',
+      onPressed: onMakeDefault,
+      foregroundColor: defaultForeground,
+      backgroundColor: defaultBackground,
+      borderColor: defaultActive
+          ? theme.colorScheme.primary
+          : TagDialogStyles.outlineColor(theme),
+      fontScale: fontScale,
+      minHeight: minControlSize,
+      iconSize: iconSize,
+      tooltip: defaultActive ? 'Current default tag' : 'Set as default tag',
+    ),
+    iconAction(
+      icon: Icons.help_outline,
+      tooltip: 'Help',
+      onPressed: onShowInstructions,
+    ),
+    iconAction(
+      icon: Icons.add_circle_outline,
+      tooltip: isDollarRepository ? 'Add note slide' : 'Add note item',
+      onPressed: isDollarRepository ? onAddNoteSlide : onAddContentItem,
+    ),
+    _HeaderActionChip(
+      icon: Icons.slideshow_outlined,
+      label: 'Prepare Presentation',
+      onPressed: onOpenPresentationPrep,
+      foregroundColor: bodyColor,
+      backgroundColor: Colors.transparent,
+      borderColor: TagDialogStyles.outlineColor(theme),
+      fontScale: fontScale,
+      minHeight: minControlSize,
+      iconSize: iconSize,
+    ),
+    iconAction(
+      icon: Icons.play_circle_outline,
+      tooltip: 'Play presentation',
+      onPressed: onOpenPresentationMode,
+    ),
+  ];
+
+  final entry = focusedEntry;
+  if (entry != null) {
+    buttons.addAll([
+      iconAction(
+        icon: Icons.chevron_left,
+        tooltip: 'Previous item',
+        onPressed: canMovePrevious ? onMovePrevious : null,
+      ),
+      iconAction(
+        icon: Icons.chevron_right,
+        tooltip: 'Next item',
+        onPressed: canMoveNext ? onMoveNext : null,
+      ),
+      iconAction(
+        icon: Icons.edit_outlined,
+        tooltip: isDollarRepository ? 'Edit current link' : 'Edit item',
+        onPressed: onEditCurrentLink,
+      ),
+      if (onDeleteFocusedEntry != null)
+        iconAction(
+          icon: Icons.delete_outline,
+          tooltip: entry.bookNumber == 0 && entry.verseRef.startsWith('note:')
+              ? 'Delete note'
+              : 'Delete verse',
+          onPressed: onDeleteFocusedEntry,
+          color: theme.colorScheme.error,
+        ),
+    ]);
+  }
+
+  return Wrap(
+    spacing: 8,
+    runSpacing: 8,
+    alignment: WrapAlignment.end,
+    crossAxisAlignment: WrapCrossAlignment.center,
+    children: buttons,
+  );
 }
 
 class _ELibraryNoteMetadata {
@@ -1952,6 +2143,11 @@ class _HeaderActionChip extends StatelessWidget {
     required this.label,
     required this.onPressed,
     required this.foregroundColor,
+    required this.fontScale,
+    required this.minHeight,
+    required this.iconSize,
+    required this.backgroundColor,
+    required this.borderColor,
     this.tooltip,
   });
 
@@ -1959,22 +2155,46 @@ class _HeaderActionChip extends StatelessWidget {
   final String label;
   final VoidCallback onPressed;
   final Color foregroundColor;
+  final double fontScale;
+  final double minHeight;
+  final double iconSize;
+  final Color backgroundColor;
+  final Color borderColor;
   final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
-    final button = TextButton.icon(
+    final theme = Theme.of(context);
+    final button = OutlinedButton.icon(
       onPressed: onPressed,
-      icon: Icon(icon, size: 17),
-      label: TagDialogStyles.fittedButtonLabel(label),
-      style: TextButton.styleFrom(
+      icon: Icon(icon, size: iconSize),
+      label: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: presentationTextStyle(
+          context,
+          theme.textTheme.labelLarge,
+          fontScale,
+          color: foregroundColor,
+          fontWeight: FontWeight.w800,
+          minFontSize: 12.5,
+          maxFontSize: 16.5,
+          height: 1.05,
+        ),
+      ),
+      style: OutlinedButton.styleFrom(
         foregroundColor: foregroundColor,
-        backgroundColor: Colors.transparent,
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        visualDensity: VisualDensity.compact,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        minimumSize: const Size(0, 28),
-        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        backgroundColor: backgroundColor,
+        side: BorderSide(color: borderColor),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        minimumSize: Size(minHeight, minHeight),
+        textStyle: TextStyle(
+          fontWeight: FontWeight.w700,
+          color: foregroundColor,
+        ),
+        tapTargetSize: MaterialTapTargetSize.padded,
+        visualDensity: VisualDensity.standard,
       ),
     );
     final labelText = tooltip ?? label;

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'presentation_prep/presentation_ui_helpers.dart';
 import 'viewer_reference_title.dart';
 import 'reader_tag_button.dart';
 
@@ -11,6 +12,7 @@ class ViewerTopBar extends StatelessWidget {
     required this.verse,
     required this.fontScale,
     required this.onSearch,
+    required this.onSavedPresentations,
     required this.onStandardTag,
     required this.onDollarTag,
     required this.onRapidTag,
@@ -24,6 +26,7 @@ class ViewerTopBar extends StatelessWidget {
   final int? verse;
   final double fontScale;
   final VoidCallback onSearch;
+  final VoidCallback onSavedPresentations;
   final VoidCallback onStandardTag;
   final VoidCallback onDollarTag;
   final VoidCallback onRapidTag;
@@ -34,6 +37,10 @@ class ViewerTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final compact = MediaQuery.sizeOf(context).width < 420;
+    final isWide = MediaQuery.sizeOf(context).width >= 700;
+    final actionExtent = isWide ? 48.0 : (compact ? 44.0 : 46.0);
+    final inset = compact ? 6.0 : 10.0;
     final baseTitleStyle =
         theme.textTheme.headlineSmall?.copyWith(
           fontWeight: FontWeight.w700,
@@ -42,20 +49,18 @@ class ViewerTopBar extends StatelessWidget {
         const TextStyle(fontSize: 20, fontWeight: FontWeight.w700);
     final readingFontSize =
         ((theme.textTheme.bodyLarge?.fontSize ?? 16) * fontScale);
+    final iconSize = presentationScaledSize(
+      context,
+      isWide ? 23 : 21,
+      fontScale,
+      min: 20,
+      max: 26,
+    );
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        const actionWidth = 48.0;
-        const leadingActions = 2;
-        const reservedTrailingActions = 4;
-        const horizontalPadding = 8.0;
-        final reservedWidth =
-            (leadingActions + reservedTrailingActions) * actionWidth +
-            (horizontalPadding * 2);
-        final titleWidth = (constraints.maxWidth - reservedWidth).clamp(
-          72.0,
-          420.0,
-        );
+        final titleWidth = (constraints.maxWidth * (isWide ? 0.30 : 0.34))
+            .clamp(72.0, isWide ? 320.0 : 280.0);
 
         return Material(
           color: theme.colorScheme.surface,
@@ -63,59 +68,84 @@ class ViewerTopBar extends StatelessWidget {
             bottom: false,
             child: SizedBox(
               height: kToolbarHeight,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Positioned.fill(
-                    child: Row(
-                      children: [
-                        IconButton(
-                          onPressed: () => Navigator.of(context).maybePop(),
-                          icon: const Icon(Icons.arrow_back),
-                        ),
-                        IconButton(
-                          onPressed: onSearch,
-                          icon: const Icon(Icons.search),
-                        ),
-                        const Spacer(),
-                        ReaderTagButtons(
-                          activeFamily: activeFamily,
-                          onStandardTap: onStandardTag,
-                          onDollarTap: onDollarTag,
-                          onRapidTap: onRapidTag,
-                        ),
-                        const SizedBox(width: 2),
-                        IconButton(
-                          onPressed: onTopics,
-                          icon: const Icon(Icons.list_alt),
-                        ),
-                      ],
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: inset),
+                child: Row(
+                  children: [
+                    IconButton(
+                      constraints: BoxConstraints.tightFor(
+                        width: actionExtent,
+                        height: actionExtent,
+                      ),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      icon: Icon(Icons.arrow_back, size: iconSize),
                     ),
-                  ),
-                  Center(
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(6),
-                      onTap: onChoosePassage,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        child: SizedBox(
-                          width: titleWidth,
-                          child: ViewerReferenceTitle(
-                            bookName: bookName,
-                            chapter: chapter,
-                            verse: verse,
-                            baseStyle: baseTitleStyle,
-                            minimumFontSize: readingFontSize,
-                            maxWidth: titleWidth,
+                    IconButton(
+                      constraints: BoxConstraints.tightFor(
+                        width: actionExtent,
+                        height: actionExtent,
+                      ),
+                      padding: EdgeInsets.zero,
+                      onPressed: onSearch,
+                      icon: Icon(Icons.search, size: iconSize),
+                    ),
+                    IconButton(
+                      constraints: BoxConstraints.tightFor(
+                        width: actionExtent,
+                        height: actionExtent,
+                      ),
+                      padding: EdgeInsets.zero,
+                      onPressed: onSavedPresentations,
+                      icon: Icon(Icons.connected_tv, size: iconSize),
+                      tooltip: 'Saved Presentations',
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Center(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(6),
+                          onTap: onChoosePassage,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            child: SizedBox(
+                              width: titleWidth,
+                              child: ViewerReferenceTitle(
+                                bookName: bookName,
+                                chapter: chapter,
+                                verse: verse,
+                                baseStyle: baseTitleStyle,
+                                minimumFontSize: readingFontSize,
+                                maxWidth: titleWidth,
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    ReaderTagButtons(
+                      fontScale: fontScale,
+                      activeFamily: activeFamily,
+                      onStandardTap: onStandardTag,
+                      onDollarTap: onDollarTag,
+                      onRapidTap: onRapidTag,
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      constraints: BoxConstraints.tightFor(
+                        width: actionExtent,
+                        height: actionExtent,
+                      ),
+                      padding: EdgeInsets.zero,
+                      onPressed: onTopics,
+                      icon: Icon(Icons.list_alt, size: iconSize),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

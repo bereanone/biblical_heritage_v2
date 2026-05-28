@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
 
+import 'presentation_prep/presentation_ui_helpers.dart';
+
 enum ReaderTagFamily { hash, dollar }
 
 class ReaderTagButtons extends StatelessWidget {
   const ReaderTagButtons({
     super.key,
+    required this.fontScale,
     required this.activeFamily,
     required this.onStandardTap,
     required this.onDollarTap,
     required this.onRapidTap,
   });
 
+  final double fontScale;
   final ReaderTagFamily? activeFamily;
   final VoidCallback onStandardTap;
   final VoidCallback onDollarTap;
@@ -19,6 +23,29 @@ class ReaderTagButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final compact = MediaQuery.sizeOf(context).width < 420;
+    final isWide = MediaQuery.sizeOf(context).width >= 700;
+    final buttonExtent = presentationScaledSize(
+      context,
+      isWide ? 44 : (compact ? 40 : 42),
+      fontScale,
+      min: 40,
+      max: 52,
+    );
+    final glyphFontSize = presentationScaledSize(
+      context,
+      isWide ? 21 : (compact ? 18 : 19),
+      fontScale,
+      min: 18,
+      max: 24,
+    );
+    final iconSize = presentationScaledSize(
+      context,
+      isWide ? 21 : (compact ? 18 : 19),
+      fontScale,
+      min: 18,
+      max: 24,
+    );
     final rapidColor = theme.colorScheme.primary;
     final activeColor = theme.colorScheme.primary;
     final activeForeground = theme.colorScheme.onPrimary;
@@ -34,6 +61,8 @@ class ReaderTagButtons extends StatelessWidget {
           message: '# Tags',
           child: _GlyphButton(
             glyph: '#',
+            size: buttonExtent,
+            glyphFontSize: glyphFontSize,
             iconColor: activeFamily == ReaderTagFamily.hash
                 ? activeForeground
                 : inactiveForeground,
@@ -49,9 +78,11 @@ class ReaderTagButtons extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Tooltip(
-          message: r'$ Tags',
-          child: _GlyphButton(
-            glyph: r'$',
+          message: 'Presentation Setup',
+          child: _IconButton(
+            icon: Icons.slideshow_outlined,
+            size: buttonExtent,
+            iconSize: iconSize,
             iconColor: activeFamily == ReaderTagFamily.dollar
                 ? activeForeground
                 : inactiveForeground,
@@ -70,6 +101,8 @@ class ReaderTagButtons extends StatelessWidget {
           message: '! Rapid tag',
           child: _GlyphButton(
             glyph: '!',
+            size: buttonExtent,
+            glyphFontSize: glyphFontSize,
             iconColor: theme.colorScheme.onPrimary,
             backgroundColor: rapidColor,
             borderColor: rapidColor,
@@ -85,6 +118,8 @@ class ReaderTagButtons extends StatelessWidget {
 class _GlyphButton extends StatelessWidget {
   const _GlyphButton({
     required this.glyph,
+    required this.size,
+    required this.glyphFontSize,
     required this.iconColor,
     required this.backgroundColor,
     required this.borderColor,
@@ -93,6 +128,8 @@ class _GlyphButton extends StatelessWidget {
   });
 
   final String glyph;
+  final double size;
+  final double glyphFontSize;
   final Color iconColor;
   final Color backgroundColor;
   final Color borderColor;
@@ -117,19 +154,67 @@ class _GlyphButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         onTap: onPressed,
         child: SizedBox(
-          width: 34,
-          height: 34,
+          width: size,
+          height: size,
           child: Center(
             child: Text(
               glyph,
               style: TextStyle(
-                fontSize: glyph == '!' ? 22 : 20,
+                fontSize: glyphFontSize,
                 fontWeight: FontWeight.w900,
                 height: 1,
                 color: iconColor,
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _IconButton extends StatelessWidget {
+  const _IconButton({
+    required this.icon,
+    required this.size,
+    required this.iconSize,
+    required this.iconColor,
+    required this.backgroundColor,
+    required this.borderColor,
+    required this.onPressed,
+    this.elevated = false,
+  });
+
+  final IconData icon;
+  final double size;
+  final double iconSize;
+  final Color iconColor;
+  final Color backgroundColor;
+  final Color borderColor;
+  final VoidCallback onPressed;
+  final bool elevated;
+
+  @override
+  Widget build(BuildContext context) {
+    final shadowColor = Theme.of(
+      context,
+    ).colorScheme.primary.withValues(alpha: 0.18);
+
+    return Material(
+      color: backgroundColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: borderColor),
+      ),
+      elevation: elevated ? 2 : 0,
+      shadowColor: shadowColor,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onPressed,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Icon(icon, color: iconColor, size: iconSize),
         ),
       ),
     );

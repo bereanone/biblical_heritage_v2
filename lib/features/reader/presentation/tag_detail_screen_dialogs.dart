@@ -350,9 +350,7 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
           decoration: BoxDecoration(
             color: TagDialogStyles.surfaceHigh(theme),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: TagDialogStyles.outlineColor(theme),
-            ),
+            border: Border.all(color: TagDialogStyles.outlineColor(theme)),
           ),
           child: Icon(icon, size: 18, color: TagDialogStyles.title(theme)),
         ),
@@ -370,7 +368,7 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
           child: Container(
             width: 112,
             height: 84,
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: TagDialogStyles.card(theme),
             child: Image.memory(attachment.bytes, fit: BoxFit.cover),
           ),
         ),
@@ -629,26 +627,27 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
                   minLines: 4,
                   maxLines: 10,
                   style: _noteBaseStyle(theme),
-                  decoration: const InputDecoration(
-                    labelText: 'Note text',
-                    border: OutlineInputBorder(),
-                  ).copyWith(
-                    labelStyle: TagDialogStyles.labelTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.body(theme),
-                    ),
-                    floatingLabelStyle: TagDialogStyles.labelTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.title(theme),
-                    ),
-                    hintStyle: TagDialogStyles.bodyTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.mutedBody(theme),
-                    ),
-                  ),
+                  decoration:
+                      const InputDecoration(
+                        labelText: 'Note text',
+                        border: OutlineInputBorder(),
+                      ).copyWith(
+                        labelStyle: TagDialogStyles.labelTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.body(theme),
+                        ),
+                        floatingLabelStyle: TagDialogStyles.labelTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.title(theme),
+                        ),
+                        hintStyle: TagDialogStyles.bodyTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.mutedBody(theme),
+                        ),
+                      ),
                 ),
               ),
               const SizedBox(height: 14),
@@ -681,9 +680,7 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest.withValues(
-                    alpha: 0.28,
-                  ),
+                  color: TagDialogStyles.surfaceHigh(theme),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: outlineColor),
                 ),
@@ -718,15 +715,15 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
                       ],
                     ),
                     const SizedBox(height: 4),
-                  Text(
-                    'Paste an image from the clipboard. It will be copied into the app media folder.',
-                    style: TagDialogStyles.bodyTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: bodyColor,
-                      height: 1.25,
+                    Text(
+                      'Paste an image from the clipboard. It will be copied into the app media folder.',
+                      style: TagDialogStyles.bodyTextStyle(
+                        theme,
+                        widget.fontScale,
+                        color: bodyColor,
+                        height: 1.25,
+                      ),
                     ),
-                  ),
                     const SizedBox(height: 10),
                     if (_media.isEmpty)
                       Text(
@@ -1260,7 +1257,7 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
           child: Container(
             width: 112,
             height: 84,
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: TagDialogStyles.card(theme),
             child: Image.memory(attachment.bytes, fit: BoxFit.cover),
           ),
         ),
@@ -1298,8 +1295,7 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
     final shouldPersistDisplayText =
         displayText.isNotEmpty &&
         (displayText != sourceDisplayText || _displayTextFormat != null);
-    final displayTextOverride =
-        shouldPersistDisplayText ? displayText : null;
+    final displayTextOverride = shouldPersistDisplayText ? displayText : null;
     if (noteText.isEmpty &&
         displayCitation.isEmpty &&
         userTitle.isEmpty &&
@@ -1324,7 +1320,10 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
 
     final noteFormatJson = noteText.isEmpty
         ? null
-        : presentationTextFormatJsonForText(text: noteText, format: _noteFormat);
+        : presentationTextFormatJsonForText(
+            text: noteText,
+            format: _noteFormat,
+          );
     final titleFormatJson = userTitle.isEmpty
         ? null
         : presentationTextFormatJsonForText(
@@ -1354,9 +1353,7 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
         values: {
           'note_text': noteText.isEmpty ? null : noteText,
           'reference_code': displayCitation.isEmpty ? null : displayCitation,
-          'note_format_json': _isBibleItem
-              ? overlayJson
-              : noteFormatJson,
+          'note_format_json': _isBibleItem ? overlayJson : noteFormatJson,
         },
       );
 
@@ -1499,9 +1496,7 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
           decoration: BoxDecoration(
             color: TagDialogStyles.surfaceHigh(theme),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: TagDialogStyles.outlineColor(theme),
-            ),
+            border: Border.all(color: TagDialogStyles.outlineColor(theme)),
           ),
           child: Icon(icon, size: 18, color: TagDialogStyles.title(theme)),
         ),
@@ -1527,9 +1522,7 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
           decoration: BoxDecoration(
             color: TagDialogStyles.surfaceHigh(theme),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: TagDialogStyles.outlineColor(theme),
-            ),
+            border: Border.all(color: TagDialogStyles.outlineColor(theme)),
           ),
           child: Icon(icon, size: 18, color: TagDialogStyles.title(theme)),
         ),
@@ -1555,9 +1548,7 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
           decoration: BoxDecoration(
             color: TagDialogStyles.surfaceHigh(theme),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: TagDialogStyles.outlineColor(theme),
-            ),
+            border: Border.all(color: TagDialogStyles.outlineColor(theme)),
           ),
           child: Icon(icon, size: 18, color: TagDialogStyles.title(theme)),
         ),
@@ -1643,27 +1634,28 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                 TextField(
                   controller: _displayCitationController,
                   textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Display citation',
-                    hintText: 'Daniel 2:46–48, KJV',
-                    border: OutlineInputBorder(),
-                  ).copyWith(
-                    labelStyle: TagDialogStyles.labelTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.body(theme),
-                    ),
-                    floatingLabelStyle: TagDialogStyles.labelTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.title(theme),
-                    ),
-                    hintStyle: TagDialogStyles.bodyTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.mutedBody(theme),
-                    ),
-                  ),
+                  decoration:
+                      const InputDecoration(
+                        labelText: 'Display citation',
+                        hintText: 'Daniel 2:46–48, KJV',
+                        border: OutlineInputBorder(),
+                      ).copyWith(
+                        labelStyle: TagDialogStyles.labelTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.body(theme),
+                        ),
+                        floatingLabelStyle: TagDialogStyles.labelTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.title(theme),
+                        ),
+                        hintStyle: TagDialogStyles.bodyTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.mutedBody(theme),
+                        ),
+                      ),
                 ),
                 const SizedBox(height: 12),
                 Text(
@@ -1714,26 +1706,27 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                   minLines: 1,
                   maxLines: 3,
                   style: _titleBaseStyle(theme),
-                  decoration: const InputDecoration(
-                    hintText: 'Optional title for this Bible range',
-                    border: OutlineInputBorder(),
-                  ).copyWith(
-                    labelStyle: TagDialogStyles.labelTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.body(theme),
-                    ),
-                    floatingLabelStyle: TagDialogStyles.labelTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.title(theme),
-                    ),
-                    hintStyle: TagDialogStyles.bodyTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.mutedBody(theme),
-                    ),
-                  ),
+                  decoration:
+                      const InputDecoration(
+                        hintText: 'Optional title for this Bible range',
+                        border: OutlineInputBorder(),
+                      ).copyWith(
+                        labelStyle: TagDialogStyles.labelTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.body(theme),
+                        ),
+                        floatingLabelStyle: TagDialogStyles.labelTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.title(theme),
+                        ),
+                        hintStyle: TagDialogStyles.bodyTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.mutedBody(theme),
+                        ),
+                      ),
                 ),
                 const SizedBox(height: 12),
                 Text(
@@ -1784,28 +1777,29 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                   minLines: 5,
                   maxLines: 14,
                   style: _displayTextBaseStyle(theme),
-                  decoration: const InputDecoration(
-                    labelText: 'Display text',
-                    hintText:
-                        'Edit the visible scripture text for this Bible range',
-                    border: OutlineInputBorder(),
-                  ).copyWith(
-                    labelStyle: TagDialogStyles.labelTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.body(theme),
-                    ),
-                    floatingLabelStyle: TagDialogStyles.labelTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.title(theme),
-                    ),
-                    hintStyle: TagDialogStyles.bodyTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.mutedBody(theme),
-                    ),
-                  ),
+                  decoration:
+                      const InputDecoration(
+                        labelText: 'Display text',
+                        hintText:
+                            'Edit the visible scripture text for this Bible range',
+                        border: OutlineInputBorder(),
+                      ).copyWith(
+                        labelStyle: TagDialogStyles.labelTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.body(theme),
+                        ),
+                        floatingLabelStyle: TagDialogStyles.labelTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.title(theme),
+                        ),
+                        hintStyle: TagDialogStyles.bodyTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.mutedBody(theme),
+                        ),
+                      ),
                 ),
                 const SizedBox(height: 10),
                 ExpansionTile(
@@ -1834,7 +1828,7 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHighest,
+                          color: TagDialogStyles.surfaceHigh(theme),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
@@ -1906,26 +1900,27 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                   minLines: 4,
                   maxLines: 10,
                   style: _noteBaseStyle(theme),
-                  decoration: const InputDecoration(
-                    labelText: 'Note / comment',
-                    border: OutlineInputBorder(),
-                  ).copyWith(
-                    labelStyle: TagDialogStyles.labelTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.body(theme),
-                    ),
-                    floatingLabelStyle: TagDialogStyles.labelTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.title(theme),
-                    ),
-                    hintStyle: TagDialogStyles.bodyTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: TagDialogStyles.mutedBody(theme),
-                    ),
-                  ),
+                  decoration:
+                      const InputDecoration(
+                        labelText: 'Note / comment',
+                        border: OutlineInputBorder(),
+                      ).copyWith(
+                        labelStyle: TagDialogStyles.labelTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.body(theme),
+                        ),
+                        floatingLabelStyle: TagDialogStyles.labelTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.title(theme),
+                        ),
+                        hintStyle: TagDialogStyles.bodyTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.mutedBody(theme),
+                        ),
+                      ),
                 ),
               ] else
                 Text(
@@ -2046,9 +2041,7 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest.withValues(
-                    alpha: 0.28,
-                  ),
+                  color: TagDialogStyles.surfaceHigh(theme),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: outlineColor),
                 ),

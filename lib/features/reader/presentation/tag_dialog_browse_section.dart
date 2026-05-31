@@ -232,7 +232,7 @@ class TagDialogBrowseSection extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   title: Text(
-                    '${summary.tag}  ·  ${summary.count}',
+                    '${summary.displayLabel}  ·  ${summary.count}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TagDialogStyles.titleTextStyle(

@@ -205,6 +205,17 @@ class UnifiedTagBibleAnchor {
   bool get isRange => verseEnd > verseStart;
 }
 
+extension UnifiedTagBibleAnchorDisplay on UnifiedTagBibleAnchor {
+  String displayReference(Map<int, String> bookNames) {
+    final bookName = bookNames[bookNumber]?.trim() ?? '';
+    final resolvedBookName = bookName.isNotEmpty ? bookName : 'Book $bookNumber';
+    final verseLabel = verseEnd > verseStart
+        ? '$verseStart-$verseEnd'
+        : '$verseStart';
+    return '$resolvedBookName $chapter:$verseLabel';
+  }
+}
+
 class UnifiedTagELibraryAnchor {
   const UnifiedTagELibraryAnchor({
     required this.compactRef,

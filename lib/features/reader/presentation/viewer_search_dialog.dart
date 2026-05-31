@@ -360,9 +360,13 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
         return;
       }
       final repository = HashTagRepository();
+      final defaultCategory = widget.currentTag?.trim().isNotEmpty == true
+          ? await repository.loadTagCategory(currentTag)
+          : await repository.loadDefaultTagCategory();
       final response = await repository.addBibleSearchResultToTag(
         tag: currentTag,
         result: result,
+        category: defaultCategory,
       );
       if (!mounted || response.tag == null) return;
       if (response.inserted > 0) {

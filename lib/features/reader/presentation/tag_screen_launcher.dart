@@ -19,7 +19,8 @@ Future<void> showHashTagScreen(
   ValueChanged<int>? onTagTabChanged,
   String? initialTag,
   String? selectionLabelOverride,
-  Future<HashTagQuickApplyResult> Function(String tag)? onApplySelectionOverride,
+  Future<HashTagQuickApplyResult> Function(String tag)?
+  onApplySelectionOverride,
   Future<void> Function(int blockId)? onSelectBlockId,
 }) {
   final resolvedInitialTabIndex = switch (launchMode) {
@@ -27,46 +28,30 @@ Future<void> showHashTagScreen(
     HashTagLaunchMode.studyChain => 1,
   }.clamp(0, 1).toInt();
 
-  return showGeneralDialog<void>(
-    context: navigator.context,
+  final rootNavigator = Navigator.of(navigator.context, rootNavigator: true);
+  return showDialog<void>(
+    context: rootNavigator.context,
+    useRootNavigator: true,
     barrierDismissible: true,
-    barrierLabel: 'Close tags',
-    barrierColor: Colors.black.withValues(alpha: 0.36),
-    transitionDuration: const Duration(milliseconds: 160),
-    pageBuilder: (context, animation, secondaryAnimation) {
+    barrierColor: Colors.black.withValues(alpha: 0.35),
+    builder: (context) {
       final repository = tagSymbol == r'$'
           ? DollarTagRepository()
           : HashTagRepository();
-      return SafeArea(
-        child: Center(
-          child: HashTagDialog(
-            repository: repository,
-            passage: passage,
-            selection: selection,
-            selectionTargets: selectionTargets,
-            fontScale: fontScale,
-            initialTabIndex: resolvedInitialTabIndex,
-            tagSymbol: tagSymbol,
-            onTagTabChanged: onTagTabChanged,
-            initialTag: initialTag,
-            selectionLabelOverride: selectionLabelOverride,
-            onApplySelectionOverride: onApplySelectionOverride,
-            onSelectBlockId: onSelectBlockId,
-          ),
-        ),
-      );
-    },
-    transitionBuilder: (context, animation, secondaryAnimation, child) {
-      final fade = CurvedAnimation(
-        parent: animation,
-        curve: Curves.easeOutCubic,
-      );
-      return FadeTransition(
-        opacity: fade,
-        child: ScaleTransition(
-          scale: Tween<double>(begin: 0.98, end: 1.0).animate(fade),
-          child: child,
-        ),
+      return HashTagDialog(
+        repository: repository,
+        passage: passage,
+        selection: selection,
+        selectionTargets: selectionTargets,
+        fontScale: fontScale,
+        initialTabIndex: resolvedInitialTabIndex,
+        tagSymbol: tagSymbol,
+        onTagTabChanged: onTagTabChanged,
+        initialTag: initialTag,
+        selectionLabelOverride: selectionLabelOverride,
+        onApplySelectionOverride: onApplySelectionOverride,
+        onSelectBlockId: onSelectBlockId,
+        fullScreen: false,
       );
     },
   );
@@ -83,7 +68,8 @@ Future<void> showDollarTagScreen(
   ValueChanged<int>? onTagTabChanged,
   String? initialTag,
   String? selectionLabelOverride,
-  Future<HashTagQuickApplyResult> Function(String tag)? onApplySelectionOverride,
+  Future<HashTagQuickApplyResult> Function(String tag)?
+  onApplySelectionOverride,
   Future<void> Function(int blockId)? onSelectBlockId,
 }) {
   return showHashTagScreen(

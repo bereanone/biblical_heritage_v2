@@ -48,7 +48,7 @@ class TagDialogHashTab extends StatelessWidget {
   final ValueChanged<String?> onCategoryChanged;
   final VoidCallback onToggleSelectedCategoryBrowseFilter;
   final VoidCallback onResetBrowseState;
-  final Future<void> Function(String value) onSearchSelected;
+  final Future<void> Function(HashTagSummary summary) onSearchSelected;
   final ValueChanged<TagSortMode> onSortModeChanged;
   final ValueChanged<HashTagSummary> onOpenSummaryDetails;
 
@@ -202,7 +202,8 @@ class TagDialogHashTab extends StatelessWidget {
                     ),
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<String?>(
-                        value: effectiveCategoryValue == null ||
+                        value:
+                            effectiveCategoryValue == null ||
                                 effectiveCategoryValue.isEmpty
                             ? null
                             : effectiveCategoryValue,
@@ -262,13 +263,13 @@ class TagDialogHashTab extends StatelessWidget {
                         ),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                        child: Icon(
-                          categoryFilter == null
-                              ? Icons.filter_alt_outlined
-                              : Icons.filter_alt,
-                          size: 18,
-                          color: TagDialogStyles.title(theme),
-                        ),
+                      child: Icon(
+                        categoryFilter == null
+                            ? Icons.filter_alt_outlined
+                            : Icons.filter_alt,
+                        size: 18,
+                        color: TagDialogStyles.title(theme),
+                      ),
                     ),
                   ),
                 ),
@@ -305,21 +306,20 @@ class TagDialogHashTab extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 6),
-            PopupMenuButton<String>(
+            PopupMenuButton<HashTagSummary>(
               tooltip: 'Search within category',
-              initialValue: searchController.text.isEmpty
-                  ? null
-                  : searchController.text,
-              onSelected: (value) async {
-                await onSearchSelected(value);
+              initialValue: null,
+              onSelected: (summary) async {
+                await onSearchSelected(summary);
               },
               itemBuilder: (_) => searchSummaries
                   .map(
-                    (summary) => PopupMenuItem<String>(
-                      value: summary.tag,
+                    (summary) => PopupMenuItem<HashTagSummary>(
+                      value: summary,
                       child: Text(
-                        summary.tag,
+                        summary.displayLabel,
                         maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TagDialogStyles.buttonTextStyle(
                           theme,
                           fontScale,
@@ -442,7 +442,7 @@ class TagDialogHashTab extends StatelessWidget {
                           borderRadius: BorderRadius.circular(10),
                         ),
                         title: Text(
-                          '${summary.tag}  ·  ${summary.count}',
+                          '${summary.displayLabel}  ·  ${summary.count}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TagDialogStyles.titleTextStyle(

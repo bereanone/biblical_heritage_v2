@@ -8,53 +8,42 @@ Future<bool?> showHashTagDetailPopup(
   BuildContext context, {
   required HashTagRepository repository,
   required String tag,
+  String? category,
   required double fontScale,
   Future<void> Function(int blockId)? onSelectBlockId,
   Future<void> Function(String tag)? onSelectTag,
 }) {
-  return showGeneralDialog<bool>(
-    context: context,
+  final navigator = Navigator.of(context, rootNavigator: true);
+  return showDialog<bool>(
+    context: navigator.context,
+    useRootNavigator: true,
     barrierDismissible: true,
-    barrierLabel: 'Close tag details',
-    barrierColor: Colors.black.withValues(alpha: 0.36),
-    transitionDuration: const Duration(milliseconds: 160),
-    pageBuilder: (dialogContext, animation, secondaryAnimation) {
+    barrierColor: Colors.black.withValues(alpha: 0.25),
+    builder: (dialogContext) {
       final theme = Theme.of(dialogContext);
-      return SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 700, maxHeight: 560),
-            child: Dialog(
-              insetPadding: TagDialogStyles.outerInset,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(
-                  TagDialogStyles.borderRadius,
-                ),
-              ),
-              clipBehavior: Clip.antiAlias,
-              backgroundColor: TagDialogStyles.surface(theme),
-              child: HashTagDetailScreen(
-                repository: repository,
-                tag: tag,
-                fontScale: fontScale,
-                onSelectBlockId: onSelectBlockId,
-                onSelectTag: onSelectTag,
-              ),
-            ),
-          ),
+      final media = MediaQuery.of(dialogContext);
+      final detailSize = TagDialogStyles.detailModalSize(media.size);
+      final constrainedWidth = detailSize.width;
+      final constrainedHeight = detailSize.height;
+
+      return Dialog(
+        insetPadding: TagDialogStyles.outerInset,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(TagDialogStyles.borderRadius),
         ),
-      );
-    },
-    transitionBuilder: (context, animation, secondaryAnimation, child) {
-      final fade = CurvedAnimation(
-        parent: animation,
-        curve: Curves.easeOutCubic,
-      );
-      return FadeTransition(
-        opacity: fade,
-        child: ScaleTransition(
-          scale: Tween<double>(begin: 0.98, end: 1.0).animate(fade),
-          child: child,
+        clipBehavior: Clip.antiAlias,
+        backgroundColor: TagDialogStyles.surface(theme),
+        child: SizedBox(
+          width: constrainedWidth,
+          height: constrainedHeight,
+          child: HashTagDetailScreen(
+            repository: repository,
+            tag: tag,
+            category: category,
+            fontScale: fontScale,
+            onSelectBlockId: onSelectBlockId,
+            onSelectTag: onSelectTag,
+          ),
         ),
       );
     },

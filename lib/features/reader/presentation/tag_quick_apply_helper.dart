@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -130,8 +131,9 @@ BibleItemOverlay? parseBibleItemOverlay(Object? raw) {
       displayTextOverride: decoded['display_text_override']?.toString().trim(),
       noteFormatJson: decoded['note_format_json']?.toString().trim(),
       titleFormatJson: decoded['title_format_json']?.toString().trim(),
-      displayTextFormatJson:
-          decoded['display_text_format_json']?.toString().trim(),
+      displayTextFormatJson: decoded['display_text_format_json']
+          ?.toString()
+          .trim(),
     );
   } catch (_) {
     return null;
@@ -395,6 +397,109 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     return '$normalizedPrefix$cleaned';
   }
 
+  String? _normalizeCategoryName(String? input) {
+    final normalized = input?.trim() ?? '';
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  String _legacyCategoryWhereClause(
+    String column,
+    String? category,
+    List<Object?> whereArgs,
+  ) {
+    final normalizedCategory = _normalizeCategoryName(category);
+    if (normalizedCategory == null) {
+      return '($column IS NULL OR TRIM($column) = \'\')';
+    }
+    whereArgs.add(normalizedCategory);
+    return 'COALESCE(TRIM($column), \'\') = ?';
+  }
+
+  Future<List<Map<String, Object?>>> _loadNormalizedTagRows(
+    DatabaseExecutor executor, {
+    required String normalizedTag,
+    String? category,
+  }) async {
+    final normalizedCategory = _normalizeCategoryName(category);
+    final tagKind = _tagKindForTable();
+    if (normalizedCategory == null) {
+      return executor.query(
+        'tag_groups',
+        columns: ['id', 'parent_group_id'],
+        where: '''
+          tag_kind = ?
+          AND name = ?
+          AND COALESCE(deleted_at, '') = ''
+        ''',
+        whereArgs: [tagKind, normalizedTag],
+        orderBy: 'created_at ASC, id ASC',
+      );
+    }
+    return executor.rawQuery(
+      '''
+      SELECT groups.id, groups.parent_group_id
+      FROM tag_groups AS groups
+      LEFT JOIN tag_groups AS parent
+        ON parent.id = groups.parent_group_id
+      WHERE groups.tag_kind = ?
+        AND groups.name = ?
+        AND COALESCE(groups.deleted_at, '') = ''
+        AND COALESCE(parent.name, '') = ?
+      ORDER BY groups.created_at ASC, groups.id ASC
+      ''',
+      [tagKind, normalizedTag, normalizedCategory],
+    );
+  }
+
+  Future<List<Map<String, Object?>>> _loadNormalizedTagItemRows(
+    DatabaseExecutor executor,
+    List<String> groupIds,
+  ) async {
+    if (groupIds.isEmpty) return const <Map<String, Object?>>[];
+    final placeholders = List.filled(groupIds.length, '?').join(', ');
+    return executor.rawQuery(
+      '''
+      SELECT *
+      FROM tag_items
+      WHERE tag_group_id IN ($placeholders)
+        AND COALESCE(deleted_at, '') = ''
+      ORDER BY tag_group_id ASC, sort_order ASC, created_at ASC, id ASC
+      ''',
+      groupIds,
+    );
+  }
+
+  Future<String?> _ensureNormalizedCategoryGroupId(
+    DatabaseExecutor executor,
+    String? category,
+  ) async {
+    final normalizedCategory = _normalizeCategoryName(category);
+    if (normalizedCategory == null) return null;
+    final tagKind = _tagKindForTable();
+    final rows = await executor.query(
+      'tag_groups',
+      columns: ['id'],
+      where: '''
+        tag_kind = ?
+        AND name = ?
+        AND COALESCE(parent_group_id, '') = ''
+        AND COALESCE(deleted_at, '') = ''
+      ''',
+      whereArgs: [tagKind, normalizedCategory],
+      orderBy: 'created_at ASC, id ASC',
+      limit: 1,
+    );
+    if (rows.isNotEmpty) {
+      return rows.first['id']?.toString();
+    }
+    final now = _utcNow();
+    return _ensureNormalizedTagGroup(
+      executor,
+      normalizedTag: normalizedCategory,
+      now: now,
+    );
+  }
+
   Future<String?> loadDefaultTag() async {
     await ensureSchema();
     final db = await _db();
@@ -411,6 +516,20 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     return normalized.isEmpty ? null : normalized;
   }
 
+  Future<String?> loadDefaultTagCategory() async {
+    await ensureSchema();
+    final db = await _db();
+    final rows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: ['$defaultSettingKey.category'],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return _normalizeCategoryName(rows.first['value']?.toString());
+  }
+
   Future<void> saveDefaultTag(String tag) async {
     final normalized = normalizeTagName(tag);
     if (normalized.isEmpty) return;
@@ -422,20 +541,44 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  Future<void> saveDefaultTagCategory(String? category) async {
+    await ensureSchema();
+    final db = await _db();
+    final normalized = _normalizeCategoryName(category);
+    if (normalized == null) {
+      await db.delete(
+        'app_settings',
+        where: 'key = ?',
+        whereArgs: ['$defaultSettingKey.category'],
+      );
+      return;
+    }
+    await db.insert('app_settings', {
+      'key': '$defaultSettingKey.category',
+      'value': normalized,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
   Future<void> clearDefaultTag() async {
     await ensureSchema();
     final db = await _db();
     await db.delete(
       'app_settings',
-      where: 'key = ?',
-      whereArgs: [defaultSettingKey],
+      where: 'key IN (?, ?)',
+      whereArgs: [defaultSettingKey, '$defaultSettingKey.category'],
     );
   }
 
   Future<String?> loadActiveDefaultTag() async {
     final defaultTag = normalizeTagName(await loadDefaultTag() ?? '');
     if (defaultTag.isEmpty) return null;
-    if (await _tagExists(defaultTag)) {
+    final defaultCategory = await loadDefaultTagCategory();
+    if (defaultCategory != null &&
+        defaultCategory.trim().isNotEmpty &&
+        await _tagExists(defaultTag, category: defaultCategory)) {
+      return defaultTag;
+    }
+    if (defaultCategory == null && await _tagExists(defaultTag)) {
       return defaultTag;
     }
 
@@ -446,17 +589,25 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   Future<int> renameTag({
     required String oldTag,
     required String newTag,
+    String? category,
   }) async {
     final normalizedOld = normalizeTagName(oldTag);
     final normalizedNew = normalizeTagName(newTag);
     if (normalizedOld.isEmpty || normalizedNew.isEmpty) return 0;
     await ensureSchema();
     final db = await _db();
+    final normalizedCategory = _normalizeCategoryName(category);
+    final whereArgs = <Object?>[normalizedOld];
+    var where = 'tag = ?';
+    if (normalizedCategory != null) {
+      where += ' AND category = ?';
+      whereArgs.add(normalizedCategory);
+    }
     final count = await db.update(
       tableName,
       {'tag': normalizedNew},
-      where: 'tag = ?',
-      whereArgs: [normalizedOld],
+      where: where,
+      whereArgs: whereArgs,
     );
     final oldCategoryKey = '$categorySettingKeyPrefix$normalizedOld';
     final newCategoryKey = '$categorySettingKeyPrefix$normalizedNew';
@@ -481,9 +632,11 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     return count;
   }
 
-  Future<String?> loadTagCategory(String tag) async {
+  Future<String?> loadTagCategory(String tag, {String? category}) async {
     final normalized = normalizeTagName(tag);
     if (normalized.isEmpty) return null;
+    final normalizedCategory = _normalizeCategoryName(category);
+    if (normalizedCategory != null) return normalizedCategory;
     try {
       await ensureSchema();
       final db = await _db();
@@ -555,37 +708,512 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     }
   }
 
-  Future<void> saveTagCategory(String tag, String category) async {
+  Future<bool> hasVisibleTagSummary(
+    String tag, {
+    String? category,
+  }) async {
     final normalizedTag = normalizeTagName(tag);
-    final normalizedCategory = category.trim();
-    if (normalizedTag.isEmpty || normalizedCategory.isEmpty) return;
+    if (normalizedTag.isEmpty) return false;
+    final normalizedCategory = _normalizeCategoryName(category);
+    final summaries = await loadSummaries();
+    return summaries.any((summary) {
+      if (summary.tag.toLowerCase() != normalizedTag.toLowerCase()) {
+        return false;
+      }
+      final summaryCategory = summary.category?.trim() ?? '';
+      if (normalizedCategory == null) {
+        return summaryCategory.isEmpty;
+      }
+      return summaryCategory.toLowerCase() == normalizedCategory.toLowerCase();
+    });
+  }
+
+  Future<bool> saveTagCategory(
+    String tag,
+    String category, {
+    String? currentCategory,
+    bool currentCategoryKnown = false,
+  }) async {
+    final normalizedTag = normalizeTagName(tag);
+    final normalizedCategory = _normalizeCategoryName(category);
+    final normalizedCurrentCategory = _normalizeCategoryName(currentCategory);
+    if (normalizedTag.isEmpty) return false;
     try {
       await ensureSchema();
       final db = await _db();
-      await db.insert('app_settings', {
-        'key': '$categorySettingKeyPrefix$normalizedTag',
-        'value': normalizedCategory,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
-      await db.update(
+      if (normalizedCategory == null) {
+        await db.delete(
+          'app_settings',
+          where: 'key = ?',
+          whereArgs: ['$categorySettingKeyPrefix$normalizedTag'],
+        );
+      } else {
+        await db.insert('app_settings', {
+          'key': '$categorySettingKeyPrefix$normalizedTag',
+          'value': normalizedCategory,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+
+      final whereArgs = <Object?>[normalizedTag];
+      var where = 'tag = ?';
+      if (currentCategoryKnown) {
+        where += ' AND COALESCE(TRIM(category), \'\') = ?';
+        whereArgs.add(normalizedCurrentCategory ?? '');
+      }
+
+      final values = <String, Object?>{'category': normalizedCategory};
+      final updated = await db.update(
         tableName,
-        {'category': normalizedCategory},
-        where: 'tag = ?',
-        whereArgs: [normalizedTag],
+        values,
+        where: where,
+        whereArgs: whereArgs,
       );
+      if (updated > 0) return true;
+
+      final normalizedGroupRows = await _loadNormalizedTagRows(
+        db,
+        normalizedTag: normalizedTag,
+        category: normalizedCurrentCategory,
+      );
+      if (normalizedGroupRows.isNotEmpty) {
+        final targetCategoryGroupId = await _ensureNormalizedCategoryGroupId(
+          db,
+          normalizedCategory,
+        );
+        var normalizedUpdated = 0;
+        for (final row in normalizedGroupRows) {
+          final groupId = row['id']?.toString() ?? '';
+          if (groupId.isEmpty) continue;
+          normalizedUpdated += await db.update(
+            'tag_groups',
+            {'parent_group_id': targetCategoryGroupId},
+            where: 'id = ?',
+            whereArgs: [groupId],
+          );
+        }
+        if (normalizedUpdated > 0) return true;
+      }
+
+      if (currentCategoryKnown) {
+        final categoryRows = await db.rawQuery(
+          '''
+          SELECT DISTINCT COALESCE(TRIM(category), '') AS category
+          FROM $tableName
+          WHERE tag = ?
+          ''',
+          [normalizedTag],
+        );
+        final categories = categoryRows
+            .map((row) => row['category']?.toString().trim() ?? '')
+            .toSet()
+            .toList(growable: false);
+        if (categories.length == 1) {
+          final fallbackUpdated = await db.update(
+            tableName,
+            values,
+            where: 'tag = ?',
+            whereArgs: [normalizedTag],
+          );
+          if (fallbackUpdated > 0) return true;
+        }
+      }
+
+      return false;
     } catch (_) {
-      // If the category migration is unavailable, keep tagging working.
+      return false;
     }
   }
 
-  Future<int> deleteTag(String tag) async {
+  Future<HashTagCategoryMergeResult> mergeTagCategory({
+    required String tag,
+    required String sourceCategory,
+    required String targetCategory,
+    bool dryRun = false,
+  }) async {
+    final normalizedTag = normalizeTagName(tag);
+    final normalizedSourceCategory = _normalizeCategoryName(sourceCategory);
+    final normalizedTargetCategory = _normalizeCategoryName(targetCategory);
+    if (normalizedTag.isEmpty) {
+      return HashTagCategoryMergeResult(
+        tag: normalizedTag,
+        sourceCategory: normalizedSourceCategory,
+        targetCategory: normalizedTargetCategory ?? '',
+        sourceCount: 0,
+        targetCount: 0,
+        addedCount: 0,
+        skippedCount: 0,
+        sourceRemoved: false,
+        dryRun: dryRun,
+      );
+    }
+
+    await ensureSchema();
+    final db = await _db();
+
+    Future<List<Map<String, Object?>>> loadLegacyRows(
+      DatabaseExecutor executor, {
+      required String? category,
+    }) async {
+      final orderBy = tableName == 'dollar_tags'
+          ? 'study_order ASC, created_at ASC, id ASC'
+          : 'sort_order ASC, created_at ASC, id ASC';
+      final whereArgs = <Object?>[normalizedTag];
+      final whereClause = _legacyCategoryWhereClause(
+        'category',
+        category,
+        whereArgs,
+      );
+      return executor.query(
+        tableName,
+        where: 'tag = ? AND $whereClause',
+        whereArgs: whereArgs,
+        orderBy: orderBy,
+      );
+    }
+
+    int legacyRowSortOrder(Map<String, Object?> row) {
+      return (tableName == 'dollar_tags'
+              ? _i(row['study_order'])
+              : _i(row['sort_order'])) ??
+          _i(row['created_at']) ??
+          0;
+    }
+
+    int normalizedRowSortOrder(Map<String, Object?> row) {
+      return _i(row['sort_order']) ?? _i(row['created_at']) ?? 0;
+    }
+
+    String copyMediaRowId({
+      required String sourceMediaId,
+      required String targetItemId,
+      required int index,
+    }) {
+      final encoded = base64Url.encode(
+        utf8.encode('$sourceMediaId|$targetItemId|$index'),
+      ).replaceAll('=', '');
+      return 'tag_item_media_$encoded';
+    }
+
+    String copyNormalizedItemId({
+      required String sourceItemId,
+      required String targetGroupId,
+    }) {
+      final encoded = base64Url.encode(
+        utf8.encode('$sourceItemId|$targetGroupId'),
+      ).replaceAll('=', '');
+      return 'tag_item_$encoded';
+    }
+
+    Future<String> ensureTargetNormalizedGroupId({
+      required DatabaseExecutor executor,
+      required String normalizedTag,
+      required String? category,
+      required String now,
+    }) async {
+      final normalizedCategory = _normalizeCategoryName(category);
+      if (normalizedCategory == null) {
+        return _ensureNormalizedTagGroup(
+          executor,
+          normalizedTag: normalizedTag,
+          now: now,
+        );
+      }
+      final rows = await executor.rawQuery(
+        '''
+        SELECT groups.id
+        FROM tag_groups AS groups
+        LEFT JOIN tag_groups AS parent
+          ON parent.id = groups.parent_group_id
+        WHERE groups.tag_kind = ?
+          AND groups.name = ?
+          AND COALESCE(groups.deleted_at, '') = ''
+          AND COALESCE(parent.name, '') = ?
+        ORDER BY groups.created_at ASC, groups.id ASC
+        LIMIT 1
+        ''',
+        [_tagKindForTable(), normalizedTag, normalizedCategory],
+      );
+      if (rows.isNotEmpty) {
+        return rows.first['id']?.toString() ?? '';
+      }
+
+      final parentGroupId = await _ensureNormalizedCategoryGroupId(
+        executor,
+        normalizedCategory,
+      );
+      final groupId =
+          'tag_group_${_slug(normalizedCategory)}_${_slug(normalizedTag)}';
+      final sortOrder = await _nextNormalizedTagGroupSortOrder(executor);
+      await executor.insert(
+        'tag_groups',
+        {
+          'id': groupId,
+          'parent_group_id': parentGroupId,
+          'tag_kind': _tagKindForTable(),
+          'name': normalizedTag,
+          'description': null,
+          'sort_order': sortOrder,
+          'source_device_name': null,
+          'legacy_group_id': null,
+          'legacy_item_id': null,
+          'legacy_import_package_id': null,
+          'imported_at': now,
+          'created_at': now,
+          'updated_at': now,
+          'deleted_at': null,
+          'device_id': await LocalSettingsStore.instance.ensureDeviceId(),
+          'revision': 1,
+          'sync_status': 'pending',
+          'last_synced_at': null,
+          'change_id': null,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      return groupId;
+    }
+
+    Future<void> copyMediaRows({
+      required DatabaseExecutor executor,
+      required String sourceItemId,
+      required String targetItemId,
+      required String now,
+    }) async {
+      final mediaRows = await executor.rawQuery(
+        '''
+        SELECT *
+        FROM tag_item_media
+        WHERE tag_item_id = ?
+          AND COALESCE(deleted_at, '') = ''
+        ORDER BY sort_order ASC, id ASC
+        ''',
+        [sourceItemId],
+      );
+      if (mediaRows.isEmpty) return;
+      final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+      for (var index = 0; index < mediaRows.length; index++) {
+        final mediaRow = Map<String, Object?>.from(mediaRows[index]);
+        mediaRow
+          ..remove('id')
+          ..['id'] = copyMediaRowId(
+            sourceMediaId: _s(mediaRows[index]['id']),
+            targetItemId: targetItemId,
+            index: index,
+          )
+          ..['tag_item_id'] = targetItemId
+          ..['created_at'] = now
+          ..['updated_at'] = now
+          ..['deleted_at'] = null
+          ..['device_id'] = deviceId
+          ..['revision'] = 1
+          ..['sync_status'] = 'pending'
+          ..['last_synced_at'] = null
+          ..['change_id'] = null;
+        await executor.insert(
+          'tag_item_media',
+          mediaRow,
+        );
+      }
+    }
+
+    final result = await db.transaction((txn) async {
+      final sourceRows = await loadLegacyRows(
+        txn,
+        category: normalizedSourceCategory,
+      );
+      final targetRows = await loadLegacyRows(
+        txn,
+        category: normalizedTargetCategory,
+      );
+      final sourceGroupRows = await _loadNormalizedTagRows(
+        txn,
+        normalizedTag: normalizedTag,
+        category: normalizedSourceCategory,
+      );
+      final targetGroupRows = await _loadNormalizedTagRows(
+        txn,
+        normalizedTag: normalizedTag,
+        category: normalizedTargetCategory,
+      );
+      final sourceGroupIds = [
+        for (final row in sourceGroupRows) row['id']?.toString() ?? '',
+      ].where((value) => value.isNotEmpty).toList(growable: false);
+      final targetGroupIds = [
+        for (final row in targetGroupRows) row['id']?.toString() ?? '',
+      ].where((value) => value.isNotEmpty).toList(growable: false);
+      final sourceItems = await _loadNormalizedTagItemRows(txn, sourceGroupIds);
+      final targetItems = await _loadNormalizedTagItemRows(txn, targetGroupIds);
+
+      final sourceCount = sourceRows.length + sourceItems.length;
+      final targetCount = targetRows.length + targetItems.length;
+      final targetKeys = <String>{
+        for (final row in targetRows) _legacyMergeKey(row),
+        for (final row in targetItems) _mergeKey(row),
+      };
+
+      int addedCount = 0;
+      int skippedCount = 0;
+
+      if (dryRun) {
+        for (final row in sourceRows) {
+          final key = _legacyMergeKey(row);
+          if (targetKeys.contains(key)) {
+            skippedCount += 1;
+          } else {
+            addedCount += 1;
+            targetKeys.add(key);
+          }
+        }
+        for (final row in sourceItems) {
+          final key = _mergeKey(row);
+          if (targetKeys.contains(key)) {
+            skippedCount += 1;
+          } else {
+            addedCount += 1;
+            targetKeys.add(key);
+          }
+        }
+        return HashTagCategoryMergeResult(
+          tag: normalizedTag,
+          sourceCategory: normalizedSourceCategory,
+          targetCategory: normalizedTargetCategory ?? '',
+          sourceCount: sourceCount,
+          targetCount: targetCount,
+          addedCount: addedCount,
+          skippedCount: skippedCount,
+          sourceRemoved: false,
+          dryRun: true,
+        );
+      }
+
+      final nowMillis = DateTime.now().millisecondsSinceEpoch;
+      final nowIso = _utcNow();
+      var nextSortOrder = [
+        for (final row in targetRows) legacyRowSortOrder(row),
+        for (final row in targetItems) normalizedRowSortOrder(row),
+      ].fold<int>(0, (highest, value) => value > highest ? value : highest);
+      nextSortOrder += 1;
+
+      for (final row in sourceRows) {
+        final key = _legacyMergeKey(row);
+        if (targetKeys.contains(key)) {
+          skippedCount += 1;
+          continue;
+        }
+        final values = Map<String, Object?>.from(row)
+          ..remove('id')
+          ..['category'] = normalizedTargetCategory
+          ..[tableName == 'dollar_tags' ? 'study_order' : 'sort_order'] =
+              nextSortOrder
+          ..['created_at'] = nowMillis;
+        if (values.containsKey('updated_at')) {
+          values['updated_at'] = nowMillis;
+        }
+        final insertedId = await txn.insert(
+          tableName,
+          values,
+        );
+        if (insertedId <= 0) {
+          throw StateError('Failed to copy legacy tag row.');
+        }
+        await copyMediaRows(
+          executor: txn,
+          sourceItemId: _s(row['id']).trim(),
+          targetItemId: insertedId.toString(),
+          now: nowMillis.toString(),
+        );
+        targetKeys.add(key);
+        addedCount += 1;
+        nextSortOrder += 1;
+      }
+
+      if (sourceItems.isNotEmpty) {
+        final targetGroupId = await ensureTargetNormalizedGroupId(
+          executor: txn,
+          normalizedTag: normalizedTag,
+          category: normalizedTargetCategory,
+          now: nowIso,
+        );
+        final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+        for (final row in sourceItems) {
+          final key = _mergeKey(row);
+          if (targetKeys.contains(key)) {
+            skippedCount += 1;
+            continue;
+          }
+
+          final sourceItemId = _s(row['id']).trim();
+          if (sourceItemId.isEmpty) {
+            skippedCount += 1;
+            continue;
+          }
+
+          final itemId = copyNormalizedItemId(
+            sourceItemId: sourceItemId,
+            targetGroupId: targetGroupId,
+          );
+          final values = Map<String, Object?>.from(row)
+            ..remove('id')
+            ..['id'] = itemId
+            ..['tag_group_id'] = targetGroupId
+            ..['sort_order'] = nextSortOrder
+            ..['created_at'] = nowIso
+            ..['updated_at'] = nowIso
+            ..['imported_at'] = nowIso
+            ..['deleted_at'] = null
+            ..['device_id'] = deviceId
+            ..['revision'] = 1
+            ..['sync_status'] = 'pending'
+            ..['last_synced_at'] = null
+            ..['change_id'] = null;
+          await txn.insert(
+            'tag_items',
+            values,
+            conflictAlgorithm: ConflictAlgorithm.ignore,
+          );
+          await copyMediaRows(
+            executor: txn,
+            sourceItemId: sourceItemId,
+            targetItemId: itemId,
+            now: nowIso,
+          );
+          targetKeys.add(key);
+          addedCount += 1;
+          nextSortOrder += 1;
+        }
+      }
+
+      return HashTagCategoryMergeResult(
+        tag: normalizedTag,
+        sourceCategory: normalizedSourceCategory,
+        targetCategory: normalizedTargetCategory ?? '',
+        sourceCount: sourceCount,
+        targetCount: targetCount,
+        addedCount: addedCount,
+        skippedCount: skippedCount,
+        sourceRemoved: false,
+        dryRun: false,
+      );
+    });
+
+    return result;
+  }
+
+  Future<int> deleteTag(String tag, {String? category}) async {
     final normalized = normalizeTagName(tag);
     if (normalized.isEmpty) return 0;
     await ensureSchema();
     final db = await _db();
+    final normalizedCategory = _normalizeCategoryName(category);
+    final whereArgs = <Object?>[normalized];
+    var where = 'tag = ?';
+    if (normalizedCategory != null) {
+      where += ' AND category = ?';
+      whereArgs.add(normalizedCategory);
+    }
     final deleted = await db.delete(
       tableName,
-      where: 'tag = ?',
-      whereArgs: [normalized],
+      where: where,
+      whereArgs: whereArgs,
     );
     await db.delete(
       'app_settings',
@@ -599,21 +1227,30 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     await ensureSchema();
     final db = await _db();
     final tagKind = _tagKindForTable();
+    final categoryOptions = await loadCategoryOptions();
+    final categoryNames = {
+      for (final category in categoryOptions) category.toLowerCase(),
+    };
     final legacyRows = await db.rawQuery('''
-      SELECT tag, COUNT(*) AS cnt
+      SELECT tag, COALESCE(TRIM(category), '') AS category, COUNT(*) AS cnt
       FROM $tableName
-      GROUP BY tag
+      GROUP BY tag, COALESCE(TRIM(category), '')
     ''');
     final normalizedRows = await db.rawQuery(
       '''
-      SELECT groups.name AS tag, COUNT(items.id) AS cnt
+      SELECT
+        groups.name AS tag,
+        COALESCE(parent.name, '') AS category,
+        COUNT(items.id) AS cnt
       FROM tag_groups AS groups
+      LEFT JOIN tag_groups AS parent
+        ON parent.id = groups.parent_group_id
       LEFT JOIN tag_items AS items
         ON items.tag_group_id = groups.id
        AND COALESCE(items.deleted_at, '') = ''
       WHERE groups.tag_kind = ?
         AND COALESCE(groups.deleted_at, '') = ''
-      GROUP BY groups.id, groups.name
+      GROUP BY groups.id, groups.name, COALESCE(parent.name, '')
     ''',
       [tagKind],
     );
@@ -622,12 +1259,19 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     void addRow(Map<String, Object?> row) {
       final tag = row['tag']?.toString().trim() ?? '';
       if (tag.isEmpty) return;
+      final category = row['category']?.toString().trim() ?? '';
       final count = (row['cnt'] as num?)?.toInt() ?? 0;
-      final key = tag.toLowerCase();
+      if (category.isEmpty &&
+          count == 0 &&
+          categoryNames.contains(tag.toLowerCase())) {
+        return;
+      }
+      final key = '${tag.toLowerCase()}|${category.toLowerCase()}';
       final existing = merged[key];
       merged[key] = HashTagSummary(
         tag: existing?.tag ?? tag,
         count: (existing?.count ?? 0) + count,
+        category: existing?.category ?? (category.isEmpty ? null : category),
       );
     }
 
@@ -647,10 +1291,12 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
 
   Future<List<HashTagEntry>> loadEntries(
     String tag, {
+    String? category,
     HashTagEntrySortMode sortMode = HashTagEntrySortMode.slideOrder,
   }) async {
     final normalized = normalizeTagName(tag);
     if (normalized.isEmpty) return const <HashTagEntry>[];
+    final normalizedCategory = _normalizeCategoryName(category);
     await ensureSchema();
     final db = await _db();
     final tagKind = _tagKindForTable();
@@ -679,11 +1325,17 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         if (tableName == 'hash_tags') 'note_text',
         if (tableName == 'hash_tags') 'note_format_json',
       ];
+      final whereArgs = <Object?>[normalized];
+      final whereClause = _legacyCategoryWhereClause(
+        'category',
+        normalizedCategory,
+        whereArgs,
+      );
       final rows = await db.query(
         tableName,
         columns: columns,
-        where: 'tag = ?',
-        whereArgs: [normalized],
+        where: 'tag = ? AND $whereClause',
+        whereArgs: whereArgs,
         orderBy: orderBy,
       );
       final entries = rows
@@ -755,17 +1407,32 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     }
 
     Future<List<HashTagEntry>> loadNormalizedEntries() async {
-      final groupRows = await db.query(
-        'tag_groups',
-        columns: ['id'],
-        where: '''
-          tag_kind = ?
-          AND name = ?
-          AND COALESCE(deleted_at, '') = ''
-        ''',
-        whereArgs: [tagKind, normalized],
-        limit: 1,
-      );
+      final groupRows = normalizedCategory == null
+          ? await db.query(
+              'tag_groups',
+              columns: ['id', 'parent_group_id'],
+              where: '''
+                tag_kind = ?
+                AND name = ?
+                AND COALESCE(deleted_at, '') = ''
+              ''',
+              whereArgs: [tagKind, normalized],
+              orderBy: 'created_at ASC, id ASC',
+            )
+          : await db.rawQuery(
+              '''
+              SELECT groups.id, groups.parent_group_id
+              FROM tag_groups AS groups
+              LEFT JOIN tag_groups AS parent
+                ON parent.id = groups.parent_group_id
+              WHERE groups.tag_kind = ?
+                AND groups.name = ?
+                AND COALESCE(groups.deleted_at, '') = ''
+                AND COALESCE(parent.name, '') = ?
+              ORDER BY groups.created_at ASC, groups.id ASC
+              ''',
+              [tagKind, normalized, normalizedCategory],
+            );
       if (groupRows.isEmpty) return const <HashTagEntry>[];
       final groupId = groupRows.first['id']?.toString() ?? '';
       if (groupId.isEmpty) return const <HashTagEntry>[];
@@ -918,6 +1585,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   Future<HashTagQuickApplyResult> quickApplyTargets({
     required List<HashTagTarget> targets,
     String? tag,
+    String? category,
   }) async {
     if (targets.isEmpty) {
       return const HashTagQuickApplyResult(tag: null, inserted: 0, skipped: 0);
@@ -926,6 +1594,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final db = await _db();
     final userId = await ensureUserId();
     final normalizedTag = normalizeTagName(tag ?? await loadDefaultTag() ?? '');
+    final normalizedCategory = _normalizeCategoryName(category);
     if (normalizedTag.isEmpty) {
       return const HashTagQuickApplyResult(tag: null, inserted: 0, skipped: 0);
     }
@@ -934,18 +1603,26 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     var skipped = 0;
     final now = DateTime.now().millisecondsSinceEpoch;
     for (final target in targets) {
+      final categoryArgs = <Object?>[];
+      final categoryClause = _legacyCategoryWhereClause(
+        'category',
+        normalizedCategory,
+        categoryArgs,
+      );
       final exists = await db.rawQuery(
         '''
         SELECT 1
         FROM $tableName
         WHERE user_id = ?
           AND tag = ?
+          AND $categoryClause
           AND ((book_number = ? AND chapter_number = ? AND verse_number = ?) OR verse_ref = ?)
         LIMIT 1
         ''',
         [
           userId,
           normalizedTag,
+          ...categoryArgs,
           target.bookNumber,
           target.chapter,
           target.verse,
@@ -959,6 +1636,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       await db.insert(tableName, {
         'user_id': userId,
         'tag': normalizedTag,
+        if (normalizedCategory != null) 'category': normalizedCategory,
         'verse_ref': target.verseRef,
         'book_number': target.bookNumber,
         'chapter_number': target.chapter,
@@ -1013,7 +1691,12 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     required List<HashTagTarget> targets,
     String? tag,
   }) async {
-    final resolvedTag = await _resolveSearchResultTag(tag);
+    final fallbackCategory = await loadDefaultTagCategory();
+    final useFallbackCategory = tag?.trim().isNotEmpty != true;
+    final resolvedTag = await _resolveSearchResultTag(
+      tag,
+      fallbackCategory: fallbackCategory,
+    );
     if (resolvedTag == null) {
       return const HashTagSearchQuickApplyResult(
         tag: null,
@@ -1036,6 +1719,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           verse: target.verse,
           text: '',
         ),
+        category: useFallbackCategory ? fallbackCategory : null,
       );
       inserted += result.inserted;
       skipped += result.skipped;
@@ -1051,8 +1735,10 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   Future<HashTagSearchQuickApplyResult> addBibleSearchResultToTag({
     required String tag,
     required PassageSearchResult result,
+    String? category,
   }) async {
     final normalizedTag = normalizeTagName(tag);
+    final normalizedCategory = _normalizeCategoryName(category);
     if (normalizedTag.isEmpty) {
       return const HashTagSearchQuickApplyResult(
         tag: null,
@@ -1071,17 +1757,25 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       normalizedTag: normalizedTag,
       now: now,
     );
+    final legacyCategoryArgs = <Object?>[];
+    final legacyCategoryClause = _legacyCategoryWhereClause(
+      'category',
+      normalizedCategory,
+      legacyCategoryArgs,
+    );
     final legacyExists = await db.query(
       tableName,
       columns: ['id'],
       where: '''
         tag = ?
+        AND $legacyCategoryClause
         AND book_number = ?
         AND chapter_number = ?
         AND verse_number = ?
       ''',
       whereArgs: [
         normalizedTag,
+        ...legacyCategoryArgs,
         result.bookNumber,
         result.chapter,
         result.verse,
@@ -1164,8 +1858,10 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     required int chapter,
     required int verseStart,
     required int verseEnd,
+    String? category,
   }) async {
     final normalizedTag = normalizeTagName(tag);
+    final normalizedCategory = _normalizeCategoryName(category);
     if (normalizedTag.isEmpty ||
         bookNumber <= 0 ||
         chapter <= 0 ||
@@ -1188,16 +1884,29 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       normalizedTag: normalizedTag,
       now: now,
     );
+    final legacyCategoryArgs = <Object?>[];
+    final legacyCategoryClause = _legacyCategoryWhereClause(
+      'category',
+      normalizedCategory,
+      legacyCategoryArgs,
+    );
     final legacyExists = await db.query(
       tableName,
       columns: ['id'],
       where: '''
         tag = ?
+        AND $legacyCategoryClause
         AND book_number = ?
         AND chapter_number = ?
         AND verse_number = ?
       ''',
-      whereArgs: [normalizedTag, bookNumber, chapter, verseStart],
+      whereArgs: [
+        normalizedTag,
+        ...legacyCategoryArgs,
+        bookNumber,
+        chapter,
+        verseStart,
+      ],
       limit: 1,
     );
     final normalizedExists = await db.query(
@@ -1317,6 +2026,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final db = await _db();
     final userId = await ensureUserId();
     final normalizedTag = resolvedTag.tag;
+    final normalizedCategory = _normalizeCategoryName(category);
     final cleanStableRef = stableRef.trim();
     final cleanParagraph = paragraphText.trim();
     final cleanTitle = bookTitle.trim();
@@ -1326,10 +2036,11 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final cleanAnchorId = sourceAnchorId?.trim() ?? '';
     final cleanRelativePath = sourceRelativePath?.trim() ?? '';
     final cleanLibraryItemId = sourceLibraryItemId?.trim() ?? '';
-    final cleanSelectedText = (selectedTextSnapshot?.trim().isNotEmpty == true
-            ? selectedTextSnapshot!
-            : paragraphText)
-        .trimRight();
+    final cleanSelectedText =
+        (selectedTextSnapshot?.trim().isNotEmpty == true
+                ? selectedTextSnapshot!
+                : paragraphText)
+            .trimRight();
     final cleanQuery = searchQuery?.trim() ?? '';
     if (cleanStableRef.isEmpty || cleanParagraph.isEmpty) {
       return HashTagSearchQuickApplyResult(
@@ -1340,11 +2051,22 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       );
     }
 
+    final categoryArgs = <Object?>[];
+    final categoryClause = _legacyCategoryWhereClause(
+      'category',
+      normalizedCategory,
+      categoryArgs,
+    );
     final exists = await db.query(
       tableName,
       columns: ['id'],
-      where: 'user_id = ? AND tag = ? AND verse_ref = ?',
-      whereArgs: [userId, normalizedTag, cleanStableRef],
+      where: '''
+        user_id = ?
+        AND tag = ?
+        AND $categoryClause
+        AND verse_ref = ?
+      ''',
+      whereArgs: [userId, normalizedTag, ...categoryArgs, cleanStableRef],
       limit: 1,
     );
     if (exists.isNotEmpty) {
@@ -1411,6 +2133,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     await db.insert(tableName, {
       'user_id': userId,
       'tag': normalizedTag,
+      if (normalizedCategory != null) 'category': normalizedCategory,
       if (resolvedCategory != null && resolvedCategory.trim().isNotEmpty)
         'category': resolvedCategory.trim(),
       'verse_ref': cleanStableRef,
@@ -1554,7 +2277,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       'source_paragraph_number': sourceParagraphNumber,
       'search_query': searchQuery,
       'source_paragraph': sourceParagraph,
-      if (selectedTextSnapshot != null && selectedTextSnapshot.trim().isNotEmpty)
+      if (selectedTextSnapshot != null &&
+          selectedTextSnapshot.trim().isNotEmpty)
         'selected_text_snapshot': selectedTextSnapshot.trimRight(),
       if (selectionStartBlockIndex != null)
         'selection_start_block_index': selectionStartBlockIndex,
@@ -1580,6 +2304,238 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
 
   String _normalizeReferenceCode(String value) {
     return value.trim().replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  String _stripHtml(String input) {
+    return input
+        .replaceAll(
+          RegExp(r'<br\s*/?>', caseSensitive: false),
+          '\n',
+        )
+        .replaceAll(RegExp(r'<[^>]+>'), '')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .trim();
+  }
+
+  String _legacyMergeKey(Map<String, Object?> row) {
+    final noteFormatJson = _s(row['note_format_json']).trim();
+    final legacyMetadata = _parseLegacyMergeMetadata(noteFormatJson);
+    if (legacyMetadata != null) {
+      return legacyMetadata.identityKey;
+    }
+
+    final verseRef = _s(row['verse_ref']).trim().toLowerCase();
+    final bookNumber = _i(row['book_number']) ?? 0;
+    final chapterNumber = _i(row['chapter_number']) ?? 0;
+    final verseNumber = _i(row['verse_number']) ?? 0;
+    final verseEndNumber = _i(row['verse_end']) ?? verseNumber;
+    final referenceCode = _normalizeReferenceCode(
+      _s(row['reference_code']),
+    ).toLowerCase();
+    final noteText = _normalizeMergeText(_s(row['note_text']));
+    final contentHtml = _normalizeMergeText(_stripHtml(_s(row['content_html'])));
+    final presentationSlideNumber = _i(row['presentation_slide_number']) ?? -1;
+    final presentationSlideRegion = _normalizeMergeText(
+      _s(row['presentation_slide_region']),
+    );
+
+    if (bookNumber > 0 && chapterNumber > 0 && verseNumber > 0) {
+      return [
+        'verse',
+        bookNumber,
+        chapterNumber,
+        verseNumber,
+        verseEndNumber,
+        verseRef,
+        referenceCode,
+      ].join('|');
+    }
+
+    return [
+      'note',
+      verseRef,
+      referenceCode,
+      noteText,
+      contentHtml,
+      presentationSlideNumber,
+      presentationSlideRegion,
+    ].join('|');
+  }
+
+  String _mergeKey(Map<String, Object?> row) {
+    final noteFormatJson = _s(row['note_format_json']).trim();
+    final legacyMetadata = _parseLegacyMergeMetadata(noteFormatJson);
+    if (legacyMetadata != null) {
+      return legacyMetadata.identityKey;
+    }
+
+    final bookNumber = _i(row['book_id']) ?? _i(row['book_number']) ?? 0;
+    final chapterNumber = _i(row['chapter']) ?? _i(row['chapter_number']) ?? 0;
+    final verseStart = _i(row['verse_start']) ?? _i(row['verse_number']) ?? 0;
+    final verseEnd = _i(row['verse_end']) ?? verseStart;
+    final verseRef = _s(row['verse_ref']).trim().toLowerCase();
+    final referenceCode = _normalizeReferenceCode(
+      _s(row['reference_code']),
+    ).toLowerCase();
+    final noteText = _normalizeMergeText(
+      _s(row['note_text']).isNotEmpty
+          ? _s(row['note_text'])
+          : _s(row['content_html']),
+    );
+    final presentationSlideNumber = _i(row['presentation_slide_number']) ?? -1;
+    final presentationSlideRegion = _normalizeMergeText(
+      _s(row['presentation_slide_region']),
+    );
+    final legacyGroupId = _s(row['legacy_group_id']).trim().toLowerCase();
+    final legacyItemId = _s(row['legacy_item_id']).trim().toLowerCase();
+    final legacyImportPackageId = _s(row['legacy_import_package_id'])
+        .trim()
+        .toLowerCase();
+
+    if (bookNumber > 0 && chapterNumber > 0 && verseStart > 0) {
+      return [
+        'verse',
+        bookNumber,
+        chapterNumber,
+        verseStart,
+        verseEnd,
+        verseRef,
+        referenceCode,
+      ].join('|');
+    }
+
+    return [
+      'item',
+      referenceCode,
+      noteText,
+      presentationSlideNumber,
+      presentationSlideRegion,
+      legacyGroupId,
+      legacyItemId,
+      legacyImportPackageId,
+    ].join('|');
+  }
+
+  Future<String> debugTagReport(
+    String tag, {
+    String? category,
+  }) async {
+    final normalizedTag = normalizeTagName(tag);
+    final normalizedCategory = _normalizeCategoryName(category);
+    if (normalizedTag.isEmpty) {
+      return 'Tag report: empty tag';
+    }
+
+    await ensureSchema();
+    final db = await _db();
+    final summaries = await loadSummaries();
+    final summaryMatches = summaries
+        .where((summary) => summary.tag.toLowerCase() == normalizedTag.toLowerCase())
+        .toList(growable: false);
+    final browseVisible = summaryMatches.where((summary) {
+      final summaryCategory = summary.category?.trim() ?? '';
+      if (normalizedCategory == null) {
+        return summaryCategory.isEmpty;
+      }
+      return summaryCategory.toLowerCase() == normalizedCategory.toLowerCase();
+    }).toList(growable: false);
+    final detailEntries = await loadEntries(
+      normalizedTag,
+      category: normalizedCategory,
+    );
+
+    final legacyRows = await db.query(
+      tableName,
+      columns: [
+        'id',
+        'tag',
+        'category',
+        'verse_ref',
+        'book_number',
+        'chapter_number',
+        'verse_number',
+        'reference_code',
+        'sort_order',
+        'created_at',
+      ],
+      where: 'tag = ?',
+      whereArgs: [normalizedTag],
+      orderBy: 'created_at ASC, id ASC',
+    );
+    final legacySamples = legacyRows
+        .take(3)
+        .map(
+          (row) =>
+              '${_s(row['verse_ref'])} @ ${_s(row['category']).isEmpty ? 'None' : _s(row['category'])}',
+        )
+        .toList(growable: false);
+
+    final normalizedRows = await _loadNormalizedTagRows(
+      db,
+      normalizedTag: normalizedTag,
+      category: normalizedCategory,
+    );
+    final normalizedSamples = <String>[];
+    for (final row in normalizedRows.take(3)) {
+      final groupId = row['id']?.toString() ?? '';
+      if (groupId.isEmpty) continue;
+      final items = await _loadNormalizedTagItemRows(db, [groupId]);
+      normalizedSamples.add(
+        '$groupId items=${items.length} parent=${_s(row['parent_group_id']).isEmpty ? 'None' : _s(row['parent_group_id'])}',
+      );
+    }
+
+    final buffer = StringBuffer()
+      ..writeln('Tag report for $normalizedTag${normalizedCategory == null ? '' : ' @ $normalizedCategory'}')
+      ..writeln('Browse visible: ${browseVisible.isNotEmpty}')
+      ..writeln('Detail entries: ${detailEntries.length}')
+      ..writeln('Legacy rows: ${legacyRows.length}')
+      ..writeln('Legacy samples: ${legacySamples.isEmpty ? 'none' : legacySamples.join(' | ')}')
+      ..writeln('Normalized groups: ${normalizedRows.length}')
+      ..writeln(
+        'Normalized samples: ${normalizedSamples.isEmpty ? 'none' : normalizedSamples.join(' | ')}',
+      );
+    return buffer.toString();
+  }
+
+  _LegacyMergeMetadata? _parseLegacyMergeMetadata(String rawJson) {
+    if (rawJson.trim().isEmpty) return null;
+    try {
+      final decoded = jsonDecode(rawJson);
+      if (decoded is! Map<String, dynamic>) return null;
+      if (decoded['kind']?.toString() != 'elibrary_note') return null;
+
+      final parts = <String>[];
+      void addPart(String label, Object? value) {
+        final text = value?.toString().trim() ?? '';
+        if (text.isEmpty) return;
+        parts.add('$label=$text');
+      }
+
+      addPart('stable_ref', decoded['stable_ref']);
+      addPart('source_type', decoded['source_type']);
+      addPart('source_library_item_id', decoded['source_library_item_id']);
+      addPart('source_href', decoded['source_href']);
+      addPart('source_anchor_id', decoded['source_anchor_id']);
+      addPart('source_relative_path', decoded['source_relative_path']);
+      addPart('source_spine_index', decoded['source_spine_index']);
+      addPart('source_paragraph_index', decoded['source_paragraph_index']);
+      addPart('source_page_number', decoded['source_page_number']);
+      addPart('source_paragraph_number', decoded['source_paragraph_number']);
+      addPart('selected_text_snapshot', decoded['selected_text_snapshot']);
+      addPart('excerpt', decoded['excerpt']);
+      if (parts.isEmpty) return null;
+      return _LegacyMergeMetadata(identityKey: 'elibrary|${parts.join('|')}');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _normalizeMergeText(String value) {
+    return value.replaceAll(RegExp(r'\s+'), ' ').trim().toLowerCase();
   }
 
   Future<String> _loadVerseRangeText({
@@ -1821,9 +2777,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     if (cleanNote.isEmpty && cleanReferenceCode.isEmpty && !allowBlank) {
       return 0;
     }
-    final resolvedCategory = category?.trim().isNotEmpty == true
-        ? category!.trim()
-        : await loadTagCategory(normalizedTag);
+    final resolvedCategory =
+        _normalizeCategoryName(category) ??
+        await loadTagCategory(normalizedTag);
     final now = DateTime.now().millisecondsSinceEpoch;
     final nextSortOrder = await _nextSortOrderForTag(db, normalizedTag);
     final values = <String, Object?>{
@@ -1887,13 +2843,18 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     return HashTagResolvedTag(tag: defaultTag, createdDefaultTag: false);
   }
 
-  Future<bool> _tagExists(String normalizedTag) async {
+  Future<bool> _tagExists(String normalizedTag, {String? category}) async {
     final db = await _db();
+    final normalizedCategory = _normalizeCategoryName(category);
     final rows = await db.query(
       tableName,
       columns: ['id'],
-      where: 'tag = ?',
-      whereArgs: [normalizedTag],
+      where: normalizedCategory == null
+          ? 'tag = ?'
+          : 'tag = ? AND COALESCE(TRIM(category), \'\') = ?',
+      whereArgs: normalizedCategory == null
+          ? [normalizedTag]
+          : [normalizedTag, normalizedCategory],
       limit: 1,
     );
     return rows.isNotEmpty;
@@ -1988,6 +2949,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     required String contentHtml,
     String? referenceCode,
     String? noteFormatJson,
+    String? category,
   }) async {
     await ensureSchema();
     final db = await _db();
@@ -2074,7 +3036,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   }
 
   Future<String> _ensureNormalizedTagGroup(
-    Database db, {
+    DatabaseExecutor db, {
     required String normalizedTag,
     required String now,
   }) async {
@@ -2120,7 +3082,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     return groupId;
   }
 
-  Future<int> _nextNormalizedTagGroupSortOrder(Database db) async {
+  Future<int> _nextNormalizedTagGroupSortOrder(DatabaseExecutor db) async {
     final tagKind = _tagKindForTable();
     final rows = await db.rawQuery(
       '''
@@ -2175,34 +3137,69 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     return highest + 1;
   }
 
-  Future<HashTagImportResult?> importSharedListFromText(String text) async {
+  Future<HashTagImportResult?> importSharedListFromText(
+    String text, {
+    String? targetCategory,
+  }) async {
     final parsed = tableName == 'dollar_tags'
         ? await _parseDollarSharedListFromText(text)
         : await _parseSharedListFromText(text);
     if (parsed == null || parsed.slides.isEmpty) return null;
 
-    if (tableName == 'dollar_tags') {
-      return _importDollarSharedList(parsed);
+    final normalizedTargetCategory =
+        _normalizeCategoryName(targetCategory) ?? recentImportCategory;
+    final sameTagCategories = await (() async {
+      final summaries = await loadSummaries();
+      return summaries
+          .where((summary) => summary.tag == parsed.tag)
+          .map((summary) => summary.category?.trim() ?? '')
+          .where((category) =>
+              category.isNotEmpty &&
+              category.toLowerCase() !=
+                  normalizedTargetCategory.toLowerCase())
+          .toSet()
+          .toList(growable: false);
+    })();
+    if (sameTagCategories.isNotEmpty) {
+      debugPrint(
+        'Same tag exists in ${sameTagCategories.join(', ')}; '
+        'import will create/update $normalizedTargetCategory copy.',
+      );
     }
-    return _importHashSharedList(parsed);
+    if (tableName == 'dollar_tags') {
+      return _importDollarSharedList(
+        parsed,
+        targetCategory: normalizedTargetCategory,
+      );
+    }
+    return _importHashSharedList(
+      parsed,
+      targetCategory: normalizedTargetCategory,
+    );
   }
 
   Future<bool> moveEntry({
     required String tag,
     required int entryId,
     required int delta,
+    String? category,
   }) async {
     if (delta == 0) return false;
     final normalized = normalizeTagName(tag);
     if (normalized.isEmpty) return false;
     await ensureSchema();
     final db = await _db();
+    final normalizedCategory = _normalizeCategoryName(category);
     return db.transaction((txn) async {
       final rows = await txn.query(
         tableName,
         columns: ['id'],
-        where: 'tag = ?',
-        whereArgs: [normalized],
+        where: normalizedCategory == null
+            ? 'tag = ?'
+            : 'tag = ? AND category = ?',
+        whereArgs: normalizedCategory == null
+            ? [normalized]
+            : [normalized, normalizedCategory],
         orderBy: 'sort_order ASC, created_at ASC, id ASC',
       );
       final ids = rows
@@ -2622,13 +3619,16 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   }
 
   Future<HashTagImportResult?> _importDollarSharedList(
-    _ParsedSharedList parsed,
-  ) async {
+    _ParsedSharedList parsed, {
+    required String targetCategory,
+  }) async {
     await ensureSchema();
     final db = await _db();
     final userId = await ensureUserId();
     final normalizedTag = parsed.tag;
     if (normalizedTag.isEmpty) return null;
+    final normalizedTargetCategory =
+        _normalizeCategoryName(targetCategory) ?? recentImportCategory;
 
     final failures = <HashTagImportFailure>[];
     var parsedCount = 0;
@@ -2663,16 +3663,23 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         );
         continue;
       }
+      final categoryArgs = <Object?>[];
+      final categoryClause = _legacyCategoryWhereClause(
+        'category',
+        normalizedTargetCategory,
+        categoryArgs,
+      );
       final exists = await db.query(
         tableName,
         columns: ['id'],
-        where: 'user_id = ? AND tag = ? AND verse_ref = ?',
-        whereArgs: [userId, normalizedTag, verseRef],
+        where: 'user_id = ? AND tag = ? AND $categoryClause AND verse_ref = ?',
+        whereArgs: [userId, normalizedTag, ...categoryArgs, verseRef],
         limit: 1,
       );
       final values = <String, Object?>{
         'user_id': userId,
         'tag': normalizedTag,
+        'category': normalizedTargetCategory,
         'verse_ref': verseRef,
         'book_number': target?.bookNumber ?? 0,
         'chapter_number': target?.chapter ?? 0,
@@ -2713,7 +3720,12 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       inserted++;
     }
 
-    await saveTagCategory(normalizedTag, recentImportCategory);
+    await saveTagCategory(
+      normalizedTag,
+      normalizedTargetCategory,
+      currentCategory: normalizedTargetCategory,
+      currentCategoryKnown: true,
+    );
     return HashTagImportResult(
       tag: normalizedTag,
       parsedCount: parsedCount,
@@ -2726,13 +3738,16 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   }
 
   Future<HashTagImportResult?> _importHashSharedList(
-    _ParsedSharedList parsed,
-  ) async {
+    _ParsedSharedList parsed, {
+    required String targetCategory,
+  }) async {
     await ensureSchema();
     final db = await _db();
     final userId = await ensureUserId();
     final normalizedTag = parsed.tag;
     if (normalizedTag.isEmpty) return null;
+    final normalizedTargetCategory =
+        _normalizeCategoryName(targetCategory) ?? recentImportCategory;
 
     final scriptureSlides = parsed.slides
         .where((slide) => slide.target != null)
@@ -2748,16 +3763,23 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
 
     for (final slide in scriptureSlides) {
       final target = slide.target!;
+      final categoryArgs = <Object?>[];
+      final categoryClause = _legacyCategoryWhereClause(
+        'category',
+        normalizedTargetCategory,
+        categoryArgs,
+      );
       final exists = await db.query(
         tableName,
         columns: ['id'],
-        where: 'user_id = ? AND tag = ? AND verse_ref = ?',
-        whereArgs: [userId, normalizedTag, target.verseRef],
+        where: 'user_id = ? AND tag = ? AND $categoryClause AND verse_ref = ?',
+        whereArgs: [userId, normalizedTag, ...categoryArgs, target.verseRef],
         limit: 1,
       );
       final values = <String, Object?>{
         'user_id': userId,
         'tag': normalizedTag,
+        'category': normalizedTargetCategory,
         'verse_ref': target.verseRef,
         'book_number': target.bookNumber,
         'chapter_number': target.chapter,
@@ -2787,7 +3809,12 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       studyOrder++;
     }
 
-    await saveTagCategory(normalizedTag, recentImportCategory);
+    await saveTagCategory(
+      normalizedTag,
+      normalizedTargetCategory,
+      currentCategory: normalizedTargetCategory,
+      currentCategoryKnown: true,
+    );
     return HashTagImportResult(
       tag: normalizedTag,
       parsedCount: scriptureSlides.length,
@@ -2896,4 +3923,10 @@ class _SentenceSpan {
   final int start;
   final int end;
   final String text;
+}
+
+class _LegacyMergeMetadata {
+  const _LegacyMergeMetadata({required this.identityKey});
+
+  final String identityKey;
 }

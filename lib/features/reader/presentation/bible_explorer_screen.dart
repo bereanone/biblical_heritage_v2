@@ -36,6 +36,10 @@ import 'viewer_top_bar.dart';
 import 'viewer_search_dialog.dart';
 import 'viewer_search_models.dart';
 import 'viewer_topic_picker.dart';
+import 'presentation_prep/presentation_ui_helpers.dart';
+import 'presentation_prep/tag_presentation_prep_launcher.dart';
+import 'presentation_prep/tag_presentation_prep_models.dart';
+import 'presentation_prep/tag_saved_presentations_screen.dart';
 import 'rapid_tag_state.dart';
 import 'tag_quick_apply_helper.dart';
 import 'tag_screen_launcher.dart';
@@ -132,6 +136,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
               verse: displayVerse,
               fontScale: _fontScale,
               onSearch: () => _openSearch(context),
+              onSavedPresentations: _openSavedPresentations,
               onStandardTag: _openTagButton,
               onDollarTag: _openDollarTagButton,
               onRapidTag: _openRapidTagButton,
@@ -185,7 +190,6 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
               onIncreaseFont: _increaseFont,
               onCommentary: _openCommentary,
               onMode: _openMode,
-              onMarkup: _applyDefaultMarkup,
               canDecreaseFont: _fontScale > _minFontScale,
               canIncreaseFont: _fontScale < _maxFontScale,
               backgroundColor:
@@ -368,9 +372,11 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
       _isRapidTagApplying = true;
     });
     try {
+      final defaultCategory = await repository.loadDefaultTagCategory();
       final result = await repository.quickApplyTargets(
         targets: targets,
         tag: defaultTag,
+        category: defaultCategory,
       );
       if (!mounted) return;
       if (result.tag == null) {
@@ -383,13 +389,13 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
         );
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Tagged ${result.inserted} verse(s) with ${result.tag}'
-            '${result.skipped > 0 ? ' (${result.skipped} already in this tag)' : ''}.',
-          ),
-        ),
+      showReadableSnackBar(
+        context,
+        result.inserted == 0 && result.skipped > 0
+            ? 'Already in ${result.tag}'
+            : 'Tagged ${result.tag}',
+        fontScale: _fontScale,
+        isRapid: true,
       );
     } finally {
       if (mounted) {
@@ -420,34 +426,51 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
+      showReadableSnackBar(
         context,
-      ).showSnackBar(SnackBar(content: Text('Could not open # tags: $error')));
+        'Could not open # tags: $error',
+        fontScale: _fontScale,
+      );
     }
   }
 
   Future<void> _openDollarTagButton() async {
     try {
-      final navigator = Navigator.of(context);
-      final passage = await _currentPassageOrLoad();
-      if (!mounted) return;
-      final targets = _currentTagTargets(passage);
-      final repository = DollarTagRepository();
+      final repository = HashTagRepository();
       final defaultTag = await repository.loadDefaultTag();
       if (!mounted) return;
-      await _showTagScreen(
-        navigator: navigator,
-        passage: passage,
-        targets: targets,
-        launchMode: HashTagLaunchMode.studyChain,
-        tagSymbol: r'$',
-        initialTag: defaultTag,
+      final selectedTag = defaultTag?.trim() ?? '';
+      if (selectedTag.isEmpty) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) {
+            return AlertDialog(
+              title: const Text('Presentation Setup'),
+              content: const Text(
+                'Create or select a #tag study chain before preparing a presentation.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+        return;
+      }
+      await openTagPresentationPrep(
+        context,
+        request: TagPresentationPrepRequest(tagName: selectedTag),
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
+      showReadableSnackBar(
         context,
-      ).showSnackBar(SnackBar(content: Text('Could not open \$ tags: $error')));
+        'Could not open presentation setup: $error',
+        fontScale: _fontScale,
+      );
     }
   }
 
@@ -482,8 +505,10 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open rapid # tags: $error')),
+      showReadableSnackBar(
+        context,
+        'Could not open rapid # tags: $error',
+        fontScale: _fontScale,
       );
     }
   }

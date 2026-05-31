@@ -21,10 +21,22 @@ class HashTagTarget {
 }
 
 class HashTagSummary {
-  const HashTagSummary({required this.tag, required this.count});
+  const HashTagSummary({required this.tag, required this.count, this.category});
 
   final String tag;
   final int count;
+  final String? category;
+
+  String get displayLabel {
+    final categoryLabel = category?.trim() ?? '';
+    if (categoryLabel.isEmpty) return tag;
+    return '$tag · $categoryLabel';
+  }
+
+  String get identityKey {
+    final categoryLabel = category?.trim().toLowerCase() ?? '';
+    return '${tag.trim().toLowerCase()}|$categoryLabel';
+  }
 }
 
 class HashTagEntry {
@@ -99,6 +111,32 @@ class HashTagResolvedTag {
 
   final String tag;
   final bool createdDefaultTag;
+}
+
+class HashTagCategoryMergeResult {
+  const HashTagCategoryMergeResult({
+    required this.tag,
+    required this.sourceCategory,
+    required this.targetCategory,
+    required this.sourceCount,
+    required this.targetCount,
+    required this.addedCount,
+    required this.skippedCount,
+    required this.sourceRemoved,
+    required this.dryRun,
+  });
+
+  final String tag;
+  final String? sourceCategory;
+  final String targetCategory;
+  final int sourceCount;
+  final int targetCount;
+  final int addedCount;
+  final int skippedCount;
+  final bool sourceRemoved;
+  final bool dryRun;
+
+  int get finalTargetCount => targetCount + addedCount;
 }
 
 class HashTagSearchQuickApplyResult {

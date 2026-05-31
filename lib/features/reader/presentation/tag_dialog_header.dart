@@ -33,33 +33,7 @@ class TagDialogHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final decoration = legacyStyle
-        ? const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFFF0DCCB), Color(0xFFF6EEE3), Color(0xFFF8F1E8)],
-            ),
-            border: Border(
-              bottom: BorderSide(color: Color(0xFFCFA36C), width: 0.6),
-            ),
-          )
-        : theme.brightness == Brightness.dark
-        ? BoxDecoration(
-            color: TagDialogStyles.surfaceHigh(theme),
-            border: Border(
-              bottom: BorderSide(
-                color: TagDialogStyles.outlineColor(theme),
-                width: 0.6,
-              ),
-            ),
-          )
-        : BoxDecoration(
-            color: TagDialogStyles.surfaceHigh(theme),
-            border: const Border(
-              bottom: BorderSide(color: TagDialogStyles.outline, width: 0.6),
-            ),
-          );
+    final decoration = TagDialogStyles.headerDecoration(theme);
 
     return Container(
       decoration: decoration,
@@ -77,9 +51,7 @@ class TagDialogHeader extends StatelessWidget {
                   style: TagDialogStyles.titleTextStyle(
                     theme,
                     fontScale,
-                    color: legacyStyle
-                        ? const Color(0xFF4A2B12)
-                        : TagDialogStyles.title(theme),
+                    color: TagDialogStyles.title(theme),
                     fontWeight: FontWeight.w900,
                     letterSpacing: -0.2,
                   ),
@@ -89,9 +61,7 @@ class TagDialogHeader extends StatelessWidget {
                 tooltip: 'Close',
                 onPressed: onClose,
                 icon: const Icon(Icons.close),
-                color: legacyStyle
-                    ? const Color(0xFF7B4A1D)
-                    : TagDialogStyles.body(theme),
+                color: TagDialogStyles.body(theme),
                 constraints: const BoxConstraints.tightFor(
                   width: 44,
                   height: 44,
@@ -226,7 +196,7 @@ class TagDialogHeader extends StatelessWidget {
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        child: TagDialogStyles.fittedButtonLabel(
+                        child: Text(
                           'Use',
                           style: TagDialogStyles.buttonTextStyle(
                             theme,
@@ -254,7 +224,7 @@ class TagDialogHeader extends StatelessWidget {
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        child: TagDialogStyles.fittedButtonLabel(
+                        child: Text(
                           'Make Default',
                           style: TagDialogStyles.buttonTextStyle(
                             theme,

@@ -4,22 +4,29 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../../core/database/user_database.dart';
+import '../../../../core/database/study_bible_database.dart';
 import 'tag_models.dart';
 import 'tag_repository.dart';
 import 'unified_tag_models.dart';
 
 class UnifiedTagReadAdapter {
-  UnifiedTagReadAdapter({TagDatabaseProvider? databaseProvider})
+  UnifiedTagReadAdapter({
+    TagDatabaseProvider? databaseProvider,
+    Future<Map<int, String>> Function()? bookNamesProvider,
+  })
     : _databaseProvider =
-          databaseProvider ?? (() => UserDatabase.instance.database);
+          databaseProvider ?? (() => UserDatabase.instance.database),
+      _bookNamesProvider = bookNamesProvider;
 
   final TagDatabaseProvider _databaseProvider;
+  final Future<Map<int, String>> Function()? _bookNamesProvider;
 
   Future<UnifiedTagReadSnapshot> loadSnapshot() async {
     final db = await _databaseProvider();
     final hashDefaults = await _loadDefaultTags(db, TagMode.quick);
     final dollarDefaults = await _loadDefaultTags(db, TagMode.studyList);
     final categoryNames = await _loadCategoryNames(db);
+    final bookNames = await _loadBookNames();
 
     final chains = <UnifiedTagChain>[];
     chains.addAll(
@@ -28,6 +35,7 @@ class UnifiedTagReadAdapter {
         tableName: 'hash_tags',
         storageKind: UnifiedTagStorageKind.hash,
         defaultTag: hashDefaults,
+        bookNames: bookNames,
       ),
     );
     chains.addAll(
@@ -36,6 +44,7 @@ class UnifiedTagReadAdapter {
         tableName: 'dollar_tags',
         storageKind: UnifiedTagStorageKind.dollar,
         defaultTag: dollarDefaults,
+        bookNames: bookNames,
       ),
     );
     chains.addAll(
@@ -44,6 +53,7 @@ class UnifiedTagReadAdapter {
         categoryNames: categoryNames,
         hashDefault: hashDefaults,
         dollarDefault: dollarDefaults,
+        bookNames: bookNames,
       ),
     );
 
@@ -87,8 +97,10 @@ class UnifiedTagReadAdapter {
     required String tableName,
     required UnifiedTagStorageKind storageKind,
     required Set<String> defaultTag,
+    required Map<int, String> bookNames,
   }) async {
     final rows = await db.query(tableName, orderBy: 'created_at ASC, id ASC');
+    final mediaByItemId = await _loadLegacyMediaByItemId(db);
     final rowsByTag = <String, List<Map<String, Object?>>>{};
     for (final row in rows) {
       final tag = _normalizeTagName(row['tag']?.toString() ?? '', storageKind);
@@ -105,6 +117,16 @@ class UnifiedTagReadAdapter {
             tableName: tableName,
             storageKind: storageKind,
             tagName: tag,
+            media: _mergeMediaLists(
+              mediaByItemId[_readString(row['id'])] ?? const <UnifiedTagMedia>[],
+              _legacyMediaForRow(
+                itemId: _readString(row['id']),
+                tableName: tableName,
+                tagName: tag,
+                contentHtml: _readStringOrNull(row['content_html']),
+              ),
+            ),
+            bookNames: bookNames,
           ),
       ]..sort(_compareItemsByOrder);
 
@@ -148,6 +170,7 @@ class UnifiedTagReadAdapter {
     required Map<String, String> categoryNames,
     required Set<String> hashDefault,
     required Set<String> dollarDefault,
+    required Map<int, String> bookNames,
   }) async {
     final groupRows = await db.query(
       'tag_groups',
@@ -194,6 +217,7 @@ class UnifiedTagReadAdapter {
             row: row,
             groupRow: groupRow,
             mediaByItemId: mediaByItemId,
+            bookNames: bookNames,
           ),
       ]..sort(_compareItemsByOrder);
 
@@ -229,6 +253,8 @@ class UnifiedTagReadAdapter {
     required String tableName,
     required UnifiedTagStorageKind storageKind,
     required String tagName,
+    required List<UnifiedTagMedia> media,
+    required Map<int, String> bookNames,
   }) {
     final rowId = _readString(row['id']);
     final bookNumber = _int(row['book_number']);
@@ -243,12 +269,9 @@ class UnifiedTagReadAdapter {
     final noteText = _readStringOrNull(row['note_text']);
     final contentHtml = _readStringOrNull(row['content_html']);
     final noteFormatJson = _readStringOrNull(row['note_format_json']);
-    final media = _legacyMediaForRow(
-      itemId: rowId,
-      tableName: tableName,
-      tagName: tagName,
-      contentHtml: contentHtml,
-    );
+    final overlayUserTitle = _legacyOverlayUserTitle(noteFormatJson);
+    final overlayDisplayTextOverride =
+        _legacyOverlayDisplayTextOverride(noteFormatJson);
     final bibleAnchor = _legacyBibleAnchor(
       row: row,
       bookNumber: bookNumber,
@@ -292,8 +315,11 @@ class UnifiedTagReadAdapter {
         itemType: itemType,
         bibleAnchor: bibleAnchor,
         elibraryAnchor: elibraryAnchor,
+        bookNames: bookNames,
         tagName: tagName,
         noteText: noteText,
+        userTitle: overlayUserTitle,
+        displayTextOverride: overlayDisplayTextOverride,
       ),
       textSnapshot: _legacyTextSnapshot(
         itemType: itemType,
@@ -329,6 +355,7 @@ class UnifiedTagReadAdapter {
     required Map<String, Object?> row,
     required Map<String, Object?> groupRow,
     required Map<String, List<UnifiedTagMedia>> mediaByItemId,
+    required Map<int, String> bookNames,
   }) {
     final rowId = _readString(row['id']);
     final bookNumber = _int(row['book_id']);
@@ -398,9 +425,9 @@ class UnifiedTagReadAdapter {
         itemType: itemType,
         bibleAnchor: bibleAnchor,
         elibraryAnchor: elibraryAnchor,
+        bookNames: bookNames,
         chainName: chainName,
         noteText: noteText,
-        referenceCode: referenceCode,
       ),
       textSnapshot: _unifiedTextSnapshot(
         itemType: itemType,
@@ -665,33 +692,71 @@ class UnifiedTagReadAdapter {
     required UnifiedTagItemType itemType,
     required UnifiedTagBibleAnchor? bibleAnchor,
     required UnifiedTagELibraryAnchor? elibraryAnchor,
+    required Map<int, String> bookNames,
     required String tagName,
     required String? noteText,
+    required String? userTitle,
+    required String? displayTextOverride,
   }) {
     if (elibraryAnchor != null) {
       final title = elibraryAnchor.sourceTitle?.trim() ?? '';
       if (title.isNotEmpty) return title;
       return elibraryAnchor.compactRef;
     }
+    final overlayTitle = userTitle?.trim() ?? '';
+    if (overlayTitle.isNotEmpty) return overlayTitle;
+    final overlayText = displayTextOverride?.trim() ?? '';
+    if (overlayText.isNotEmpty) return overlayText;
     if (bibleAnchor != null) {
-      return _bibleDisplayLabel(bibleAnchor);
+      return _bibleDisplayLabel(bibleAnchor, bookNames);
     }
     if ((noteText ?? '').trim().isNotEmpty) return 'Note';
+    if (tagName.trim().isNotEmpty) return tagName;
     if (itemType == UnifiedTagItemType.image ||
         itemType == UnifiedTagItemType.media) {
       return 'Media';
     }
-    if (tagName.trim().isNotEmpty) return tagName;
     return 'Legacy item';
+  }
+
+  String? _legacyOverlayUserTitle(String? raw) {
+    final overlay = _parseLegacyBibleItemOverlay(raw);
+    final title = overlay?.userTitle?.trim() ?? '';
+    return title.isEmpty ? null : title;
+  }
+
+  String? _legacyOverlayDisplayTextOverride(String? raw) {
+    final overlay = _parseLegacyBibleItemOverlay(raw);
+    final text = overlay?.displayTextOverride?.trim() ?? '';
+    return text.isEmpty ? null : text;
+  }
+
+  _LegacyBibleItemOverlay? _parseLegacyBibleItemOverlay(String? raw) {
+    final text = raw?.trim() ?? '';
+    if (text.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is! Map<String, dynamic>) return null;
+      final kind = decoded['kind']?.toString();
+      if (kind != 'bible_item_overlay' && kind != 'bible_item_meta') {
+        return null;
+      }
+      return _LegacyBibleItemOverlay(
+        userTitle: _readStringOrNull(decoded['user_title']),
+        displayTextOverride: _readStringOrNull(decoded['display_text_override']),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   String _unifiedDisplayTitle({
     required UnifiedTagItemType itemType,
     required UnifiedTagBibleAnchor? bibleAnchor,
     required UnifiedTagELibraryAnchor? elibraryAnchor,
+    required Map<int, String> bookNames,
     required String chainName,
     required String? noteText,
-    required String? referenceCode,
   }) {
     if (elibraryAnchor != null) {
       final title = elibraryAnchor.sourceTitle?.trim() ?? '';
@@ -701,17 +766,15 @@ class UnifiedTagReadAdapter {
       return elibraryAnchor.compactRef;
     }
     if (bibleAnchor != null) {
-      if (referenceCode != null && referenceCode.trim().isNotEmpty) {
-        return referenceCode.trim();
-      }
-      return _bibleDisplayLabel(bibleAnchor);
+      return _bibleDisplayLabel(bibleAnchor, bookNames);
     }
     if ((noteText ?? '').trim().isNotEmpty) return 'Note';
+    if (chainName.isNotEmpty) return chainName;
     if (itemType == UnifiedTagItemType.image ||
         itemType == UnifiedTagItemType.media) {
-      return chainName.isNotEmpty ? chainName : 'Media';
+      return 'Media';
     }
-    return chainName.isNotEmpty ? chainName : 'Item';
+    return 'Item';
   }
 
   String? _legacyTextSnapshot({
@@ -804,6 +867,48 @@ class UnifiedTagReadAdapter {
     return grouped;
   }
 
+  Future<Map<String, List<UnifiedTagMedia>>> _loadLegacyMediaByItemId(
+    Database db,
+  ) async {
+    final rows = await db.query(
+      'tag_item_media',
+      orderBy: 'tag_item_id ASC, sort_order ASC, id ASC',
+    );
+    final grouped = <String, List<UnifiedTagMedia>>{};
+    for (final row in rows) {
+      final itemId = _readString(row['tag_item_id']);
+      final legacyItemId = _readStringOrNull(row['legacy_item_id']);
+      final relativePath = _readString(row['relative_path']);
+      if (relativePath.isEmpty) continue;
+      final media = UnifiedTagMedia(
+        id: 'legacy-media:${_readString(row['id'])}',
+        itemId: itemId,
+        relativePath: relativePath,
+        mediaType: _readString(row['media_type']),
+        sortOrder: _int(row['sort_order']) ?? 0,
+        caption: _readStringOrNull(row['caption']),
+        fileHash: _readStringOrNull(row['file_hash']),
+        fileSize: _int(row['file_size']),
+        legacyTable: 'tag_item_media',
+        legacyTagName: null,
+        legacyTagId: _readStringOrNull(row['legacy_group_id']),
+        legacyItemId: legacyItemId,
+        legacyImportPackageId: _readStringOrNull(row['legacy_import_package_id']),
+        createdAt: _parseTimestamp(row['created_at']),
+        updatedAt: _parseTimestamp(row['updated_at']),
+        deletedAt: _parseTimestamp(row['deleted_at']),
+        rawFields: _asUnmodifiableMap(row),
+      );
+      if (itemId.isNotEmpty) {
+        grouped.putIfAbsent(itemId, () => <UnifiedTagMedia>[]).add(media);
+      }
+      if (legacyItemId != null && legacyItemId.isNotEmpty) {
+        grouped.putIfAbsent(legacyItemId, () => <UnifiedTagMedia>[]).add(media);
+      }
+    }
+    return grouped;
+  }
+
   List<UnifiedTagMedia> _legacyMediaForRow({
     required String itemId,
     required String tableName,
@@ -850,6 +955,22 @@ class UnifiedTagReadAdapter {
     ];
   }
 
+  List<UnifiedTagMedia> _mergeMediaLists(
+    List<UnifiedTagMedia> first,
+    List<UnifiedTagMedia> second,
+  ) {
+    if (first.isEmpty) return second;
+    if (second.isEmpty) return first;
+    final merged = <UnifiedTagMedia>[];
+    final seen = <String>{};
+    for (final media in [...first, ...second]) {
+      final key = '${media.relativePath}|${media.caption ?? ''}|${media.mediaType}';
+      if (!seen.add(key)) continue;
+      merged.add(media);
+    }
+    return merged;
+  }
+
   Future<Map<String, String>> _loadCategoryNames(Database db) async {
     final rows = await db.query(
       'tag_groups',
@@ -859,6 +980,26 @@ class UnifiedTagReadAdapter {
     return {
       for (final row in rows) _readString(row['id']): _readString(row['name']),
     };
+  }
+
+  Future<Map<int, String>> _loadBookNames() async {
+    final provider = _bookNamesProvider;
+    if (provider != null) {
+      try {
+        return await provider();
+      } catch (_) {
+        return const <int, String>{};
+      }
+    }
+
+    try {
+      final books = await StudyBibleDatabase.instance.loadBooks();
+      return {
+        for (final book in books) book.bookNumber: book.bookName,
+      };
+    } catch (_) {
+      return const <int, String>{};
+    }
   }
 
   Future<Set<String>> _loadDefaultTags(Database db, TagMode mode) async {
@@ -897,11 +1038,11 @@ class UnifiedTagReadAdapter {
     return prefix.isEmpty ? cleaned : '$prefix$cleaned';
   }
 
-  String _bibleDisplayLabel(UnifiedTagBibleAnchor anchor) {
-    final verseLabel = anchor.verseEnd > anchor.verseStart
-        ? '${anchor.verseStart}-${anchor.verseEnd}'
-        : '${anchor.verseStart}';
-    return 'Book ${anchor.bookNumber} ${anchor.chapter}:$verseLabel';
+  String _bibleDisplayLabel(
+    UnifiedTagBibleAnchor anchor,
+    Map<int, String> bookNames,
+  ) {
+    return anchor.displayReference(bookNames);
   }
 
   String _stripHtml(String input) {
@@ -1047,4 +1188,14 @@ class _LegacyDollarNotePayload {
   final String? noteText;
   final String? legacyNoteFormatJson;
   final UnifiedTagItemType? legacyItemType;
+}
+
+class _LegacyBibleItemOverlay {
+  const _LegacyBibleItemOverlay({
+    this.userTitle,
+    this.displayTextOverride,
+  });
+
+  final String? userTitle;
+  final String? displayTextOverride;
 }

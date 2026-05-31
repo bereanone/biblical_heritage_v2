@@ -123,10 +123,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       return;
     }
     setState(() {
-      _rangeSelection = _rangeSelection.completeTokenRange(
-        blockId,
-        tokenIndex,
-      );
+      _rangeSelection = _rangeSelection.completeTokenRange(blockId, tokenIndex);
     });
   }
 
@@ -271,6 +268,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       final defaultTag = repository.normalizeTagName(
         await repository.loadDefaultTag() ?? '',
       );
+      final defaultCategory = await repository.loadDefaultTagCategory();
       if (!mounted) return;
       if (defaultTag.isEmpty) {
         _resetRapidTagArmed();
@@ -301,6 +299,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
           chapter: chapterLines.first.chapter,
           verseStart: chapterLines.first.verse,
           verseEnd: chapterLines.last.verse,
+          category: defaultCategory,
         );
         inserted += result.inserted;
         skipped += result.skipped;
@@ -434,9 +433,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
 
   void _showRangeActionMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showReadableSnackBar(context, message, fontScale: _fontScale);
   }
 
   String? _buildSelectedTokenPreview(List<VerseLine> lines) {

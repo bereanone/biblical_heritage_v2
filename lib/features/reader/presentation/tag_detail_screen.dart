@@ -16,10 +16,7 @@ import '../../library/data/library_citation_display_helper.dart';
 import '../../library/presentation/library_book_reader_screen.dart';
 import '../data/presentation/presentation_models.dart';
 import '../data/presentation/presentation_text_format.dart';
-import '../data/tags/unified_tag_models.dart';
 import 'presentation_prep/presentation_ui_helpers.dart';
-import 'presentation_prep/tag_presentation_prep_launcher.dart';
-import 'presentation_prep/tag_presentation_prep_models.dart';
 import 'tag_dialog_styles.dart';
 import 'tag_quick_apply_helper.dart';
 import 'viewer_presentation_launcher.dart';
@@ -31,6 +28,7 @@ class HashTagDetailScreen extends StatefulWidget {
     super.key,
     required this.repository,
     required this.tag,
+    this.category,
     required this.fontScale,
     this.onSelectBlockId,
     this.onSelectTag,
@@ -38,6 +36,7 @@ class HashTagDetailScreen extends StatefulWidget {
 
   final HashTagRepository repository;
   final String tag;
+  final String? category;
   final double fontScale;
   final Future<void> Function(int blockId)? onSelectBlockId;
   final Future<void> Function(String tag)? onSelectTag;
@@ -50,6 +49,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   final Map<int, String> _bookNames = <int, String>{};
   bool _loading = true;
   String? _defaultTag;
+  String? _currentCategory;
   List<HashTagEntry> _entries = const <HashTagEntry>[];
   int _focusedIndex = 0;
   bool _hasChanges = false;
@@ -57,13 +57,22 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _currentCategory = widget.category?.trim().isNotEmpty == true
+        ? widget.category!.trim()
+        : null;
     _load();
+  }
+
+  String? get _resolvedCategory {
+    final category = _currentCategory?.trim() ?? '';
+    return category.isEmpty ? null : category;
   }
 
   Future<void> _load() async {
     final defaultTag = await widget.repository.loadDefaultTag();
     final entries = await widget.repository.loadEntries(
       widget.tag,
+      category: _resolvedCategory,
       sortMode: HashTagEntrySortMode.slideOrder,
     );
     final books = await StudyBibleDatabase.instance.loadBooks();
@@ -85,6 +94,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   Future<void> _reload() async {
     final entries = await widget.repository.loadEntries(
       widget.tag,
+      category: _resolvedCategory,
       sortMode: HashTagEntrySortMode.slideOrder,
     );
     if (!mounted) return;
@@ -216,11 +226,11 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   }
 
   Future<void> _makeDefault() async {
-    final currentCategory = await widget.repository.loadTagCategory(widget.tag);
-    if (currentCategory != null && currentCategory.trim().isNotEmpty) {
-      await widget.repository.saveTagCategory(widget.tag, currentCategory);
-    }
+    final currentCategory =
+        _resolvedCategory ??
+        await widget.repository.loadTagCategory(widget.tag);
     await widget.repository.saveDefaultTag(widget.tag);
+    await widget.repository.saveDefaultTagCategory(currentCategory);
     await AppSettingsService.instance.saveActiveTagFamily(
       _isDollarRepository ? 'dollar' : 'hash',
     );
@@ -230,7 +240,11 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     if (onSelectTag != null) {
       await onSelectTag(widget.tag);
     }
-    _showSnack('Default set to ${widget.tag}');
+    _showSnack(
+      currentCategory == null || currentCategory.trim().isEmpty
+          ? 'Default set to ${widget.tag}'
+          : 'Default set to ${widget.tag} in $currentCategory',
+    );
   }
 
   Future<void> _showInstructions() async {
@@ -439,6 +453,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       tag: widget.tag,
       contentHtml: clean,
       referenceCode: referenceCode,
+      category: _resolvedCategory,
     );
     if (!mounted) return;
     _markChanged();
@@ -451,40 +466,118 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   }
 
   Future<void> _renameTag() async {
-    final controller = TextEditingController(text: widget.tag);
     final renamed = await showDialog<String>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Rename tag'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: '#tag',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: TagDialogStyles.fittedButtonLabel('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(controller.text.trim()),
-              child: TagDialogStyles.fittedButtonLabel('Rename'),
-            ),
-          ],
-        );
-      },
+      builder: (dialogContext) => _RenameTagDialog(initialTag: widget.tag),
     );
-    controller.dispose();
     final normalized = widget.repository.normalizeTagName(renamed ?? '');
     if (normalized.isEmpty || normalized == widget.tag) return;
-    await widget.repository.renameTag(oldTag: widget.tag, newTag: normalized);
+    await widget.repository.renameTag(
+      oldTag: widget.tag,
+      newTag: normalized,
+      category: _resolvedCategory,
+    );
     if (!mounted) return;
     Navigator.of(context).pop(true);
+  }
+
+  Future<void> _changeCategory() async {
+    final currentCategory = _resolvedCategory;
+    final chosenCategory = await showDialog<_MoveTagCategoryResult>(
+      context: context,
+      builder: (dialogContext) => _MoveTagCategoryDialog(
+        repository: widget.repository,
+        tag: widget.tag,
+        currentCategory: currentCategory,
+        fontScale: widget.fontScale,
+      ),
+    );
+    if (!mounted) return;
+    final normalizedTarget = chosenCategory?.targetCategory?.trim();
+    if (chosenCategory == null) return;
+    if ((currentCategory ?? '').toLowerCase() ==
+        (normalizedTarget ?? '').toLowerCase()) {
+      _showSnack('No category change.');
+      return;
+    }
+    if (chosenCategory.merged) {
+      _markChanged();
+      await _notifyParentChanged();
+      await _reload();
+      final targetLabel = normalizedTarget?.isNotEmpty == true
+          ? normalizedTarget!
+          : 'None';
+      final sourceLabel = currentCategory?.trim().isNotEmpty == true
+          ? currentCategory!.trim()
+          : 'None';
+      if (chosenCategory.addedCount > 0) {
+        _showSnack(
+          'Merged copy only: ${chosenCategory.addedCount} added to '
+          '${widget.tag} · $targetLabel, ${chosenCategory.skippedCount} '
+          'skipped as duplicates. Source tag was left unchanged.',
+        );
+      } else {
+        _showSnack(
+          'No new cards added. All source cards already exist in '
+          '${widget.tag} · $targetLabel. Source tag was left unchanged.',
+        );
+      }
+      debugPrint(
+        'Merge copy only completed for ${widget.tag}: '
+        'source=$sourceLabel target=$targetLabel '
+        'added=${chosenCategory.addedCount} skipped=${chosenCategory.skippedCount}',
+      );
+      return;
+    }
+    final targetLabel = normalizedTarget?.isNotEmpty == true
+        ? normalizedTarget!
+        : 'None';
+    final sourceLabel = currentCategory?.trim().isNotEmpty == true
+        ? currentCategory!.trim()
+        : 'None';
+
+    final saved = await widget.repository.saveTagCategory(
+      widget.tag,
+      normalizedTarget ?? '',
+      currentCategory: currentCategory,
+      currentCategoryKnown: true,
+    );
+    if (!mounted) return;
+    if (!saved) {
+      final sourceEntries = await widget.repository.loadEntries(
+        widget.tag,
+        category: currentCategory,
+      );
+      final targetEntries = await widget.repository.loadEntries(
+        widget.tag,
+        category: normalizedTarget,
+      );
+      debugPrint(
+        'Move category failed for ${widget.tag}: '
+        'source=$sourceLabel target=$targetLabel '
+        'sourceRows=${sourceEntries.length} targetRows=${targetEntries.length}',
+      );
+      debugPrint(
+        await widget.repository.debugTagReport(
+          widget.tag,
+          category: currentCategory,
+        ),
+      );
+      _showSnack('Could not move ${widget.tag} to $targetLabel.');
+      return;
+    }
+    setState(() {
+      _currentCategory = normalizedTarget;
+    });
+    _markChanged();
+    await _notifyParentChanged();
+    await _reload();
+    if (_defaultTag == widget.tag) {
+      await widget.repository.saveDefaultTagCategory(normalizedTarget);
+    }
+    _showSnack(
+      'Moved ${widget.tag} from $sourceLabel to $targetLabel',
+    );
   }
 
   Future<void> _deleteEntry(HashTagEntry entry) async {
@@ -501,6 +594,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   Future<void> _moveEntry(HashTagEntry entry, int delta) async {
     final changed = await widget.repository.moveEntry(
       tag: widget.tag,
+      category: _resolvedCategory,
       entryId: entry.id,
       delta: delta,
     );
@@ -534,7 +628,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       },
     );
     if (confirmed != true) return;
-    await widget.repository.deleteTag(widget.tag);
+    await widget.repository.deleteTag(widget.tag, category: _resolvedCategory);
     if (_defaultTag == widget.tag) {
       await widget.repository.clearDefaultTag();
     }
@@ -563,25 +657,6 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       initialIndex: _focusedIndex,
       tag: widget.tag,
       tagFamily: _isDollarRepository ? 'dollar' : 'hash',
-    );
-  }
-
-  Future<void> _openPresentationPrep() async {
-    await openTagPresentationPrep(
-      context,
-      request: TagPresentationPrepRequest(
-        tagName: widget.tag,
-        preferredStorageKinds: _isDollarRepository
-            ? const [
-                UnifiedTagStorageKind.dollar,
-                UnifiedTagStorageKind.unified,
-              ]
-            : const [
-              UnifiedTagStorageKind.hash,
-              UnifiedTagStorageKind.unified,
-            ],
-      ),
-      dismissSourceRoute: true,
     );
   }
 
@@ -696,10 +771,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     return entry.verseRef;
   }
 
-  String _displayCitationForEntry(
-    HashTagEntry entry, {
-    String? bookName,
-  }) {
+  String _displayCitationForEntry(HashTagEntry entry, {String? bookName}) {
     final direct = entry.referenceCode?.trim() ?? '';
     if (direct.isNotEmpty) return direct;
     if (entry.bookNumber > 0 && entry.chapter > 0 && entry.verse > 0) {
@@ -880,18 +952,24 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
             decoded['source_library_item_id']?.toString() ?? '',
         selectedTextSnapshot:
             decoded['selected_text_snapshot']?.toString() ?? '',
-        selectionStartBlockIndex:
-            _intFromJson(decoded['selection_start_block_index']),
-        selectionStartCharOffset:
-            _intFromJson(decoded['selection_start_char_offset']),
-        selectionEndBlockIndex:
-            _intFromJson(decoded['selection_end_block_index']),
-        selectionEndCharOffset:
-            _intFromJson(decoded['selection_end_char_offset']),
-        selectionStartTokenIndex:
-            _intFromJson(decoded['selection_start_token_index']),
-        selectionEndTokenIndex:
-            _intFromJson(decoded['selection_end_token_index']),
+        selectionStartBlockIndex: _intFromJson(
+          decoded['selection_start_block_index'],
+        ),
+        selectionStartCharOffset: _intFromJson(
+          decoded['selection_start_char_offset'],
+        ),
+        selectionEndBlockIndex: _intFromJson(
+          decoded['selection_end_block_index'],
+        ),
+        selectionEndCharOffset: _intFromJson(
+          decoded['selection_end_char_offset'],
+        ),
+        selectionStartTokenIndex: _intFromJson(
+          decoded['selection_start_token_index'],
+        ),
+        selectionEndTokenIndex: _intFromJson(
+          decoded['selection_end_token_index'],
+        ),
       );
     } catch (_) {
       return null;
@@ -907,7 +985,8 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   String _slideAssignmentLabel(HashTagEntry entry) {
     final slideNumber = entry.presentationSlideNumber;
     final placement = entry.presentationSlideRegion;
-    final regionLabel = placement == null || placement == PresentationItemPlacement.auto
+    final regionLabel =
+        placement == null || placement == PresentationItemPlacement.auto
         ? ''
         : ' · ${presentationItemPlacementLabel(placement)}';
     if (slideNumber == null || slideNumber <= 0) {
@@ -958,14 +1037,13 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                       ),
                       items: presentationItemPlacementOptions
                           .map(
-                            (placement) => DropdownMenuItem<
-                              PresentationItemPlacement
-                            >(
-                              value: placement,
-                              child: Text(
-                                presentationItemPlacementLabel(placement),
-                              ),
-                            ),
+                            (placement) =>
+                                DropdownMenuItem<PresentationItemPlacement>(
+                                  value: placement,
+                                  child: Text(
+                                    presentationItemPlacementLabel(placement),
+                                  ),
+                                ),
                           )
                           .toList(growable: false),
                       onChanged: (value) {
@@ -1014,9 +1092,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         'presentation_slide_number': slideNumber,
         'presentation_slide_region':
             slideNumber == null ||
-                    selectedPlacement == PresentationItemPlacement.auto
-                ? null
-                : presentationItemPlacementToJson(selectedPlacement),
+                selectedPlacement == PresentationItemPlacement.auto
+            ? null
+            : presentationItemPlacementToJson(selectedPlacement),
       },
     );
     if (!mounted) return;
@@ -1063,9 +1141,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
           title: _isNoteOnlyEntry(entry)
               ? 'Edit content item'
               : 'Edit Bible range',
-          noteLabel: _isNoteOnlyEntry(entry)
-              ? 'Note item'
-              : 'Bible range',
+          noteLabel: _isNoteOnlyEntry(entry) ? 'Note item' : 'Bible range',
           canonicalReferenceLabel: canonicalReference,
           verseText: currentVerseText,
           initialNoteText: currentNote,
@@ -1180,10 +1256,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     final defaultActive = _defaultTag == widget.tag;
     final focusedEntry = _focusedEntry;
 
-    final headerDecoration = BoxDecoration(
-      color: surfaceHigh,
-      border: Border(bottom: BorderSide(color: outlineColor, width: 0.6)),
-    );
+    final headerDecoration = TagDialogStyles.headerDecoration(theme);
 
     return Material(
       color: surface,
@@ -1192,70 +1265,179 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         children: [
           Container(
             decoration: headerDecoration,
-            padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+            padding: const EdgeInsets.fromLTRB(12, 6, 8, 4),
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final isNarrow = constraints.maxWidth < 860;
-                final headerTitleStyle = presentationTextStyle(
-                  context,
-                  theme.textTheme.titleLarge,
-                  widget.fontScale,
-                  color: titleColor,
-                  fontWeight: FontWeight.w900,
-                  minFontSize: 18,
-                  maxFontSize: 24,
-                );
-
-                final title = Text(
-                  '${widget.tag} · ${_entries.length}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: headerTitleStyle.copyWith(letterSpacing: -0.2, height: 1),
-                );
-
-                final actions = _buildTagDetailHeaderActions(
-                  context,
-                  fontScale: widget.fontScale,
-                  bodyColor: bodyColor,
-                  foregroundColor: headerButtonForeground,
-                  defaultActive: defaultActive,
-                  isDollarRepository: _isDollarRepository,
-                  canMovePrevious: _focusedIndex > 0,
-                  canMoveNext: _focusedIndex < _entries.length - 1,
-                  focusedEntry: focusedEntry,
-                  onMakeDefault: _makeDefault,
-                  onShowInstructions: _showInstructions,
-                  onAddContentItem: _addContentItem,
-                  onAddNoteSlide: _addNoteSlide,
-                  onOpenPresentationPrep: _openPresentationPrep,
-                  onOpenPresentationMode: _openPresentationMode,
-                  onEditCurrentLink: _editCurrentLink,
-                  onMovePrevious: () => _moveFocusedEntry(-1),
-                  onMoveNext: () => _moveFocusedEntry(1),
-                  onDeleteFocusedEntry: focusedEntry == null
-                      ? null
-                      : () => _deleteEntry(focusedEntry),
-                );
-
-                if (isNarrow) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      title,
-                      const SizedBox(height: 8),
-                      actions,
-                    ],
-                  );
-                }
-
+                final compactHeader = constraints.maxWidth < 700;
+                final displayTag = _resolvedCategory != null
+                    ? '${widget.tag} · ${_resolvedCategory!}'
+                    : widget.tag;
                 return Row(
                   children: [
-                    Expanded(child: title),
+                    Expanded(
+                      child: Text(
+                        '$displayTag · ${_entries.length}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: presentationTextStyle(
+                          context,
+                          theme.textTheme.titleLarge,
+                          widget.fontScale,
+                          fontSize: 18,
+                          color: titleColor,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.2,
+                          height: 1.0,
+                          minFontSize: 18,
+                          maxFontSize: 26,
+                        ),
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     Flexible(
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: actions,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          return FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _HeaderActionChip(
+                                  icon: defaultActive
+                                      ? Icons.check_circle
+                                      : Icons.check_circle_outline,
+                                  label: defaultActive
+                                      ? 'Default'
+                                      : (compactHeader
+                                            ? 'Set default'
+                                            : 'Make default'),
+                                  tooltip: defaultActive
+                                      ? 'Current default tag'
+                                      : 'Set as default tag',
+                                  onPressed: _makeDefault,
+                                  foregroundColor: headerButtonForeground,
+                                ),
+                                const SizedBox(width: 6),
+                                IconButton(
+                                  tooltip: 'Show instructions',
+                                  onPressed: _showInstructions,
+                                  icon: const Icon(Icons.help_outline),
+                                  color: headerButtonForeground,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 36,
+                                    height: 36,
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                if (!_isDollarRepository) ...[
+                                  IconButton(
+                                    tooltip: 'Add Content Item',
+                                    onPressed: _addContentItem,
+                                    icon: const Icon(Icons.note_add_outlined),
+                                    color: headerButtonForeground,
+                                    constraints: const BoxConstraints.tightFor(
+                                      width: 36,
+                                      height: 36,
+                                    ),
+                                    padding: const EdgeInsets.all(4),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  const SizedBox(width: 2),
+                                ],
+                                if (_isDollarRepository) ...[
+                                  IconButton(
+                                    tooltip: 'Add Note Slide',
+                                    onPressed: _addNoteSlide,
+                                    icon: const Icon(Icons.note_add_outlined),
+                                    color: headerButtonForeground,
+                                    constraints: const BoxConstraints.tightFor(
+                                      width: 36,
+                                      height: 36,
+                                    ),
+                                    padding: const EdgeInsets.all(4),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  const SizedBox(width: 2),
+                                ],
+                                IconButton(
+                                  tooltip: 'Presentation Mode',
+                                  onPressed: focusedEntry == null
+                                      ? null
+                                      : _openPresentationMode,
+                                  icon: const Icon(Icons.slideshow_rounded),
+                                  color: headerButtonForeground,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 36,
+                                    height: 36,
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                IconButton(
+                                  tooltip: 'Export to clipboard',
+                                  onPressed: _entries.isEmpty
+                                      ? null
+                                      : _exportToClipboard,
+                                  icon: const Icon(Icons.arrow_upward_rounded),
+                                  color: headerButtonForeground,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 36,
+                                    height: 36,
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                IconButton(
+                                  tooltip: 'Rename',
+                                  onPressed: _renameTag,
+                                  icon: const Icon(Icons.edit_outlined),
+                                  color: headerButtonForeground,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 36,
+                                    height: 36,
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                const SizedBox(width: 2),
+                                _HeaderActionChip(
+                                  icon: Icons.drive_file_move_outline,
+                                  label: 'Move',
+                                  tooltip: 'Move to category',
+                                  onPressed: _changeCategory,
+                                  foregroundColor: headerButtonForeground,
+                                ),
+                                const SizedBox(width: 2),
+                                IconButton(
+                                  tooltip: 'Delete entire tag',
+                                  onPressed: _deleteTag,
+                                  icon: const Icon(Icons.delete_forever),
+                                  color: theme.colorScheme.error,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 36,
+                                    height: 36,
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                IconButton(
+                                  tooltip: 'Close',
+                                  onPressed: _closeDetail,
+                                  icon: const Icon(Icons.close),
+                                  color: titleColor,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 36,
+                                    height: 36,
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
                     ),
                   ],
@@ -1292,16 +1474,14 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                 Expanded(
                                   child: Text(
                                     '${widget.tag} Study Chain',
-                                    style: theme.textTheme.titleLarge?.copyWith(
-                                      fontSize: presentationScaledSize(
-                                        context,
-                                        17,
-                                        widget.fontScale,
-                                        min: 16,
-                                        max: 20,
-                                      ),
-                                      fontWeight: FontWeight.w900,
+                                    style: presentationTextStyle(
+                                      context,
+                                      theme.textTheme.titleLarge,
+                                      widget.fontScale,
                                       color: titleColor,
+                                      fontWeight: FontWeight.w900,
+                                      minFontSize: 18,
+                                      maxFontSize: 28,
                                     ),
                                   ),
                                 ),
@@ -1316,8 +1496,8 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                       widget.fontScale,
                                       color: bodyColor,
                                       fontWeight: FontWeight.w700,
-                                      minFontSize: 12.5,
-                                      maxFontSize: 16,
+                                      minFontSize: 13.5,
+                                      maxFontSize: 21,
                                     ),
                                   ),
                                   style: TextButton.styleFrom(
@@ -1362,10 +1542,14 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     textAlign: TextAlign.center,
-                                    style: theme.textTheme.titleLarge?.copyWith(
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.w900,
+                                    style: presentationTextStyle(
+                                      context,
+                                      theme.textTheme.titleLarge,
+                                      widget.fontScale,
                                       color: titleColor,
+                                      fontWeight: FontWeight.w900,
+                                      minFontSize: 18,
+                                      maxFontSize: 28,
                                     ),
                                   ),
                                 ),
@@ -1395,19 +1579,28 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                               Text(
                                 'Current Scripture',
                                 textAlign: TextAlign.center,
-                                style: theme.textTheme.labelLarge?.copyWith(
-                                  fontWeight: FontWeight.w700,
+                                style: presentationTextStyle(
+                                  context,
+                                  theme.textTheme.labelLarge,
+                                  widget.fontScale,
                                   color: titleColor,
+                                  fontWeight: FontWeight.w700,
+                                  minFontSize: 13.5,
+                                  maxFontSize: 21,
                                 ),
                               ),
                               const SizedBox(height: 4),
                               SelectableText(
                                 focusedEntry.verseText.trim(),
                                 textAlign: TextAlign.center,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  fontSize: 14,
+                                style: presentationTextStyle(
+                                  context,
+                                  theme.textTheme.bodyMedium,
+                                  widget.fontScale,
                                   color: bodyColor,
                                   height: 1.28,
+                                  minFontSize: 15,
+                                  maxFontSize: 23,
                                 ),
                               ),
                             ],
@@ -1417,23 +1610,33 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                               const SizedBox(height: 10),
                               Text(
                                 'Study Notes',
-                                style: theme.textTheme.labelLarge?.copyWith(
-                                  fontWeight: FontWeight.w700,
+                                style: presentationTextStyle(
+                                  context,
+                                  theme.textTheme.labelLarge,
+                                  widget.fontScale,
                                   color: titleColor,
+                                  fontWeight: FontWeight.w700,
+                                  minFontSize: 13.5,
+                                  maxFontSize: 21,
                                 ),
                               ),
                               const SizedBox(height: 6),
                               Container(
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
-                                  color: theme.colorScheme.surface,
+                                  color: TagDialogStyles.card(theme),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: SelectableText(
                                   _cleanStoredHtml(focusedEntry.contentHtml!),
-                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                  style: presentationTextStyle(
+                                    context,
+                                    theme.textTheme.bodyMedium,
+                                    widget.fontScale,
                                     color: bodyColor,
                                     height: 1.28,
+                                    minFontSize: 15,
+                                    maxFontSize: 23,
                                   ),
                                 ),
                               ),
@@ -1484,10 +1687,14 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 textAlign: TextAlign.center,
-                                style: theme.textTheme.titleLarge?.copyWith(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w900,
+                                style: presentationTextStyle(
+                                  context,
+                                  theme.textTheme.titleLarge,
+                                  widget.fontScale,
                                   color: titleColor,
+                                  fontWeight: FontWeight.w900,
+                                  minFontSize: 18,
+                                  maxFontSize: 28,
                                 ),
                               ),
                             ),
@@ -1520,8 +1727,13 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                       child: Text(
                         'This tag is empty.',
                         textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyLarge?.copyWith(
+                        style: presentationTextStyle(
+                          context,
+                          theme.textTheme.bodyLarge,
+                          widget.fontScale,
                           color: bodyColor,
+                          minFontSize: 15,
+                          maxFontSize: 23,
                         ),
                       ),
                     )
@@ -1567,8 +1779,8 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                     height: 34,
                                     margin: const EdgeInsets.only(top: 1),
                                     decoration: BoxDecoration(
-                                      color: outlineColor.withValues(
-                                        alpha: 0.35,
+                                      color: TagDialogStyles.accentStripColor(
+                                        theme,
                                       ),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
@@ -1579,7 +1791,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        if (entry.userTitle?.trim().isNotEmpty ==
+                                        if (entry.userTitle
+                                                    ?.trim()
+                                                    .isNotEmpty ==
                                                 true &&
                                             entry.titleFormatJson
                                                     ?.trim()
@@ -1588,33 +1802,40 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                           RichText(
                                             textAlign: TextAlign.left,
                                             text: TextSpan(
-                                              children: buildPresentationTextSpans(
-                                                text: entry.userTitle!.trim(),
-                                                baseStyle: theme.textTheme
-                                                        .titleMedium
-                                                        ?.copyWith(
+                                              children:
+                                                  buildPresentationTextSpans(
+                                                    text: entry.userTitle!
+                                                        .trim(),
+                                                    baseStyle:
+                                                        presentationTextStyle(
+                                                          context,
+                                                          theme
+                                                              .textTheme
+                                                              .titleMedium,
+                                                          widget.fontScale,
+                                                          color: titleColor,
                                                           fontWeight:
                                                               FontWeight.w800,
-                                                          color: titleColor,
-                                                        ) ??
-                                                    TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.w800,
-                                                      color: titleColor,
-                                                    ),
-                                                formatJson:
-                                                    entry.titleFormatJson,
-                                              ),
+                                                          minFontSize: 16,
+                                                          maxFontSize: 26,
+                                                        ),
+                                                    formatJson:
+                                                        entry.titleFormatJson,
+                                                  ),
                                             ),
                                           )
                                         else
                                           Text(
                                             _entryTitle(entry, bookName),
-                                            style: theme.textTheme.titleMedium
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.w800,
-                                                  color: titleColor,
-                                                ),
+                                            style: presentationTextStyle(
+                                              context,
+                                              theme.textTheme.titleMedium,
+                                              widget.fontScale,
+                                              color: titleColor,
+                                              fontWeight: FontWeight.w800,
+                                              minFontSize: 16,
+                                              maxFontSize: 26,
+                                            ),
                                           ),
                                         const SizedBox(height: 1),
                                         if (entry.displayTextOverride
@@ -1629,33 +1850,40 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                           RichText(
                                             textAlign: TextAlign.left,
                                             text: TextSpan(
-                                              children: buildPresentationTextSpans(
-                                                text: entry.displayTextOverride!
-                                                    .trim(),
-                                                baseStyle: theme
-                                                    .textTheme
-                                                    .bodyMedium
-                                                    ?.copyWith(
-                                                      color: bodyColor,
-                                                      height: 1.25,
-                                                    ) ??
-                                                    TextStyle(
-                                                      color: bodyColor,
-                                                      height: 1.25,
-                                                    ),
-                                                formatJson:
-                                                    entry.displayTextFormatJson,
-                                              ),
+                                              children:
+                                                  buildPresentationTextSpans(
+                                                    text: entry
+                                                        .displayTextOverride!
+                                                        .trim(),
+                                                    baseStyle:
+                                                        presentationTextStyle(
+                                                          context,
+                                                          theme
+                                                              .textTheme
+                                                              .bodyMedium,
+                                                          widget.fontScale,
+                                                          color: bodyColor,
+                                                          height: 1.25,
+                                                          minFontSize: 15,
+                                                          maxFontSize: 23,
+                                                        ),
+                                                    formatJson: entry
+                                                        .displayTextFormatJson,
+                                                  ),
                                             ),
                                           )
                                         else
                                           Text(
                                             _entryBody(entry),
-                                            style: theme.textTheme.bodyMedium
-                                                ?.copyWith(
-                                                  color: bodyColor,
-                                                  height: 1.25,
-                                                ),
+                                            style: presentationTextStyle(
+                                              context,
+                                              theme.textTheme.bodyMedium,
+                                              widget.fontScale,
+                                              color: bodyColor,
+                                              height: 1.25,
+                                              minFontSize: 15,
+                                              maxFontSize: 23,
+                                            ),
                                             softWrap: true,
                                           ),
                                         if (citationText.isNotEmpty &&
@@ -1663,13 +1891,17 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                           const SizedBox(height: 3),
                                           Text(
                                             citationText,
-                                            style: theme.textTheme.bodySmall
-                                                ?.copyWith(
-                                                  color: bodyColor.withValues(
-                                                    alpha: 0.78,
-                                                  ),
-                                                  fontWeight: FontWeight.w600,
-                                                ),
+                                            style: presentationTextStyle(
+                                              context,
+                                              theme.textTheme.bodySmall,
+                                              widget.fontScale,
+                                              color: bodyColor.withValues(
+                                                alpha: 0.78,
+                                              ),
+                                              fontWeight: FontWeight.w600,
+                                              minFontSize: 12.5,
+                                              maxFontSize: 19,
+                                            ),
                                           ),
                                         ],
                                         if (!_isDollarRepository) ...[
@@ -1685,11 +1917,19 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                               ),
                                               label: Text(
                                                 _slideAssignmentLabel(entry),
+                                                style: presentationTextStyle(
+                                                  context,
+                                                  theme.textTheme.labelLarge,
+                                                  widget.fontScale,
+                                                  fontWeight: FontWeight.w700,
+                                                  minFontSize: 12.5,
+                                                  maxFontSize: 20,
+                                                ),
                                               ),
                                               style: TextButton.styleFrom(
                                                 visualDensity:
                                                     VisualDensity.compact,
-                                                minimumSize: const Size(0, 32),
+                                                minimumSize: const Size(0, 36),
                                                 padding:
                                                     const EdgeInsets.symmetric(
                                                       horizontal: 10,
@@ -1706,8 +1946,14 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                             ),
                                             child: Text(
                                               'Note-only item',
-                                              style: theme.textTheme.bodySmall
-                                                  ?.copyWith(color: bodyColor),
+                                              style: presentationTextStyle(
+                                                context,
+                                                theme.textTheme.bodySmall,
+                                                widget.fontScale,
+                                                color: bodyColor,
+                                                minFontSize: 12.5,
+                                                maxFontSize: 19,
+                                              ),
                                             ),
                                           ),
                                         if (hasNote) ...[
@@ -1719,8 +1965,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                               vertical: 6,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: theme.colorScheme.surface
-                                                  .withValues(alpha: 0.75),
+                                              color: TagDialogStyles.card(
+                                                theme,
+                                              ),
                                               borderRadius:
                                                   BorderRadius.circular(8),
                                               border: Border.all(
@@ -1746,12 +1993,17 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                                   child: Text(
                                                     _entryNotePreview(entry) ??
                                                         'Note saved',
-                                                    style: theme
-                                                        .textTheme
-                                                        .bodySmall
-                                                        ?.copyWith(
+                                                    style:
+                                                        presentationTextStyle(
+                                                          context,
+                                                          theme
+                                                              .textTheme
+                                                              .bodySmall,
+                                                          widget.fontScale,
                                                           color: bodyColor,
                                                           height: 1.2,
+                                                          minFontSize: 12.5,
+                                                          maxFontSize: 19,
                                                         ),
                                                   ),
                                                 ),
@@ -1768,8 +2020,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                               vertical: 6,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: theme.colorScheme.surface
-                                                  .withValues(alpha: 0.72),
+                                              color: TagDialogStyles.card(
+                                                theme,
+                                              ),
                                               borderRadius:
                                                   BorderRadius.circular(8),
                                               border: Border.all(
@@ -1796,12 +2049,17 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                                     entry.mediaRefs.length == 1
                                                         ? '1 image attached'
                                                         : '${entry.mediaRefs.length} images attached',
-                                                    style: theme
-                                                        .textTheme
-                                                        .bodySmall
-                                                        ?.copyWith(
+                                                    style:
+                                                        presentationTextStyle(
+                                                          context,
+                                                          theme
+                                                              .textTheme
+                                                              .bodySmall,
+                                                          widget.fontScale,
                                                           color: bodyColor,
                                                           height: 1.2,
+                                                          minFontSize: 12.5,
+                                                          maxFontSize: 19,
                                                         ),
                                                   ),
                                                 ),
@@ -1824,7 +2082,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                             : 'Edit item',
                                         onPressed: () async {
                                           if (_isDollarRepository) {
-                                            setState(() => _focusedIndex = index);
+                                            setState(
+                                              () => _focusedIndex = index,
+                                            );
                                             await _editCurrentLink();
                                           } else {
                                             await _editEntryNote(entry);
@@ -1843,9 +2103,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                         ),
                                         constraints:
                                             const BoxConstraints.tightFor(
-                                          width: 44,
-                                          height: 44,
-                                        ),
+                                              width: 44,
+                                              height: 44,
+                                            ),
                                       ),
                                       IconButton(
                                         tooltip: 'Move up',
@@ -1864,9 +2124,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                         ),
                                         constraints:
                                             const BoxConstraints.tightFor(
-                                          width: 44,
-                                          height: 44,
-                                        ),
+                                              width: 44,
+                                              height: 44,
+                                            ),
                                       ),
                                       IconButton(
                                         tooltip: 'Move down',
@@ -1885,9 +2145,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                         ),
                                         constraints:
                                             const BoxConstraints.tightFor(
-                                          width: 44,
-                                          height: 44,
-                                        ),
+                                              width: 44,
+                                              height: 44,
+                                            ),
                                       ),
                                       IconButton(
                                         tooltip: _isNoteOnlyEntry(entry)
@@ -1907,9 +2167,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                         ),
                                         constraints:
                                             const BoxConstraints.tightFor(
-                                          width: 44,
-                                          height: 44,
-                                        ),
+                                              width: 44,
+                                              height: 44,
+                                            ),
                                       ),
                                     ],
                                   ),
@@ -1929,151 +2189,375 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   }
 }
 
-Widget _buildTagDetailHeaderActions(
-  BuildContext context, {
-  required double fontScale,
-  required Color bodyColor,
-  required Color foregroundColor,
-  required bool defaultActive,
-  required bool isDollarRepository,
-  required bool canMovePrevious,
-  required bool canMoveNext,
-  required HashTagEntry? focusedEntry,
-  required VoidCallback onMakeDefault,
-  required VoidCallback onShowInstructions,
-  required VoidCallback onAddContentItem,
-  required VoidCallback onAddNoteSlide,
-  required VoidCallback onOpenPresentationPrep,
-  required VoidCallback onOpenPresentationMode,
-  required VoidCallback onEditCurrentLink,
-  required VoidCallback onMovePrevious,
-  required VoidCallback onMoveNext,
-  required VoidCallback? onDeleteFocusedEntry,
-}) {
-  final theme = Theme.of(context);
-  final isWide = MediaQuery.sizeOf(context).width >= 720;
-  final minControlSize = presentationScaledSize(
-    context,
-    isWide ? 46 : 42,
-    fontScale,
-    min: 40,
-    max: 54,
-  );
-  final iconSize = presentationScaledSize(
-    context,
-    isWide ? 22 : 20,
-    fontScale,
-    min: 18,
-    max: 26,
-  );
-  final selectedForeground = theme.colorScheme.onPrimaryContainer;
-  final defaultBackground = defaultActive
-      ? theme.colorScheme.primaryContainer
-      : Colors.transparent;
-  final defaultForeground = defaultActive ? selectedForeground : foregroundColor;
+class _MoveTagCategoryDialog extends StatefulWidget {
+  const _MoveTagCategoryDialog({
+    required this.repository,
+    required this.tag,
+    required this.currentCategory,
+    required this.fontScale,
+  });
 
-  Widget iconAction({
-    required IconData icon,
-    required String tooltip,
-    required VoidCallback? onPressed,
-    Color? color,
-  }) {
-    return Tooltip(
-      message: tooltip,
-      child: IconButton(
-        tooltip: tooltip,
-        onPressed: onPressed,
-        icon: Icon(icon, size: iconSize, color: color ?? bodyColor),
-        constraints: BoxConstraints.tightFor(
-          width: minControlSize,
-          height: minControlSize,
-        ),
-        padding: EdgeInsets.zero,
-        visualDensity: VisualDensity.standard,
+  final HashTagRepository repository;
+  final String tag;
+  final String? currentCategory;
+  final double fontScale;
+
+  @override
+  State<_MoveTagCategoryDialog> createState() => _MoveTagCategoryDialogState();
+}
+
+class _MoveTagCategoryResult {
+  const _MoveTagCategoryResult({
+    required this.targetCategory,
+    required this.merged,
+    required this.addedCount,
+    required this.skippedCount,
+    required this.sourceRemoved,
+  });
+
+  final String? targetCategory;
+  final bool merged;
+  final int addedCount;
+  final int skippedCount;
+  final bool sourceRemoved;
+}
+
+class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
+  List<String> _categoryOptions = const <String>[];
+  String? _selectedCategory;
+  bool _loading = true;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    final options = List<String>.from(
+      await widget.repository.loadCategoryOptions(),
+    );
+    if (!mounted) return;
+
+    final current = widget.currentCategory?.trim() ?? '';
+    final normalizedCurrent = current.isEmpty
+        ? null
+        : options.firstWhere(
+            (value) => value.toLowerCase() == current.toLowerCase(),
+            orElse: () => current,
+          );
+    if (normalizedCurrent != null &&
+        !options.any(
+          (value) => value.toLowerCase() == normalizedCurrent.toLowerCase(),
+        )) {
+      options.insert(0, normalizedCurrent);
+    }
+
+    setState(() {
+      _categoryOptions = options;
+      _selectedCategory = normalizedCurrent;
+      _loading = false;
+    });
+  }
+
+  Future<void> _save() async {
+    final target = _selectedCategory?.trim();
+    final current = widget.currentCategory?.trim() ?? '';
+    if ((target ?? '').toLowerCase() == current.toLowerCase()) {
+      Navigator.of(context).pop();
+      return;
+    }
+
+    final sourceEntries = await widget.repository.loadEntries(
+      widget.tag,
+      category: current,
+    );
+    final targetEntries = await widget.repository.loadEntries(
+      widget.tag,
+      category: target,
+    );
+    if (!mounted) return;
+    final conflict = targetEntries.isNotEmpty;
+    final branch = conflict ? 'mergeCopyOnlyPrompt' : 'simpleMove';
+    debugPrint(
+      'Move probe for ${widget.tag}: '
+      'sourceRaw=${current.isEmpty ? 'None' : current} '
+      'targetRaw=${target ?? 'None'} '
+      'normalizedSource=${current.isEmpty ? 'None' : current} '
+      'normalizedTarget=${target ?? 'None'} '
+      'sourceRowCount=${sourceEntries.length} '
+      'targetSameNameRowCount=${targetEntries.length} '
+      'targetVisibleItemCount=${targetEntries.length} '
+      'conflict=$conflict '
+      'branch=$branch '
+      'conflictDecision=loadEntries(category: target)',
+    );
+    if (conflict) {
+      final targetLabel = target?.isNotEmpty == true ? target! : 'None';
+      try {
+        final preview = await widget.repository.mergeTagCategory(
+          tag: widget.tag,
+          sourceCategory: current,
+          targetCategory: target ?? '',
+          dryRun: true,
+        );
+        if (!mounted) return;
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Merge copy only?'),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '${widget.tag} already exists in $targetLabel. '
+                    'Merge missing cards into the existing ${widget.tag}?',
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Source tag will be left unchanged.',
+                    style: TagDialogStyles.bodyTextStyle(
+                      Theme.of(dialogContext),
+                      widget.fontScale,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Source cards: ${preview.sourceCount}\n'
+                    'Target cards: ${preview.targetCount}\n'
+                    'Will add: ${preview.addedCount}\n'
+                    'Will skip: ${preview.skippedCount}',
+                    style: TagDialogStyles.bodyTextStyle(
+                      Theme.of(dialogContext),
+                      widget.fontScale,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'This will copy only missing cards into the target tag. '
+                    'Duplicates will be skipped.',
+                    style: TagDialogStyles.bodyTextStyle(
+                      Theme.of(dialogContext),
+                      widget.fontScale,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Merge Copy Only'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) {
+          return;
+        }
+        final mergeResult = await widget.repository.mergeTagCategory(
+          tag: widget.tag,
+          sourceCategory: current,
+          targetCategory: target ?? '',
+          dryRun: false,
+        );
+        if (!mounted) return;
+        Navigator.of(context).pop(
+          _MoveTagCategoryResult(
+            targetCategory: target,
+            merged: true,
+            addedCount: mergeResult.addedCount,
+            skippedCount: mergeResult.skippedCount,
+            sourceRemoved: false,
+          ),
+        );
+      } catch (error, stackTrace) {
+        debugPrint(
+          'Merge copy only failed for ${widget.tag}: $error\n$stackTrace',
+        );
+        if (!mounted) return;
+        setState(() {
+          _errorText = 'Could not merge ${widget.tag} into '
+              '${target ?? 'None'}.';
+        });
+      }
+      return;
+    }
+
+    Navigator.of(context).pop(
+      _MoveTagCategoryResult(
+        targetCategory: target,
+        merged: false,
+        addedCount: 0,
+        skippedCount: 0,
+        sourceRemoved: false,
       ),
     );
   }
 
-  final buttons = <Widget>[
-    _HeaderActionChip(
-      icon: defaultActive ? Icons.star : Icons.star_border,
-      label: 'Default',
-      onPressed: onMakeDefault,
-      foregroundColor: defaultForeground,
-      backgroundColor: defaultBackground,
-      borderColor: defaultActive
-          ? theme.colorScheme.primary
-          : TagDialogStyles.outlineColor(theme),
-      fontScale: fontScale,
-      minHeight: minControlSize,
-      iconSize: iconSize,
-      tooltip: defaultActive ? 'Current default tag' : 'Set as default tag',
-    ),
-    iconAction(
-      icon: Icons.help_outline,
-      tooltip: 'Help',
-      onPressed: onShowInstructions,
-    ),
-    iconAction(
-      icon: Icons.add_circle_outline,
-      tooltip: isDollarRepository ? 'Add note slide' : 'Add note item',
-      onPressed: isDollarRepository ? onAddNoteSlide : onAddContentItem,
-    ),
-    _HeaderActionChip(
-      icon: Icons.slideshow_outlined,
-      label: 'Prepare Presentation',
-      onPressed: onOpenPresentationPrep,
-      foregroundColor: bodyColor,
-      backgroundColor: Colors.transparent,
-      borderColor: TagDialogStyles.outlineColor(theme),
-      fontScale: fontScale,
-      minHeight: minControlSize,
-      iconSize: iconSize,
-    ),
-    iconAction(
-      icon: Icons.play_circle_outline,
-      tooltip: 'Play presentation',
-      onPressed: onOpenPresentationMode,
-    ),
-  ];
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final titleStyle = TagDialogStyles.titleTextStyle(
+      theme,
+      widget.fontScale,
+      color: TagDialogStyles.title(theme),
+      fontWeight: FontWeight.w900,
+    );
+    final bodyStyle = TagDialogStyles.bodyTextStyle(
+      theme,
+      widget.fontScale,
+      color: TagDialogStyles.body(theme),
+    );
 
-  final entry = focusedEntry;
-  if (entry != null) {
-    buttons.addAll([
-      iconAction(
-        icon: Icons.chevron_left,
-        tooltip: 'Previous item',
-        onPressed: canMovePrevious ? onMovePrevious : null,
+    return AlertDialog(
+      title: Text('Change category', style: titleStyle),
+      content: SizedBox(
+        width: 420,
+        child: _loading
+            ? const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('Tag: ${widget.tag}', style: bodyStyle),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Current category: ${widget.currentCategory?.trim().isNotEmpty == true ? widget.currentCategory!.trim() : 'None'}',
+                    style: bodyStyle,
+                  ),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String?>(
+                    initialValue: _selectedCategory,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Move to category',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: <DropdownMenuItem<String?>>[
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('None'),
+                      ),
+                      ..._categoryOptions
+                        .map(
+                          (category) => DropdownMenuItem<String?>(
+                            value: category,
+                            child: Text(category),
+                          ),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedCategory = value;
+                        _errorText = null;
+                      });
+                    },
+                  ),
+                  if (_errorText != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      _errorText!,
+                      style: bodyStyle.copyWith(color: theme.colorScheme.error),
+                    ),
+                  ],
+                ],
+              ),
       ),
-      iconAction(
-        icon: Icons.chevron_right,
-        tooltip: 'Next item',
-        onPressed: canMoveNext ? onMoveNext : null,
-      ),
-      iconAction(
-        icon: Icons.edit_outlined,
-        tooltip: isDollarRepository ? 'Edit current link' : 'Edit item',
-        onPressed: onEditCurrentLink,
-      ),
-      if (onDeleteFocusedEntry != null)
-        iconAction(
-          icon: Icons.delete_outline,
-          tooltip: entry.bookNumber == 0 && entry.verseRef.startsWith('note:')
-              ? 'Delete note'
-              : 'Delete verse',
-          onPressed: onDeleteFocusedEntry,
-          color: theme.colorScheme.error,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: TagDialogStyles.fittedButtonLabel(
+            'Cancel',
+            style: TagDialogStyles.buttonTextStyle(
+              theme,
+              widget.fontScale,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ),
-    ]);
+        FilledButton(
+          onPressed: _loading ? null : _save,
+          child: TagDialogStyles.fittedButtonLabel(
+            'Move',
+            style: TagDialogStyles.buttonTextStyle(
+              theme,
+              widget.fontScale,
+              color: theme.colorScheme.onPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RenameTagDialog extends StatefulWidget {
+  const _RenameTagDialog({required this.initialTag});
+
+  final String initialTag;
+
+  @override
+  State<_RenameTagDialog> createState() => _RenameTagDialogState();
+}
+
+class _RenameTagDialogState extends State<_RenameTagDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialTag);
   }
 
-  return Wrap(
-    spacing: 8,
-    runSpacing: 8,
-    alignment: WrapAlignment.end,
-    crossAxisAlignment: WrapCrossAlignment.center,
-    children: buttons,
-  );
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    Navigator.of(context).pop(_controller.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Rename tag'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        textInputAction: TextInputAction.done,
+        decoration: const InputDecoration(
+          labelText: '#tag',
+          border: OutlineInputBorder(),
+        ),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: TagDialogStyles.fittedButtonLabel('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: TagDialogStyles.fittedButtonLabel('Rename'),
+        ),
+      ],
+    );
+  }
 }
 
 class _ELibraryNoteMetadata {
@@ -2143,11 +2627,6 @@ class _HeaderActionChip extends StatelessWidget {
     required this.label,
     required this.onPressed,
     required this.foregroundColor,
-    required this.fontScale,
-    required this.minHeight,
-    required this.iconSize,
-    required this.backgroundColor,
-    required this.borderColor,
     this.tooltip,
   });
 
@@ -2155,46 +2634,22 @@ class _HeaderActionChip extends StatelessWidget {
   final String label;
   final VoidCallback onPressed;
   final Color foregroundColor;
-  final double fontScale;
-  final double minHeight;
-  final double iconSize;
-  final Color backgroundColor;
-  final Color borderColor;
   final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final button = OutlinedButton.icon(
+    final button = TextButton.icon(
       onPressed: onPressed,
-      icon: Icon(icon, size: iconSize),
-      label: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: presentationTextStyle(
-          context,
-          theme.textTheme.labelLarge,
-          fontScale,
-          color: foregroundColor,
-          fontWeight: FontWeight.w800,
-          minFontSize: 12.5,
-          maxFontSize: 16.5,
-          height: 1.05,
-        ),
-      ),
-      style: OutlinedButton.styleFrom(
+      icon: Icon(icon, size: 17),
+      label: TagDialogStyles.fittedButtonLabel(label),
+      style: TextButton.styleFrom(
         foregroundColor: foregroundColor,
-        backgroundColor: backgroundColor,
-        side: BorderSide(color: borderColor),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        minimumSize: Size(minHeight, minHeight),
-        textStyle: TextStyle(
-          fontWeight: FontWeight.w700,
-          color: foregroundColor,
-        ),
-        tapTargetSize: MaterialTapTargetSize.padded,
-        visualDensity: VisualDensity.standard,
+        backgroundColor: Colors.transparent,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        visualDensity: VisualDensity.compact,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        minimumSize: const Size(0, 28),
+        textStyle: const TextStyle(fontWeight: FontWeight.w700),
       ),
     );
     final labelText = tooltip ?? label;

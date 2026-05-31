@@ -228,6 +228,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
       onOpenBibleMemory: _openBibleMemory,
       onOpenInterlinearSettings: _openInterlinearSettings,
       onOpenColorSetup: _openMarkupSettings,
+      onApplyDefaultMarkup: _applyDefaultMarkup,
       presentationAspectRatio: _presentationAspectRatio,
       onPresentationAspectRatioChanged: (preset) {
         if (!mounted) return;
@@ -273,6 +274,15 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
   Future<void> _openMarkupSettings() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const MarkupSettingsScreen()),
+    );
+  }
+
+  Future<void> _openSavedPresentations() async {
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const TagSavedPresentationsScreen(),
+      ),
     );
   }
 }

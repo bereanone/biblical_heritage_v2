@@ -9,6 +9,27 @@ void main() {
     );
   });
 
+  test('rejects eLibrary internal locators in user-facing ref text', () {
+    expect(
+      librarySafeUserFacingReferenceText(
+        'elibrary-range:library_item_research_epubs:115:5::OEBPS/content110.xhtml',
+      ),
+      isNull,
+    );
+    expect(
+      librarySafeUserFacingReferenceText('library_item_research_epubs'),
+      isNull,
+    );
+    expect(
+      librarySafeUserFacingReferenceText('compactRef:library_item_research_epubs'),
+      isNull,
+    );
+    expect(
+      librarySafeUserFacingReferenceText('content110.xhtml'),
+      isNull,
+    );
+  });
+
   test('prefers official devotional refs and falls back safely', () {
     expect(
       libraryUserFacingSearchLocationText(
@@ -44,6 +65,24 @@ void main() {
       ),
       'CC',
     );
+  });
+
+  test('hides internal eLibrary locator strings from display labels', () {
+    final label = libraryUserFacingELibraryDisplayLabel(
+      sourceTitle: 'library_item_research_epubs',
+      sourceTitleAcronym: 'compactRef:library_item_research_epubs',
+      sourceLocation:
+          'elibrary-range:library_item_research_epubs:115:5::OEBPS/content110.xhtml',
+      sourceReferenceText: 'library_item_research_epubs',
+      fileName: 'content110.xhtml',
+      relativePath: 'ePubs/Research/EGW_Devotionals/library_item_research_epubs.epub',
+      pageCitation: '115.5',
+      paragraphIndex: 5,
+    );
+
+    expect(label, isNot(contains('library_item_')));
+    expect(label, isNot(contains('elibrary-range:')));
+    expect(label, isNot(contains('OEBPS/')));
   });
 
   group('abbreviation from filename — language prefix stripping', () {

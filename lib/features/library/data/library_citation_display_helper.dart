@@ -4,18 +4,9 @@ String? librarySafeUserFacingReferenceText(String? value) {
   final cleaned = (value ?? '').trim().replaceAll(RegExp(r'\s+'), ' ');
   if (cleaned.isEmpty) return null;
   final lower = cleaned.toLowerCase();
-  if (lower.startsWith('elibrary:') ||
+  if (_looksLikeInternalLocator(lower) ||
       lower.startsWith('note:') ||
-      lower.contains('::') ||
-      lower.contains('oebps/') ||
-      lower.contains('.xhtml') ||
       lower == 'book 0 0:0') {
-    return null;
-  }
-  if (RegExp(
-    r'^content\d+(?:\.xhtml)?$',
-    caseSensitive: false,
-  ).hasMatch(lower)) {
     return null;
   }
   return cleaned;
@@ -26,13 +17,19 @@ String? libraryUserFacingBookAbbreviation({
   String? fileName,
   String? relativePath,
 }) {
-  final fromTitle = _libraryAbbreviationFromTitle(title);
+  final fromTitle = _looksLikeInternalLocator(title)
+      ? null
+      : _libraryAbbreviationFromTitle(title);
   if (fromTitle != null) return fromTitle;
 
-  final fromFileName = _libraryAbbreviationFromPathSegment(fileName);
+  final fromFileName = _looksLikeInternalLocator(fileName)
+      ? null
+      : _libraryAbbreviationFromPathSegment(fileName);
   if (fromFileName != null) return fromFileName;
 
-  final fromRelativePath = _libraryAbbreviationFromPathSegment(relativePath);
+  final fromRelativePath = _looksLikeInternalLocator(relativePath)
+      ? null
+      : _libraryAbbreviationFromPathSegment(relativePath);
   if (fromRelativePath != null) return fromRelativePath;
 
   return null;
@@ -96,6 +93,90 @@ String libraryUserFacingSearchLocationText({
     return 'ch. $chapterNumber';
   }
   return '';
+}
+
+String libraryUserFacingELibraryCitationText({
+  required String sourceTitle,
+  String? sourceTitleAcronym,
+  String? sourceLocation,
+  String? sourceReferenceText,
+  String? fileName,
+  String? relativePath,
+  String? pageCitation,
+  int? paragraphIndex,
+}) {
+  final safeReference = librarySafeUserFacingReferenceText(sourceReferenceText);
+  if (safeReference != null) return safeReference;
+
+  final safeLocation = librarySafeUserFacingReferenceText(sourceLocation);
+  if (safeLocation != null) return safeLocation;
+
+  final abbreviation =
+      _libraryAbbreviationFromText(sourceTitleAcronym) ??
+      libraryUserFacingBookAbbreviation(
+        title: sourceTitle,
+        fileName: fileName,
+        relativePath: relativePath,
+      );
+
+  final cleanPageCitation = pageCitation?.trim() ?? '';
+  if (abbreviation != null && cleanPageCitation.isNotEmpty) {
+    return '$abbreviation $cleanPageCitation';
+  }
+  if (abbreviation != null && paragraphIndex != null && paragraphIndex > 0) {
+    return '$abbreviation ¶$paragraphIndex';
+  }
+  if (cleanPageCitation.isNotEmpty) return cleanPageCitation;
+  if (paragraphIndex != null && paragraphIndex > 0) return '¶$paragraphIndex';
+
+  return '';
+}
+
+String libraryUserFacingELibraryDisplayLabel({
+  required String sourceTitle,
+  String? sourceTitleAcronym,
+  String? sourceLocation,
+  String? sourceReferenceText,
+  String? fileName,
+  String? relativePath,
+  String? pageCitation,
+  int? paragraphIndex,
+}) {
+  final cleanTitle = librarySafeUserFacingReferenceText(sourceTitle) ?? '';
+  final citation = libraryUserFacingELibraryCitationText(
+    sourceTitle: sourceTitle,
+    sourceTitleAcronym: sourceTitleAcronym,
+    sourceLocation: sourceLocation,
+    sourceReferenceText: sourceReferenceText,
+    fileName: fileName,
+    relativePath: relativePath,
+    pageCitation: pageCitation,
+    paragraphIndex: paragraphIndex,
+  );
+
+  if (cleanTitle.isNotEmpty && citation.isNotEmpty) {
+    final lowerTitle = cleanTitle.toLowerCase();
+    final lowerCitation = citation.toLowerCase();
+    if (lowerCitation == lowerTitle ||
+        lowerCitation.startsWith('$lowerTitle — ') ||
+        lowerCitation.startsWith('$lowerTitle ')) {
+      return citation;
+    }
+    return '$cleanTitle — $citation';
+  }
+  if (citation.isNotEmpty) return citation;
+  if (cleanTitle.isNotEmpty) return cleanTitle;
+
+  final abbreviation =
+      _libraryAbbreviationFromText(sourceTitleAcronym) ??
+      libraryUserFacingBookAbbreviation(
+        title: sourceTitle,
+        fileName: fileName,
+        relativePath: relativePath,
+      );
+  if (abbreviation != null) return abbreviation;
+
+  return 'eLibrary Quote';
 }
 
 String? _libraryAbbreviationFromTitle(String value) {
@@ -179,8 +260,9 @@ String? _libraryAbbreviationFromPathSegment(String? value) {
   for (final token in tokens.reversed) {
     final upper = token.toUpperCase();
     final isSimple = RegExp(r'^[A-Z0-9]{2,8}$').hasMatch(upper);
-    final isHyphenated =
-        RegExp(r'^[A-Z0-9]{2,8}(?:-[A-Z0-9]{2,8})+$').hasMatch(upper);
+    final isHyphenated = RegExp(
+      r'^[A-Z0-9]{2,8}(?:-[A-Z0-9]{2,8})+$',
+    ).hasMatch(upper);
     if (!isSimple && !isHyphenated) continue;
     if (RegExp(
       r'^(EPUB|HTML|XHTML|CONTENT\d+)$',
@@ -197,6 +279,34 @@ String? _libraryAbbreviationFromPathSegment(String? value) {
     return upper;
   }
   return null;
+}
+
+String? _libraryAbbreviationFromText(String? value) {
+  final cleaned = librarySafeUserFacingReferenceText(value);
+  if (cleaned == null) return null;
+  final normalized = cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
+  return normalized.isEmpty ? null : normalized;
+}
+
+bool _looksLikeInternalLocator(String? value) {
+  final cleaned = (value ?? '').trim();
+  if (cleaned.isEmpty) return false;
+  final lower = cleaned.toLowerCase();
+  if (lower.startsWith('elibrary-range:') ||
+      lower.startsWith('elibrary:') ||
+      lower.contains('library_item_') ||
+      lower.contains('compactref') ||
+      lower.contains('oebps/') ||
+      RegExp(r'content\d+(?:\.xhtml)?', caseSensitive: false).hasMatch(lower) ||
+      lower.contains('.xhtml')) {
+    return true;
+  }
+  if (RegExp(
+    r'(?<!\w)\d+:\d+:\d+(?:-\d+)?(?::\d+)?(?!\w)',
+  ).hasMatch(lower)) {
+    return true;
+  }
+  return false;
 }
 
 String _normalizeLibraryText(String? value) {

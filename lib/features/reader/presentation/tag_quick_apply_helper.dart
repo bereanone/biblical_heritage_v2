@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -457,16 +458,13 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   ) async {
     if (groupIds.isEmpty) return const <Map<String, Object?>>[];
     final placeholders = List.filled(groupIds.length, '?').join(', ');
-    return executor.rawQuery(
-      '''
+    return executor.rawQuery('''
       SELECT *
       FROM tag_items
       WHERE tag_group_id IN ($placeholders)
         AND COALESCE(deleted_at, '') = ''
       ORDER BY tag_group_id ASC, sort_order ASC, created_at ASC, id ASC
-      ''',
-      groupIds,
-    );
+      ''', groupIds);
   }
 
   Future<String?> _ensureNormalizedCategoryGroupId(
@@ -708,10 +706,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     }
   }
 
-  Future<bool> hasVisibleTagSummary(
-    String tag, {
-    String? category,
-  }) async {
+  Future<bool> hasVisibleTagSummary(String tag, {String? category}) async {
     final normalizedTag = normalizeTagName(tag);
     if (normalizedTag.isEmpty) return false;
     final normalizedCategory = _normalizeCategoryName(category);
@@ -888,9 +883,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       required String targetItemId,
       required int index,
     }) {
-      final encoded = base64Url.encode(
-        utf8.encode('$sourceMediaId|$targetItemId|$index'),
-      ).replaceAll('=', '');
+      final encoded = base64Url
+          .encode(utf8.encode('$sourceMediaId|$targetItemId|$index'))
+          .replaceAll('=', '');
       return 'tag_item_media_$encoded';
     }
 
@@ -898,9 +893,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       required String sourceItemId,
       required String targetGroupId,
     }) {
-      final encoded = base64Url.encode(
-        utf8.encode('$sourceItemId|$targetGroupId'),
-      ).replaceAll('=', '');
+      final encoded = base64Url
+          .encode(utf8.encode('$sourceItemId|$targetGroupId'))
+          .replaceAll('=', '');
       return 'tag_item_$encoded';
     }
 
@@ -944,31 +939,27 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       final groupId =
           'tag_group_${_slug(normalizedCategory)}_${_slug(normalizedTag)}';
       final sortOrder = await _nextNormalizedTagGroupSortOrder(executor);
-      await executor.insert(
-        'tag_groups',
-        {
-          'id': groupId,
-          'parent_group_id': parentGroupId,
-          'tag_kind': _tagKindForTable(),
-          'name': normalizedTag,
-          'description': null,
-          'sort_order': sortOrder,
-          'source_device_name': null,
-          'legacy_group_id': null,
-          'legacy_item_id': null,
-          'legacy_import_package_id': null,
-          'imported_at': now,
-          'created_at': now,
-          'updated_at': now,
-          'deleted_at': null,
-          'device_id': await LocalSettingsStore.instance.ensureDeviceId(),
-          'revision': 1,
-          'sync_status': 'pending',
-          'last_synced_at': null,
-          'change_id': null,
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      await executor.insert('tag_groups', {
+        'id': groupId,
+        'parent_group_id': parentGroupId,
+        'tag_kind': _tagKindForTable(),
+        'name': normalizedTag,
+        'description': null,
+        'sort_order': sortOrder,
+        'source_device_name': null,
+        'legacy_group_id': null,
+        'legacy_item_id': null,
+        'legacy_import_package_id': null,
+        'imported_at': now,
+        'created_at': now,
+        'updated_at': now,
+        'deleted_at': null,
+        'device_id': await LocalSettingsStore.instance.ensureDeviceId(),
+        'revision': 1,
+        'sync_status': 'pending',
+        'last_synced_at': null,
+        'change_id': null,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
       return groupId;
     }
 
@@ -1008,10 +999,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           ..['sync_status'] = 'pending'
           ..['last_synced_at'] = null
           ..['change_id'] = null;
-        await executor.insert(
-          'tag_item_media',
-          mediaRow,
-        );
+        await executor.insert('tag_item_media', mediaRow);
       }
     }
 
@@ -1108,10 +1096,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         if (values.containsKey('updated_at')) {
           values['updated_at'] = nowMillis;
         }
-        final insertedId = await txn.insert(
-          tableName,
-          values,
-        );
+        final insertedId = await txn.insert(tableName, values);
         if (insertedId <= 0) {
           throw StateError('Failed to copy legacy tag row.');
         }
@@ -1766,7 +1751,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final legacyExists = await db.query(
       tableName,
       columns: ['id'],
-      where: '''
+      where:
+          '''
         tag = ?
         AND $legacyCategoryClause
         AND book_number = ?
@@ -1893,7 +1879,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final legacyExists = await db.query(
       tableName,
       columns: ['id'],
-      where: '''
+      where:
+          '''
         tag = ?
         AND $legacyCategoryClause
         AND book_number = ?
@@ -2060,7 +2047,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final exists = await db.query(
       tableName,
       columns: ['id'],
-      where: '''
+      where:
+          '''
         user_id = ?
         AND tag = ?
         AND $categoryClause
@@ -2308,10 +2296,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
 
   String _stripHtml(String input) {
     return input
-        .replaceAll(
-          RegExp(r'<br\s*/?>', caseSensitive: false),
-          '\n',
-        )
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
         .replaceAll(RegExp(r'<[^>]+>'), '')
         .replaceAll('&nbsp;', ' ')
         .replaceAll('&amp;', '&')
@@ -2336,7 +2321,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       _s(row['reference_code']),
     ).toLowerCase();
     final noteText = _normalizeMergeText(_s(row['note_text']));
-    final contentHtml = _normalizeMergeText(_stripHtml(_s(row['content_html'])));
+    final contentHtml = _normalizeMergeText(
+      _stripHtml(_s(row['content_html'])),
+    );
     final presentationSlideNumber = _i(row['presentation_slide_number']) ?? -1;
     final presentationSlideRegion = _normalizeMergeText(
       _s(row['presentation_slide_region']),
@@ -2391,9 +2378,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     );
     final legacyGroupId = _s(row['legacy_group_id']).trim().toLowerCase();
     final legacyItemId = _s(row['legacy_item_id']).trim().toLowerCase();
-    final legacyImportPackageId = _s(row['legacy_import_package_id'])
-        .trim()
-        .toLowerCase();
+    final legacyImportPackageId = _s(
+      row['legacy_import_package_id'],
+    ).trim().toLowerCase();
 
     if (bookNumber > 0 && chapterNumber > 0 && verseStart > 0) {
       return [
@@ -2419,10 +2406,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     ].join('|');
   }
 
-  Future<String> debugTagReport(
-    String tag, {
-    String? category,
-  }) async {
+  Future<String> debugTagReport(String tag, {String? category}) async {
     final normalizedTag = normalizeTagName(tag);
     final normalizedCategory = _normalizeCategoryName(category);
     if (normalizedTag.isEmpty) {
@@ -2433,15 +2417,20 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final db = await _db();
     final summaries = await loadSummaries();
     final summaryMatches = summaries
-        .where((summary) => summary.tag.toLowerCase() == normalizedTag.toLowerCase())
+        .where(
+          (summary) => summary.tag.toLowerCase() == normalizedTag.toLowerCase(),
+        )
         .toList(growable: false);
-    final browseVisible = summaryMatches.where((summary) {
-      final summaryCategory = summary.category?.trim() ?? '';
-      if (normalizedCategory == null) {
-        return summaryCategory.isEmpty;
-      }
-      return summaryCategory.toLowerCase() == normalizedCategory.toLowerCase();
-    }).toList(growable: false);
+    final browseVisible = summaryMatches
+        .where((summary) {
+          final summaryCategory = summary.category?.trim() ?? '';
+          if (normalizedCategory == null) {
+            return summaryCategory.isEmpty;
+          }
+          return summaryCategory.toLowerCase() ==
+              normalizedCategory.toLowerCase();
+        })
+        .toList(growable: false);
     final detailEntries = await loadEntries(
       normalizedTag,
       category: normalizedCategory,
@@ -2489,11 +2478,15 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     }
 
     final buffer = StringBuffer()
-      ..writeln('Tag report for $normalizedTag${normalizedCategory == null ? '' : ' @ $normalizedCategory'}')
+      ..writeln(
+        'Tag report for $normalizedTag${normalizedCategory == null ? '' : ' @ $normalizedCategory'}',
+      )
       ..writeln('Browse visible: ${browseVisible.isNotEmpty}')
       ..writeln('Detail entries: ${detailEntries.length}')
       ..writeln('Legacy rows: ${legacyRows.length}')
-      ..writeln('Legacy samples: ${legacySamples.isEmpty ? 'none' : legacySamples.join(' | ')}')
+      ..writeln(
+        'Legacy samples: ${legacySamples.isEmpty ? 'none' : legacySamples.join(' | ')}',
+      )
       ..writeln('Normalized groups: ${normalizedRows.length}')
       ..writeln(
         'Normalized samples: ${normalizedSamples.isEmpty ? 'none' : normalizedSamples.join(' | ')}',
@@ -3153,10 +3146,12 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       return summaries
           .where((summary) => summary.tag == parsed.tag)
           .map((summary) => summary.category?.trim() ?? '')
-          .where((category) =>
-              category.isNotEmpty &&
-              category.toLowerCase() !=
-                  normalizedTargetCategory.toLowerCase())
+          .where(
+            (category) =>
+                category.isNotEmpty &&
+                category.toLowerCase() !=
+                    normalizedTargetCategory.toLowerCase(),
+          )
           .toSet()
           .toList(growable: false);
     })();
@@ -3314,7 +3309,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
 
     for (final block in blocks) {
       final slide = _parseSharedSlideBlock(block, bookLookup, tagName);
-      if (slide == null) continue;
       final dedupeKey = slide.target?.verseRef ?? slide.noteRef;
       if (!seen.add(dedupeKey)) continue;
       slides.add(slide);
@@ -3463,16 +3457,34 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     return blocks;
   }
 
-  _ParsedSharedSlide? _parseSharedSlideBlock(
+  _ParsedSharedSlide _parseSharedSlideBlock(
     List<String> block,
     Map<String, (int, String)> bookLookup,
     String tagName,
   ) {
-    if (block.isEmpty) return null;
+    if (block.isEmpty) {
+      return _ParsedSharedSlide(
+        target: null,
+        contentText: '',
+        noteRef: 'unsupported:${DateTime.now().microsecondsSinceEpoch}:empty',
+      );
+    }
     final firstLine = block.first.trim();
-    if (firstLine.isEmpty) return null;
+    if (firstLine.isEmpty) {
+      return _ParsedSharedSlide(
+        target: null,
+        contentText: _extractSharedNoteContent(block, tagName),
+        noteRef:
+            'unsupported:${DateTime.now().microsecondsSinceEpoch}:${block.join('|')}',
+      );
+    }
     if (_detectSharedListName([firstLine]) == firstLine) {
-      return null;
+      return _ParsedSharedSlide(
+        target: null,
+        contentText: _extractSharedNoteContent(block, tagName),
+        noteRef:
+            'unsupported:${DateTime.now().microsecondsSinceEpoch}:${block.join('|')}',
+      );
     }
 
     final reference = _parseSharedReferenceLine(firstLine, bookLookup);
@@ -3482,6 +3494,71 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         target: reference,
         contentText: content,
         noteRef: reference.verseRef,
+      );
+    }
+
+    final studyBibleMetadata = _extractSharedStudyBibleMetadata(block);
+    if (studyBibleMetadata != null) {
+      final kind = _s(studyBibleMetadata['kind']).trim().toLowerCase();
+      if (kind == 'note') {
+        final noteText =
+            _s(studyBibleMetadata['note_text']).trim().isNotEmpty
+            ? _s(studyBibleMetadata['note_text']).trim()
+            : _extractSharedNoteContent(block, tagName);
+        final noteKey = _sharedStudyBibleMetadataKey(
+          metadata: studyBibleMetadata,
+          block: block,
+          kind: kind,
+        );
+        return _ParsedSharedSlide(
+          target: null,
+          contentText: noteText,
+          noteRef: 'note:$noteKey',
+          studyBibleMetadata: studyBibleMetadata,
+        );
+      }
+      if (kind == 'bible') {
+        final bookNumber = _i(studyBibleMetadata['book_number']) ?? 0;
+        final chapter = _i(studyBibleMetadata['chapter_number']) ?? 0;
+        final verseStart = _i(studyBibleMetadata['verse_number']) ?? 0;
+        if (bookNumber > 0 && chapter > 0 && verseStart > 0) {
+          final verseEnd = _i(studyBibleMetadata['verse_end']) ?? verseStart;
+          final verseRef =
+              _s(studyBibleMetadata['verse_ref']).trim().isNotEmpty
+              ? _s(studyBibleMetadata['verse_ref']).trim()
+              : '$bookNumber:$chapter:$verseStart';
+          return _ParsedSharedSlide(
+            target: HashTagTarget(
+              bookNumber: bookNumber,
+              chapter: chapter,
+              verse: verseStart,
+              verseRef: verseRef,
+              verseEnd: verseEnd > verseStart ? verseEnd : null,
+              tokenNumber: _i(studyBibleMetadata['token_number']),
+            ),
+            contentText:
+                _s(studyBibleMetadata['verse_text']).trim().isNotEmpty
+                ? _s(studyBibleMetadata['verse_text']).trim()
+                : _extractSharedVerseContent(block.skip(1).toList()),
+            noteRef: verseRef,
+            studyBibleMetadata: studyBibleMetadata,
+          );
+        }
+      }
+    }
+
+    final elibraryMetadata = _extractSharedELibraryMetadata(block);
+    if (elibraryMetadata != null) {
+      final stableRef = _s(elibraryMetadata['stable_ref']).trim();
+      final noteRef = stableRef.isNotEmpty
+          ? stableRef
+          : 'elibrary:${block.join('|').hashCode}:${block.length}';
+      final content = _extractSharedELibraryContent(block);
+      return _ParsedSharedSlide(
+        target: null,
+        contentText: content,
+        noteRef: noteRef,
+        elibraryMetadata: elibraryMetadata,
       );
     }
 
@@ -3495,7 +3572,35 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       );
     }
 
+    return _ParsedSharedSlide(
+      target: null,
+      contentText: _extractSharedNoteContent(block, tagName),
+      noteRef:
+          'unsupported:${DateTime.now().microsecondsSinceEpoch}:${block.join('|')}',
+    );
+  }
+
+  Map<String, Object?>? _extractSharedStudyBibleMetadata(List<String> block) {
+    for (final rawLine in block) {
+      final line = rawLine.trim();
+      if (!_isSharedStudyBibleMetadataLine(line)) continue;
+      final rawJson = line.substring(line.indexOf(':') + 1).trim();
+      if (rawJson.isEmpty) return null;
+      try {
+        final decoded = jsonDecode(rawJson);
+        if (decoded is Map<String, dynamic>) {
+          return decoded.cast<String, Object?>();
+        }
+      } catch (_) {
+        return null;
+      }
+    }
     return null;
+  }
+
+  bool _isSharedStudyBibleMetadataLine(String line) {
+    final normalized = line.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return normalized.toLowerCase().startsWith('studybible metadata:');
   }
 
   bool _looksLikeSharedNoteBlock(List<String> block) {
@@ -3577,6 +3682,76 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       contentLines.add(rawLine);
     }
     return contentLines.join('\n').trim();
+  }
+
+  String _extractSharedELibraryContent(List<String> lines) {
+    final contentLines = <String>[];
+    for (final rawLine in lines) {
+      final line = rawLine.trimRight();
+      final normalized = line.trim();
+      if (normalized.isEmpty) {
+        contentLines.add('');
+        continue;
+      }
+      if (_isSharedELibraryMetadataLine(normalized)) {
+        continue;
+      }
+      contentLines.add(line);
+    }
+    return contentLines.join('\n').trim();
+  }
+
+  Map<String, Object?>? _extractSharedELibraryMetadata(List<String> block) {
+    for (final rawLine in block) {
+      final line = rawLine.trim();
+      if (!_isSharedELibraryMetadataLine(line)) continue;
+      final rawJson = line.substring(line.indexOf(':') + 1).trim();
+      if (rawJson.isEmpty) return null;
+      try {
+        final decoded = jsonDecode(rawJson);
+        if (decoded is Map<String, dynamic> &&
+            decoded['kind']?.toString() == 'elibrary_note') {
+          return decoded.cast<String, Object?>();
+        }
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  bool _isSharedELibraryMetadataLine(String line) {
+    final normalized = line.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return normalized.toLowerCase().startsWith('elibrary metadata:') ||
+        normalized.toLowerCase().startsWith('eLibrary metadata:'.toLowerCase());
+  }
+
+  String _sharedStudyBibleMetadataKey({
+    required Map<String, Object?> metadata,
+    required List<String> block,
+    required String kind,
+  }) {
+    final seedParts = <String>[
+      kind,
+      _s(metadata['note_key']),
+      _s(metadata['reference_code']),
+      _s(metadata['note_text']),
+      _s(metadata['title']),
+      _s(metadata['verse_ref']),
+      _s(metadata['book_number']),
+      _s(metadata['chapter_number']),
+      _s(metadata['verse_number']),
+      _s(metadata['verse_end']),
+      _s(metadata['selected_text_snapshot']),
+      _s(metadata['source_paragraph']),
+      _s(metadata['excerpt']),
+    ];
+    final seed = seedParts
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .join('|');
+    final rawSeed = seed.isEmpty ? block.join('|') : seed;
+    return sha1.convert(utf8.encode(rawSeed)).toString().substring(0, 16);
   }
 
   HashTagTarget? _parseSharedReferenceLine(
@@ -3752,14 +3927,130 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final scriptureSlides = parsed.slides
         .where((slide) => slide.target != null)
         .toList(growable: false);
-    if (scriptureSlides.isEmpty) return null;
+    final eLibrarySlides = parsed.slides
+        .where((slide) => slide.elibraryMetadata != null)
+        .toList(growable: false);
+    final noteSlides = parsed.slides
+        .where(
+          (slide) =>
+              slide.target == null &&
+              slide.elibraryMetadata == null &&
+              slide.noteRef.startsWith('note:'),
+        )
+        .toList(growable: false);
+    final unsupportedSlides = parsed.slides
+        .where(
+          (slide) =>
+              slide.target == null &&
+              slide.elibraryMetadata == null &&
+              !slide.noteRef.startsWith('note:'),
+        )
+        .toList(growable: false);
+    if (parsed.slides.isEmpty) return null;
 
     final failures = <HashTagImportFailure>[];
     var inserted = 0;
     var updatedExisting = 0;
     var skippedExisting = 0;
+    var bibleImportedCount = 0;
+    var eLibraryImportedCount = 0;
+    var noteImportedCount = 0;
     var studyOrder = 1;
     final now = DateTime.now().millisecondsSinceEpoch;
+    final warnings = <String>[];
+
+    if (unsupportedSlides.isNotEmpty) {
+      warnings.add(
+        'Skipped ${unsupportedSlides.length} unsupported item${unsupportedSlides.length == 1 ? '' : 's'}.',
+      );
+      for (var index = 0; index < unsupportedSlides.length; index++) {
+        final slide = unsupportedSlides[index];
+        failures.add(
+          HashTagImportFailure(
+            lineNumber: index + 1,
+            reason: 'Unsupported card type',
+            line: slide.contentText,
+          ),
+        );
+      }
+    }
+
+    for (final slide in noteSlides) {
+      final metadata = slide.studyBibleMetadata ?? const <String, Object?>{};
+      final noteText =
+          _s(metadata['note_text']).trim().isNotEmpty
+          ? _s(metadata['note_text']).trim()
+          : slide.contentText.trim();
+      final referenceCode = _s(metadata['reference_code']).trim();
+      final noteKey = _s(metadata['note_key']).trim().isNotEmpty
+          ? _s(metadata['note_key']).trim()
+          : _sharedStudyBibleMetadataKey(
+              metadata: metadata,
+              block: slide.contentText.isEmpty
+                  ? [slide.noteRef]
+                  : [slide.contentText],
+              kind: 'note',
+            );
+      final verseRef = 'note:$noteKey';
+      final categoryArgs = <Object?>[];
+      final categoryClause = _legacyCategoryWhereClause(
+        'category',
+        normalizedTargetCategory,
+        categoryArgs,
+      );
+      final exists = await db.query(
+        tableName,
+        columns: ['id'],
+        where: 'user_id = ? AND tag = ? AND $categoryClause AND verse_ref = ?',
+        whereArgs: [userId, normalizedTag, ...categoryArgs, verseRef],
+        limit: 1,
+      );
+      final values = <String, Object?>{
+        'user_id': userId,
+        'tag': normalizedTag,
+        'category': normalizedTargetCategory,
+        'verse_ref': verseRef,
+        'book_number': 0,
+        'chapter_number': 0,
+        'verse_number': 0,
+        'token_number': null,
+        'reference_code':
+            referenceCode.isNotEmpty ? referenceCode : null,
+        'note_text': noteText.isNotEmpty ? noteText : null,
+        'note_format_json': jsonEncode(
+          <String, Object?>{
+            if (metadata.isNotEmpty) ...metadata,
+            'kind': 'studybible_note',
+            'note_key': noteKey,
+            if (referenceCode.isNotEmpty) 'reference_code': referenceCode,
+            if (noteText.isNotEmpty) 'note_text': noteText,
+          },
+        ),
+        'sort_order': studyOrder,
+        'created_at': now + inserted + updatedExisting,
+      };
+      if (exists.isNotEmpty) {
+        final existingId = (exists.first['id'] as num?)?.toInt();
+        if (existingId != null) {
+          await db.update(
+            tableName,
+            values,
+            where: 'id = ?',
+            whereArgs: [existingId],
+          );
+          updatedExisting++;
+          noteImportedCount++;
+          studyOrder++;
+          continue;
+        }
+        skippedExisting++;
+        continue;
+      }
+      await db.insert(tableName, values);
+      inserted++;
+      noteImportedCount++;
+      studyOrder++;
+    }
 
     for (final slide in scriptureSlides) {
       final target = slide.target!;
@@ -3786,7 +4077,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         'verse_number': target.verse,
         'token_number': target.tokenNumber,
         'sort_order': studyOrder,
-        'created_at': now + inserted,
+        'created_at': now + inserted + updatedExisting,
       };
       if (exists.isNotEmpty) {
         final existingId = (exists.first['id'] as num?)?.toInt();
@@ -3798,6 +4089,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
             whereArgs: [existingId],
           );
           updatedExisting++;
+          bibleImportedCount++;
           studyOrder++;
           continue;
         }
@@ -3806,6 +4098,138 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       }
       await db.insert(tableName, values);
       inserted++;
+      bibleImportedCount++;
+      studyOrder++;
+    }
+
+    for (final slide in eLibrarySlides) {
+      final metadata = slide.elibraryMetadata!;
+      final stableRef = _s(metadata['stable_ref']).trim();
+      final paragraphText =
+          _s(metadata['selected_text_snapshot']).trim().isNotEmpty
+          ? _s(metadata['selected_text_snapshot']).trim()
+          : _s(metadata['source_paragraph']).trim().isNotEmpty
+          ? _s(metadata['source_paragraph']).trim()
+          : _s(metadata['excerpt']).trim().isNotEmpty
+          ? _s(metadata['excerpt']).trim()
+          : slide.contentText.trim();
+      final citation = libraryUserFacingELibraryCitationText(
+        sourceTitle: _s(metadata['source_title']),
+        sourceTitleAcronym: _s(metadata['source_title_acronym']).isNotEmpty
+            ? _s(metadata['source_title_acronym'])
+            : null,
+        sourceLocation: _s(metadata['source_location']).isNotEmpty
+            ? _s(metadata['source_location'])
+            : null,
+        sourceReferenceText: _s(metadata['source_reference_text']).isNotEmpty
+            ? _s(metadata['source_reference_text'])
+            : null,
+        fileName: _s(metadata['source_relative_path']).trim().isNotEmpty
+            ? p.basename(_s(metadata['source_relative_path']))
+            : null,
+        relativePath: _s(metadata['source_relative_path']),
+        pageCitation:
+            _s(metadata['source_page_number']).trim().isNotEmpty &&
+                _s(metadata['source_paragraph_number']).trim().isNotEmpty
+            ? '${_s(metadata['source_page_number']).trim()}.${_s(metadata['source_paragraph_number']).trim()}'
+            : null,
+        paragraphIndex: _i(metadata['source_paragraph_index']),
+      );
+      final displayLabel = libraryUserFacingELibraryDisplayLabel(
+        sourceTitle: _s(metadata['source_title']),
+        sourceTitleAcronym: _s(metadata['source_title_acronym']).isNotEmpty
+            ? _s(metadata['source_title_acronym'])
+            : null,
+        sourceLocation: _s(metadata['source_location']).isNotEmpty
+            ? _s(metadata['source_location'])
+            : null,
+        sourceReferenceText: _s(metadata['source_reference_text']).isNotEmpty
+            ? _s(metadata['source_reference_text'])
+            : null,
+        fileName: _s(metadata['source_relative_path']).trim().isNotEmpty
+            ? p.basename(_s(metadata['source_relative_path']))
+            : null,
+        relativePath: _s(metadata['source_relative_path']),
+        pageCitation:
+            _s(metadata['source_page_number']).trim().isNotEmpty &&
+                _s(metadata['source_paragraph_number']).trim().isNotEmpty
+            ? '${_s(metadata['source_page_number']).trim()}.${_s(metadata['source_paragraph_number']).trim()}'
+            : null,
+        paragraphIndex: _i(metadata['source_paragraph_index']),
+      );
+      final effectiveStableRef = stableRef.isNotEmpty
+          ? stableRef
+          : 'elibrary:${_sharedStudyBibleMetadataKey(
+              metadata: metadata,
+              block: [
+                slide.contentText,
+                citation,
+                displayLabel,
+              ],
+              kind: 'elibrary_note',
+            )}';
+      final effectiveParagraphText = paragraphText.isNotEmpty
+          ? paragraphText
+          : (displayLabel.trim().isNotEmpty ? displayLabel.trim() : citation);
+      if (effectiveParagraphText.isEmpty) {
+        failures.add(
+          HashTagImportFailure(
+            lineNumber: parsed.slides.indexOf(slide) + 1,
+            reason: 'Missing eLibrary content',
+            line: slide.contentText,
+          ),
+        );
+        continue;
+      }
+
+      final categoryArgs = <Object?>[];
+      final categoryClause = _legacyCategoryWhereClause(
+        'category',
+        normalizedTargetCategory,
+        categoryArgs,
+      );
+      final exists = await db.query(
+        tableName,
+        columns: ['id'],
+        where: 'user_id = ? AND tag = ? AND $categoryClause AND verse_ref = ?',
+        whereArgs: [userId, normalizedTag, ...categoryArgs, effectiveStableRef],
+        limit: 1,
+      );
+      final values = <String, Object?>{
+        'user_id': userId,
+        'tag': normalizedTag,
+        'category': normalizedTargetCategory,
+        'verse_ref': effectiveStableRef,
+        'book_number': 0,
+        'chapter_number': 0,
+        'verse_number': 0,
+        'token_number': null,
+        'reference_code': citation.isNotEmpty ? citation : null,
+        'note_text': effectiveParagraphText,
+        'note_format_json': jsonEncode(metadata),
+        'sort_order': studyOrder,
+        'created_at': now + inserted + updatedExisting,
+      };
+      if (exists.isNotEmpty) {
+        final existingId = (exists.first['id'] as num?)?.toInt();
+        if (existingId != null) {
+          await db.update(
+            tableName,
+            values,
+            where: 'id = ?',
+            whereArgs: [existingId],
+          );
+          updatedExisting++;
+          eLibraryImportedCount++;
+          studyOrder++;
+          continue;
+        }
+        skippedExisting++;
+        continue;
+      }
+      await db.insert(tableName, values);
+      inserted++;
+      eLibraryImportedCount++;
       studyOrder++;
     }
 
@@ -3817,12 +4241,17 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     );
     return HashTagImportResult(
       tag: normalizedTag,
-      parsedCount: scriptureSlides.length,
+      parsedCount: parsed.slides.length,
       insertedCount: inserted,
       updatedExistingCount: updatedExisting,
       skippedExistingCount: skippedExisting,
       failedCount: failures.length,
       failures: failures,
+      bibleImportedCount: bibleImportedCount,
+      eLibraryImportedCount: eLibraryImportedCount,
+      noteImportedCount: noteImportedCount,
+      unsupportedCount: unsupportedSlides.length,
+      warnings: warnings,
     );
   }
 

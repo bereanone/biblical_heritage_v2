@@ -8,6 +8,8 @@ import '../bootstrap/local_settings_store.dart';
 import '../bootstrap/library_root_service.dart';
 import 'user_v2_schema.dart';
 
+const bool kLogKnownSqfliteFalsePositives = false;
+
 class UserDatabase {
   UserDatabase._();
 
@@ -71,11 +73,13 @@ class UserDatabase {
       debugPrint('UserDatabase[$label]: $actionLabel succeeded.');
     } on DatabaseException catch (error) {
       if (_isKnownWalFalsePositive(error)) {
-        debugPrint(
-          'UserDatabase[$label]: ignoring known sqflite false-positive while '
-          '$actionLabel: '
-          '$error',
-        );
+        if (kLogKnownSqfliteFalsePositives) {
+          debugPrint(
+            'UserDatabase[$label]: ignoring known sqflite false-positive while '
+            '$actionLabel: '
+            '$error',
+          );
+        }
         return;
       }
       rethrow;

@@ -14,6 +14,47 @@ const Map<String, ({int start, int end})> _volumeScopes =
       '7ABC': (start: 44, end: 66),
     };
 
+String? _inferCommentaryVolumeCodeForItem(String fileName, String title) {
+  final rawCandidate = '$fileName $title';
+  final volumeMatch = RegExp(
+    r'\bvol(?:ume)?\.?\s*(\d{1,2})\b',
+    caseSensitive: false,
+  ).firstMatch(rawCandidate);
+  if (volumeMatch != null) {
+    final volumeNumber = int.tryParse(volumeMatch.group(1) ?? '');
+    if (volumeNumber != null && volumeNumber >= 1 && volumeNumber <= 7) {
+      return '${volumeNumber}BC';
+    }
+  }
+
+  final candidate = rawCandidate
+      .replaceAll('_', '')
+      .replaceAll('-', '')
+      .replaceAll(' ', '');
+  final match = RegExp(
+    r'(?:(\dABC)|(\dBC))',
+    caseSensitive: false,
+  ).firstMatch(candidate);
+  final raw = match?.group(1) ?? match?.group(2);
+  return raw?.toUpperCase();
+}
+
+List<Map<String, Object?>> filterRowsByPreferredCommentaryVolume(
+  List<Map<String, Object?>> rows,
+  String? preferredVolumeCode,
+) {
+  if (preferredVolumeCode == null) return rows;
+  return rows
+      .where((row) {
+        final inferred = _inferCommentaryVolumeCodeForItem(
+          row['file_name']?.toString() ?? '',
+          row['title']?.toString() ?? '',
+        );
+        return inferred == preferredVolumeCode;
+      })
+      .toList(growable: false);
+}
+
 mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
   Future<List<CommentaryResearchMatchItem>> _loadMatches({
     required Database db,
@@ -88,19 +129,10 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
           : [folderType, bookId, chapter, verse, verse],
     );
 
-    final filteredRows = preferredVolumeCode == null
-        ? rows
-        : rows
-              .where((row) {
-                final inferred = _inferVolumeCodeForItem(
-                  row['file_name']?.toString() ?? '',
-                  row['title']?.toString() ?? '',
-                );
-                return inferred == preferredVolumeCode;
-              })
-              .toList(growable: false);
+    final visibleRows =
+        filterRowsByPreferredCommentaryVolume(rows, preferredVolumeCode);
 
-    return filteredRows
+    return visibleRows
         .map(
           (row) => CommentaryResearchMatchItem(
             libraryItemId: row['library_item_id']?.toString() ?? '',
@@ -338,16 +370,7 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
   }
 
   String? _inferVolumeCodeForItem(String fileName, String title) {
-    final candidate = '$fileName $title'
-        .replaceAll('_', '')
-        .replaceAll('-', '')
-        .replaceAll(' ', '');
-    final match = RegExp(
-      r'(?:(\dABC)|(\dBC))',
-      caseSensitive: false,
-    ).firstMatch(candidate);
-    final raw = match?.group(1) ?? match?.group(2);
-    return raw?.toUpperCase();
+    return _inferCommentaryVolumeCodeForItem(fileName, title);
   }
 
   List<File> _preferEpubs(List<File> files) {
@@ -409,18 +432,19 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
       orderBy: 'title COLLATE NOCASE ASC, file_name COLLATE NOCASE ASC',
     );
     if (rows.isEmpty) return null;
-    final hasIndexedFiles = rows.any((row) {
+    final hasEpubFiles = rows.any((row) {
       final format =
           row['file_format']?.toString().toLowerCase() ??
           row['source_type']?.toString().toLowerCase() ??
           '';
-      if (format != 'epub') return false;
-      final status = row['index_status']?.toString().toLowerCase() ?? '';
-      final error = row['index_error']?.toString().trim() ?? '';
-      return status == 'indexed' && error.isEmpty;
+      return format == 'epub';
     });
-    if (!hasIndexedFiles) return null;
+    if (!hasEpubFiles) return null;
 
+    final linkCounts = await _loadLinkCountsByItemId(
+      db: db,
+      folderType: folderType,
+    );
     final files = <CommentaryResearchFileItem>[];
     var indexedCount = 0;
     for (final row in rows) {
@@ -436,7 +460,7 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
           : p.basenameWithoutExtension(fileName);
       final relativePath = row['relative_path']?.toString() ?? '';
       final fileSize = (row['file_size'] as num?)?.toInt() ?? 0;
-      final linksCount = await _countLinks(db, itemId, folderType);
+      final linksCount = linkCounts[itemId] ?? 0;
       indexedCount += linksCount;
       files.add(
         CommentaryResearchFileItem(
@@ -482,6 +506,17 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
       title: folderLabel,
       statusMessage: _statusMessage(
         folderLabel: folderLabel,
+        bookName: bookName,
+        chapter: chapter,
+        candidatePaths: folderType == 'commentary'
+            ? [
+                p.join(rootPath, 'ePubs', 'Commentaries'),
+                p.join(rootPath, 'PDFs', 'Commentaries'),
+              ]
+            : [
+                p.join(rootPath, 'ePubs', 'Research'),
+                p.join(rootPath, 'PDFs', 'Research'),
+              ],
         discoveredCount: files.length,
         indexedCount: indexedCount,
         matchCount: displayMatches.length,
@@ -492,6 +527,28 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
       indexedCount: indexedCount,
       matchCount: displayMatches.length,
     );
+  }
+
+  Future<Map<String, int>> _loadLinkCountsByItemId({
+    required Database db,
+    required String folderType,
+  }) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT library_item_id, COUNT(*) AS count
+      FROM library_links
+      WHERE link_type = ?
+      GROUP BY library_item_id
+      ''',
+      [folderType],
+    );
+    final counts = <String, int>{};
+    for (final row in rows) {
+      final itemId = row['library_item_id']?.toString().trim() ?? '';
+      if (itemId.isEmpty) continue;
+      counts[itemId] = (row['count'] as num?)?.toInt() ?? 0;
+    }
+    return counts;
   }
 
   Future<void> _writeIndexReport(

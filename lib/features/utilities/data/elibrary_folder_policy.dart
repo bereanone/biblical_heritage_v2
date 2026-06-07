@@ -20,99 +20,168 @@ class ELibraryFolderPolicy {
   static const managedEgwFolderDefinitions = <ELibraryManagedFolderDefinition>[
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Commentaries',
-      relativeFolder: 'ePubs/Commentaries/EGW_Commentaries',
+      relativeFolder: 'ePubs/EGW/EGW_Commentaries',
       folderType: 'commentary',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Commentaries',
-      relativeFolder: 'PDFs/Commentaries/EGW_Commentaries',
+      relativeFolder: 'PDFs/EGW/EGW_Commentaries',
       folderType: 'commentary',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Books',
-      relativeFolder: 'ePubs/Research/EGW_Books',
+      relativeFolder: 'ePubs/EGW/EGW_Books',
       folderType: 'research',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Books',
-      relativeFolder: 'PDFs/Research/EGW_Books',
+      relativeFolder: 'PDFs/EGW/EGW_Books',
       folderType: 'research',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Devotionals',
-      relativeFolder: 'ePubs/Research/EGW_Devotionals',
+      relativeFolder: 'ePubs/EGW/EGW_Devotionals',
       folderType: 'research',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Devotionals',
-      relativeFolder: 'PDFs/Research/EGW_Devotionals',
+      relativeFolder: 'PDFs/EGW/EGW_Devotionals',
       folderType: 'research',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Misc Collections',
-      relativeFolder: 'ePubs/Research/EGW_Misc_Collections',
+      relativeFolder: 'ePubs/EGW/EGW_Misc_Collections',
       folderType: 'research',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Misc Collections',
-      relativeFolder: 'PDFs/Research/EGW_Misc_Collections',
+      relativeFolder: 'PDFs/EGW/EGW_Misc_Collections',
       folderType: 'research',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Pamphlets',
-      relativeFolder: 'ePubs/Research/EGW_Pamphlets',
+      relativeFolder: 'ePubs/EGW/EGW_Pamphlets',
       folderType: 'research',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Pamphlets',
-      relativeFolder: 'PDFs/Research/EGW_Pamphlets',
+      relativeFolder: 'PDFs/EGW/EGW_Pamphlets',
       folderType: 'research',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Periodicals',
-      relativeFolder: 'ePubs/Research/EGW_Periodicals',
+      relativeFolder: 'ePubs/EGW/EGW_Periodicals',
       folderType: 'research',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Periodicals',
-      relativeFolder: 'PDFs/Research/EGW_Periodicals',
+      relativeFolder: 'PDFs/EGW/EGW_Periodicals',
       folderType: 'research',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Manuscript Releases',
-      relativeFolder: 'ePubs/Research/EGW_Manuscript_Releases',
+      relativeFolder: 'ePubs/EGW/EGW_Manuscript_Releases',
       folderType: 'research',
     ),
     ELibraryManagedFolderDefinition(
       collectionName: 'EGW Manuscript Releases',
-      relativeFolder: 'PDFs/Research/EGW_Manuscript_Releases',
+      relativeFolder: 'PDFs/EGW/EGW_Manuscript_Releases',
       folderType: 'research',
     ),
   ];
 
-  static const managedEgwFolderSegments = <String>{
-    'egw_books',
-    'egwbooks',
-    'egw-html',
-    'egw_pdf',
-    'egwbooksfix',
-    'egw_devotionals',
-    'egw_misc_collections',
-    'egw_pamphlets',
-    'egw_periodicals',
-    'egw_manuscript_releases',
-    'egw_commentaries',
-  };
+  static const legacyManagedEgwFolderDefinitions =
+      <ELibraryManagedFolderDefinition>[
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Commentaries',
+          relativeFolder: 'ePubs/Commentaries/EGW_Commentaries',
+          folderType: 'commentary',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Commentaries',
+          relativeFolder: 'PDFs/Commentaries/EGW_Commentaries',
+          folderType: 'commentary',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Books',
+          relativeFolder: 'ePubs/Research/EGW_Books',
+          folderType: 'research',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Books',
+          relativeFolder: 'PDFs/Research/EGW_Books',
+          folderType: 'research',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Devotionals',
+          relativeFolder: 'ePubs/Research/EGW_Devotionals',
+          folderType: 'research',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Devotionals',
+          relativeFolder: 'PDFs/Research/EGW_Devotionals',
+          folderType: 'research',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Misc Collections',
+          relativeFolder: 'ePubs/Research/EGW_Misc_Collections',
+          folderType: 'research',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Misc Collections',
+          relativeFolder: 'PDFs/Research/EGW_Misc_Collections',
+          folderType: 'research',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Pamphlets',
+          relativeFolder: 'ePubs/Research/EGW_Pamphlets',
+          folderType: 'research',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Pamphlets',
+          relativeFolder: 'PDFs/Research/EGW_Pamphlets',
+          folderType: 'research',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Periodicals',
+          relativeFolder: 'ePubs/Research/EGW_Periodicals',
+          folderType: 'research',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Periodicals',
+          relativeFolder: 'PDFs/Research/EGW_Periodicals',
+          folderType: 'research',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Manuscript Releases',
+          relativeFolder: 'ePubs/Research/EGW_Manuscript_Releases',
+          folderType: 'research',
+        ),
+        ELibraryManagedFolderDefinition(
+          collectionName: 'EGW Manuscript Releases',
+          relativeFolder: 'PDFs/Research/EGW_Manuscript_Releases',
+          folderType: 'research',
+        ),
+      ];
+
+  static Iterable<ELibraryManagedFolderDefinition>
+  get allManagedEgwFolderDefinitions sync* {
+    yield* managedEgwFolderDefinitions;
+    yield* legacyManagedEgwFolderDefinitions;
+  }
 
   static const quarantineFolderSegment = '_quarantine_duplicates';
 
   static bool isManagedEgwFolderPath(String path) {
     final normalized = p.normalize(path).toLowerCase();
-    final segments = p.split(normalized);
-    return segments.any((segment) {
-      final clean = segment.trim().toLowerCase();
-      return managedEgwFolderSegments.contains(clean);
-    });
+    final pathSegments = p.split(normalized);
+    for (final folder in allManagedEgwFolderDefinitions) {
+      final folderSegments = p.split(p.normalize(folder.relativeFolder).toLowerCase());
+      if (_containsPathSegments(pathSegments, folderSegments)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   static bool isQuarantinePath(String path) {
@@ -162,6 +231,32 @@ class ELibraryFolderPolicy {
   static String normalizedEditionStem(String fileName) {
     final stem = p.basenameWithoutExtension(fileName).trim().toLowerCase();
     return stem.replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  static bool _containsPathSegments(
+    List<String> pathSegments,
+    List<String> targetSegments,
+  ) {
+    if (targetSegments.isEmpty || pathSegments.length < targetSegments.length) {
+      return false;
+    }
+
+    for (
+      var start = 0;
+      start <= pathSegments.length - targetSegments.length;
+      start++
+    ) {
+      var matched = true;
+      for (var index = 0; index < targetSegments.length; index++) {
+        if (pathSegments[start + index].trim().toLowerCase() !=
+            targetSegments[index].trim().toLowerCase()) {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) return true;
+    }
+    return false;
   }
 
   static String editionKeyForFileName(String fileName) {

@@ -33,6 +33,7 @@ class ELibraryDuplicateCleanupService {
       p.join(rootPath, 'PDFs'),
       p.join(rootPath, 'Commentaries'),
       p.join(rootPath, 'Research'),
+      p.join(rootPath, 'eLibrary_Downloads'),
       p.join(rootPath, 'TEST_Downloads'),
     ];
     final reportRoot = Directory(p.join(rootPath, 'download_reports'));
@@ -236,8 +237,7 @@ class ELibraryDuplicateCleanupService {
       }
       if (entity is! File) continue;
       if (ELibraryFolderPolicy.isQuarantinePath(entity.path)) continue;
-      final lower = entity.path.toLowerCase();
-      if (!lower.endsWith('.epub')) continue;
+      if (!isElibraryDuplicateCandidateFilePath(entity.path)) continue;
       final normalized = p.normalize(entity.path);
       if (!seen.add(normalized)) continue;
       if (_shouldSkipDirectory(p.dirname(normalized))) continue;
@@ -320,12 +320,9 @@ class ELibraryDuplicateCleanupService {
   }
 
   Future<String?> _writableLibraryRootPath() async {
-    final accessible = await LibraryRootService.instance
-        .accessibleLibraryRootPath();
-    if (accessible != null && accessible.trim().isNotEmpty) return accessible;
-    final selection = await LibraryRootService.instance.loadSelection();
-    if (selection.path == null || !selection.exists) return null;
-    return selection.path;
+    final explicit = await LibraryRootService.instance.explicitLibraryRootPath();
+    if (explicit != null && explicit.trim().isNotEmpty) return explicit;
+    return null;
   }
 
   String _relativePath(String rootPath, String path) {
@@ -364,6 +361,11 @@ class ELibraryDuplicateCleanupService {
     String two(int n) => n.toString().padLeft(2, '0');
     return '${value.year}${two(value.month)}${two(value.day)}_${two(value.hour)}${two(value.minute)}${two(value.second)}';
   }
+}
+
+bool isElibraryDuplicateCandidateFilePath(String path) {
+  final lower = path.toLowerCase();
+  return lower.endsWith('.epub') || lower.endsWith('.pdf');
 }
 
 class ELibraryDuplicateCleanupReport {

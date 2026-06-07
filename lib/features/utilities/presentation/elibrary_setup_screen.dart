@@ -1,19 +1,20 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
-import '../../../core/bootstrap/library_root_native.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/user_database.dart';
 import '../../library/data/library_catalog_service.dart';
 import '../../reader/data/commentary_research_library_service.dart';
+import '../data/elibrary_file_management_service.dart';
 import '../data/elibrary_duplicate_cleanup_service.dart';
 import '../data/elibrary_install_estimate_repository.dart';
 import '../data/elibrary_migration_service.dart';
-import '../data/demo_download_service.dart';
+import '../data/elibrary_download_service.dart';
+import 'library_root_setup_screen.dart';
 
 class ELibrarySetupScreen extends StatefulWidget {
   const ELibrarySetupScreen({super.key});
@@ -25,30 +26,35 @@ class ELibrarySetupScreen extends StatefulWidget {
 class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   LibraryRootSelection? _selection;
   bool _loading = true;
+  bool _loadingStorageSummary = true;
   bool _running = false;
   bool _indexing = false;
+  bool _removingFiles = false;
   bool _cancelRequested = false;
-  bool _installBooks = true;
-  bool _installDevotionals = true;
-  bool _installCommentaries = true;
-  bool _installMiscCollections = true;
-  bool _installPamphlets = true;
-  bool _installPeriodicals = true;
-  bool _installManuscriptReleases = true;
-  bool _installEpub = true;
-  bool _installPdf = true;
+  bool _installBooks = false;
+  bool _installDevotionals = false;
+  bool _installCommentaries = false;
+  bool _installMiscCollections = false;
+  bool _installPamphlets = false;
+  bool _installPeriodicals = false;
+  bool _installManuscriptReleases = false;
+  bool _installEpub = false;
+  bool _installPdf = false;
   bool _refreshingEstimateCache = false;
   Map<String, Map<String, ELibraryInstallEstimateRecord>>
   _estimateCacheByCollection =
       <String, Map<String, ELibraryInstallEstimateRecord>>{};
-  DemoDownloadProgress? _progress;
-  DemoDownloadReport? _downloadReport;
+  ELibraryDownloadProgress? _progress;
+  ELibraryDownloadReport? _downloadReport;
   LegacyELibraryMigrationReport? _migrationReport;
   ELibraryDuplicateCleanupReport? _cleanupReport;
   String? _setupReportPath;
   String? _indexReportPath;
   String? _setupStatusMessage;
+  String? _selectionWarning;
+  ELibraryStorageSummary? _storageSummary;
   String? _error;
+  String? _errorDetails;
   int _indexedCount = 0;
   int _indexingErrors = 0;
   bool _manualIndexing = false;
@@ -77,6 +83,32 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       _selection = selection;
       _loading = false;
     });
+    await _loadStorageSummary();
+  }
+
+  Future<void> _loadStorageSummary() async {
+    if (!mounted) return;
+    setState(() => _loadingStorageSummary = true);
+    try {
+      final summary = await ELibraryFileManagementService.instance
+          .computeDownloadedStorageSummary(rootPath: _selection?.path);
+      if (!mounted) return;
+      setState(() => _storageSummary = summary);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _storageSummary = const ELibraryStorageSummary(
+          epubCount: 0,
+          epubSizeBytes: 0,
+          pdfCount: 0,
+          pdfSizeBytes: 0,
+        );
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _loadingStorageSummary = false);
+      }
+    }
   }
 
   Future<void> _loadEstimateCache() async {
@@ -104,7 +136,8 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     if (_refreshingEstimateCache) return;
     setState(() => _refreshingEstimateCache = true);
     try {
-      await DemoDownloadService.instance.refreshProductionCollectionEstimates();
+      await ELibraryDownloadService.instance
+          .refreshProductionCollectionEstimates();
       await _loadEstimateCache();
       if (!mounted) {
         return;
@@ -173,73 +206,18 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   }
 
   Future<void> _chooseRoot() async {
-    final currentSelection = _selection;
-    if (currentSelection?.path != null && currentSelection?.exists == true) {
-      if (!mounted) return;
-      setState(() {
-        _setupStatusMessage = 'Library Root already selected.';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Library Root already selected.')),
-      );
-      return;
-    }
-
-    final selectedPath = await _pickRootFolder();
-    final chosenPath = selectedPath?.path.trim() ?? '';
-    if (chosenPath.isNotEmpty) {
-      await LibraryRootService.instance.setLibraryRoot(
-        path: chosenPath,
-        bookmark: selectedPath?.bookmark,
-      );
-      if (!mounted) return;
-      setState(() {
-        _setupStatusMessage = 'Library root saved and folders created.';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Library root saved and folders created.')),
-      );
-      await _load();
-      return;
-    }
-
-    if (!Platform.isIOS) {
-      return;
-    }
-
-    final fallbackPath = await _defaultIosLibraryRootPath();
-    await LibraryRootService.instance.setLibraryRoot(path: fallbackPath);
-    if (!mounted) return;
-    setState(() {
-      _setupStatusMessage = 'Using app documents library root for iOS.';
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Using app documents library root for iOS.'),
-      ),
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const LibraryRootSetupScreen()),
     );
+    if (!mounted) return;
     await _load();
   }
 
-  Future<({String path, String bookmark})?> _pickRootFolder() async {
-    try {
-      return await LibraryRootNative.pickFolder();
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Folder picker failed: $error')));
-      }
-      return null;
-    }
+  void _clearSelectionWarning() {
+    _selectionWarning = null;
   }
 
-  Future<String> _defaultIosLibraryRootPath() async {
-    final documentsDir = await getApplicationDocumentsDirectory();
-    return p.join(documentsDir.path, 'BiblicalHeritage', 'v2');
-  }
-
-  void _setPresetAll() {
+  void _selectAllCollectionsAndFormats() {
     setState(() {
       _installBooks = true;
       _installDevotionals = true;
@@ -250,6 +228,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       _installManuscriptReleases = true;
       _installEpub = true;
       _installPdf = true;
+      _clearSelectionWarning();
     });
   }
 
@@ -257,6 +236,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     setState(() {
       _installEpub = true;
       _installPdf = false;
+      _clearSelectionWarning();
     });
   }
 
@@ -264,6 +244,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     setState(() {
       _installEpub = false;
       _installPdf = true;
+      _clearSelectionWarning();
     });
   }
 
@@ -271,10 +252,11 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     setState(() {
       _installEpub = true;
       _installPdf = true;
+      _clearSelectionWarning();
     });
   }
 
-  void _setPresetSkip() {
+  void _clearAllSelections() {
     setState(() {
       _installBooks = false;
       _installDevotionals = false;
@@ -283,14 +265,39 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       _installPamphlets = false;
       _installPeriodicals = false;
       _installManuscriptReleases = false;
+      _installEpub = false;
+      _installPdf = false;
+      _clearSelectionWarning();
     });
   }
 
+  Set<String> _selectedCollectionNames() {
+    final selections = <String>{};
+    if (_installBooks) selections.add('EGW Books');
+    if (_installDevotionals) selections.add('EGW Devotionals');
+    if (_installCommentaries) selections.add('EGW Commentaries');
+    if (_installMiscCollections) selections.add('EGW Misc Collections');
+    if (_installPamphlets) selections.add('EGW Pamphlets');
+    if (_installPeriodicals) selections.add('EGW Periodicals');
+    if (_installManuscriptReleases) {
+      selections.add('EGW Manuscript Releases');
+    }
+    return selections;
+  }
+
+  Set<ELibraryManagedDownloadFormat> _selectedFormats() {
+    final formats = <ELibraryManagedDownloadFormat>{};
+    if (_installEpub) {
+      formats.add(ELibraryManagedDownloadFormat.epub);
+    }
+    if (_installPdf) {
+      formats.add(ELibraryManagedDownloadFormat.pdf);
+    }
+    return formats;
+  }
+
   int _selectedFormatCount() {
-    var count = 0;
-    if (_installEpub) count += 1;
-    if (_installPdf) count += 1;
-    return count;
+    return _selectedFormats().length;
   }
 
   bool _isCollectionSelected(int index) {
@@ -379,15 +386,142 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     return 'Selected download: ${_fileCountLabel(totalCount)} • size unknown';
   }
 
+  String? _installSelectionWarning() {
+    if (_selectedCollectionNames().isEmpty) {
+      return 'Select at least one collection to install.';
+    }
+    if (_selectedFormats().isEmpty) {
+      return 'Select EPUB, PDF, or both before installing.';
+    }
+    return null;
+  }
+
+  String _friendlyErrorMessage(Object error) {
+    if (error is EgwCollectionFetchException) {
+      return error.userFacingMessage;
+    }
+    final message = error.toString();
+    if (message.contains('EGW site refused this request')) {
+      return 'EGW site refused this request. Open the collection in a browser or try again later.';
+    }
+    return message;
+  }
+
+  String? _errorDiagnostics(Object error) {
+    if (error is EgwCollectionFetchException) {
+      return error.diagnosticDetails;
+    }
+    final message = error.toString();
+    final match = RegExp(
+      r'Failed URL: .+\nStatus code: \d+',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(message);
+    return match?.group(0);
+  }
+
+  String? _downloadFailureSummary(ELibraryDownloadReport? report) {
+    if (report == null || report.failures.isEmpty) {
+      return null;
+    }
+    for (final failure in report.failures) {
+      final error = failure.error ?? '';
+      if (error.contains('EGW site refused this request')) {
+        return 'EGW site refused this request. Open the collection in a browser or try again later.';
+      }
+    }
+    return 'Some eLibrary files could not be downloaded.';
+  }
+
+  String? _downloadUnavailableSummary(ELibraryDownloadReport? report) {
+    if (report == null || report.filesUnavailable.isEmpty) {
+      return null;
+    }
+    return 'Some books did not have a verified EPUB download URL.';
+  }
+
+  Future<bool?> _confirmLegacyMigration() {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Move legacy eLibrary files?'),
+          content: const SingleChildScrollView(
+            child: Text(
+              'Legacy eLibrary files can be copied into the new EGW folder layout before the download starts.\n\n'
+              'Some duplicate or conflicting legacy files may be moved to a quarantine folder after a verified copy so the original can be reviewed later.\n\n'
+              'This is not a delete or reset operation. Your downloaded books are preserved.\n\n'
+              'You can cancel now and come back later.',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Move Files'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _startSetup() async {
     if (_running) return;
     final selection = _selection;
-    if (selection?.path == null || selection?.exists != true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Choose a Library Root Folder first.')),
-      );
+    if (selection?.path == null ||
+        selection?.exists != true ||
+        selection?.isExplicitlySelected != true) {
+      final warning = selection?.path == null
+          ? 'Choose a Library Root before installing eLibrary files.'
+          : 'Legacy Library Root detected. Open Library Root Setup to confirm or migrate before installing.';
+      if (!mounted) return;
+      setState(() {
+        _selectionWarning = warning;
+        _setupStatusMessage = warning;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(warning)));
       return;
     }
+    final validationWarning = _installSelectionWarning();
+    if (validationWarning != null) {
+      if (!mounted) return;
+      setState(() {
+        _selectionWarning = validationWarning;
+        _setupStatusMessage = validationWarning;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(validationWarning)));
+      return;
+    }
+
+    final needsLegacyMigration =
+        await LegacyELibraryMigrationService.instance.hasMigrationCandidates();
+    if (!mounted) return;
+    if (needsLegacyMigration) {
+      final confirmed = await _confirmLegacyMigration();
+      if (!mounted) return;
+      if (confirmed != true) {
+        setState(() {
+          _setupStatusMessage =
+              'Legacy migration cancelled. No files were changed.';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Legacy migration cancelled. No files were changed.'),
+          ),
+        );
+        return;
+      }
+    }
+
     final rootPath = selection!.path!;
 
     setState(() {
@@ -395,6 +529,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       _indexing = false;
       _cancelRequested = false;
       _error = null;
+      _errorDetails = null;
       _downloadReport = null;
       _migrationReport = null;
       _cleanupReport = null;
@@ -404,6 +539,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       _progress = null;
       _indexedCount = 0;
       _indexingErrors = 0;
+      _clearSelectionWarning();
     });
 
     try {
@@ -422,7 +558,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         );
       }
 
-      final downloadReport = await DemoDownloadService.instance
+      final downloadReport = await ELibraryDownloadService.instance
           .runProductionSetup(
             installBooks: _installBooks,
             installDevotionals: _installDevotionals,
@@ -438,7 +574,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
               setState(() => _progress = progress);
             },
             isCancelled: () => _cancelRequested,
-      );
+          );
 
       if (!mounted) return;
       setState(() {
@@ -488,6 +624,8 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
           );
       if (!mounted) return;
       final db = await UserDatabase.instance.database;
+      final unindexedItems = await LibraryCatalogService.instance
+          .listUnindexedManagedItems();
       final failedRows = await db.rawQuery('''
         SELECT COUNT(*) AS count
         FROM library_items
@@ -522,9 +660,22 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         'epub_downloaded_count': downloadReport.epubDownloadedCount,
         'pdf_downloaded_count': downloadReport.pdfDownloadedCount,
         'skipped_existing_count': downloadReport.skippedExistingCount,
+        'unavailable_count': downloadReport.unavailableCount,
         'failed_count': downloadReport.failedCount,
         'indexed_count': indexedCount,
         'indexing_errors': indexingErrors,
+        'unindexed_item_count': unindexedItems.length,
+        'unindexed_items': unindexedItems
+            .map(
+              (item) => {
+                'id': item.id,
+                'title': item.displayTitle,
+                'collection_name': item.collectionName,
+                'relative_path': item.relativePath,
+                'index_status': item.indexStatus,
+              },
+            )
+            .toList(growable: false),
         'auto_index_result': {
           'indexed': indexResult.indexed,
           'skipped': indexResult.skipped,
@@ -535,6 +686,9 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
             .map((item) => item.toJson())
             .toList(growable: false),
         'files_skipped': downloadReport.filesSkipped
+            .map((item) => item.toJson())
+            .toList(growable: false),
+        'files_unavailable': downloadReport.filesUnavailable
             .map((item) => item.toJson())
             .toList(growable: false),
         'failures': downloadReport.failures
@@ -563,9 +717,17 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         _indexReportPath = passageData.indexReportPath;
         _indexedCount = indexedCount;
         _indexingErrors = indexingErrors;
-        _setupStatusMessage = 'Done';
+        _setupStatusMessage =
+            downloadReport.failures.isEmpty &&
+                downloadReport.filesUnavailable.isEmpty
+            ? 'Done'
+            : downloadReport.failures.isNotEmpty
+            ? 'Done with download issues.'
+            : 'Done with unavailable books.';
         _indexing = false;
       });
+      await _loadStorageSummary();
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -576,7 +738,10 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       );
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = error.toString());
+      setState(() {
+        _error = _friendlyErrorMessage(error);
+        _errorDetails = _errorDiagnostics(error);
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('eLibrary setup failed: $error')));
@@ -587,6 +752,190 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
           _indexing = false;
           _setupStatusMessage ??= 'Done';
         });
+      }
+    }
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    var value = bytes.toDouble();
+    var unitIndex = -1;
+    do {
+      value /= 1024;
+      unitIndex += 1;
+    } while (value >= 1024 && unitIndex < units.length - 1);
+    return '${value.toStringAsFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}';
+  }
+
+  Future<void> _removeDownloadedFiles({
+    required Set<String> collectionNames,
+    required Set<ELibraryManagedDownloadFormat> formats,
+    required String actionLabel,
+  }) async {
+    if (_running || _removingFiles) return;
+    final selection = _selection;
+    if (selection?.path == null ||
+        selection?.exists != true ||
+        selection?.isExplicitlySelected != true) {
+      final warning = selection?.path == null
+          ? 'Choose a Library Root before removing downloaded eLibrary files.'
+          : 'Legacy Library Root detected. Open Library Root Setup to confirm or migrate before removing files.';
+      if (!mounted) return;
+      setState(() {
+        _selectionWarning = warning;
+        _setupStatusMessage = warning;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(warning)));
+      return;
+    }
+    if (collectionNames.isEmpty) {
+      final warning = 'Select at least one collection to remove.';
+      if (!mounted) return;
+      setState(() {
+        _selectionWarning = warning;
+        _setupStatusMessage = warning;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(warning)));
+      return;
+    }
+    if (formats.isEmpty) {
+      final warning = 'Select EPUB, PDF, or both before removing.';
+      if (!mounted) return;
+      setState(() {
+        _selectionWarning = warning;
+        _setupStatusMessage = warning;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(warning)));
+      return;
+    }
+
+    final rootPath = selection!.path!;
+    setState(() {
+      _removingFiles = true;
+      _selectionWarning = null;
+      _setupStatusMessage = 'Scanning downloaded files...';
+      _error = null;
+      _errorDetails = null;
+    });
+
+    try {
+      final queue = await ELibraryFileManagementService.instance
+          .buildFilteredRemovalQueue(
+            collectionNames: collectionNames,
+            formats: formats,
+            rootPath: rootPath,
+          );
+      if (!mounted) return;
+      if (queue.isEmpty) {
+        setState(
+          () =>
+              _setupStatusMessage = 'No matching downloaded files were found.',
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No matching downloaded files were found.'),
+          ),
+        );
+        return;
+      }
+
+      final totalBytes = queue.fold<int>(
+        0,
+        (sum, record) => sum + record.fileSize,
+      );
+      final managedFolders =
+          queue
+              .map((record) => p.dirname(record.relativePath))
+              .toSet()
+              .toList(growable: false)
+            ..sort();
+      final epubCount = queue
+          .where(
+            (record) => record.format == ELibraryManagedDownloadFormat.epub,
+          )
+          .length;
+      final pdfCount = queue
+          .where((record) => record.format == ELibraryManagedDownloadFormat.pdf)
+          .length;
+      final breakdown = epubCount > 0 && pdfCount > 0
+          ? '$epubCount EPUB and $pdfCount PDF'
+          : epubCount > 0
+          ? '$epubCount EPUB'
+          : '$pdfCount PDF';
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: Text(actionLabel),
+            content: Text(
+              'Library Root:\n${selection.path}\n\n'
+              'Managed folders:\n${managedFolders.join('\n')}\n\n'
+              'Remove ${queue.length} $breakdown files '
+              '(${_formatBytes(totalBytes)}) from the eLibrary?\n\n'
+              'If this Library Root is shared with another Biblical Heritage or standalone eLibrary app, removing files here may remove files used by that app too. This will not delete tags, notes, highlights, bookmarks, saved presentations, or user.db.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Remove'),
+              ),
+            ],
+          );
+        },
+      );
+      if (confirm != true) {
+        if (!mounted) return;
+        setState(() => _setupStatusMessage = 'Removal cancelled.');
+        return;
+      }
+
+      setState(() => _setupStatusMessage = 'Removing downloaded files...');
+      final report = await ELibraryFileManagementService.instance
+          .removeDownloadedFiles(
+            collectionNames: collectionNames,
+            formats: formats,
+            rootPath: rootPath,
+          );
+      if (!mounted) return;
+      setState(() {
+        _setupStatusMessage =
+            'Removed ${report.removedCount} files '
+            '(${_formatBytes(report.removedBytes)}). '
+            'User tags, notes, highlights, and saved presentations were not changed.';
+      });
+      await _loadStorageSummary();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Removed ${report.removedCount} files '
+            '(${report.epubRemovedCount} EPUB, ${report.pdfRemovedCount} PDF).',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = _friendlyErrorMessage(error);
+        _errorDetails = _errorDiagnostics(error);
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Removal failed: $error')));
+    } finally {
+      if (mounted) {
+        setState(() => _removingFiles = false);
       }
     }
   }
@@ -615,361 +964,338 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     final selection = _selection;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('eLibrary Setup'), centerTitle: true),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          selection?.path == null
-                              ? 'No Library Root selected'
-                              : selection!.exists
-                              ? 'Library Root selected'
-                              : 'Library Root missing, reconnect needed',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        _pathLine('Root', selection?.path),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
-                          children: [
-                            FilledButton(
-                              onPressed: _chooseRoot,
-                              child: const Text('Choose Library Folder'),
-                            ),
-                            OutlinedButton(
-                              onPressed: _running ? null : _startSetup,
-                              child: const Text('Install Selected'),
-                            ),
-                            OutlinedButton(
-                              onPressed: _running ? _cancelSetup : null,
-                              child: const Text('Cancel'),
-                            ),
-                            OutlinedButton(
-                              onPressed: (_running || _manualIndexing)
-                                  ? null
-                                  : _runManualIndex,
-                              child: Text(
-                                _manualIndexing
-                                    ? 'Indexing new/changed books...'
-                                    : 'Index New/Changed Books',
+      appBar: AppBar(
+        title: const Text('eLibrary Setup'),
+        centerTitle: true,
+        leading: _setupLeading(context),
+        leadingWidth: _setupLeadingWidth(),
+      ),
+      body: SafeArea(
+        top: false,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            selection?.statusLabel ??
+                                'No Library Root selected.',
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          _pathLine('Root path', selection?.path),
+                          _pathLine('Root source', selection?.sourceLabel),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              FilledButton(
+                                onPressed: _chooseRoot,
+                                child: const Text('Manage Library Root'),
                               ),
-                            ),
-                            OutlinedButton(
-                              onPressed: (_running || _refreshingEstimateCache)
-                                  ? null
-                                  : _refreshEstimateCache,
-                              child: Text(
-                                _refreshingEstimateCache
-                                    ? 'Refreshing estimates...'
-                                    : 'Refresh estimates',
+                              OutlinedButton(
+                                onPressed: _running ? null : _startSetup,
+                                child: const Text('Install Selected'),
+                              ),
+                              OutlinedButton(
+                                onPressed: _running ? _cancelSetup : null,
+                                child: const Text('Cancel'),
+                              ),
+                              OutlinedButton(
+                                onPressed: (_running || _manualIndexing)
+                                    ? null
+                                    : _runManualIndex,
+                                child: Text(
+                                  _manualIndexing
+                                      ? 'Indexing new/changed books...'
+                                      : 'Index New/Changed Books',
+                                ),
+                              ),
+                              OutlinedButton(
+                                onPressed:
+                                    (_running || _refreshingEstimateCache)
+                                    ? null
+                                    : _refreshEstimateCache,
+                                child: Text(
+                                  _refreshingEstimateCache
+                                      ? 'Refreshing estimates...'
+                                      : 'Refresh estimates',
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (_setupStatusMessage != null) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              _setupStatusMessage!,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: scheme.primary,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ],
-                        ),
-                        if (_setupStatusMessage != null) ...[
-                          const SizedBox(height: 12),
+                          if (_manualIndexing) ...[
+                            const SizedBox(height: 12),
+                            LinearProgressIndicator(
+                              value: _manualIndexTotal > 0
+                                  ? _manualIndexCompleted / _manualIndexTotal
+                                  : null,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _manualIndexTotal > 0
+                                  ? 'Indexing $_manualIndexCompleted of $_manualIndexTotal'
+                                  : 'Indexing new/changed books...',
+                            ),
+                            if (_manualIndexCurrentTitle != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Current: $_manualIndexCurrentTitle',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ],
+                          if (_manualIndexStatus != null) ...[
+                            const SizedBox(height: 8),
+                            Text(_manualIndexStatus!),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Text(
-                            _setupStatusMessage!,
+                            'Install eLibrary Collections',
+                            style: theme.textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Choose your eLibrary collections and formats, then use Install Selected to begin. The selection buttons only change checkmarks; they do not start a download.',
                             style: theme.textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              ActionChip(
+                                label: const Text(
+                                  'Select All Collections + All File Types',
+                                ),
+                                onPressed: _running
+                                    ? null
+                                    : _selectAllCollectionsAndFormats,
+                              ),
+                              ActionChip(
+                                label: const Text('Clear All'),
+                                onPressed: _running
+                                    ? null
+                                    : _clearAllSelections,
+                              ),
+                              ActionChip(
+                                label: const Text('EPUB Only'),
+                                onPressed: _running ? null : _setPresetEpubOnly,
+                              ),
+                              ActionChip(
+                                label: const Text('PDF Only'),
+                                onPressed: _running ? null : _setPresetPdfOnly,
+                              ),
+                              ActionChip(
+                                label: const Text('EPUB + PDF'),
+                                onPressed: _running ? null : _setPresetBoth,
+                              ),
+                            ],
+                          ),
+                          if (_selectionWarning != null) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              _selectionWarning!,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: scheme.error,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 16),
+                          CheckboxListTile(
+                            value: _installBooks,
+                            onChanged: _running
+                                ? null
+                                : (value) => setState(() {
+                                    _installBooks = value ?? false;
+                                    _clearSelectionWarning();
+                                  }),
+                            title: const Text('Install EGW Books'),
+                            subtitle: Text(
+                              _estimateLineForCollection(0),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          CheckboxListTile(
+                            value: _installDevotionals,
+                            onChanged: _running
+                                ? null
+                                : (value) => setState(() {
+                                    _installDevotionals = value ?? false;
+                                    _clearSelectionWarning();
+                                  }),
+                            title: const Text('Install EGW Devotionals'),
+                            subtitle: Text(
+                              _estimateLineForCollection(1),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          CheckboxListTile(
+                            value: _installCommentaries,
+                            onChanged: _running
+                                ? null
+                                : (value) => setState(() {
+                                    _installCommentaries = value ?? false;
+                                    _clearSelectionWarning();
+                                  }),
+                            title: const Text('Install EGW Commentaries'),
+                            subtitle: Text(
+                              _estimateLineForCollection(2),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          CheckboxListTile(
+                            value: _installMiscCollections,
+                            onChanged: _running
+                                ? null
+                                : (value) => setState(() {
+                                    _installMiscCollections = value ?? false;
+                                    _clearSelectionWarning();
+                                  }),
+                            title: const Text('Install EGW Misc Collections'),
+                            subtitle: Text(
+                              _estimateLineForCollection(3),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          CheckboxListTile(
+                            value: _installPamphlets,
+                            onChanged: _running
+                                ? null
+                                : (value) => setState(() {
+                                    _installPamphlets = value ?? false;
+                                    _clearSelectionWarning();
+                                  }),
+                            title: const Text('Install EGW Pamphlets'),
+                            subtitle: Text(
+                              _estimateLineForCollection(4),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          CheckboxListTile(
+                            value: _installPeriodicals,
+                            onChanged: _running
+                                ? null
+                                : (value) => setState(() {
+                                    _installPeriodicals = value ?? false;
+                                    _clearSelectionWarning();
+                                  }),
+                            title: const Text('Install EGW Periodicals'),
+                            subtitle: Text(
+                              _estimateLineForCollection(5),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          CheckboxListTile(
+                            value: _installManuscriptReleases,
+                            onChanged: _running
+                                ? null
+                                : (value) => setState(() {
+                                    _installManuscriptReleases = value ?? false;
+                                    _clearSelectionWarning();
+                                  }),
+                            title: const Text(
+                              'Install EGW Manuscript Releases',
+                            ),
+                            subtitle: Text(
+                              _estimateLineForCollection(6),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _selectedDownloadSummary(),
+                            style: theme.textTheme.titleMedium?.copyWith(
                               color: scheme.primary,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                        ],
-                        if (_manualIndexing) ...[
-                          const SizedBox(height: 12),
-                          LinearProgressIndicator(
-                            value: _manualIndexTotal > 0
-                                ? _manualIndexCompleted / _manualIndexTotal
-                                : null,
+                          const Divider(height: 24),
+                          CheckboxListTile(
+                            value: _installEpub,
+                            onChanged: _running
+                                ? null
+                                : (value) => setState(() {
+                                    _installEpub = value ?? false;
+                                    _clearSelectionWarning();
+                                  }),
+                            title: const Text('EPUB'),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          CheckboxListTile(
+                            value: _installPdf,
+                            onChanged: _running
+                                ? null
+                                : (value) => setState(() {
+                                    _installPdf = value ?? false;
+                                    _clearSelectionWarning();
+                                  }),
+                            title: const Text('PDF'),
+                            contentPadding: EdgeInsets.zero,
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            _manualIndexTotal > 0
-                                ? 'Indexing $_manualIndexCompleted of $_manualIndexTotal'
-                                : 'Indexing new/changed books...',
-                          ),
-                          if (_manualIndexCurrentTitle != null) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              'Current: $_manualIndexCurrentTitle',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ],
-                        if (_manualIndexStatus != null) ...[
-                          const SizedBox(height: 8),
-                          Text(_manualIndexStatus!),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Download choices',
-                          style: theme.textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Choose your EGW collections and formats, then use Install all or Install Selected to begin.',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
-                          children: [
-                            ActionChip(
-                              label: const Text('Install all'),
-                              onPressed: _running
-                                  ? null
-                                  : () {
-                                      _setPresetAll();
-                                      _startSetup();
-                                    },
-                            ),
-                            ActionChip(
-                              label: const Text('EPUB only'),
-                              onPressed: _running ? null : _setPresetEpubOnly,
-                            ),
-                            ActionChip(
-                              label: const Text('PDF only'),
-                              onPressed: _running ? null : _setPresetPdfOnly,
-                            ),
-                            ActionChip(
-                              label: const Text('EPUB and PDF'),
-                              onPressed: _running ? null : _setPresetBoth,
-                            ),
-                            ActionChip(
-                              label: const Text('Skip EGW download'),
-                              onPressed: _running ? null : _setPresetSkip,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        CheckboxListTile(
-                          value: _installBooks,
-                          onChanged: _running
-                              ? null
-                              : (value) => setState(
-                                  () => _installBooks = value ?? false,
-                                ),
-                          title: const Text('Install EGW Books'),
-                          subtitle: Text(
-                            _estimateLineForCollection(0),
-                            style: theme.textTheme.bodySmall?.copyWith(
+                            'This app does not include or redistribute these books. If you choose to download them, the files are downloaded directly from the official EGW Writings website into your own local eLibrary folder. Please honor the terms and notices of the source website and do not redistribute the downloaded files.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
                               color: scheme.onSurfaceVariant,
                             ),
-                          ),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        CheckboxListTile(
-                          value: _installDevotionals,
-                          onChanged: _running
-                              ? null
-                              : (value) => setState(
-                                  () => _installDevotionals = value ?? false,
-                                ),
-                          title: const Text('Install EGW Devotionals'),
-                          subtitle: Text(
-                            _estimateLineForCollection(1),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        CheckboxListTile(
-                          value: _installCommentaries,
-                          onChanged: _running
-                              ? null
-                              : (value) => setState(
-                                  () => _installCommentaries = value ?? false,
-                                ),
-                          title: const Text('Install EGW Commentaries'),
-                          subtitle: Text(
-                            _estimateLineForCollection(2),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        CheckboxListTile(
-                          value: _installMiscCollections,
-                          onChanged: _running
-                              ? null
-                              : (value) => setState(
-                                  () =>
-                                      _installMiscCollections = value ?? false,
-                                ),
-                          title: const Text('Install EGW Misc Collections'),
-                          subtitle: Text(
-                            _estimateLineForCollection(3),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        CheckboxListTile(
-                          value: _installPamphlets,
-                          onChanged: _running
-                              ? null
-                              : (value) => setState(
-                                  () => _installPamphlets = value ?? false,
-                                ),
-                          title: const Text('Install EGW Pamphlets'),
-                          subtitle: Text(
-                            _estimateLineForCollection(4),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        CheckboxListTile(
-                          value: _installPeriodicals,
-                          onChanged: _running
-                              ? null
-                              : (value) => setState(
-                                  () => _installPeriodicals = value ?? false,
-                                ),
-                          title: const Text('Install EGW Periodicals'),
-                          subtitle: Text(
-                            _estimateLineForCollection(5),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        CheckboxListTile(
-                          value: _installManuscriptReleases,
-                          onChanged: _running
-                              ? null
-                              : (value) => setState(
-                                  () => _installManuscriptReleases =
-                                      value ?? false,
-                                ),
-                          title: const Text('Install EGW Manuscript Releases'),
-                          subtitle: Text(
-                            _estimateLineForCollection(6),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _selectedDownloadSummary(),
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: scheme.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const Divider(height: 24),
-                        CheckboxListTile(
-                          value: _installEpub,
-                          onChanged: _running
-                              ? null
-                              : (value) => setState(
-                                  () => _installEpub = value ?? false,
-                                ),
-                          title: const Text('EPUB'),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        CheckboxListTile(
-                          value: _installPdf,
-                          onChanged: _running
-                              ? null
-                              : (value) => setState(
-                                  () => _installPdf = value ?? false,
-                                ),
-                          title: const Text('PDF'),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'This app does not include or redistribute these books. If you choose to download them, the files are downloaded directly from the official EGW Writings website into your own local eLibrary folder. Please honor the terms and notices of the source website and do not redistribute the downloaded files.',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (_running) ...[
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (_indexing) ...[
-                            const LinearProgressIndicator(),
-                            const SizedBox(height: 12),
-                            Text(
-                              _setupStatusMessage ??
-                                  'Indexing new/changed books...',
-                            ),
-                          ] else ...[
-                            const LinearProgressIndicator(),
-                            const SizedBox(height: 12),
-                            Text(
-                              _setupStatusMessage ??
-                                  _progress?.statusMessage ??
-                                  'Preparing download...',
-                            ),
-                          ],
-                          const SizedBox(height: 8),
-                          Text(
-                            '${_progress?.currentCollection ?? 'Collection'} '
-                            '${_progress?.collectionIndex ?? 0}/${_progress?.collectionTotal ?? 0}',
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Downloaded: ${_progress?.downloadedCount ?? 0}  '
-                            'Skipped: ${_progress?.skippedCount ?? 0}  '
-                            'Failed: ${_progress?.failedCount ?? 0}',
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Current file: ${_progress?.currentFile ?? '-'}',
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Elapsed: ${(_progress?.elapsedSeconds ?? 0).toStringAsFixed(1)}s',
                           ),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 12),
-                ],
-                if (_downloadReport != null) ...[
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(20),
@@ -977,69 +1303,309 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Setup complete',
+                            'Manage Downloaded Files',
                             style: theme.textTheme.titleLarge,
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 6),
                           Text(
-                            'Downloaded: ${_downloadReport!.filesDownloaded.length}',
+                            'These removal actions only touch the managed eLibrary EPUB/PDF folders under the current Library Root. User tags, notes, highlights, bookmarks, saved presentations, and user.db are not deleted.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
                           ),
-                          Text(
-                            'Skipped existing: ${_downloadReport!.filesSkipped.length}',
+                          const SizedBox(height: 12),
+                          if (_loadingStorageSummary)
+                            const LinearProgressIndicator()
+                          else if (_storageSummary != null) ...[
+                            Text(
+                              'Downloaded library files: '
+                              '${_storageSummary!.epubCount} EPUB '
+                              '(${_formatBytes(_storageSummary!.epubSizeBytes)}), '
+                              '${_storageSummary!.pdfCount} PDF '
+                              '(${_formatBytes(_storageSummary!.pdfSizeBytes)}), '
+                              'total ${_storageSummary!.totalCount} files '
+                              '(${_formatBytes(_storageSummary!.totalSizeBytes)}).',
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              OutlinedButton(
+                                onPressed:
+                                    (_running ||
+                                        _removingFiles ||
+                                        selection?.isExplicitlySelected != true)
+                                    ? null
+                                    : () => _removeDownloadedFiles(
+                                        collectionNames:
+                                            _selectedCollectionNames(),
+                                        formats: _selectedFormats(),
+                                        actionLabel: 'Remove Selected',
+                                      ),
+                                child: const Text('Remove Selected'),
+                              ),
+                              OutlinedButton(
+                                onPressed:
+                                    (_running ||
+                                        _removingFiles ||
+                                        selection?.isExplicitlySelected != true)
+                                    ? null
+                                    : () => _removeDownloadedFiles(
+                                        collectionNames: _collectionKeys
+                                            .toSet(),
+                                        formats: const {
+                                          ELibraryManagedDownloadFormat.epub,
+                                        },
+                                        actionLabel: 'Remove EPUBs',
+                                      ),
+                                child: const Text('Remove EPUBs'),
+                              ),
+                              OutlinedButton(
+                                onPressed:
+                                    (_running ||
+                                        _removingFiles ||
+                                        selection?.isExplicitlySelected != true)
+                                    ? null
+                                    : () => _removeDownloadedFiles(
+                                        collectionNames: _collectionKeys
+                                            .toSet(),
+                                        formats: const {
+                                          ELibraryManagedDownloadFormat.pdf,
+                                        },
+                                        actionLabel: 'Remove PDFs',
+                                      ),
+                                child: const Text('Remove PDFs'),
+                              ),
+                              FilledButton.tonal(
+                                onPressed:
+                                    (_running ||
+                                        _removingFiles ||
+                                        selection?.isExplicitlySelected != true)
+                                    ? null
+                                    : () => _removeDownloadedFiles(
+                                        collectionNames: _collectionKeys
+                                            .toSet(),
+                                        formats: const {
+                                          ELibraryManagedDownloadFormat.epub,
+                                          ELibraryManagedDownloadFormat.pdf,
+                                        },
+                                        actionLabel:
+                                            'Remove All Downloaded Library Files',
+                                      ),
+                                child: const Text(
+                                  'Remove All Downloaded Library Files',
+                                ),
+                              ),
+                            ],
                           ),
-                          Text('Failed: ${_downloadReport!.failures.length}'),
-                          Text('Indexed: $_indexedCount'),
-                          Text('Indexing errors: $_indexingErrors'),
-                          Text(
-                            'Elapsed: ${_downloadReport!.elapsedSeconds.toStringAsFixed(1)}s',
-                          ),
-                          const SizedBox(height: 8),
-                          SelectableText(
-                            _setupReportPath ?? _downloadReport!.reportFilePath,
-                          ),
-                          if (_indexReportPath != null) ...[
-                            const SizedBox(height: 8),
-                            SelectableText(_indexReportPath!),
+                          if (_removingFiles) ...[
+                            const SizedBox(height: 12),
+                            const LinearProgressIndicator(),
                           ],
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 12),
-                ],
-                if (_error != null) ...[
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Text(
-                        _error!,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: scheme.error,
+                  if (_running) ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (_indexing) ...[
+                              const LinearProgressIndicator(),
+                              const SizedBox(height: 12),
+                              Text(
+                                _setupStatusMessage ??
+                                    'Indexing new/changed books...',
+                              ),
+                            ] else ...[
+                              const LinearProgressIndicator(),
+                              const SizedBox(height: 12),
+                              Text(
+                                _setupStatusMessage ??
+                                    _progress?.statusMessage ??
+                                    'Preparing download...',
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                            Text(
+                              '${_progress?.currentCollection ?? 'Collection'} '
+                              '${_progress?.collectionIndex ?? 0}/${_progress?.collectionTotal ?? 0}',
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Downloaded: ${_progress?.downloadedCount ?? 0}  '
+                              'Skipped: ${_progress?.skippedCount ?? 0}  '
+                              'Unavailable: ${_progress?.unavailableCount ?? 0}  '
+                              'Failed: ${_progress?.failedCount ?? 0}',
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Current file: ${_progress?.currentFile ?? '-'}',
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Elapsed: ${(_progress?.elapsedSeconds ?? 0).toStringAsFixed(1)}s',
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Text(
-                          'To add your own files later, place them in the appropriate folder and then tap Index New/Changed Books.',
+                    const SizedBox(height: 12),
+                  ],
+                  if (_downloadReport != null) ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Setup complete',
+                              style: theme.textTheme.titleLarge,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Downloaded: ${_downloadReport!.filesDownloaded.length}',
+                            ),
+                            Text(
+                              'Skipped existing: ${_downloadReport!.filesSkipped.length}',
+                            ),
+                            Text(
+                              'Unavailable: ${_downloadReport!.filesUnavailable.length}',
+                            ),
+                            Text('Failed: ${_downloadReport!.failures.length}'),
+                            Text('Indexed: $_indexedCount'),
+                            Text('Indexing errors: $_indexingErrors'),
+                            Text(
+                              'Elapsed: ${_downloadReport!.elapsedSeconds.toStringAsFixed(1)}s',
+                            ),
+                            if (_downloadReport!
+                                .filesUnavailable
+                                .isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                _downloadUnavailableSummary(_downloadReport) ??
+                                    'Some books did not have a verified EPUB download URL.',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: scheme.tertiary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SelectableText(
+                                _downloadReport!.filesUnavailable
+                                    .take(3)
+                                    .map(
+                                      (item) =>
+                                          '${item.title} (${item.format.toUpperCase()}): ${item.sourceUrl}\n${item.error ?? "No diagnostic details available."}',
+                                    )
+                                    .join('\n\n'),
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                            if (_downloadReport!.failures.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                _downloadFailureSummary(_downloadReport) ??
+                                    'Some eLibrary files could not be downloaded.',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: scheme.error,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SelectableText(
+                                _downloadReport!.failures.first.error ??
+                                    'No diagnostic details available.',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                            SelectableText(
+                              _setupReportPath ??
+                                  _downloadReport!.reportFilePath,
+                            ),
+                            if (_indexReportPath != null) ...[
+                              const SizedBox(height: 8),
+                              SelectableText(_indexReportPath!),
+                            ],
+                          ],
                         ),
-                        SizedBox(height: 12),
-                        SelectableText(
-                          'Commentary EPUBs:\nLibraryRoot/ePubs/Commentaries/User/\n\nCommentary PDFs:\nLibraryRoot/PDFs/Commentaries/User/\n\nResearch EPUBs:\nLibraryRoot/ePubs/Research/User/\n\nResearch PDFs:\nLibraryRoot/PDFs/Research/User/',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  if (_error != null) ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _error!,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: scheme.error,
+                              ),
+                            ),
+                            if (_errorDetails != null &&
+                                _errorDetails!.trim().isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              SelectableText(
+                                _errorDetails!,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                      ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'To add your own files later, place them in the appropriate folder and then tap Index New/Changed Books.',
+                          ),
+                          SizedBox(height: 12),
+                          SelectableText(
+                            'EGW EPUBs:\nLibraryRoot/ePubs/EGW/\n\nEGW PDFs:\nLibraryRoot/PDFs/EGW/\n\nThe setup screen uses the simplified EGW folder layout.',
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+      ),
     );
+  }
+
+  Widget _setupLeading(BuildContext context) {
+    final inset = defaultTargetPlatform == TargetPlatform.macOS ? 48.0 : 0.0;
+    return Padding(
+      padding: EdgeInsets.only(left: inset),
+      child: const BackButton(),
+    );
+  }
+
+  double _setupLeadingWidth() {
+    return 56 + (defaultTargetPlatform == TargetPlatform.macOS ? 48.0 : 0.0);
   }
 }

@@ -21,6 +21,30 @@ class LegacyELibraryMigrationService {
   static final LegacyELibraryMigrationService instance =
       LegacyELibraryMigrationService._();
 
+  Future<bool> hasMigrationCandidates() async {
+    final rootPath = await _writableLibraryRootPath();
+    if (rootPath == null) return false;
+
+    final scannedRoots = <String>[
+      p.join(rootPath, 'ePubs'),
+      p.join(rootPath, 'PDFs'),
+      p.join(rootPath, 'Commentaries'),
+      p.join(rootPath, 'Research'),
+      p.join(rootPath, 'TEST_Downloads'),
+    ];
+
+    final discovered = <File>[];
+    final seen = <String>{};
+    for (final sourceRoot in scannedRoots) {
+      final directory = Directory(sourceRoot);
+      if (!await directory.exists()) continue;
+      await _collectLegacyFiles(directory, discovered, seen);
+      if (discovered.isNotEmpty) return true;
+    }
+
+    return false;
+  }
+
   Future<LegacyELibraryMigrationReport> migrate({
     void Function(LegacyELibraryMigrationProgress progress)? onProgress,
     bool Function()? isCancelled,
@@ -49,23 +73,23 @@ class LegacyELibraryMigrationService {
       startedAt: startedAt,
       sourcePathsScanned: scannedRoots,
       destinationPathsCreated: <String>[
-        p.join(rootPath, 'ePubs', 'Commentaries', 'EGW_Commentaries'),
+        p.join(rootPath, 'ePubs', 'EGW', 'EGW_Commentaries'),
+        p.join(rootPath, 'ePubs', 'EGW', 'EGW_Books'),
+        p.join(rootPath, 'ePubs', 'EGW', 'EGW_Devotionals'),
+        p.join(rootPath, 'ePubs', 'EGW', 'EGW_Misc_Collections'),
+        p.join(rootPath, 'ePubs', 'EGW', 'EGW_Pamphlets'),
+        p.join(rootPath, 'ePubs', 'EGW', 'EGW_Periodicals'),
+        p.join(rootPath, 'ePubs', 'EGW', 'EGW_Manuscript_Releases'),
         p.join(rootPath, 'ePubs', 'Commentaries', 'User'),
-        p.join(rootPath, 'ePubs', 'Research', 'EGW_Books'),
-        p.join(rootPath, 'ePubs', 'Research', 'EGW_Devotionals'),
-        p.join(rootPath, 'ePubs', 'Research', 'EGW_Misc_Collections'),
-        p.join(rootPath, 'ePubs', 'Research', 'EGW_Pamphlets'),
-        p.join(rootPath, 'ePubs', 'Research', 'EGW_Periodicals'),
-        p.join(rootPath, 'ePubs', 'Research', 'EGW_Manuscript_Releases'),
         p.join(rootPath, 'ePubs', 'Research', 'User'),
-        p.join(rootPath, 'PDFs', 'Commentaries', 'EGW_Commentaries'),
+        p.join(rootPath, 'PDFs', 'EGW', 'EGW_Commentaries'),
+        p.join(rootPath, 'PDFs', 'EGW', 'EGW_Books'),
+        p.join(rootPath, 'PDFs', 'EGW', 'EGW_Devotionals'),
+        p.join(rootPath, 'PDFs', 'EGW', 'EGW_Misc_Collections'),
+        p.join(rootPath, 'PDFs', 'EGW', 'EGW_Pamphlets'),
+        p.join(rootPath, 'PDFs', 'EGW', 'EGW_Periodicals'),
+        p.join(rootPath, 'PDFs', 'EGW', 'EGW_Manuscript_Releases'),
         p.join(rootPath, 'PDFs', 'Commentaries', 'User'),
-        p.join(rootPath, 'PDFs', 'Research', 'EGW_Books'),
-        p.join(rootPath, 'PDFs', 'Research', 'EGW_Devotionals'),
-        p.join(rootPath, 'PDFs', 'Research', 'EGW_Misc_Collections'),
-        p.join(rootPath, 'PDFs', 'Research', 'EGW_Pamphlets'),
-        p.join(rootPath, 'PDFs', 'Research', 'EGW_Periodicals'),
-        p.join(rootPath, 'PDFs', 'Research', 'EGW_Manuscript_Releases'),
         p.join(rootPath, 'PDFs', 'Research', 'User'),
       ],
     );
@@ -323,24 +347,16 @@ class LegacyELibraryMigrationService {
 
   bool _isCanonicalPath(String path) {
     final normalized = p.normalize(path).toLowerCase();
+    for (final folder in ELibraryFolderPolicy.allManagedEgwFolderDefinitions) {
+      final canonical = p.normalize(folder.relativeFolder).toLowerCase();
+      if (normalized.contains(canonical)) return true;
+    }
     for (final canonical in const [
-      'epubs/commentaries/egw_commentaries',
+      'epubs/egw',
+      'pdfs/egw',
       'epubs/commentaries/user',
-      'epubs/research/egw_books',
-      'epubs/research/egw_devotionals',
-      'epubs/research/egw_misc_collections',
-      'epubs/research/egw_pamphlets',
-      'epubs/research/egw_periodicals',
-      'epubs/research/egw_manuscript_releases',
       'epubs/research/user',
-      'pdfs/commentaries/egw_commentaries',
       'pdfs/commentaries/user',
-      'pdfs/research/egw_books',
-      'pdfs/research/egw_devotionals',
-      'pdfs/research/egw_misc_collections',
-      'pdfs/research/egw_pamphlets',
-      'pdfs/research/egw_periodicals',
-      'pdfs/research/egw_manuscript_releases',
       'pdfs/research/user',
     ]) {
       if (normalized.contains(canonical)) return true;
@@ -360,7 +376,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('$fileRoot/egw_books')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Books', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Books', fileName),
           reason: 'Legacy TEST_Downloads EGW Books path.',
           libraryRole: 'research',
           collectionName: 'EGW Books',
@@ -371,7 +387,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('$fileRoot/egw_devotionals')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Devotionals', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Devotionals', fileName),
           reason: 'Legacy TEST_Downloads EGW Devotionals path.',
           libraryRole: 'research',
           collectionName: 'EGW Devotionals',
@@ -382,7 +398,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('$fileRoot/commentaries')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Commentaries', 'EGW_Commentaries', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Commentaries', fileName),
           reason: 'Legacy TEST_Downloads commentaries path.',
           libraryRole: 'commentary',
           collectionName: 'EGW Commentaries',
@@ -404,7 +420,7 @@ class LegacyELibraryMigrationService {
     if (parts.first == 'commentaries') {
       return _LegacyClassification(
         destinationRelativePath: (fileName) =>
-            p.join(fileRoot, 'Commentaries', 'EGW_Commentaries', fileName),
+            p.join(fileRoot, 'EGW', 'EGW_Commentaries', fileName),
         reason: 'Legacy Commentary folder.',
         libraryRole: 'commentary',
         collectionName: 'EGW Commentaries',
@@ -417,7 +433,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('egw_books')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Books', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Books', fileName),
           reason: 'Legacy Research EGW Books folder.',
           libraryRole: 'research',
           collectionName: 'EGW Books',
@@ -428,7 +444,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('egw_devotionals')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Devotionals', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Devotionals', fileName),
           reason: 'Legacy Research EGW Devotionals folder.',
           libraryRole: 'research',
           collectionName: 'EGW Devotionals',
@@ -439,7 +455,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('egw_misc_collections')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Misc_Collections', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Misc_Collections', fileName),
           reason: 'Legacy Research EGW Misc Collections folder.',
           libraryRole: 'research',
           collectionName: 'EGW Misc Collections',
@@ -450,7 +466,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('egw_pamphlets')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Pamphlets', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Pamphlets', fileName),
           reason: 'Legacy Research EGW Pamphlets folder.',
           libraryRole: 'research',
           collectionName: 'EGW Pamphlets',
@@ -461,7 +477,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('egw_periodicals')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Periodicals', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Periodicals', fileName),
           reason: 'Legacy Research EGW Periodicals folder.',
           libraryRole: 'research',
           collectionName: 'EGW Periodicals',
@@ -472,7 +488,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('egw_manuscript_releases')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Manuscript_Releases', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Manuscript_Releases', fileName),
           reason: 'Legacy Research EGW Manuscript Releases folder.',
           libraryRole: 'research',
           collectionName: 'EGW Manuscript Releases',
@@ -495,7 +511,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('egw_books')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Books', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Books', fileName),
           reason: 'Legacy ePub/PDF EGW Books folder.',
           libraryRole: 'research',
           collectionName: 'EGW Books',
@@ -506,7 +522,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('egw_devotionals')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Devotionals', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Devotionals', fileName),
           reason: 'Legacy ePub/PDF EGW Devotionals folder.',
           libraryRole: 'research',
           collectionName: 'EGW Devotionals',
@@ -517,7 +533,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('egw_misc_collections')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Misc_Collections', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Misc_Collections', fileName),
           reason: 'Legacy ePub/PDF EGW Misc Collections folder.',
           libraryRole: 'research',
           collectionName: 'EGW Misc Collections',
@@ -528,7 +544,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('egw_pamphlets')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Pamphlets', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Pamphlets', fileName),
           reason: 'Legacy ePub/PDF EGW Pamphlets folder.',
           libraryRole: 'research',
           collectionName: 'EGW Pamphlets',
@@ -539,7 +555,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('egw_periodicals')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Periodicals', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Periodicals', fileName),
           reason: 'Legacy ePub/PDF EGW Periodicals folder.',
           libraryRole: 'research',
           collectionName: 'EGW Periodicals',
@@ -550,7 +566,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('egw_manuscript_releases')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Research', 'EGW_Manuscript_Releases', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Manuscript_Releases', fileName),
           reason: 'Legacy ePub/PDF EGW Manuscript Releases folder.',
           libraryRole: 'research',
           collectionName: 'EGW Manuscript Releases',
@@ -561,7 +577,7 @@ class LegacyELibraryMigrationService {
       if (normalized.contains('commentaries')) {
         return _LegacyClassification(
           destinationRelativePath: (fileName) =>
-              p.join(fileRoot, 'Commentaries', 'EGW_Commentaries', fileName),
+              p.join(fileRoot, 'EGW', 'EGW_Commentaries', fileName),
           reason: 'Legacy ePub/PDF commentaries folder.',
           libraryRole: 'commentary',
           collectionName: 'EGW Commentaries',
@@ -789,12 +805,10 @@ class LegacyELibraryMigrationService {
   }
 
   Future<String?> _writableLibraryRootPath() async {
-    final accessible = await LibraryRootService.instance
-        .accessibleLibraryRootPath();
-    if (accessible != null && accessible.trim().isNotEmpty) return accessible;
-    final selection = await LibraryRootService.instance.loadSelection();
-    if (selection.path == null || !selection.exists) return null;
-    return selection.path;
+    final explicit = await LibraryRootService.instance
+        .explicitLibraryRootPath();
+    if (explicit != null && explicit.trim().isNotEmpty) return explicit;
+    return null;
   }
 
   Future<String> _sha256ForFile(File file) async {

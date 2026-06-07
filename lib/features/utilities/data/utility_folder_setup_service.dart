@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/library_root_service.dart';
@@ -453,19 +452,19 @@ class UtilityFolderSetupService {
   }
 
   Future<UtilityFolderConfig> _defaultConfig() async {
-    final libraryRoot = await LibraryRootService.instance.libraryRootPath();
-    if (libraryRoot != null) {
+    final explicitRoot =
+        await LibraryRootService.instance.explicitLibraryRootPath();
+    if (explicitRoot != null) {
       return UtilityFolderConfig(
-        commentaryLocalRoot: p.join(libraryRoot, 'Commentaries'),
-        researchLocalRoot: p.join(libraryRoot, 'Research'),
-        elibraryLocalRoot: p.join(libraryRoot, 'ePubs'),
-        imagesLocalRoot: p.join(libraryRoot, 'Images'),
-        translationsLocalRoot: p.join(libraryRoot, 'Translations'),
+        commentaryLocalRoot: p.join(explicitRoot, 'Commentaries'),
+        researchLocalRoot: p.join(explicitRoot, 'Research'),
+        elibraryLocalRoot: p.join(explicitRoot, 'ePubs'),
+        imagesLocalRoot: p.join(explicitRoot, 'Images'),
+        translationsLocalRoot: p.join(explicitRoot, 'Translations'),
         cloudRoot: null,
       );
     }
-    final supportDir = await getApplicationSupportDirectory();
-    final root = p.join(supportDir.path, 'BiblicalHeritage');
+    final root = await LibraryRootService.instance.defaultAppLibraryRootPath();
     return UtilityFolderConfig(
       commentaryLocalRoot: p.join(root, 'Commentary'),
       researchLocalRoot: p.join(root, 'Research'),
@@ -477,8 +476,20 @@ class UtilityFolderSetupService {
   }
 
   Future<UtilityFolderConfig> _withLibraryRoot(UtilityFolderConfig config) async {
-    final libraryRoot = await LibraryRootService.instance.libraryRootPath();
-    if (libraryRoot == null) return config;
+    final libraryRoot =
+        await LibraryRootService.instance.explicitLibraryRootPath();
+    if (libraryRoot == null) {
+      final defaultRoot =
+          await LibraryRootService.instance.defaultAppLibraryRootPath();
+      return UtilityFolderConfig(
+        commentaryLocalRoot: p.join(defaultRoot, 'Commentary'),
+        researchLocalRoot: p.join(defaultRoot, 'Research'),
+        elibraryLocalRoot: p.join(defaultRoot, 'eLibrary'),
+        imagesLocalRoot: p.join(defaultRoot, 'Images'),
+        translationsLocalRoot: p.join(defaultRoot, 'Translations'),
+        cloudRoot: config.cloudRoot,
+      );
+    }
     return UtilityFolderConfig(
       commentaryLocalRoot: p.join(libraryRoot, 'Commentaries'),
       researchLocalRoot: p.join(libraryRoot, 'Research'),

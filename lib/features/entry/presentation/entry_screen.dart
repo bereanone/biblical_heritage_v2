@@ -29,7 +29,7 @@ class _EntryScreenState extends State<EntryScreen> {
       builder: (context) => AlertDialog(
         title: const Text('About'),
         content: const Text(
-          'Biblical Heritage\n'
+          'Biblical Heritage StudyBible 2.0\n'
           'Version 2.0\n'
           '© 2026 Dean Bowen — All Rights Reserved.\n'
           'Built with Flutter.\n\n'
@@ -139,7 +139,7 @@ class _EntryScreenState extends State<EntryScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Biblical Heritage',
+                          'Biblical Heritage StudyBible 2.0',
                           style: TextStyle(
                             fontFamily: 'PlayfairDisplay',
                             fontSize: titleSize,
@@ -151,7 +151,7 @@ class _EntryScreenState extends State<EntryScreen> {
                           textAlign: TextAlign.center,
                         ),
                         Text(
-                          '#StudyBible',
+                          '#StudyBible2',
                           style: TextStyle(
                             fontFamily: 'Roboto',
                             fontSize: hashSize,
@@ -226,7 +226,7 @@ class _EntryScreenState extends State<EntryScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                ElevatedButton(
+                              ElevatedButton(
                                   style: ElevatedButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 40,

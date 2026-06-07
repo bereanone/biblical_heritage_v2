@@ -64,7 +64,7 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'StudyBible',
+      title: 'Biblical Heritage StudyBible 2.0',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(_themeMode, settings: _visualSettings),
       home: _loadedTheme

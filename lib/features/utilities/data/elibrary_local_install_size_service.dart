@@ -20,7 +20,7 @@ class ELibraryLocalInstallSizeService {
         .loadByCollectionAndFormat();
     if (cachedEstimates.isEmpty) return;
 
-    final localSizes = await scanInstalledCollectionSizes(
+    final localSizes = await _scanInstalledCollectionSizes(
       rootPath: resolvedRootPath,
     );
     final checkedAt = DateTime.now().toUtc();
@@ -47,27 +47,30 @@ class ELibraryLocalInstallSizeService {
   }
 
   Future<Map<String, Map<String, _LocalCollectionSize>>>
-  scanInstalledCollectionSizes({
-    String? rootPath,
-  }) async {
+  _scanInstalledCollectionSizes({String? rootPath}) async {
     final resolvedRootPath = await _resolveRootPath(rootPath);
     if (resolvedRootPath == null) {
       return const <String, Map<String, _LocalCollectionSize>>{};
     }
 
     final totals = <String, Map<String, _MutableLocalCollectionSize>>{};
-    for (final folder in ELibraryFolderPolicy.managedEgwFolderDefinitions) {
-      final directory = Directory(p.join(resolvedRootPath, folder.relativeFolder));
+    for (final folder in ELibraryFolderPolicy.allManagedEgwFolderDefinitions) {
+      final directory = Directory(
+        p.join(resolvedRootPath, folder.relativeFolder),
+      );
       if (!await directory.exists()) continue;
 
-      final format = p
-              .split(p.normalize(folder.relativeFolder))
-              .firstWhere(
-                (segment) => segment.toLowerCase() == 'epubs' || segment.toLowerCase() == 'pdfs',
-                orElse: () => '',
-              )
-              .toLowerCase() ==
-          'epubs'
+      final format =
+          p
+                  .split(p.normalize(folder.relativeFolder))
+                  .firstWhere(
+                    (segment) =>
+                        segment.toLowerCase() == 'epubs' ||
+                        segment.toLowerCase() == 'pdfs',
+                    orElse: () => '',
+                  )
+                  .toLowerCase() ==
+              'epubs'
           ? 'epub'
           : 'pdf';
 
@@ -114,13 +117,10 @@ class ELibraryLocalInstallSizeService {
     final normalized = rootPath?.trim() ?? '';
     if (normalized.isNotEmpty) return normalized;
 
-    final accessible = await LibraryRootService.instance
-        .accessibleLibraryRootPath();
-    if (accessible != null && accessible.trim().isNotEmpty) return accessible;
-
-    final selection = await LibraryRootService.instance.loadSelection();
-    if (selection.path == null || !selection.exists) return null;
-    return selection.path;
+    final explicit = await LibraryRootService.instance
+        .explicitLibraryRootPath();
+    if (explicit != null && explicit.trim().isNotEmpty) return explicit;
+    return null;
   }
 }
 

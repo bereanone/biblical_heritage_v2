@@ -15,6 +15,7 @@ const String _libraryAllCollectionsFilterLabel = 'All Collections';
 const List<String> _libraryCollectionFilterPriority = <String>[
   'egw_books',
   'egw_devotionals',
+  'egw_commentaries',
   'egw_misc_collections',
   'egw_pamphlets',
   'egw_periodicals',

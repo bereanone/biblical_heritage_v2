@@ -141,9 +141,10 @@ class LibraryCatalogService {
     final items = normalizedRows
         .map(LibraryCatalogItem.fromRow)
         .toList(growable: false);
-    return _dedupeLibraryItems(
+    final result = _dedupeLibraryItems(
       items,
     ).where(_isVisibleLibraryItem).toList(growable: false);
+    return result;
   }
 
   Future<int> refreshManagedItemsFromDisk() async {
@@ -163,7 +164,7 @@ class LibraryCatalogService {
     final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
     var touched = 0;
 
-    for (final folder in ELibraryFolderPolicy.managedEgwFolderDefinitions) {
+    for (final folder in ELibraryFolderPolicy.allManagedEgwFolderDefinitions) {
       final directory = Directory(p.join(rootPath, folder.relativeFolder));
       if (!await directory.exists()) continue;
 
@@ -302,6 +303,138 @@ class LibraryCatalogService {
     return (result.first['cnt'] as num?)?.toInt() ?? 0;
   }
 
+  Future<List<LibraryCatalogItem>> listUnindexedManagedItems({
+    int limit = 500,
+  }) async {
+    return _queryItems(
+      where: '''
+        LOWER(COALESCE(li.file_format, '')) = 'epub'
+        AND LOWER(COALESCE(li.folder_type, '')) IN ('commentary', 'research')
+        AND (
+          LOWER(COALESCE(li.index_status, '')) NOT IN ('indexed', 'indexed_empty')
+          OR NOT EXISTS (
+            SELECT 1 FROM library_text_blocks
+            WHERE library_item_id = li.id
+          )
+        )
+      ''',
+      args: const <Object?>[],
+      limit: limit,
+    );
+  }
+
+  Future<int> countIndexedSearchableItems({String? collectionFilter}) async {
+    final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
+      collectionFilter ?? '',
+    );
+    final db = await UserDatabase.instance.database;
+    final where = <String>['li.deleted_at IS NULL'];
+    final args = <Object?>[];
+    if (normalizedCollectionFilter.isNotEmpty &&
+        normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
+      where.add(_libraryCollectionSearchClause());
+      args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
+    }
+
+    final rows = await db.rawQuery('''
+      SELECT COUNT(DISTINCT li.id) AS cnt
+      FROM library_items li
+      INNER JOIN library_text_blocks ltb ON ltb.library_item_id = li.id
+      WHERE ${where.join(' AND ')}
+      ''', args);
+    return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<int> countCatalogItemsInScope({String? collectionFilter}) async {
+    final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
+      collectionFilter ?? '',
+    );
+    final db = await UserDatabase.instance.database;
+    final where = <String>['li.deleted_at IS NULL'];
+    final args = <Object?>[];
+    if (normalizedCollectionFilter.isNotEmpty &&
+        normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
+      where.add(_libraryCollectionSearchClause());
+      args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
+    }
+
+    final rows = await db.rawQuery('''
+      SELECT COUNT(DISTINCT li.id) AS cnt
+      FROM library_items li
+      WHERE ${where.join(' AND ')}
+      ''', args);
+    return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<int> countSearchContentResults({
+    required String query,
+    String? collectionFilter,
+  }) async {
+    final normalizedTerms = extractLibrarySearchHighlightTerms(query);
+    if (normalizedTerms.isEmpty) {
+      return 0;
+    }
+
+    final db = await UserDatabase.instance.database;
+    final where = <String>['li.deleted_at IS NULL'];
+    final args = <Object?>[];
+    final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
+      collectionFilter ?? '',
+    );
+    if (normalizedCollectionFilter.isNotEmpty &&
+        normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
+      where.add(_libraryCollectionSearchClause());
+      args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
+    }
+
+    var termAdded = false;
+    for (final term in normalizedTerms) {
+      final normalizedTerm = _normalizedLibrarySearchText(term);
+      if (normalizedTerm.isEmpty) continue;
+      final pattern = _librarySearchLikePattern(normalizedTerm);
+      where.add('(${_librarySearchTermClause()})');
+      args.addAll(
+        List<Object?>.filled(_librarySearchClauseFields.length, pattern),
+      );
+      termAdded = true;
+    }
+
+    if (!termAdded) {
+      return 0;
+    }
+
+    final rows = await db.rawQuery('''
+      SELECT COUNT(DISTINCT ltb.library_item_id) AS cnt
+      FROM library_text_blocks ltb
+      INNER JOIN library_items li ON li.id = ltb.library_item_id
+      WHERE ${where.join(' AND ')}
+      ''', args);
+    return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+  }
+
+  String _libraryCollectionSearchClause() {
+    return '''
+      (
+        LOWER(COALESCE(li.collection_name, '')) LIKE ?
+        OR LOWER(COALESCE(li.relative_path, '')) LIKE ?
+        OR LOWER(COALESCE(li.folder_type, '')) LIKE ?
+        OR LOWER(COALESCE(li.library_role, '')) LIKE ?
+      )
+    ''';
+  }
+
+  List<Object?> _libraryCollectionSearchArgs(
+    String normalizedCollectionFilter,
+  ) {
+    final humanizedFilter = normalizedCollectionFilter.replaceAll('_', ' ');
+    return <Object?>[
+      '%$humanizedFilter%',
+      '%$normalizedCollectionFilter%',
+      normalizedCollectionFilter,
+      normalizedCollectionFilter,
+    ];
+  }
+
   Future<List<LibraryCatalogSearchResult>> searchContent({
     required String query,
     int limit = 50,
@@ -315,12 +448,13 @@ class LibraryCatalogService {
     final db = await UserDatabase.instance.database;
     final where = <String>['li.deleted_at IS NULL'];
     final args = <Object?>[];
-    final normalizedCollectionFilter =
-        collectionFilter?.trim().toLowerCase() ?? '';
+    final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
+      collectionFilter ?? '',
+    );
     if (normalizedCollectionFilter.isNotEmpty &&
-        normalizedCollectionFilter != 'all') {
-      where.add("LOWER(COALESCE(li.collection_name, '')) = ?");
-      args.add(normalizedCollectionFilter);
+        normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
+      where.add(_libraryCollectionSearchClause());
+      args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
     }
     // Per-book deduplication: pick the earliest matching paragraph (MIN rowid)
     // per book using a CTE with GROUP BY.  This is far faster than a correlated
@@ -343,6 +477,12 @@ class LibraryCatalogService {
     }
 
     final cteWhere = where.join(' AND ');
+    final fetchLimit =
+        limit *
+        ((normalizedCollectionFilter.isNotEmpty &&
+                normalizedCollectionFilter != _libraryAllCollectionsFilterValue)
+            ? 8
+            : 4);
 
     final rows = await db.rawQuery(
       '''
@@ -394,84 +534,97 @@ class LibraryCatalogService {
         AND eri.paragraph_index = ltb.paragraph_index
       ORDER BY li.title COLLATE NOCASE ASC
       ''',
-      [...args, limit * 4],
+      [...args, fetchLimit],
     );
 
-    final mappedResults = rows.map((row) {
-      final item =
-          LibraryCatalogItem.fromRow({
-            'id': row['item_id'],
-            'title': row['title'],
-            'author': row['author'],
-            'file_name': row['file_name'],
-            'file_hash': row['file_hash'],
-            'relative_path': row['relative_path'],
-            'file_format': row['file_format'],
-            'folder_type': row['folder_type'],
-            'library_role': row['library_role'],
-            'collection_name': row['collection_name'],
-            'source_site': row['source_site'],
-            'source_url': row['source_url'],
-            'source_type': row['source_type'],
-            'cover_path': row['cover_path'],
-            'date_added': row['date_added'],
-            'last_opened': row['last_opened'],
-            'index_status': row['index_status'],
-            'file_size': row['file_size'],
-            'mime_type': row['mime_type'],
-            'spine_index': row['item_spine_index'],
-            'anchor_id': row['item_anchor_id'],
-            'epub_href': row['item_epub_href'],
-            'paragraph_index': row['item_paragraph_index'],
-            'navigation_count': 0,
-          }).copyWith(
-            spineIndex: (row['hit_spine_index'] as num?)?.toInt(),
-            epubHref: row['hit_epub_href']?.toString(),
-            paragraphIndex: (row['paragraph_on_section'] as num?)?.toInt(),
+    final mappedResults = rows
+        .map((row) {
+          final item =
+              LibraryCatalogItem.fromRow({
+                'id': row['item_id'],
+                'title': row['title'],
+                'author': row['author'],
+                'file_name': row['file_name'],
+                'file_hash': row['file_hash'],
+                'relative_path': row['relative_path'],
+                'file_format': row['file_format'],
+                'folder_type': row['folder_type'],
+                'library_role': row['library_role'],
+                'collection_name': row['collection_name'],
+                'source_site': row['source_site'],
+                'source_url': row['source_url'],
+                'source_type': row['source_type'],
+                'cover_path': row['cover_path'],
+                'date_added': row['date_added'],
+                'last_opened': row['last_opened'],
+                'index_status': row['index_status'],
+                'file_size': row['file_size'],
+                'mime_type': row['mime_type'],
+                'spine_index': row['item_spine_index'],
+                'anchor_id': row['item_anchor_id'],
+                'epub_href': row['item_epub_href'],
+                'paragraph_index': row['item_paragraph_index'],
+                'navigation_count': 0,
+              }).copyWith(
+                spineIndex: (row['hit_spine_index'] as num?)?.toInt(),
+                epubHref: row['hit_epub_href']?.toString(),
+                paragraphIndex: (row['paragraph_on_section'] as num?)?.toInt(),
+              );
+
+          final fullParagraph = row['plain_text']?.toString();
+          final sectionTitle = row['section_title']?.toString();
+          final paragraphOnSection = (row['paragraph_on_section'] as num?)
+              ?.toInt();
+          final refCode = row['hit_ref_code']?.toString();
+
+          final locationText = _buildLibraryTextBlockLocationText(
+            item: item,
+            refCode: refCode,
+            sectionTitle: sectionTitle,
+            paragraphOnSection: paragraphOnSection,
           );
 
-      final fullParagraph = row['plain_text']?.toString();
-      final sectionTitle = row['section_title']?.toString();
-      final paragraphOnSection = (row['paragraph_on_section'] as num?)?.toInt();
-      final refCode = row['hit_ref_code']?.toString();
+          final snippet = _buildLibrarySearchSnippet(
+            fullParagraph: fullParagraph,
+            terms: normalizedTerms,
+          );
+          if (snippet == null || snippet.trim().isEmpty) {
+            return null;
+          }
 
-      final locationText = _buildLibraryTextBlockLocationText(
-        item: item,
-        refCode: refCode,
-        sectionTitle: sectionTitle,
-        paragraphOnSection: paragraphOnSection,
-      );
+          final score = _scoreLibrarySearchResult(
+            item: item,
+            referenceText: null,
+            fullParagraph: fullParagraph,
+            queryTerms: normalizedTerms,
+          );
 
-      final snippet = _buildLibrarySearchSnippet(
-        fullParagraph: fullParagraph,
-        terms: normalizedTerms,
-      );
-      if (snippet == null || snippet.trim().isEmpty) {
-        return null;
-      }
-
-      final score = _scoreLibrarySearchResult(
-        item: item,
-        referenceText: null,
-        fullParagraph: fullParagraph,
-        queryTerms: normalizedTerms,
-      );
-
-      return LibraryCatalogSearchResult(
-        item: item,
-        snippet: snippet,
-        locationText: locationText,
-        referenceText: null,
-        fullParagraph: fullParagraph,
-        chapterNumber: null,
-        verseStart: null,
-        verseEnd: null,
-        score: score,
-      );
-    }).toList(growable: false);
+          return LibraryCatalogSearchResult(
+            item: item,
+            snippet: snippet,
+            locationText: locationText,
+            referenceText: null,
+            fullParagraph: fullParagraph,
+            chapterNumber: null,
+            verseStart: null,
+            verseEnd: null,
+            score: score,
+          );
+        })
+        .toList(growable: false);
 
     final filteredResults = mappedResults
         .whereType<LibraryCatalogSearchResult>()
+        .where((result) {
+          if (normalizedCollectionFilter.isEmpty ||
+              normalizedCollectionFilter == _libraryAllCollectionsFilterValue) {
+            return true;
+          }
+          return libraryItemMatchesCollectionFilter(
+            result.item,
+            normalizedCollectionFilter,
+          );
+        })
         .toList(growable: false);
 
     filteredResults.sort((left, right) {
@@ -1008,58 +1161,15 @@ class LibraryCatalogService {
       return results;
     }
 
-    const managedFolders = <({String collectionName, String relativeFolder})>[
-      (collectionName: 'EGW Books', relativeFolder: 'ePubs/Research/EGW_Books'),
-      (collectionName: 'EGW Books', relativeFolder: 'PDFs/Research/EGW_Books'),
-      (
-        collectionName: 'EGW Devotionals',
-        relativeFolder: 'ePubs/Research/EGW_Devotionals',
-      ),
-      (
-        collectionName: 'EGW Devotionals',
-        relativeFolder: 'PDFs/Research/EGW_Devotionals',
-      ),
-      (
-        collectionName: 'EGW Misc Collections',
-        relativeFolder: 'ePubs/Research/EGW_Misc_Collections',
-      ),
-      (
-        collectionName: 'EGW Misc Collections',
-        relativeFolder: 'PDFs/Research/EGW_Misc_Collections',
-      ),
-      (
-        collectionName: 'EGW Pamphlets',
-        relativeFolder: 'ePubs/Research/EGW_Pamphlets',
-      ),
-      (
-        collectionName: 'EGW Pamphlets',
-        relativeFolder: 'PDFs/Research/EGW_Pamphlets',
-      ),
-      (
-        collectionName: 'EGW Periodicals',
-        relativeFolder: 'ePubs/Research/EGW_Periodicals',
-      ),
-      (
-        collectionName: 'EGW Periodicals',
-        relativeFolder: 'PDFs/Research/EGW_Periodicals',
-      ),
-      (
-        collectionName: 'EGW Manuscript Releases',
-        relativeFolder: 'ePubs/Research/EGW_Manuscript_Releases',
-      ),
-      (
-        collectionName: 'EGW Manuscript Releases',
-        relativeFolder: 'PDFs/Research/EGW_Manuscript_Releases',
-      ),
-      (
-        collectionName: 'EGW Commentaries',
-        relativeFolder: 'ePubs/Commentaries/EGW_Commentaries',
-      ),
-      (
-        collectionName: 'EGW Commentaries',
-        relativeFolder: 'PDFs/Commentaries/EGW_Commentaries',
-      ),
-    ];
+    final managedFolders = ELibraryFolderPolicy.allManagedEgwFolderDefinitions
+        .where((folder) => folder.relativeFolder.startsWith('ePubs/'))
+        .map(
+          (folder) => (
+            collectionName: folder.collectionName,
+            relativeFolder: folder.relativeFolder,
+          ),
+        )
+        .toList(growable: false);
 
     for (final row in candidates) {
       final id = row['id']?.toString().trim() ?? '';
@@ -1799,6 +1909,37 @@ class LibraryCatalogSearchResult {
   final int? chapterNumber;
   final int? verseStart;
   final int? verseEnd;
+}
+
+class LibraryCatalogSearchSession {
+  const LibraryCatalogSearchSession({
+    required this.query,
+    required this.collectionFilter,
+    required this.results,
+    required this.currentIndex,
+  });
+
+  final String query;
+  final String? collectionFilter;
+  final List<LibraryCatalogSearchResult> results;
+  final int currentIndex;
+
+  LibraryCatalogSearchResult get currentResult => results[currentIndex];
+
+  String get counterLabel => '${currentIndex + 1}/${results.length}';
+
+  bool get hasPrevious => currentIndex > 0;
+
+  bool get hasNext => currentIndex < results.length - 1;
+
+  LibraryCatalogSearchSession copyWithIndex(int index) {
+    return LibraryCatalogSearchSession(
+      query: query,
+      collectionFilter: collectionFilter,
+      results: results,
+      currentIndex: index.clamp(0, results.length - 1),
+    );
+  }
 }
 
 class LibraryCatalogNavigationItem {

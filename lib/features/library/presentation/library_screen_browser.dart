@@ -463,32 +463,17 @@ class _TabSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SegmentedButton<_LibraryTab>(
+      style: _librarySegmentedButtonStyle(context),
       segments: [
         ButtonSegment(
           value: _LibraryTab.books,
           icon: Icon(Icons.auto_stories_outlined),
-          label: Text(
-            'Books',
-            style: libraryControlTextStyle(
-              context,
-              Theme.of(context).textTheme.labelLarge,
-              fontWeight: FontWeight.w800,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
+          label: const Text('Books'),
         ),
         ButtonSegment(
           value: _LibraryTab.recent,
           icon: Icon(Icons.history_rounded),
-          label: Text(
-            'Recent',
-            style: libraryControlTextStyle(
-              context,
-              Theme.of(context).textTheme.labelLarge,
-              fontWeight: FontWeight.w800,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
+          label: const Text('Recent'),
         ),
       ],
       selected: {selectedTab},
@@ -511,32 +496,17 @@ class _ViewToggleRow extends StatelessWidget {
     return Align(
       alignment: Alignment.centerLeft,
       child: SegmentedButton<_LibraryView>(
+        style: _librarySegmentedButtonStyle(context),
         segments: [
           ButtonSegment(
             value: _LibraryView.shelf,
             icon: Icon(Icons.grid_view_rounded),
-            label: Text(
-              'Shelf',
-              style: libraryControlTextStyle(
-                context,
-                Theme.of(context).textTheme.labelLarge,
-                fontWeight: FontWeight.w800,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-            ),
+            label: const Text('Shelf'),
           ),
           ButtonSegment(
             value: _LibraryView.list,
             icon: Icon(Icons.view_list_rounded),
-            label: Text(
-              'List',
-              style: libraryControlTextStyle(
-                context,
-                Theme.of(context).textTheme.labelLarge,
-                fontWeight: FontWeight.w800,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-            ),
+            label: const Text('List'),
           ),
         ],
         selected: {view},
@@ -547,6 +517,39 @@ class _ViewToggleRow extends StatelessWidget {
       ),
     );
   }
+}
+
+ButtonStyle _librarySegmentedButtonStyle(BuildContext context) {
+  final theme = Theme.of(context);
+  final scheme = theme.colorScheme;
+  final selectedForeground = scheme.onPrimaryContainer;
+  final unselectedForeground = scheme.onSurfaceVariant;
+
+  return ButtonStyle(
+    visualDensity: VisualDensity.compact,
+    padding: WidgetStateProperty.all(
+      const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+    ),
+    side: WidgetStateProperty.all(BorderSide(color: scheme.outlineVariant)),
+    backgroundColor: WidgetStateProperty.resolveWith((states) {
+      return states.contains(WidgetState.selected)
+          ? scheme.primaryContainer
+          : scheme.surfaceContainerHigh;
+    }),
+    foregroundColor: WidgetStateProperty.resolveWith((states) {
+      return states.contains(WidgetState.selected)
+          ? selectedForeground
+          : unselectedForeground;
+    }),
+    iconColor: WidgetStateProperty.resolveWith((states) {
+      return states.contains(WidgetState.selected)
+          ? selectedForeground
+          : unselectedForeground;
+    }),
+    textStyle: WidgetStateProperty.all(
+      theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+    ),
+  );
 }
 
 class _AlphabetStrip extends StatelessWidget {

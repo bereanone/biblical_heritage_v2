@@ -1,0 +1,1995 @@
+{
+  "version": 1,
+  "collections": [
+    {
+      "cache_key": "EGW Books",
+      "label": "EGW Books",
+      "folder_root": "Research",
+      "folder_name": "EGW_Books",
+      "collection_page_url": "https://egwwritings.org/allCollection/en/4",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/en/4",
+      "items": [
+        {
+          "code": "1MCP",
+          "title": "Mind, Character, and Personality, vol. 1"
+        },
+        {
+          "code": "1SG",
+          "title": "Spiritual Gifts, vol. 1"
+        },
+        {
+          "code": "1SM",
+          "title": "Selected Messages Book 1"
+        },
+        {
+          "code": "1SP",
+          "title": "The Spirit of Prophecy, vol. 1"
+        },
+        {
+          "code": "1T",
+          "title": "Testimonies for the Church, vol. 1"
+        },
+        {
+          "code": "1TT",
+          "title": "Testimony Treasures, vol. 1"
+        },
+        {
+          "code": "2MCP",
+          "title": "Mind, Character, and Personality, vol. 2"
+        },
+        {
+          "code": "2SG",
+          "title": "Spiritual Gifts, vol. 2"
+        },
+        {
+          "code": "2SM",
+          "title": "Selected Messages Book 2"
+        },
+        {
+          "code": "2SP",
+          "title": "The Spirit of Prophecy, vol. 2"
+        },
+        {
+          "code": "2T",
+          "title": "Testimonies for the Church, vol. 2"
+        },
+        {
+          "code": "2TT",
+          "title": "Testimony Treasures, vol. 2"
+        },
+        {
+          "code": "3AM",
+          "title": "The Three Angels’ Messages"
+        },
+        {
+          "code": "3SG",
+          "title": "Spiritual Gifts, vol. 3"
+        },
+        {
+          "code": "3SM",
+          "title": "Selected Messages Book 3"
+        },
+        {
+          "code": "3SP",
+          "title": "The Spirit of Prophecy, vol. 3"
+        },
+        {
+          "code": "3T",
+          "title": "Testimonies for the Church, vol. 3"
+        },
+        {
+          "code": "3TT",
+          "title": "Testimony Treasures, vol. 3"
+        },
+        {
+          "code": "4aSG",
+          "title": "Spiritual Gifts, vol. 4a"
+        },
+        {
+          "code": "4bSG",
+          "title": "Spiritual Gifts, vol. 4b"
+        },
+        {
+          "code": "4SP",
+          "title": "The Spirit of Prophecy, vol. 4"
+        },
+        {
+          "code": "4T",
+          "title": "Testimonies for the Church, vol. 4"
+        },
+        {
+          "code": "5T",
+          "title": "Testimonies for the Church, vol. 5"
+        },
+        {
+          "code": "6T",
+          "title": "Testimonies for the Church, vol. 6"
+        },
+        {
+          "code": "7T",
+          "title": "Testimonies for the Church, vol. 7"
+        },
+        {
+          "code": "8T",
+          "title": "Testimonies for the Church, vol. 8"
+        },
+        {
+          "code": "9T",
+          "title": "Testimonies for the Church, vol. 9"
+        },
+        {
+          "code": "AA",
+          "title": "The Acts of the Apostles"
+        },
+        {
+          "code": "AH",
+          "title": "The Adventist Home"
+        },
+        {
+          "code": "ApM",
+          "title": "An Appeal to Mothers"
+        },
+        {
+          "code": "AY",
+          "title": "An Appeal to the Youth"
+        },
+        {
+          "code": "CCh",
+          "title": "Counsels for the Church"
+        },
+        {
+          "code": "CD",
+          "title": "Counsels on Diet and Foods"
+        },
+        {
+          "code": "CE",
+          "title": "Christian Education"
+        },
+        {
+          "code": "CET",
+          "title": "Christian Experience and Teachings of Ellen G. White"
+        },
+        {
+          "code": "CEv",
+          "title": "The Colporteur Evangelist"
+        },
+        {
+          "code": "CG",
+          "title": "Child Guidance"
+        },
+        {
+          "code": "CH",
+          "title": "Counsels on Health"
+        },
+        {
+          "code": "ChL",
+          "title": "Christian Leadership"
+        },
+        {
+          "code": "ChS",
+          "title": "Christian Service"
+        },
+        {
+          "code": "CIHS",
+          "title": "Christ in His Sanctuary"
+        },
+        {
+          "code": "CL",
+          "title": "Country Living"
+        },
+        {
+          "code": "CM",
+          "title": "Colporteur Ministry"
+        },
+        {
+          "code": "CME",
+          "title": "A Call to Medical Evangelism and Health Education"
+        },
+        {
+          "code": "COL",
+          "title": "Christ’s Object Lessons"
+        },
+        {
+          "code": "Con",
+          "title": "Confrontation"
+        },
+        {
+          "code": "COS",
+          "title": "Christ Our Saviour"
+        },
+        {
+          "code": "CS",
+          "title": "Counsels on Stewardship"
+        },
+        {
+          "code": "CSA",
+          "title": "A Call To Stand Apart"
+        },
+        {
+          "code": "CSW",
+          "title": "Counsels on Sabbath School Work"
+        },
+        {
+          "code": "CT",
+          "title": "Counsels to Parents, Teachers, and Students"
+        },
+        {
+          "code": "CTBH",
+          "title": "Christian Temperance and Bible Hygiene"
+        },
+        {
+          "code": "CW",
+          "title": "Counsels to Writers and Editors"
+        },
+        {
+          "code": "DA",
+          "title": "The Desire of Ages"
+        },
+        {
+          "code": "DD",
+          "title": "Darkness Before Dawn"
+        },
+        {
+          "code": "DG",
+          "title": "Daughters of God"
+        },
+        {
+          "code": "Ed",
+          "title": "Education"
+        },
+        {
+          "code": "EP",
+          "title": "From Eternity Past"
+        },
+        {
+          "code": "Ev",
+          "title": "Evangelism"
+        },
+        {
+          "code": "EW",
+          "title": "Early Writings"
+        },
+        {
+          "code": "ExV",
+          "title": "A Sketch of the Christian Experience and Views of Ellen G. White"
+        },
+        {
+          "code": "ExV53",
+          "title": "Notes of Explanation"
+        },
+        {
+          "code": "ExV54",
+          "title": "Supplement to the Christian Experience and Views of Ellen G. White"
+        },
+        {
+          "code": "FE",
+          "title": "Fundamentals of Christian Education"
+        },
+        {
+          "code": "FW",
+          "title": "Faith and Works"
+        },
+        {
+          "code": "GC",
+          "title": "The Great Controversy"
+        },
+        {
+          "code": "GC88",
+          "title": "The Great Controversy (1888 ed.)"
+        },
+        {
+          "code": "GRC",
+          "title": "God’s Remnant Church (The Remnant Church)"
+        },
+        {
+          "code": "GrH",
+          "title": "The Great Hope (Condensed)"
+        },
+        {
+          "code": "GW",
+          "title": "Gospel Workers (1915 ed.)"
+        },
+        {
+          "code": "GW92",
+          "title": "Gospel Workers (1892/1893 ed.)"
+        },
+        {
+          "code": "HDL",
+          "title": "Help In Daily Living"
+        },
+        {
+          "code": "HF",
+          "title": "From Here to Forever"
+        },
+        {
+          "code": "HFM",
+          "title": "The Health Food Ministry"
+        },
+        {
+          "code": "HL",
+          "title": "Healthful Living"
+        },
+        {
+          "code": "HLv",
+          "title": "From Heaven With Love"
+        },
+        {
+          "code": "HS",
+          "title": "Historical Sketches of the Foreign Missions of the Seventh-day Adventists"
+        },
+        {
+          "code": "Hvn",
+          "title": "Heaven"
+        },
+        {
+          "code": "IC",
+          "title": "The Impending Conflict"
+        },
+        {
+          "code": "LDE",
+          "title": "Last Day Events"
+        },
+        {
+          "code": "LP",
+          "title": "Sketches from the Life of Paul"
+        },
+        {
+          "code": "LS",
+          "title": "Life Sketches of Ellen G. White"
+        },
+        {
+          "code": "LS80",
+          "title": "Life Sketches of James White and Ellen G. White (1880 ed.)"
+        },
+        {
+          "code": "LS88",
+          "title": "Life Sketches of James White and Ellen G. White (1888 ed.)"
+        },
+        {
+          "code": "LYL",
+          "title": "Letters to Young Lovers"
+        },
+        {
+          "code": "MB",
+          "title": "Thoughts From the Mount of Blessing"
+        },
+        {
+          "code": "MC",
+          "title": "Manual for Canvassers"
+        },
+        {
+          "code": "MH",
+          "title": "The Ministry of Healing"
+        },
+        {
+          "code": "MM",
+          "title": "Medical Ministry"
+        },
+        {
+          "code": "MTC",
+          "title": "Ministry to the Cities"
+        },
+        {
+          "code": "MYP",
+          "title": "Messages to Young People"
+        },
+        {
+          "code": "NL",
+          "title": "A New Life (Revival and Beyond)"
+        },
+        {
+          "code": "PaM",
+          "title": "Pastoral Ministry"
+        },
+        {
+          "code": "PCL",
+          "title": "Principles for Christian Leaders"
+        },
+        {
+          "code": "PCP",
+          "title": "Peter’s Counsel to Parents"
+        },
+        {
+          "code": "PK",
+          "title": "Prophets and Kings"
+        },
+        {
+          "code": "PM",
+          "title": "The Publishing Ministry"
+        },
+        {
+          "code": "PP",
+          "title": "Patriarchs and Prophets"
+        },
+        {
+          "code": "Pr",
+          "title": "Prayer"
+        },
+        {
+          "code": "RY",
+          "title": "The Retirement Years"
+        },
+        {
+          "code": "SA",
+          "title": "A Solemn Appeal"
+        },
+        {
+          "code": "SC",
+          "title": "Steps to Christ"
+        },
+        {
+          "code": "SJ",
+          "title": "The Story of Jesus"
+        },
+        {
+          "code": "SL",
+          "title": "The Sanctified Life"
+        },
+        {
+          "code": "SpTEd",
+          "title": "Special Testimonies On Education"
+        },
+        {
+          "code": "SR",
+          "title": "The Story of Redemption"
+        },
+        {
+          "code": "SS",
+          "title": "From Splendor to Shadow"
+        },
+        {
+          "code": "SWk",
+          "title": "The Southern Work"
+        },
+        {
+          "code": "TA",
+          "title": "The Truth About Angels"
+        },
+        {
+          "code": "Te",
+          "title": "Temperance"
+        },
+        {
+          "code": "TM",
+          "title": "Testimonies to Ministers and Gospel Workers"
+        },
+        {
+          "code": "TR",
+          "title": "True Revival"
+        },
+        {
+          "code": "TSA",
+          "title": "Testimonies to Southern Africa"
+        },
+        {
+          "code": "TSB",
+          "title": "Testimonies on Sexual Behavior, Adultery, and Divorce"
+        },
+        {
+          "code": "TSDF",
+          "title": "Testimony Studies on Diet and Foods"
+        },
+        {
+          "code": "TSS",
+          "title": "Testimonies on Sabbath-School Work"
+        },
+        {
+          "code": "TT",
+          "title": "From Trials to Triumph"
+        },
+        {
+          "code": "VSS",
+          "title": "The Voice in Speech and Song"
+        },
+        {
+          "code": "WLF",
+          "title": "A Word to the Little Flock"
+        },
+        {
+          "code": "WM",
+          "title": "Welfare Ministry"
+        }
+      ]
+    },
+    {
+      "cache_key": "EGW Devotionals",
+      "label": "EGW Devotionals",
+      "folder_root": "Research",
+      "folder_name": "EGW_Devotionals",
+      "collection_page_url": "https://egwwritings.org/allCollection/en/1227",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/en/1227",
+      "items": [
+        {
+          "code": "AG",
+          "title": "God’s Amazing Grace"
+        },
+        {
+          "code": "BLJ",
+          "title": "To Be Like Jesus"
+        },
+        {
+          "code": "CC",
+          "title": "Conflict and Courage"
+        },
+        {
+          "code": "CTr",
+          "title": "Christ Triumphant"
+        },
+        {
+          "code": "FH",
+          "title": "From the Heart"
+        },
+        {
+          "code": "FLB",
+          "title": "The Faith I Live By"
+        },
+        {
+          "code": "HB",
+          "title": "Homeward Bound"
+        },
+        {
+          "code": "HP",
+          "title": "In Heavenly Places"
+        },
+        {
+          "code": "JNN",
+          "title": "Jesus, Name Above All Names"
+        },
+        {
+          "code": "LHU",
+          "title": "Lift Him Up"
+        },
+        {
+          "code": "Mar",
+          "title": "Maranatha"
+        },
+        {
+          "code": "ML",
+          "title": "My Life Today"
+        },
+        {
+          "code": "OFC",
+          "title": "Our Father Cares"
+        },
+        {
+          "code": "OHC",
+          "title": "Our High Calling"
+        },
+        {
+          "code": "RC",
+          "title": "Reflecting Christ"
+        },
+        {
+          "code": "RRe",
+          "title": "Radiant Religion"
+        },
+        {
+          "code": "SD",
+          "title": "Sons and Daughters of God"
+        },
+        {
+          "code": "TDG",
+          "title": "This Day With God"
+        },
+        {
+          "code": "TMK",
+          "title": "That I May Know Him"
+        },
+        {
+          "code": "UL",
+          "title": "The Upward Look"
+        },
+        {
+          "code": "WGD",
+          "title": "With God at Dawn"
+        },
+        {
+          "code": "YRP",
+          "title": "Ye Shall Receive Power"
+        }
+      ]
+    },
+    {
+      "cache_key": "EGW Commentaries",
+      "label": "Commentaries",
+      "folder_root": "Commentaries",
+      "folder_name": "EGW_Commentaries",
+      "collection_page_url": "https://egwwritings.org/allCollection/en/1371",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/en/1371",
+      "items": [
+        {
+          "code": "1BC",
+          "title": "EGW SDA Bible Commentary, vol. 1"
+        },
+        {
+          "code": "1SDABC",
+          "title": "SDA Bible Commentary, vol. 1"
+        },
+        {
+          "code": "2BC",
+          "title": "EGW SDA Bible Commentary, vol. 2"
+        },
+        {
+          "code": "2SDABC",
+          "title": "SDA Bible Commentary, vol. 2"
+        },
+        {
+          "code": "3BC",
+          "title": "EGW SDA Bible Commentary, vol. 3"
+        },
+        {
+          "code": "3SDABC",
+          "title": "SDA Bible Commentary, vol. 3"
+        },
+        {
+          "code": "4BC",
+          "title": "EGW SDA Bible Commentary, vol. 4"
+        },
+        {
+          "code": "4SDABC",
+          "title": "SDA Bible Commentary, vol. 4"
+        },
+        {
+          "code": "5BC",
+          "title": "EGW SDA Bible Commentary, vol. 5"
+        },
+        {
+          "code": "5SDABC",
+          "title": "SDA Bible Commentary, vol. 5"
+        },
+        {
+          "code": "6BC",
+          "title": "EGW SDA Bible Commentary, vol. 6"
+        },
+        {
+          "code": "6SDABC",
+          "title": "SDA Bible Commentary, vol. 6"
+        },
+        {
+          "code": "7ABC",
+          "title": "EGW SDA Bible Commentary, vol. 7A"
+        },
+        {
+          "code": "7BC",
+          "title": "EGW SDA Bible Commentary, vol. 7"
+        },
+        {
+          "code": "7SDABC",
+          "title": "SDA Bible Commentary, vol. 7"
+        },
+        {
+          "code": "ABC",
+          "title": "Andrews Bible Commentary - Old Testament"
+        },
+        {
+          "code": "HSDAT",
+          "title": "Handbook of SDA Theology"
+        },
+        {
+          "code": "KJRSBM",
+          "title": "King James Reference Suite - Bible Maps"
+        },
+        {
+          "code": "MHBC",
+          "title": "Matthew Henry’s Concise Bible Commentary"
+        },
+        {
+          "code": "MHBCC",
+          "title": "Matthew Henry’s Complete Bible Commentary"
+        },
+        {
+          "code": "SDASB",
+          "title": "SDA Bible Students’ Source Book"
+        }
+      ]
+    },
+    {
+      "cache_key": "EGW Misc Collections",
+      "label": "EGW Misc Collections",
+      "folder_root": "Research",
+      "folder_name": "EGW_Misc_Collections",
+      "collection_page_url": "https://egwwritings.org/allCollection/en/10",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/en/10",
+      "items": [
+        {
+          "code": "1888",
+          "title": "The Ellen G. White 1888 Materials"
+        },
+        {
+          "code": "1NL",
+          "title": "Notebook Leaflets from the Elmshaven Library, vol. 1"
+        },
+        {
+          "code": "1SAT",
+          "title": "Sermons and Talks, vol. 1"
+        },
+        {
+          "code": "2NL",
+          "title": "Notebook Leaflets from the Elmshaven Library, vol. 2"
+        },
+        {
+          "code": "2SAT",
+          "title": "Sermons and Talks, vol. 2"
+        },
+        {
+          "code": "BCL",
+          "title": "Battle Creek Letters"
+        },
+        {
+          "code": "EA",
+          "title": "Experiences in Australia"
+        },
+        {
+          "code": "KC",
+          "title": "The Kress Collection"
+        },
+        {
+          "code": "LLM",
+          "title": "Loma Linda Messages"
+        },
+        {
+          "code": "LSMS",
+          "title": "Life Sketches Manuscript"
+        },
+        {
+          "code": "PC",
+          "title": "The Paulson Collection of Ellen G. White Letters"
+        },
+        {
+          "code": "PCO",
+          "title": "A Place Called Oakwood"
+        },
+        {
+          "code": "SHM",
+          "title": "The Story of Our Health Message"
+        },
+        {
+          "code": "SHM-apx",
+          "title": "SHM-apx"
+        },
+        {
+          "code": "SpM",
+          "title": "Spalding and Magan Collection"
+        }
+      ]
+    },
+    {
+      "cache_key": "EGW Pamphlets",
+      "label": "EGW Pamphlets",
+      "folder_root": "Research",
+      "folder_name": "EGW_Pamphlets",
+      "collection_page_url": "https://egwwritings.org/allCollection/en/8",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/en/8",
+      "items": [
+        {
+          "code": "1Red",
+          "title": "Redemption Or The First Advent Of Christ With His Life And Ministry"
+        },
+        {
+          "code": "2Red",
+          "title": "Redemption; or the Temptation of Christ in The Wilderness"
+        },
+        {
+          "code": "3Red",
+          "title": "Redemption: Or the Miracles of Christ, the Mighty One"
+        },
+        {
+          "code": "4Red",
+          "title": "Redemption: or the Teachings of Christ, the Anointed One"
+        },
+        {
+          "code": "5Red",
+          "title": "Redemption Or The Sufferings Of Christ His Trial And Crucifixion"
+        },
+        {
+          "code": "6Red",
+          "title": "Redemption: or the Resurrection of Christ; and His Ascension"
+        },
+        {
+          "code": "7Red",
+          "title": "Redemption: or the Ministry of Peter and the Conversion of Saul"
+        },
+        {
+          "code": "8Red",
+          "title": "Redemption: or the Teachings of Paul, and his Mission to the Gentiles"
+        },
+        {
+          "code": "PH001",
+          "title": "An Appeal"
+        },
+        {
+          "code": "PH002",
+          "title": "Appeal and Suggestions to Conference Officers"
+        },
+        {
+          "code": "PH004",
+          "title": "An Appeal for Missions"
+        },
+        {
+          "code": "PH005",
+          "title": "An Appeal for Self-supporting Laborers to Enter Unworked Fields"
+        },
+        {
+          "code": "PH007",
+          "title": "An Appeal to Our Churches in Behalf of Home Missionary Work"
+        },
+        {
+          "code": "PH008",
+          "title": "An Appeal in Behalf of Our Work in Scandinavia"
+        },
+        {
+          "code": "PH009",
+          "title": "An Appeal in Behalf of Our New Medical College"
+        },
+        {
+          "code": "PH010",
+          "title": "An Appeal to Ministers and Church Officers"
+        },
+        {
+          "code": "PH011",
+          "title": "Appeal to the Battle Creek Church"
+        },
+        {
+          "code": "PH012",
+          "title": "An Appeal to Seventh-day Adventists to Fulfil Their Duty to the South"
+        },
+        {
+          "code": "PH013",
+          "title": "Appeal to the Young"
+        },
+        {
+          "code": "PH014",
+          "title": "Appeals for Unity"
+        },
+        {
+          "code": "PH015",
+          "title": "Brother Aldrich"
+        },
+        {
+          "code": "PH016",
+          "title": "To Brother J. N. Andrews And Sister H. N. Smith"
+        },
+        {
+          "code": "PH019",
+          "title": "A Call to Service in the Masters Harvest Field"
+        },
+        {
+          "code": "PH020",
+          "title": "A Call to the Watchmen"
+        },
+        {
+          "code": "PH022",
+          "title": "Choice Thoughts on Dress"
+        },
+        {
+          "code": "PH026",
+          "title": "Do You Eat Flesh?"
+        },
+        {
+          "code": "PH028",
+          "title": "Elder Daniels and the Fresno Church"
+        },
+        {
+          "code": "PH029",
+          "title": "The Enlargement of Our Work"
+        },
+        {
+          "code": "PH030",
+          "title": "An Exposure of Fanaticism and Wickedness"
+        },
+        {
+          "code": "PH031",
+          "title": "Extracts from Unpublished Testimonies in Regard to Flesh Foods"
+        },
+        {
+          "code": "PH036",
+          "title": "Guiding Principles for the Young"
+        },
+        {
+          "code": "PH037",
+          "title": "Hillcrest School Farm"
+        },
+        {
+          "code": "PH038",
+          "title": "Important Testimony"
+        },
+        {
+          "code": "PH039",
+          "title": "An Important Testimony to our Brethren and Sisters in New York"
+        },
+        {
+          "code": "PH040",
+          "title": "Instruction Concerning Education"
+        },
+        {
+          "code": "PH043",
+          "title": "The Judgment"
+        },
+        {
+          "code": "PH045",
+          "title": "Knowing and Obeying the Lord"
+        },
+        {
+          "code": "PH048",
+          "title": "Living by Principle"
+        },
+        {
+          "code": "PH049",
+          "title": "Loma Linda’s Work"
+        },
+        {
+          "code": "PH050",
+          "title": "Messages to Young People"
+        },
+        {
+          "code": "PH054",
+          "title": "I Will Guide Thee"
+        },
+        {
+          "code": "PH055",
+          "title": "Our Work in Washington D. C."
+        },
+        {
+          "code": "PH058",
+          "title": "Perils Increase Till Jesus Comes"
+        },
+        {
+          "code": "PH061",
+          "title": "Progress of Work at Loma Linda"
+        },
+        {
+          "code": "PH066",
+          "title": "Health, Philanthropic, and Medical Missionary Work"
+        },
+        {
+          "code": "PH067",
+          "title": "The Removal to Washington"
+        },
+        {
+          "code": "PH068",
+          "title": "Rolling Back the Reproach"
+        },
+        {
+          "code": "PH069",
+          "title": "The Sanitarium Patients at Goguac Lake"
+        },
+        {
+          "code": "PH070",
+          "title": "The Selection of Articles for our Papers"
+        },
+        {
+          "code": "PH077",
+          "title": "The Sin of Licentiousness"
+        },
+        {
+          "code": "PH078",
+          "title": "Sowing Beside All Waters"
+        },
+        {
+          "code": "PH079",
+          "title": "Special Instruction Regarding Royalties"
+        },
+        {
+          "code": "PH080",
+          "title": "Special Instruction Relating to The Review and Herald Office, and The Work in Battle Creek"
+        },
+        {
+          "code": "PH081",
+          "title": "Special Testimonies on Church Schools"
+        },
+        {
+          "code": "PH082",
+          "title": "Special Testimonies Relating to Medical Missionary Work"
+        },
+        {
+          "code": "PH083",
+          "title": "Special Testimony Relative to Tract and Missionary Societies and Our Preachers"
+        },
+        {
+          "code": "PH084",
+          "title": "Special Testimonies - Relating to Various Matters in Battle Creek"
+        },
+        {
+          "code": "PH085",
+          "title": "Special Testimony for the Battle Creek Church"
+        },
+        {
+          "code": "PH086",
+          "title": "Special Testimony to Battle Creek Church"
+        },
+        {
+          "code": "PH087",
+          "title": "Special Testimony to Battle Creek Church"
+        },
+        {
+          "code": "PH088",
+          "title": "Special Testimony to the Managers and Workers in our Institutions"
+        },
+        {
+          "code": "PH089",
+          "title": "Spiritual Advancement the Object of Camp-Meetings"
+        },
+        {
+          "code": "PH090",
+          "title": "Statement and Appeal"
+        },
+        {
+          "code": "PH092",
+          "title": "Suggestions to Those Holding Missionary Conventions"
+        },
+        {
+          "code": "PH093",
+          "title": "The Temperance Work"
+        },
+        {
+          "code": "PH094",
+          "title": "Testimonies and Experiences Connected with the Loma Linda Sanitarium and College of Medical Evangelists"
+        },
+        {
+          "code": "PH095",
+          "title": "Testimonies and Experiences Connected With The Loma Linda Sanitarium and College of Medical Evangelists"
+        },
+        {
+          "code": "PH096",
+          "title": "Testimonies on the Case of Elder E. P. Daniels"
+        },
+        {
+          "code": "PH097",
+          "title": "Testimony for the Church at Battle Creek"
+        },
+        {
+          "code": "PH098",
+          "title": "Testimony for the Church at Olcott, N. Y."
+        },
+        {
+          "code": "PH099",
+          "title": "Testimony for the Churches at Allegan & Monterey"
+        },
+        {
+          "code": "PH100",
+          "title": "Testimony for the Physicians and Helpers of the Sanitarium"
+        },
+        {
+          "code": "PH101",
+          "title": "Testimony Relative to Marriage Duties, and Extremes in The Health Reform"
+        },
+        {
+          "code": "PH102",
+          "title": "Testimonies on Fair Dealing and Book Royalties"
+        },
+        {
+          "code": "PH104",
+          "title": "Testimony To the Brethren in Western New York"
+        },
+        {
+          "code": "PH105",
+          "title": "There Is Help in God"
+        },
+        {
+          "code": "PH107",
+          "title": "To Whom it May Concern"
+        },
+        {
+          "code": "PH109",
+          "title": "A View of the Conflict"
+        },
+        {
+          "code": "PH113",
+          "title": "Words of Encouragement to Self-supporting Workers"
+        },
+        {
+          "code": "PH114",
+          "title": "The Work Among the Jews"
+        },
+        {
+          "code": "PH116",
+          "title": "The Writing and Sending Out of the Testimonies to the Church"
+        },
+        {
+          "code": "PH117",
+          "title": "Testimony for the Battle Creek Church"
+        },
+        {
+          "code": "PH118",
+          "title": "Address To Ministers"
+        },
+        {
+          "code": "PH119",
+          "title": "An Appeal for the Madison School"
+        },
+        {
+          "code": "PH120",
+          "title": "The Time and The Work"
+        },
+        {
+          "code": "PH122",
+          "title": "To Our Bookmen"
+        },
+        {
+          "code": "PH123",
+          "title": "Testimony to the Church at Battle Creek"
+        },
+        {
+          "code": "PH124",
+          "title": "What Shall We Teach?"
+        },
+        {
+          "code": "PH126",
+          "title": "And Their Cry Came Up Unto God"
+        },
+        {
+          "code": "PH127",
+          "title": "Appeal To Our People in America in Behalf of the Nashville Publishing House"
+        },
+        {
+          "code": "PH128",
+          "title": "Backsliding in Health Reform"
+        },
+        {
+          "code": "PH129",
+          "title": "A Big Surprise Party"
+        },
+        {
+          "code": "PH130",
+          "title": "Camp-Meetings Their Object, and How to Conduct Them"
+        },
+        {
+          "code": "PH131",
+          "title": "Church Schools"
+        },
+        {
+          "code": "PH132",
+          "title": "The Curse of the Liquor Traffic"
+        },
+        {
+          "code": "PH133",
+          "title": "Danger in Adopting Worldly Policy in the Work of God"
+        },
+        {
+          "code": "PH134",
+          "title": "The Dress Reform"
+        },
+        {
+          "code": "PH135",
+          "title": "God’s Plan for the Relief of Avondale School"
+        },
+        {
+          "code": "PH136",
+          "title": "Gospel Temperance Work"
+        },
+        {
+          "code": "PH137",
+          "title": "Health and Healing"
+        },
+        {
+          "code": "PH138",
+          "title": "The Health Reform and the Health Institute"
+        },
+        {
+          "code": "PH139",
+          "title": "The Relief of the Schools"
+        },
+        {
+          "code": "PH140",
+          "title": "Home and Church School Manual"
+        },
+        {
+          "code": "PH141",
+          "title": "The Liquor Traffic Working Counter to Christ"
+        },
+        {
+          "code": "PH142",
+          "title": "Notes on Health and Temperance Topics"
+        },
+        {
+          "code": "PH143",
+          "title": "The $150,000 Fund"
+        },
+        {
+          "code": "PH144",
+          "title": "The Place of Herbs in Rational Therapy"
+        },
+        {
+          "code": "PH145",
+          "title": "Recreation"
+        },
+        {
+          "code": "PH146",
+          "title": "Report of Special Meeting"
+        },
+        {
+          "code": "PH147",
+          "title": "The Sanitarium Must Not be Cramped"
+        },
+        {
+          "code": "PH148",
+          "title": "The Second Tithe"
+        },
+        {
+          "code": "PH149",
+          "title": "Selections from Testimonies to the Managers and Workers in our Institutions"
+        },
+        {
+          "code": "PH150",
+          "title": "Selections from the Testimonies Setting forth Important Principles Relating to Our Work in General, the Publishing Work in Particular, and the Relatio"
+        },
+        {
+          "code": "PH151",
+          "title": "Selections from the Testimonies for the Church For the Study of Those Attending the General Conference in Oakland, Ca., March 27, 1903"
+        },
+        {
+          "code": "PH152",
+          "title": "Special Testimonies Concerning the Work and Workers in the Pacific Press"
+        },
+        {
+          "code": "PH153",
+          "title": "Special Testimony on Canvassing for Christ’s Object Lessons"
+        },
+        {
+          "code": "PH154",
+          "title": "Special Testimony to Battle Creek Church"
+        },
+        {
+          "code": "PH155",
+          "title": "Special Testimony to the Battle Creek Church"
+        },
+        {
+          "code": "PH156",
+          "title": "Special Testimony to the Brethren in Battle Creek"
+        },
+        {
+          "code": "PH157",
+          "title": "Special Testimony to the Oakland and Battle Creek Churches"
+        },
+        {
+          "code": "PH158",
+          "title": "Testimonies Relating to Emmanuel Missionary College and Its Work"
+        },
+        {
+          "code": "PH159",
+          "title": "Testimony to the Church"
+        },
+        {
+          "code": "PH160",
+          "title": "To Conference Officers"
+        },
+        {
+          "code": "PH161",
+          "title": "To Conference Officers and Managers of Our Schools"
+        },
+        {
+          "code": "PH162",
+          "title": "To the Leading Men of Our Churches"
+        },
+        {
+          "code": "PH163",
+          "title": "To Those in Charge of the Colored Orphanage Enterprise"
+        },
+        {
+          "code": "PH164",
+          "title": "Words of Encouragement to Workers in the Home Missionary Field"
+        },
+        {
+          "code": "PH165",
+          "title": "Extracts from Recent Letters from Sister White Relative to Medical Missionary Work"
+        },
+        {
+          "code": "PH166",
+          "title": "Special on Tithing"
+        },
+        {
+          "code": "PH167",
+          "title": "Counsels to Physicians and Medical Students"
+        },
+        {
+          "code": "PH168",
+          "title": "In Memoriam: A Sketch of the Last Sickness and Death of Elder James White"
+        },
+        {
+          "code": "PH169",
+          "title": "The Sufferings of Christ"
+        },
+        {
+          "code": "SpTA01a",
+          "title": "Special Testimony for Our Ministers"
+        },
+        {
+          "code": "SpTA01b",
+          "title": "An Appeal to Our Ministers and Conference Committees"
+        },
+        {
+          "code": "SpTA02a",
+          "title": "Special Testimony to Our Ministers—No. 2"
+        },
+        {
+          "code": "SpTA02b",
+          "title": "Danger in Adopting Worldly Policy in the Work of God"
+        },
+        {
+          "code": "SpTA03",
+          "title": "Special Testimonies to Ministers and Workers—No. 3"
+        },
+        {
+          "code": "SpTA04",
+          "title": "Special Testimonies for Ministers and Workers—No. 4"
+        },
+        {
+          "code": "SpTA05",
+          "title": "Special Testimonies for Ministers and Workers—No. 5"
+        },
+        {
+          "code": "SpTA06",
+          "title": "Special Testimonies for Ministers and Workers—No. 6"
+        },
+        {
+          "code": "SpTA07",
+          "title": "Special Testimonies for Ministers and Workers—No. 7"
+        },
+        {
+          "code": "SpTA08",
+          "title": "Special Testimonies for Ministers and Workers—No. 8"
+        },
+        {
+          "code": "SpTA09",
+          "title": "Special Testimonies for Ministers and Workers—No. 9"
+        },
+        {
+          "code": "SpTA10",
+          "title": "Special Testimonies for Ministers and Workers—No. 10"
+        },
+        {
+          "code": "SpTA11",
+          "title": "Special Testimonies for Ministers and Workers—No. 11"
+        },
+        {
+          "code": "SpTA12",
+          "title": "A Message to Our Physicians"
+        },
+        {
+          "code": "SpTB01",
+          "title": "Letters to Physicians and Ministers"
+        },
+        {
+          "code": "SpTB02",
+          "title": "Testimonies for the Church Containing Letters to Physicians and Ministers Instruction to Seventh-Day Adventists"
+        },
+        {
+          "code": "SpTB03a",
+          "title": "Letters to Sanitarium Workers in Southern California"
+        },
+        {
+          "code": "SpTB03b",
+          "title": "Letters from Ellen G. White to Sanitarium Workers in Southern California—b"
+        },
+        {
+          "code": "SpTB03c",
+          "title": "Letters From Ellen G. White To Sanitarium Workers in Southern California—c"
+        },
+        {
+          "code": "SpTB04",
+          "title": "Testimonies for the Church Regarding the Spirit of Unity"
+        },
+        {
+          "code": "SpTB05",
+          "title": "Record of Progress and An Appeal In Behalf of the Boulder-Colorado Sanitarium"
+        },
+        {
+          "code": "SpTB06",
+          "title": "Testimonies to the Church Regarding our Youth Going to Battle Creek to Obtain An Education"
+        },
+        {
+          "code": "SpTB07",
+          "title": "Testimonies for the Church Containing Messages of Warning and Instruction to Seventh-day Adventists"
+        },
+        {
+          "code": "SpTB08",
+          "title": "Testimonies to the Church Regarding The Strengthening of Our Institutions and Training Centers"
+        },
+        {
+          "code": "SpTB09",
+          "title": "Testimonies to the Church Regarding Individual Responsibility and Christian Unity"
+        },
+        {
+          "code": "SpTB10",
+          "title": "Jehovah Is Our King"
+        },
+        {
+          "code": "SpTB11",
+          "title": "The Madison School"
+        },
+        {
+          "code": "SpTB12",
+          "title": "The Oakwood Manual Training School"
+        },
+        {
+          "code": "SpTB12x",
+          "title": "The Huntsville School"
+        },
+        {
+          "code": "SpTB13",
+          "title": "The New England Sanitarium"
+        },
+        {
+          "code": "SpTB14",
+          "title": "The Paradise Valley Sanitarium"
+        },
+        {
+          "code": "SpTB15",
+          "title": "Letters from Ellen G. White to Sanitarium Workers"
+        },
+        {
+          "code": "SpTB16",
+          "title": "Selections from the Testimonies for Students and Workers of our Sanitariums"
+        },
+        {
+          "code": "SpTB17a",
+          "title": "The Unwise Use of Money and the Spirit of Speculation"
+        },
+        {
+          "code": "SpTB17b",
+          "title": "The Purchase of Land at Loma Linda and Letters from Mrs. E. G. White"
+        },
+        {
+          "code": "SpTB18",
+          "title": "The Nashville Sanitarium"
+        },
+        {
+          "code": "SpTB19",
+          "title": "The Spirit of Sacrifice"
+        },
+        {
+          "code": "T01",
+          "title": "Testimony for the Church — No. 1"
+        },
+        {
+          "code": "T02",
+          "title": "Testimony for the Church — No. 2"
+        },
+        {
+          "code": "T03",
+          "title": "Testimony for the Church — No. 3"
+        },
+        {
+          "code": "T04",
+          "title": "Testimony for the Church — No. 4"
+        },
+        {
+          "code": "T05",
+          "title": "Testimony for the Church — No. 5"
+        },
+        {
+          "code": "T06",
+          "title": "Testimony for the Church — No. 6"
+        },
+        {
+          "code": "T07",
+          "title": "Testimony for the Church — No. 7"
+        },
+        {
+          "code": "T08",
+          "title": "Testimony for the Church — No. 8"
+        },
+        {
+          "code": "T09",
+          "title": "Testimony for the Church — No. 9"
+        },
+        {
+          "code": "T10",
+          "title": "Testimony for the Church — No. 10"
+        },
+        {
+          "code": "T11",
+          "title": "Testimony for the Church — No. 11"
+        },
+        {
+          "code": "T12",
+          "title": "Testimony for the Church — No. 12"
+        },
+        {
+          "code": "T13",
+          "title": "Testimony for the Church — No. 13"
+        },
+        {
+          "code": "T14",
+          "title": "Testimony for the Church — No. 14"
+        },
+        {
+          "code": "T15",
+          "title": "Testimony for the Church — No. 15"
+        },
+        {
+          "code": "T16",
+          "title": "Testimony for the Church — No. 16"
+        },
+        {
+          "code": "T17",
+          "title": "Testimony for the Church — No. 17"
+        },
+        {
+          "code": "T18",
+          "title": "Testimony for the Church — No. 18"
+        },
+        {
+          "code": "T19",
+          "title": "Testimony for the Church — No. 19"
+        },
+        {
+          "code": "T20",
+          "title": "Testimony for the Church — No. 20"
+        },
+        {
+          "code": "T21",
+          "title": "Testimony for the Church — No. 21"
+        },
+        {
+          "code": "T21a",
+          "title": "Testimony to the Church — No. 21a"
+        },
+        {
+          "code": "T22",
+          "title": "Testimony for the Church — No. 22"
+        },
+        {
+          "code": "T23",
+          "title": "Testimony for the Church — No. 23"
+        },
+        {
+          "code": "T24",
+          "title": "Testimony for the Church — No. 24"
+        },
+        {
+          "code": "T25",
+          "title": "Testimony for the Church — No. 25"
+        },
+        {
+          "code": "T25a",
+          "title": "Testimony for the Church — No. 25a"
+        },
+        {
+          "code": "T26",
+          "title": "Testimony for the Church — No. 26"
+        },
+        {
+          "code": "T27",
+          "title": "Testimony for the Church — No. 27"
+        },
+        {
+          "code": "T28",
+          "title": "Testimony for the Church — No. 28"
+        },
+        {
+          "code": "T29",
+          "title": "Testimony for the Church — No. 29"
+        },
+        {
+          "code": "T30",
+          "title": "Testimony for the Church — No. 30"
+        },
+        {
+          "code": "T31",
+          "title": "Testimony for the Church — No. 31"
+        },
+        {
+          "code": "T32",
+          "title": "Testimony for the Church — No. 32"
+        },
+        {
+          "code": "T33",
+          "title": "Testimony for the Church — No. 33"
+        }
+      ]
+    },
+    {
+      "cache_key": "EGW Periodicals",
+      "label": "EGW Periodicals",
+      "folder_root": "Research",
+      "folder_name": "EGW_Periodicals",
+      "collection_page_url": "https://egwwritings.org/allCollection/en/5",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/en/5",
+      "items": [
+        {
+          "code": "Advance",
+          "title": "The Advance"
+        },
+        {
+          "code": "Advocate",
+          "title": "The Advocate"
+        },
+        {
+          "code": "AUCR",
+          "title": "Australasian Union Conference Record"
+        },
+        {
+          "code": "AUGleaner",
+          "title": "Atlantic Union Gleaner"
+        },
+        {
+          "code": "AustYouth",
+          "title": "Our Australasian Youth and Sabbath School Guide"
+        },
+        {
+          "code": "Banner",
+          "title": "East Michigan Banner"
+        },
+        {
+          "code": "BEcho",
+          "title": "Bible Echo and Signs of the Times"
+        },
+        {
+          "code": "Broadside1",
+          "title": "To the Little Remnant Scattered Abroad"
+        },
+        {
+          "code": "Broadside2",
+          "title": "To Those who are receiving the seal of the living God"
+        },
+        {
+          "code": "Broadside3",
+          "title": "A Vision"
+        },
+        {
+          "code": "BTS",
+          "title": "Bible Training School"
+        },
+        {
+          "code": "Bulletin",
+          "title": "Church and Sabbath School Bulletin"
+        },
+        {
+          "code": "Canvasser",
+          "title": "The Atlantic Canvasser"
+        },
+        {
+          "code": "Caterer",
+          "title": "The Hygienic Caterer"
+        },
+        {
+          "code": "CentralAdvance",
+          "title": "The Central Advance"
+        },
+        {
+          "code": "ChristianEducation",
+          "title": "Christian Education"
+        },
+        {
+          "code": "ChristianEducator",
+          "title": "The Christian Educator"
+        },
+        {
+          "code": "CollegeRecord",
+          "title": "(Battle Creek) College Record"
+        },
+        {
+          "code": "CUM",
+          "title": "The Canadian Union Messenger"
+        },
+        {
+          "code": "DS",
+          "title": "The Day-Star"
+        },
+        {
+          "code": "Echoes",
+          "title": "Echoes From the Field"
+        },
+        {
+          "code": "EducationalMessenger",
+          "title": "The Educational Messenger"
+        },
+        {
+          "code": "FPR",
+          "title": "Forest Park Reporter"
+        },
+        {
+          "code": "Gazette",
+          "title": "The Church Officers’ Gazette"
+        },
+        {
+          "code": "GCB",
+          "title": "The General Conference Bulletin"
+        },
+        {
+          "code": "GCDB",
+          "title": "General Conference Daily Bulletin"
+        },
+        {
+          "code": "GH",
+          "title": "The Gospel Herald"
+        },
+        {
+          "code": "GMM",
+          "title": "Gospel Medical Messenger"
+        },
+        {
+          "code": "GosHealth",
+          "title": "The Gospel of Health"
+        },
+        {
+          "code": "GS",
+          "title": "The Good Samaritan"
+        },
+        {
+          "code": "HM",
+          "title": "The Home Missionary"
+        },
+        {
+          "code": "HR",
+          "title": "The Health Reformer"
+        },
+        {
+          "code": "IR",
+          "title": "The Indiana Reporter"
+        },
+        {
+          "code": "LifeBoat",
+          "title": "The Life Boat"
+        },
+        {
+          "code": "LUH",
+          "title": "Lake Union Herald"
+        },
+        {
+          "code": "MedEv",
+          "title": "The Medical Evangelist"
+        },
+        {
+          "code": "Messenger",
+          "title": "The Messenger"
+        },
+        {
+          "code": "MinnWorker",
+          "title": "The Minnesota Worker"
+        },
+        {
+          "code": "MissWorker",
+          "title": "The Missionary Worker"
+        },
+        {
+          "code": "MMis",
+          "title": "The Medical Missionary"
+        },
+        {
+          "code": "MMR",
+          "title": "Monthly Missionary Reading"
+        },
+        {
+          "code": "NebRep",
+          "title": "The Nebraska Reporter"
+        },
+        {
+          "code": "Needs",
+          "title": "The Needs of the Cause in Australasia"
+        },
+        {
+          "code": "NIRec",
+          "title": "The Northern Illinois Recorder"
+        },
+        {
+          "code": "NPUGleaner",
+          "title": "North Pacific Union Gleaner"
+        },
+        {
+          "code": "NUReaper",
+          "title": "The Northern Union Reaper"
+        },
+        {
+          "code": "NYI",
+          "title": "The New York Indicator"
+        },
+        {
+          "code": "Outlook",
+          "title": "The Central Union Outlook"
+        },
+        {
+          "code": "OW",
+          "title": "The Oriental Watchman"
+        },
+        {
+          "code": "PHJ",
+          "title": "Pacific Health Journal"
+        },
+        {
+          "code": "PrT",
+          "title": "The Present Truth (UK)"
+        },
+        {
+          "code": "PT",
+          "title": "The Present Truth"
+        },
+        {
+          "code": "PUR",
+          "title": "Pacific Union Recorder"
+        },
+        {
+          "code": "RH",
+          "title": "The Review and Herald"
+        },
+        {
+          "code": "RP",
+          "title": "Report of Progress"
+        },
+        {
+          "code": "San",
+          "title": "Sanitarium Announcement"
+        },
+        {
+          "code": "SFEcho",
+          "title": "Southern Field Echo"
+        },
+        {
+          "code": "SSW",
+          "title": "Sabbath-School Worker"
+        },
+        {
+          "code": "ST",
+          "title": "The Signs of the Times"
+        },
+        {
+          "code": "SW",
+          "title": "The Southern Review"
+        },
+        {
+          "code": "Tidings",
+          "title": "Field Tidings"
+        },
+        {
+          "code": "TrueMiss",
+          "title": "The True Missionary"
+        },
+        {
+          "code": "Visitor",
+          "title": "The Columbia Union Visitor"
+        },
+        {
+          "code": "WB",
+          "title": "The Workers’ Bulletin"
+        },
+        {
+          "code": "WIMessenger",
+          "title": "West Indian Messenger"
+        },
+        {
+          "code": "WMHerald",
+          "title": "The West Michigan Herald"
+        },
+        {
+          "code": "WR",
+          "title": "The Wisconsin Reporter"
+        },
+        {
+          "code": "YI",
+          "title": "The Youth’s Instructor"
+        }
+      ]
+    },
+    {
+      "cache_key": "EGW Manuscript Releases",
+      "label": "EGW Manuscript Releases",
+      "folder_root": "Research",
+      "folder_name": "EGW_Manuscript_Releases",
+      "collection_page_url": "https://egwwritings.org/allCollection/en/1376",
+      "fallback_collection_page_url": "https://next.egwwritings.org/allCollection/en/1376",
+      "items": [
+        {
+          "code": "10MR",
+          "title": "10MR"
+        },
+        {
+          "code": "11MR",
+          "title": "11MR"
+        },
+        {
+          "code": "12MR",
+          "title": "12MR"
+        },
+        {
+          "code": "13MR",
+          "title": "13MR"
+        },
+        {
+          "code": "14MR",
+          "title": "14MR"
+        },
+        {
+          "code": "15MR",
+          "title": "15MR"
+        },
+        {
+          "code": "16MR",
+          "title": "16MR"
+        },
+        {
+          "code": "17MR",
+          "title": "17MR"
+        },
+        {
+          "code": "18MR",
+          "title": "18MR"
+        },
+        {
+          "code": "19MR",
+          "title": "19MR"
+        },
+        {
+          "code": "1MR",
+          "title": "1MR"
+        },
+        {
+          "code": "20MR",
+          "title": "20MR"
+        },
+        {
+          "code": "21MR",
+          "title": "21MR"
+        },
+        {
+          "code": "2MI",
+          "title": "Manuscritos Inéditos Tomo 2 (Contiene los manuscritos 97-161)"
+        },
+        {
+          "code": "2MR",
+          "title": "2MR"
+        },
+        {
+          "code": "3MI",
+          "title": "Manuscritos Inéditos Tomo 3 (Contiene los manuscritos 162-209)"
+        },
+        {
+          "code": "3MR",
+          "title": "3MR"
+        },
+        {
+          "code": "4MR",
+          "title": "4MR"
+        },
+        {
+          "code": "5MR",
+          "title": "5MR"
+        },
+        {
+          "code": "6MR",
+          "title": "6MR"
+        },
+        {
+          "code": "7MR",
+          "title": "7MR"
+        },
+        {
+          "code": "8MR",
+          "title": "8MR"
+        },
+        {
+          "code": "9MR",
+          "title": "9MR"
+        },
+        {
+          "code": "MI1",
+          "title": "Manuscritos Inéditos Tomo 1 (Contiene los manuscritos 19-96)"
+        },
+        {
+          "code": "MR1033",
+          "title": "MR1033"
+        },
+        {
+          "code": "MR311",
+          "title": "MR311"
+        },
+        {
+          "code": "MR728",
+          "title": "MR728"
+        },
+        {
+          "code": "MR760",
+          "title": "MR760"
+        },
+        {
+          "code": "MR852",
+          "title": "MR852"
+        },
+        {
+          "code": "MR926",
+          "title": "MR926"
+        }
+      ]
+    }
+  ]
+}

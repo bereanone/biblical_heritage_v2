@@ -149,14 +149,10 @@ class ViewerVerseLine extends StatelessWidget {
               geometryRevision: geometryRevision,
               textDirection: textDirection,
               textAlign: TextAlign.start,
-              child: RichText(
-                text: textSpan,
-              ),
+              child: RichText(text: textSpan),
             ),
           )
-        : RichText(
-            text: textSpan,
-          );
+        : RichText(text: textSpan);
 
     return Material(
       color: Colors.transparent,
@@ -191,10 +187,7 @@ class ViewerVerseLine extends StatelessWidget {
                 textDirection: textDirection,
                 onLongPress: onVerseNumberLongPress,
               ),
-              Expanded(
-                key: textKey,
-                child: textWidget,
-              ),
+              Expanded(key: textKey, child: textWidget),
             ],
           ),
         ),
@@ -245,17 +238,38 @@ class _VerseGutter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final verseWidth = _measureTextWidth('$verse', numberStyle, textDirection);
+    final verseWidth = _measureTextWidth(
+      context,
+      '$verse',
+      numberStyle,
+      textDirection,
+    ).ceilToDouble();
+    // Reserve a 3-digit verse slot so chapters like Psalm 119 do not clip
+    // once the verse numbers reach 100+ at larger font sizes.
+    final reservedVerseWidth = _measureTextWidth(
+      context,
+      '888',
+      numberStyle,
+      textDirection,
+    ).ceilToDouble() + 4.0;
+    final verseSlotWidth = verseWidth > reservedVerseWidth
+        ? verseWidth
+        : reservedVerseWidth;
     final chapterWidth = showChapterNumber
-        ? _measureTextWidth('$chapter', chapterStyle, textDirection)
+        ? _measureTextWidth(
+            context,
+            '$chapter',
+            chapterStyle,
+            textDirection,
+          ).ceilToDouble()
         : 0.0;
     final badgePadding = isTagged ? 10.0 : 0.0;
     final contentWidth = showChapterNumber
-        ? (chapterWidth > verseWidth + badgePadding
+        ? (chapterWidth > verseSlotWidth + badgePadding
               ? chapterWidth
-              : verseWidth + badgePadding)
-        : verseWidth + badgePadding;
-    final width = contentWidth + 12.0;
+              : verseSlotWidth + badgePadding)
+        : verseSlotWidth + badgePadding;
+    final width = contentWidth + 16.0;
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
@@ -349,14 +363,17 @@ class _VerseNumberBadge extends StatelessWidget {
 }
 
 double _measureTextWidth(
+  BuildContext context,
   String text,
   TextStyle style,
   TextDirection textDirection,
 ) {
+  final textScaler = MediaQuery.textScalerOf(context);
   final painter = TextPainter(
     text: TextSpan(text: text, style: style),
     textDirection: textDirection,
     maxLines: 1,
+    textScaler: textScaler,
   )..layout();
   return painter.width;
 }

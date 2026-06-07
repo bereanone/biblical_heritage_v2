@@ -52,7 +52,9 @@ class LocalSettingsStore {
   Future<String> ensureDeviceId() async {
     final settings = await load();
     final existing = settings['device_id']?.toString().trim() ?? '';
-    if (existing.isNotEmpty) return existing;
+    if (existing.isNotEmpty) {
+      return existing;
+    }
 
     final generated = 'device_${DateTime.now().toUtc().microsecondsSinceEpoch}';
     settings['device_id'] = generated;
@@ -72,12 +74,33 @@ class LocalSettingsStore {
     return value.isEmpty ? null : value;
   }
 
-  Future<void> saveLibraryRoot({required String path, String? bookmark}) async {
+  Future<String?> loadLibraryRootSource() async {
+    final settings = await load();
+    final value = settings['library_root_source']?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
+  Future<void> saveLibraryRoot({
+    required String path,
+    String? bookmark,
+    String? source,
+  }) async {
     final settings = await load();
     settings['library_root_path'] = path.trim();
     settings['library_root_bookmark'] = bookmark?.trim().isEmpty == true
         ? null
         : bookmark?.trim();
+    settings['library_root_source'] = source?.trim().isEmpty == true
+        ? null
+        : source?.trim();
+    await save(settings);
+  }
+
+  Future<void> clearLibraryRoot() async {
+    final settings = await load();
+    settings.remove('library_root_path');
+    settings.remove('library_root_bookmark');
+    settings.remove('library_root_source');
     await save(settings);
   }
 

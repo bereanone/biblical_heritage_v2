@@ -52,11 +52,14 @@ class StartupCoordinator {
   static const _fromVersion = 'legacy-v1';
   static const _toVersion = 'v2';
 
-  Future<StartupSnapshot> initialize() async {
+  Future<StartupSnapshot> initialize({
+    ValueChanged<String>? onStatus,
+  }) async {
+    onStatus?.call('Checking saved startup state...');
     _ensureDesktopSqlite();
-    await SandboxBootstrap.ensureBibleReady();
-
+    onStatus?.call('Reading device identity...');
     final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+    onStatus?.call('Reading saved migration state...');
     final migrationState = await LocalSettingsStore.instance
         .loadMigrationState();
     final migrationStatus = migrationState['status']?.toString() ?? '';
@@ -64,7 +67,9 @@ class StartupCoordinator {
 
     if (migrationStatus == 'migration_completed' ||
         migrationStatus == 'fresh_install_selected') {
+      onStatus?.call('Preparing user database...');
       await _ensureFreshV2Database(deviceId: deviceId);
+      onStatus?.call('Recording startup state...');
       await _recordMigrationRow(
         deviceId: deviceId,
         migrationKey: migrationKey ?? 'migration_completed',
@@ -83,9 +88,12 @@ class StartupCoordinator {
       );
     }
 
+    onStatus?.call('Scanning for legacy user data...');
     final legacyFiles = await _discoverLegacyWritableFiles();
     if (legacyFiles.isEmpty) {
+      onStatus?.call('Preparing fresh user database...');
       await _ensureFreshV2Database(deviceId: deviceId);
+      onStatus?.call('Recording startup state...');
       await _recordMigrationRow(
         deviceId: deviceId,
         migrationKey: 'no_legacy_found',
@@ -146,7 +154,6 @@ class StartupCoordinator {
     required bool importLegacyData,
   }) async {
     _ensureDesktopSqlite();
-    await SandboxBootstrap.ensureBibleReady();
 
     final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
     final snapshot = await LocalSettingsStore.instance.loadMigrationState();

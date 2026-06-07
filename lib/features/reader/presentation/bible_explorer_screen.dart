@@ -66,6 +66,8 @@ class BibleExplorerScreen extends StatefulWidget {
 }
 
 class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
+  String _viewerStatus = 'Loading Bible Explorer...';
+  String? _viewerLoadError;
   int _bookNumber = 1;
   int _chapter = 1;
   int _verse = 1;
@@ -76,6 +78,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
   PresentationAspectRatioPreset _presentationAspectRatio =
       PresentationAspectRatioPreset.auto;
   String? _lastSearchTerm;
+  BibleSearchSession? _activeBibleSearchSession;
   ViewerRangeSelection _rangeSelection = const ViewerRangeSelection();
   int _highlightRefreshTick = 0;
   int _navigationTick = 0;
@@ -115,8 +118,65 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     if (!_viewerReady || _anchorBlockId == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        backgroundColor: theme.scaffoldBackgroundColor,
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(),
+                        const SizedBox(height: 16),
+                        Text(
+                          _viewerLoadError == null
+                              ? _viewerStatus
+                              : 'Bible Explorer could not finish loading.',
+                          textAlign: TextAlign.center,
+                        ),
+                        if (_viewerLoadError != null) ...[
+                          const SizedBox(height: 12),
+                          SelectableText(
+                            _viewerLoadError!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: theme.colorScheme.error,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            FilledButton(
+                              onPressed: _initializeViewer,
+                              child: const Text('Retry'),
+                            ),
+                            OutlinedButton(
+                              onPressed: () => Navigator.of(context).maybePop(),
+                              child: const Text('Back'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
     }
 
     final passage = _buildCurrentPassage();
@@ -136,6 +196,9 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
               verse: displayVerse,
               fontScale: _fontScale,
               onSearch: () => _openSearch(context),
+              bibleSearchSession: _activeBibleSearchSession,
+              onPreviousBibleSearchHit: () => _navigateBibleSearchHit(-1),
+              onNextBibleSearchHit: () => _navigateBibleSearchHit(1),
               onSavedPresentations: _openSavedPresentations,
               onStandardTag: _openTagButton,
               onDollarTag: _openDollarTagButton,

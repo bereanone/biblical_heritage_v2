@@ -23,6 +23,7 @@ Future<ViewerSearchSelection?> showViewerSearchDialog(
   required double fontScale,
   String? lastSearchTerm,
   String? currentTag,
+  VoidCallback? onReturnToBible,
   Future<void> Function(String tag)? onBibleResultAdded,
   ReaderSearchMode initialMode = ReaderSearchMode.bible,
   int? initialHighlightGroupId,
@@ -42,6 +43,7 @@ Future<ViewerSearchSelection?> showViewerSearchDialog(
             fontScale: fontScale,
             lastSearchTerm: lastSearchTerm,
             currentTag: currentTag,
+            onReturnToBible: onReturnToBible,
             onBibleResultAdded: onBibleResultAdded,
             initialMode: initialMode,
             initialHighlightGroupId: initialHighlightGroupId,
@@ -59,6 +61,7 @@ class ViewerSearchDialog extends StatefulWidget {
     required this.fontScale,
     this.lastSearchTerm,
     this.currentTag,
+    this.onReturnToBible,
     this.onBibleResultAdded,
     this.initialMode = ReaderSearchMode.bible,
     this.initialHighlightGroupId,
@@ -68,6 +71,7 @@ class ViewerSearchDialog extends StatefulWidget {
   final double fontScale;
   final String? lastSearchTerm;
   final String? currentTag;
+  final VoidCallback? onReturnToBible;
   final Future<void> Function(String tag)? onBibleResultAdded;
   final ReaderSearchMode initialMode;
   final int? initialHighlightGroupId;
@@ -313,22 +317,36 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
     );
   }
 
-  void _openLibraryItem(LibraryCatalogItem item, String searchQuery) {
+  void _openLibraryItem(
+    LibraryCatalogSearchResult result,
+    int index,
+    List<LibraryCatalogSearchResult> results,
+    String searchQuery,
+    String collectionFilter,
+  ) {
     final navigator = Navigator.of(context, rootNavigator: true);
     navigator.pop();
+    final session = LibraryCatalogSearchSession(
+      query: searchQuery,
+      collectionFilter: collectionFilter == 'all' ? null : collectionFilter,
+      results: List<LibraryCatalogSearchResult>.unmodifiable(results),
+      currentIndex: index,
+    );
     unawaited(
       Future<void>.microtask(() {
         if (!navigator.mounted) return;
         navigator.push(
           MaterialPageRoute<void>(
             builder: (_) => LibraryBookReaderScreen(
-              item: item,
-              initialHref: item.epubHref,
-              initialAnchorId: item.anchorId,
-              initialSpineIndex: item.spineIndex,
-              initialParagraphIndex: item.paragraphIndex,
+              item: result.item,
+              initialHref: result.item.epubHref,
+              initialAnchorId: result.item.anchorId,
+              initialSpineIndex: result.item.spineIndex,
+              initialParagraphIndex: result.item.paragraphIndex,
               searchQuery: searchQuery,
               highlightTerms: extractLibrarySearchHighlightTerms(searchQuery),
+              searchSession: session,
+              onReturnToBible: widget.onReturnToBible,
             ),
           ),
         );
@@ -743,15 +761,32 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
                     currentTag: _currentDefaultTag,
                     isCurrentTagLoading: _loadingCurrentDefaultTag,
                     onLoadMore: () => _performSearch(append: true),
-                    onSelectResult: (result) => Navigator.of(context).pop(
-                      ViewerSearchSelection(
-                        blockId: result.blockId,
-                        bookNumber: result.bookNumber,
-                        chapter: result.chapter,
-                        verse: result.verse,
-                        lastSearchTerm: bibleSearchTerm,
-                      ),
-                    ),
+                    onSelectResult: (result, index) {
+                      final session = BibleSearchSession(
+                        query: bibleSearchTerm,
+                        section: _selectedSection,
+                        bookNumber: _selectedBookNumber,
+                        lookupByHighlight: _lookupByHighlight,
+                        highlightGroupId: _lookupByHighlight
+                            ? _selectedHighlightGroupId
+                            : null,
+                        results: List<PassageSearchResult>.unmodifiable(
+                          _results,
+                        ),
+                        currentIndex: index,
+                        totalResultCount: _totalResultsCount,
+                      );
+                      Navigator.of(context).pop(
+                        ViewerSearchSelection(
+                          blockId: result.blockId,
+                          bookNumber: result.bookNumber,
+                          chapter: result.chapter,
+                          verse: result.verse,
+                          lastSearchTerm: bibleSearchTerm,
+                          bibleSearchSession: session,
+                        ),
+                      );
+                    },
                     onQuickApplyResult: _quickApplyBibleSearchResult,
                   ),
                 ],

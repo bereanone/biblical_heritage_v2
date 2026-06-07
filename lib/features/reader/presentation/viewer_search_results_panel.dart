@@ -33,7 +33,7 @@ class ViewerSearchResultsPanel extends StatelessWidget {
   final List<String> highlightTerms;
   final String? currentTag;
   final bool isCurrentTagLoading;
-  final ValueChanged<PassageSearchResult> onSelectResult;
+  final void Function(PassageSearchResult result, int index) onSelectResult;
   final Future<void> Function(PassageSearchResult result)? onQuickApplyResult;
   final VoidCallback onLoadMore;
 
@@ -146,7 +146,7 @@ class ViewerSearchResultsPanel extends StatelessWidget {
                 baseStyle: bodyStyle,
                 highlightTerms: highlightTerms,
               ),
-              onTap: () => onSelectResult(result),
+              onTap: () => onSelectResult(result, index),
             );
           },
         ),

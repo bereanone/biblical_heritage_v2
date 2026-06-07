@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'presentation_prep/presentation_ui_helpers.dart';
 import 'viewer_reference_title.dart';
 import 'reader_tag_button.dart';
+import 'viewer_search_models.dart';
 
 class ViewerTopBar extends StatelessWidget {
   const ViewerTopBar({
@@ -12,6 +13,9 @@ class ViewerTopBar extends StatelessWidget {
     required this.verse,
     required this.fontScale,
     required this.onSearch,
+    this.bibleSearchSession,
+    this.onPreviousBibleSearchHit,
+    this.onNextBibleSearchHit,
     required this.onSavedPresentations,
     required this.onStandardTag,
     required this.onDollarTag,
@@ -26,6 +30,9 @@ class ViewerTopBar extends StatelessWidget {
   final int? verse;
   final double fontScale;
   final VoidCallback onSearch;
+  final BibleSearchSession? bibleSearchSession;
+  final VoidCallback? onPreviousBibleSearchHit;
+  final VoidCallback? onNextBibleSearchHit;
   final VoidCallback onSavedPresentations;
   final VoidCallback onStandardTag;
   final VoidCallback onDollarTag;
@@ -90,6 +97,15 @@ class ViewerTopBar extends StatelessWidget {
                       onPressed: onSearch,
                       icon: Icon(Icons.search, size: iconSize),
                     ),
+                    if (_showBibleSearchNavigator) ...[
+                      const SizedBox(width: 6),
+                      _BibleSearchNavigator(
+                        session: bibleSearchSession!,
+                        compact: compact,
+                        onPrevious: onPreviousBibleSearchHit,
+                        onNext: onNextBibleSearchHit,
+                      ),
+                    ],
                     IconButton(
                       constraints: BoxConstraints.tightFor(
                         width: actionExtent,
@@ -151,6 +167,84 @@ class ViewerTopBar extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  bool get _showBibleSearchNavigator =>
+      bibleSearchSession != null && bibleSearchSession!.results.isNotEmpty;
+}
+
+class _BibleSearchNavigator extends StatelessWidget {
+  const _BibleSearchNavigator({
+    required this.session,
+    required this.compact,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final BibleSearchSession session;
+  final bool compact;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final foreground = theme.colorScheme.onSurface;
+    final background = theme.colorScheme.surface;
+    final borderColor = theme.dividerColor;
+    final labelStyle = theme.textTheme.labelLarge?.copyWith(
+      color: foreground,
+      fontWeight: FontWeight.w800,
+      fontSize: compact ? 11 : 12,
+      height: 1,
+    );
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: borderColor),
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 4 : 6,
+          vertical: compact ? 2 : 3,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              onPressed: session.hasPrevious ? onPrevious : null,
+              tooltip: 'Previous Bible search hit',
+              icon: const Icon(Icons.chevron_left),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: BoxConstraints.tightFor(
+                width: compact ? 28 : 30,
+                height: compact ? 28 : 30,
+              ),
+              color: foreground,
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(session.counterLabel, style: labelStyle),
+            ),
+            IconButton(
+              onPressed: session.hasNext ? onNext : null,
+              tooltip: 'Next Bible search hit',
+              icon: const Icon(Icons.chevron_right),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: BoxConstraints.tightFor(
+                width: compact ? 28 : 30,
+                height: compact ? 28 : 30,
+              ),
+              color: foreground,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

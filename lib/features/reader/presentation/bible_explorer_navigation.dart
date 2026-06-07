@@ -4,38 +4,57 @@ part of 'bible_explorer_screen.dart';
 
 extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
   Future<void> _initializeViewer() async {
-    final db = StudyBibleDatabase.instance;
-    final books = await db.loadBooks();
-    final names = <int, String>{
-      for (final book in books) book.bookNumber: book.bookName,
-    };
-    final latest = await NavigationHistoryService.instance.fetchLatest();
-    final targetBook = latest?.book ?? _bookNumber;
-    final targetChapter = latest?.chapter ?? _chapter;
-    final targetVerse = latest?.verse ?? _verse;
-    final targetBlockId =
-        latest?.blockId ??
-        await db.loadBlockIdForVerse(
-          bookNumber: targetBook,
-          chapter: targetChapter,
-          verse: targetVerse,
-        ) ??
-        1;
+    if (mounted) {
+      setState(() {
+        _viewerStatus = 'Loading Bible Explorer...';
+        _viewerLoadError = null;
+      });
+    }
+    try {
+      final db = StudyBibleDatabase.instance;
+      final books = await db.loadBooks();
+      final names = <int, String>{
+        for (final book in books) book.bookNumber: book.bookName,
+      };
+      final latest = await NavigationHistoryService.instance.fetchLatest();
+      final targetBook = latest?.book ?? _bookNumber;
+      final targetChapter = latest?.chapter ?? _chapter;
+      final targetVerse = latest?.verse ?? _verse;
+      final targetBlockId =
+          latest?.blockId ??
+          await db.loadBlockIdForVerse(
+            bookNumber: targetBook,
+            chapter: targetChapter,
+            verse: targetVerse,
+          ) ??
+          1;
 
-    await _viewerData.ensureWindow(targetBlockId);
-    if (!mounted) return;
-    setState(() {
-      _bookNames
-        ..clear()
-        ..addAll(names);
-      _bookNumber = targetBook;
-      _chapter = targetChapter;
-      _verse = targetVerse;
-      _anchorBlockId = targetBlockId;
-      _selectedBlockId = targetBlockId;
-      _viewerReady = true;
-      _navigationTick += 1;
-    });
+      await _viewerData.ensureWindow(targetBlockId);
+      if (!mounted) return;
+      setState(() {
+        _bookNames
+          ..clear()
+          ..addAll(names);
+        _bookNumber = targetBook;
+        _chapter = targetChapter;
+        _verse = targetVerse;
+        _anchorBlockId = targetBlockId;
+        _selectedBlockId = targetBlockId;
+        _viewerReady = true;
+        _viewerStatus = 'Bible Explorer loaded.';
+        _viewerLoadError = null;
+        _navigationTick += 1;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _viewerReady = false;
+        _anchorBlockId = null;
+        _selectedBlockId = null;
+        _viewerStatus = 'Bible Explorer could not finish loading.';
+        _viewerLoadError = error.toString();
+      });
+    }
   }
 
   void _handleVisibleBlockChanged(int blockId) {
@@ -106,13 +125,31 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
     final ViewerSearchSelection? selection = await showViewerSearchDialog(
       context,
       fontScale: _fontScale,
-      lastSearchTerm: _lastSearchTerm,
+      lastSearchTerm: _activeBibleSearchSession?.query ?? _lastSearchTerm,
     );
     if (selection == null || !mounted) return;
     setState(() {
       _lastSearchTerm = selection.lastSearchTerm;
+      _activeBibleSearchSession = selection.bibleSearchSession;
     });
     await _openBlockId(selection.blockId);
+  }
+
+  Future<void> _navigateBibleSearchHit(int delta) async {
+    final session = _activeBibleSearchSession;
+    if (session == null || session.results.isEmpty) return;
+
+    final nextIndex = session.currentIndex + delta;
+    if (nextIndex < 0 || nextIndex >= session.results.length) return;
+
+    final nextSession = session.copyWithIndex(nextIndex);
+    final nextResult = nextSession.currentResult;
+    if (!mounted) return;
+    setState(() {
+      _activeBibleSearchSession = nextSession;
+      _lastSearchTerm = nextSession.query;
+    });
+    await _openBlockId(nextResult.blockId);
   }
 
   Future<void> _openTopics(BuildContext context) async {

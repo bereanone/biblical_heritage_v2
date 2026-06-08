@@ -12,6 +12,7 @@ class ViewerTopBar extends StatelessWidget {
     required this.chapter,
     required this.verse,
     required this.fontScale,
+    required this.baseBibleFontSize,
     required this.onSearch,
     this.bibleSearchSession,
     this.onPreviousBibleSearchHit,
@@ -29,6 +30,7 @@ class ViewerTopBar extends StatelessWidget {
   final int chapter;
   final int? verse;
   final double fontScale;
+  final double baseBibleFontSize;
   final VoidCallback onSearch;
   final BibleSearchSession? bibleSearchSession;
   final VoidCallback? onPreviousBibleSearchHit;
@@ -66,8 +68,19 @@ class ViewerTopBar extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final titleWidth = (constraints.maxWidth * (isWide ? 0.30 : 0.34))
+        final barWidth = constraints.maxWidth;
+        final titleWidth = (barWidth * (isWide ? 0.30 : 0.34))
             .clamp(72.0, isWide ? 320.0 : 280.0);
+        final halfBar = barWidth / 2.0;
+        final halfTitle = titleWidth / 2.0;
+        const clusterGap = 20.0;
+        final presClusterW = 2.0 * actionExtent + 8.0;
+
+        // Center-relative cluster positions: both inner clusters are equidistant
+        // from the title edges, so neither side can push the title off-center.
+        final presLeft = (halfBar - halfTitle - clusterGap - presClusterW)
+            .clamp(24.0 + 2.0 * actionExtent + 8.0, halfBar - presClusterW);
+        final tagLeft = halfBar + halfTitle + clusterGap;
 
         return Material(
           color: theme.colorScheme.surface,
@@ -77,88 +90,130 @@ class ViewerTopBar extends StatelessWidget {
               height: kToolbarHeight,
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: inset),
-                child: Row(
+                child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    IconButton(
-                      constraints: BoxConstraints.tightFor(
-                        width: actionExtent,
-                        height: actionExtent,
-                      ),
-                      padding: EdgeInsets.zero,
-                      onPressed: () => Navigator.of(context).maybePop(),
-                      icon: Icon(Icons.arrow_back, size: iconSize),
-                    ),
-                    IconButton(
-                      constraints: BoxConstraints.tightFor(
-                        width: actionExtent,
-                        height: actionExtent,
-                      ),
-                      padding: EdgeInsets.zero,
-                      onPressed: onSearch,
-                      icon: Icon(Icons.search, size: iconSize),
-                    ),
-                    if (_showBibleSearchNavigator) ...[
-                      const SizedBox(width: 6),
-                      _BibleSearchNavigator(
-                        session: bibleSearchSession!,
-                        compact: compact,
-                        onPrevious: onPreviousBibleSearchHit,
-                        onNext: onNextBibleSearchHit,
-                      ),
-                    ],
-                    IconButton(
-                      constraints: BoxConstraints.tightFor(
-                        width: actionExtent,
-                        height: actionExtent,
-                      ),
-                      padding: EdgeInsets.zero,
-                      onPressed: onSavedPresentations,
-                      icon: Icon(Icons.connected_tv, size: iconSize),
-                      tooltip: 'Saved Presentations',
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Center(
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(6),
-                          onTap: onChoosePassage,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 8,
+                    Positioned(
+                      left: 24,
+                      top: 0,
+                      bottom: 0,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            constraints: BoxConstraints.tightFor(
+                              width: actionExtent,
+                              height: actionExtent,
                             ),
-                            child: SizedBox(
-                              width: titleWidth,
-                              child: ViewerReferenceTitle(
-                                bookName: bookName,
-                                chapter: chapter,
-                                verse: verse,
-                                baseStyle: baseTitleStyle,
-                                minimumFontSize: readingFontSize,
-                                maxWidth: titleWidth,
-                              ),
+                            padding: EdgeInsets.zero,
+                            onPressed: () => Navigator.of(context).maybePop(),
+                            icon: Icon(Icons.arrow_back, size: iconSize),
+                          ),
+                          IconButton(
+                            constraints: BoxConstraints.tightFor(
+                              width: actionExtent,
+                              height: actionExtent,
+                            ),
+                            padding: EdgeInsets.zero,
+                            onPressed: onSearch,
+                            icon: Icon(Icons.search, size: iconSize),
+                          ),
+                          if (_showBibleSearchNavigator) ...[
+                            const SizedBox(width: 16),
+                            _BibleSearchNavigator(
+                              session: bibleSearchSession!,
+                              compact: compact,
+                              onPrevious: onPreviousBibleSearchHit,
+                              onNext: onNextBibleSearchHit,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.center,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: onChoosePassage,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          child: SizedBox(
+                            width: titleWidth,
+                            child: ViewerReferenceTitle(
+                              bookName: bookName,
+                              chapter: chapter,
+                              verse: verse,
+                              baseStyle: baseTitleStyle,
+                              minimumFontSize: readingFontSize,
+                              maxWidth: titleWidth,
                             ),
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    ReaderTagButtons(
-                      fontScale: fontScale,
-                      activeFamily: activeFamily,
-                      onStandardTap: onStandardTag,
-                      onDollarTap: onDollarTag,
-                      onRapidTap: onRapidTag,
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      constraints: BoxConstraints.tightFor(
-                        width: actionExtent,
-                        height: actionExtent,
+                    Positioned(
+                      left: presLeft,
+                      top: 0,
+                      bottom: 0,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            constraints: BoxConstraints.tightFor(
+                              width: actionExtent,
+                              height: actionExtent,
+                            ),
+                            padding: EdgeInsets.zero,
+                            onPressed: onSavedPresentations,
+                            icon: Icon(Icons.connected_tv, size: iconSize),
+                            tooltip: 'Saved Presentations',
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            constraints: BoxConstraints.tightFor(
+                              width: actionExtent,
+                              height: actionExtent,
+                            ),
+                            padding: EdgeInsets.zero,
+                            onPressed: onDollarTag,
+                            icon: Icon(
+                              Icons.slideshow_outlined,
+                              size: iconSize,
+                            ),
+                            tooltip: 'Presentation Setup',
+                          ),
+                        ],
                       ),
-                      padding: EdgeInsets.zero,
-                      onPressed: onTopics,
-                      icon: Icon(Icons.list_alt, size: iconSize),
+                    ),
+                    Positioned(
+                      left: tagLeft,
+                      top: 0,
+                      bottom: 0,
+                      child: ReaderTagButtons(
+                        fontScale: fontScale,
+                        activeFamily: activeFamily,
+                        showDollar: false,
+                        onStandardTap: onStandardTag,
+                        onDollarTap: onDollarTag,
+                        onRapidTap: onRapidTag,
+                      ),
+                    ),
+                    Positioned(
+                      right: 24,
+                      top: 0,
+                      bottom: 0,
+                      child: IconButton(
+                        constraints: BoxConstraints.tightFor(
+                          width: actionExtent,
+                          height: actionExtent,
+                        ),
+                        padding: EdgeInsets.zero,
+                        onPressed: onTopics,
+                        icon: Icon(Icons.list_alt, size: iconSize),
+                      ),
                     ),
                   ],
                 ),
@@ -195,8 +250,8 @@ class _BibleSearchNavigator extends StatelessWidget {
     final borderColor = theme.dividerColor;
     final labelStyle = theme.textTheme.labelLarge?.copyWith(
       color: foreground,
-      fontWeight: FontWeight.w800,
-      fontSize: compact ? 11 : 12,
+      fontWeight: FontWeight.w600,
+      fontSize: compact ? 18 : 19,
       height: 1,
     );
 
@@ -217,12 +272,20 @@ class _BibleSearchNavigator extends StatelessWidget {
             IconButton(
               onPressed: session.hasPrevious ? onPrevious : null,
               tooltip: 'Previous Bible search hit',
-              icon: const Icon(Icons.chevron_left),
+              icon: Text(
+                '<',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: foreground,
+                  fontWeight: FontWeight.w800,
+                  fontSize: compact ? 20 : 21,
+                  height: 1,
+                ),
+              ),
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,
               constraints: BoxConstraints.tightFor(
-                width: compact ? 28 : 30,
-                height: compact ? 28 : 30,
+                width: compact ? 30 : 32,
+                height: compact ? 30 : 32,
               ),
               color: foreground,
             ),
@@ -233,12 +296,20 @@ class _BibleSearchNavigator extends StatelessWidget {
             IconButton(
               onPressed: session.hasNext ? onNext : null,
               tooltip: 'Next Bible search hit',
-              icon: const Icon(Icons.chevron_right),
+              icon: Text(
+                '>',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: foreground,
+                  fontWeight: FontWeight.w800,
+                  fontSize: compact ? 20 : 21,
+                  height: 1,
+                ),
+              ),
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,
               constraints: BoxConstraints.tightFor(
-                width: compact ? 28 : 30,
-                height: compact ? 28 : 30,
+                width: compact ? 30 : 32,
+                height: compact ? 30 : 32,
               ),
               color: foreground,
             ),

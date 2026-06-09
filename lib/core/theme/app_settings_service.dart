@@ -78,7 +78,10 @@ class AppSettingsService {
   static const _tagPresentationLayoutKeyPrefix = 'tags.presentation_layout.';
   static const _churchAutoMuteEnabledKey = 'utilities.church_auto_mute.enabled';
   static const _lastBibleSearchKey = 'search.last_bible_search';
+  static const _lastBibleSearchSessionKey = 'search.last_bible_search_session';
   static const _lastElibrarySearchKey = 'search.last_elibrary_search';
+  static const _lastElibrarySearchSessionKey =
+      'search.last_elibrary_search_session';
 
   Future<AppVisualSettings> loadVisualSettings(AppThemeMode mode) async {
     final db = await UserDatabase.instance.database;
@@ -101,7 +104,7 @@ class AppSettingsService {
       for (final row in rows) row['key'] as String: row['value'] as String,
     };
 
-    return AppVisualSettings(
+    final loaded = AppVisualSettings(
       backgroundColor:
           _parseColor(values[_backgroundKey]) ?? preset.backgroundColor,
       textColor: _parseColor(values[_textKey]) ?? preset.textColor,
@@ -113,6 +116,7 @@ class AppSettingsService {
           double.tryParse(values[_viewerFontSizeKey] ?? '') ??
           preset.viewerFontScale,
     );
+    return _looksReadable(loaded) ? loaded : preset;
   }
 
   Future<void> applyThemePreset(AppThemeMode mode) async {
@@ -518,12 +522,28 @@ class AppSettingsService {
     return _saveStringSetting(_lastBibleSearchKey, value);
   }
 
+  Future<String?> loadLastBibleSearchSessionJson() {
+    return _loadStringSetting(_lastBibleSearchSessionKey);
+  }
+
+  Future<void> saveLastBibleSearchSessionJson(String value) {
+    return _saveStringSetting(_lastBibleSearchSessionKey, value);
+  }
+
   Future<String?> loadLastElibrarySearch() {
     return _loadStringSetting(_lastElibrarySearchKey);
   }
 
   Future<void> saveLastElibrarySearch(String value) {
     return _saveStringSetting(_lastElibrarySearchKey, value);
+  }
+
+  Future<String?> loadLastElibrarySearchSessionJson() {
+    return _loadStringSetting(_lastElibrarySearchSessionKey);
+  }
+
+  Future<void> saveLastElibrarySearchSessionJson(String value) {
+    return _saveStringSetting(_lastElibrarySearchSessionKey, value);
   }
 
   AppVisualSettings presetForMode(AppThemeMode mode) {
@@ -630,5 +650,21 @@ class AppSettingsService {
       'key': key,
       'value': trimmed,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  bool _looksReadable(AppVisualSettings settings) {
+    final background = settings.backgroundColor;
+    final text = settings.textColor;
+    final appBar = settings.appBarColor;
+    final bottomBar = settings.bottomBarColor;
+    final backgroundTextContrast =
+        (background.computeLuminance() - text.computeLuminance()).abs();
+    final backgroundBarContrast =
+        (background.computeLuminance() - appBar.computeLuminance()).abs();
+    final backgroundBottomContrast =
+        (background.computeLuminance() - bottomBar.computeLuminance()).abs();
+    return backgroundTextContrast > 0.20 ||
+        backgroundBarContrast > 0.08 ||
+        backgroundBottomContrast > 0.08;
   }
 }

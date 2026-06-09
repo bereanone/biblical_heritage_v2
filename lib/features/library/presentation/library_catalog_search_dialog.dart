@@ -2,15 +2,24 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../core/theme/app_settings_service.dart';
 import '../data/library_catalog_service.dart';
 import 'library_book_reader_screen.dart';
 import 'library_catalog_search_panel.dart';
 import 'library_font_scale.dart';
 import '../../reader/presentation/tag_quick_apply_helper.dart';
 
+double _libraryCatalogSearchDialogWidthFor(double screenWidth) {
+  if (screenWidth < 700) {
+    return (screenWidth - 32).clamp(280.0, double.infinity);
+  }
+  return (screenWidth * 0.75).clamp(0.0, 1100.0);
+}
+
 Future<void> showLibraryCatalogSearchDialog(
   BuildContext context, {
   required double fontScale,
+  VoidCallback? onReturnToBible,
 }) {
   return showDialog<void>(
     context: context,
@@ -19,34 +28,53 @@ Future<void> showLibraryCatalogSearchDialog(
     barrierColor: Colors.black54,
     builder: (context) => LibraryFontScaleScope(
       scale: fontScale,
-      child: const _LibraryCatalogSearchDialog(),
+      child: _LibraryCatalogSearchDialog(onReturnToBible: onReturnToBible),
     ),
   );
 }
 
 class _LibraryCatalogSearchDialog extends StatelessWidget {
-  const _LibraryCatalogSearchDialog();
+  const _LibraryCatalogSearchDialog({this.onReturnToBible});
+
+  final VoidCallback? onReturnToBible;
 
   void _openItem(
     BuildContext context,
-    LibraryCatalogItem item,
+    LibraryCatalogSearchResult result,
+    int index,
+    List<LibraryCatalogSearchResult> results,
     String searchQuery,
+    String collectionFilter,
   ) {
     final navigator = Navigator.of(context, rootNavigator: true);
     navigator.pop();
+    final session = LibraryCatalogSearchSession(
+      query: searchQuery,
+      collectionFilter: collectionFilter == 'all' ? null : collectionFilter,
+      results: List<LibraryCatalogSearchResult>.unmodifiable(results),
+      currentIndex: index,
+    );
+    unawaited(
+      AppSettingsService.instance.saveLastElibrarySearchSessionJson(
+        LibraryCatalogSearchSessionSnapshot.fromSession(session).toJsonString(),
+      ),
+    );
+    unawaited(AppSettingsService.instance.saveLastElibrarySearch(searchQuery));
     unawaited(
       Future<void>.microtask(() {
         if (!navigator.mounted) return;
         navigator.push(
           MaterialPageRoute<void>(
             builder: (_) => LibraryBookReaderScreen(
-              item: item,
-              initialHref: item.epubHref,
-              initialAnchorId: item.anchorId,
-              initialSpineIndex: item.spineIndex,
-              initialParagraphIndex: item.paragraphIndex,
+              item: result.item,
+              initialHref: result.item.epubHref,
+              initialAnchorId: result.item.anchorId,
+              initialSpineIndex: result.item.spineIndex,
+              initialParagraphIndex: result.item.paragraphIndex,
               searchQuery: searchQuery,
               highlightTerms: extractLibrarySearchHighlightTerms(searchQuery),
+              searchSession: session,
+              onReturnToBible: onReturnToBible,
             ),
           ),
         );
@@ -118,54 +146,70 @@ class _LibraryCatalogSearchDialog extends StatelessWidget {
     final theme = Theme.of(context);
     final fontScale = libraryFontScaleOf(context);
 
+    final screenSize = MediaQuery.sizeOf(context);
+    final dialogWidth = _libraryCatalogSearchDialogWidthFor(screenSize.width);
+
     return Dialog(
-      insetPadding: const EdgeInsets.all(16),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       backgroundColor: theme.colorScheme.surface,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width.clamp(320.0, 720.0),
-          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
-        ),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
-              child: Row(
+      child: SizedBox(
+        width: dialogWidth,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minWidth: dialogWidth,
+            maxWidth: dialogWidth,
+            maxHeight: screenSize.height * 0.85,
+          ),
+          child: Column(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    tooltip: 'Close Search',
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      'eLibrary Search',
-                      style: libraryScaledTextStyle(
-                        theme.textTheme.titleMedium,
-                        fontScale,
-                        multiplier: 1.0,
-                        fontWeight: FontWeight.w700,
-                        color: theme.colorScheme.onSurface,
-                      ),
-                      textAlign: TextAlign.center,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          tooltip: 'Close Search',
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            'eLibrary Search',
+                            style: libraryScaledTextStyle(
+                              theme.textTheme.titleMedium,
+                              fontScale,
+                              multiplier: 1.0,
+                              fontWeight: FontWeight.w700,
+                              color: theme.colorScheme.onSurface,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        const SizedBox(width: 48),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 48),
+                  Divider(height: 1, color: theme.dividerColor),
+                  Expanded(
+                    child: LibraryCatalogSearchPanel(
+                      onSelectItem:
+                          (result, index, results, query, collection) =>
+                              _openItem(
+                                context,
+                                result,
+                                index,
+                                results,
+                                query,
+                                collection,
+                              ),
+                      onQuickApplyItem: (result, query) =>
+                          _quickApplyItem(context, result, query),
+                    ),
+                  ),
                 ],
               ),
             ),
-            Divider(height: 1, color: theme.dividerColor),
-            Expanded(
-              child: LibraryCatalogSearchPanel(
-                onSelectItem: (item, query) => _openItem(context, item, query),
-                onQuickApplyItem: (result, query) =>
-                    _quickApplyItem(context, result, query),
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
     );
   }
 }

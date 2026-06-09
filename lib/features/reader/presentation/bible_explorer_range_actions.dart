@@ -3,7 +3,19 @@
 part of 'bible_explorer_screen.dart';
 
 extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
+  void _clearBibleSearchSessionForManualSelection() {
+    if (_activeBibleSearchSession == null && !_isBibleSearchNavigationActive) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _activeBibleSearchSession = null;
+      _isBibleSearchNavigationActive = false;
+    });
+  }
+
   void _selectLine(VerseLine line) {
+    _clearBibleSearchSessionForManualSelection();
     if (shouldOpenRangeActionsOnTap(_rangeSelection, line.blockId ?? 0)) {
       if (line.bookNumber != _bookNumber ||
           line.chapter != _chapter ||
@@ -49,6 +61,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
   }
 
   void _selectMarkupAnchor(VerseLine line) {
+    _clearBibleSearchSessionForManualSelection();
     final blockId = line.blockId ?? 0;
     if (blockId <= 0) return;
     _resetRapidTagArmed();
@@ -75,6 +88,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
   }
 
   void _selectTokenAnchor(VerseLine line, int tokenIndex) {
+    _clearBibleSearchSessionForManualSelection();
     final blockId = line.blockId ?? 0;
     if (blockId <= 0 || tokenIndex <= 0) return;
     _resetRapidTagArmed();

@@ -17,6 +17,14 @@ import 'viewer_search_options.dart';
 import 'viewer_search_query.dart';
 import 'viewer_search_results_panel.dart';
 import 'tag_quick_apply_helper.dart';
+import '../../search/search_highlight_helper.dart';
+
+double _viewerSearchDialogWidthFor(double screenWidth) {
+  if (screenWidth < 700) {
+    return (screenWidth - 32).clamp(280.0, double.infinity);
+  }
+  return (screenWidth * 0.75).clamp(0.0, 1100.0);
+}
 
 Future<ViewerSearchSelection?> showViewerSearchDialog(
   BuildContext context, {
@@ -95,6 +103,10 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
   bool _lookupByHighlight = false;
   late ReaderSearchMode _mode;
   String? _activeSearchTerm;
+  BibleSearchSessionSnapshot? _rememberedBibleSearchSession;
+  int? _bibleSearchResultsScrollIndex;
+  int? _bibleSearchResultsScrollToken;
+  int _bibleSearchResultsScrollSequence = 0;
   String? _currentDefaultTag;
   bool _loadingCurrentDefaultTag = true;
   var _isLoading = false;
@@ -105,12 +117,6 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
   @override
   void initState() {
     super.initState();
-    if ((widget.lastSearchTerm ?? '').trim().isNotEmpty) {
-      _controller.text = widget.lastSearchTerm!;
-      _controller.selection = TextSelection.collapsed(
-        offset: _controller.text.length,
-      );
-    }
     _controller.addListener(_onQueryChanged);
     _mode = widget.initialMode;
     _lookupByHighlight = widget.startInHighlightMode;
@@ -123,7 +129,7 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
     } else {
       _loadCurrentDefaultTag();
     }
-    _loadRememberedBibleSearch();
+    _loadRememberedBibleSearchSession();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && !_lookupByHighlight) _focusNode.requestFocus();
     });
@@ -178,15 +184,18 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
     return defaultTag;
   }
 
-  Future<void> _loadRememberedBibleSearch() async {
+  Future<void> _loadRememberedBibleSearchSession() async {
     if (_mode != ReaderSearchMode.bible) return;
-    if (_controller.text.trim().isNotEmpty) return;
-    final remembered = await AppSettingsService.instance.loadLastBibleSearch();
+    final remembered = BibleSearchSessionSnapshot.fromJsonString(
+      await AppSettingsService.instance.loadLastBibleSearchSessionJson(),
+    );
     if (!mounted) return;
-    final query = remembered?.trim() ?? '';
-    if (query.isEmpty || _controller.text.trim().isNotEmpty) return;
-    _controller.text = query;
-    _controller.selection = TextSelection.collapsed(offset: query.length);
+    if (remembered == null && (widget.lastSearchTerm ?? '').trim().isEmpty) {
+      return;
+    }
+    setState(() {
+      _rememberedBibleSearchSession = remembered;
+    });
   }
 
   void _insertSearchToken(String token) {
@@ -219,7 +228,7 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
     });
     if (_mode == ReaderSearchMode.bible) {
       if (_controller.text.trim().isEmpty) {
-        unawaited(_loadRememberedBibleSearch());
+        unawaited(_loadRememberedBibleSearchSession());
       }
       _focusNode.requestFocus();
     }
@@ -242,7 +251,10 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
     });
   }
 
-  Future<void> _performSearch({bool append = false}) async {
+  Future<void> _performSearch({
+    bool append = false,
+    bool persistRememberedSession = true,
+  }) async {
     final query = _controller.text.trim();
     if (!_lookupByHighlight && query.isEmpty) return;
     if (_lookupByHighlight && _selectedHighlightGroupId == null) return;
@@ -269,6 +281,14 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
             offset: append ? _results.length : 0,
           );
     if (!mounted) return;
+    final rememberedSnapshot = BibleSearchSessionSnapshot(
+      query: query,
+      section: _selectedSection,
+      bookNumber: _selectedBookNumber,
+      lookupByHighlight: _lookupByHighlight,
+      highlightGroupId: _lookupByHighlight ? _selectedHighlightGroupId : null,
+      totalResultCount: search.totalCount,
+    );
     setState(() {
       _results = append
           ? <PassageSearchResult>[..._results, ...search.results]
@@ -276,7 +296,15 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
       _totalResultsCount = search.totalCount;
       _isBroadSearch = search.totalCount > 200;
       _isLoading = false;
+      _rememberedBibleSearchSession = rememberedSnapshot;
     });
+    if (persistRememberedSession) {
+      unawaited(
+        AppSettingsService.instance.saveLastBibleSearchSessionJson(
+          rememberedSnapshot.toJsonString(),
+        ),
+      );
+    }
   }
 
   Future<void> _showMissingTagDialog() async {
@@ -405,6 +433,148 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
     }
   }
 
+  String _sectionLabelForValue(String section) {
+    final normalized = section.trim();
+    if (normalized.isEmpty) {
+      return '';
+    }
+    if (normalized == 'All') {
+      return 'All';
+    }
+    for (final option in viewerSearchSectionOptions) {
+      if (option.value == normalized) {
+        return _abbreviatedSectionLabel(option.label);
+      }
+    }
+    return _abbreviatedSectionLabel(normalized);
+  }
+
+  String _abbreviatedSectionLabel(String label) {
+    switch (label.trim()) {
+      case 'Old Testament':
+        return 'OT';
+      case 'New Testament':
+        return 'NT';
+      default:
+        return label.trim();
+    }
+  }
+
+  String _bookLabelForNumber(int? bookNumber) {
+    if (bookNumber == null) return '';
+    for (final book in _books) {
+      if (book.bookNumber == bookNumber) {
+        return book.bookName;
+      }
+    }
+    return 'Book $bookNumber';
+  }
+
+  String _highlightGroupLabelForId(int? groupId) {
+    if (groupId == null) return '';
+    for (final group in _highlightGroups) {
+      if (group.id == groupId) {
+        return group.name.trim();
+      }
+    }
+    return 'Highlight';
+  }
+
+  String _buildBibleRememberedSearchLabel() {
+    final session = _rememberedBibleSearchSession;
+    final query = session?.query.trim().isNotEmpty == true
+        ? session!.query.trim()
+        : (widget.lastSearchTerm ?? '').trim();
+    if (query.isEmpty && session == null) {
+      return '';
+    }
+
+    final parts = <String>[];
+    if (query.isNotEmpty) {
+      parts.add(stripWrappingSearchQuotes(query));
+    }
+
+    if (session != null) {
+      final bookLabel = _bookLabelForNumber(session.bookNumber);
+      final filterLabel = session.lookupByHighlight
+          ? _highlightGroupLabelForId(session.highlightGroupId)
+          : bookLabel.isNotEmpty
+          ? bookLabel
+          : _sectionLabelForValue(session.section);
+      if (filterLabel.isNotEmpty) {
+        parts.add(filterLabel);
+      }
+      if (session.hasCurrentIndex) {
+        parts.add(session.counterLabel);
+      } else if (session.totalResultCount > 0) {
+        parts.add('${session.totalResultCount} results');
+      }
+    }
+
+    return parts.isEmpty ? '' : 'Last search: ${parts.join(' — ')}';
+  }
+
+  Future<void> _resumeBibleRememberedSearch() async {
+    final session = _rememberedBibleSearchSession;
+    final query = session?.query.trim().isNotEmpty == true
+        ? session!.query.trim()
+        : (widget.lastSearchTerm ?? '').trim();
+    if (query.isEmpty && session == null) {
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      if (session != null) {
+        _selectedSection = session.section;
+        _selectedBookNumber = session.bookNumber;
+        _lookupByHighlight = session.lookupByHighlight;
+        _selectedHighlightGroupId = session.highlightGroupId;
+      }
+      _controller.text = query;
+      _controller.selection = TextSelection.collapsed(offset: query.length);
+      _results = const [];
+      _isBroadSearch = false;
+      _totalResultsCount = 0;
+      _hasSearched = false;
+    });
+
+    await _performSearch(persistRememberedSession: false);
+    if (!mounted) return;
+
+    if (session?.hasCurrentIndex == true) {
+      while (_results.length <= session!.currentIndex! &&
+          _results.length < _totalResultsCount) {
+        await _performSearch(append: true, persistRememberedSession: false);
+        if (!mounted) return;
+      }
+      if (_results.isNotEmpty) {
+        final clampedIndex = session.currentIndex!
+            .clamp(0, _results.length - 1)
+            .toInt();
+        final restoredSnapshot = BibleSearchSessionSnapshot(
+          query: query,
+          section: _selectedSection,
+          bookNumber: _selectedBookNumber,
+          lookupByHighlight: _lookupByHighlight,
+          highlightGroupId: _lookupByHighlight
+              ? _selectedHighlightGroupId
+              : null,
+          currentIndex: clampedIndex,
+          totalResultCount: _totalResultsCount,
+        );
+        setState(() {
+          _rememberedBibleSearchSession = restoredSnapshot;
+          _bibleSearchResultsScrollIndex = clampedIndex;
+          _bibleSearchResultsScrollToken = ++_bibleSearchResultsScrollSequence;
+        });
+        await AppSettingsService.instance.saveLastBibleSearchSessionJson(
+          restoredSnapshot.toJsonString(),
+        );
+      }
+    }
+  }
+
   String _librarySearchStableRef(LibraryCatalogSearchResult result) {
     final item = result.item;
     final spine = item.spineIndex?.toString() ?? '';
@@ -491,389 +661,487 @@ class _ViewerSearchDialogState extends State<ViewerSearchDialog> {
         );
     final isBibleMode = _mode == ReaderSearchMode.bible;
     final bibleSearchTerm = _activeSearchTerm ?? _controller.text.trim();
+    final rememberedBibleSearchLabel = _buildBibleRememberedSearchLabel();
     final highlightTerms = isBibleMode && !_lookupByHighlight
         ? extractViewerSearchHighlightTerms(bibleSearchTerm)
         : const <String>[];
 
-    return Dialog(
-      insetPadding: const EdgeInsets.all(16),
-      backgroundColor: theme.colorScheme.surface,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width.clamp(280.0, 560.0),
-          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
-        ),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isCompact = constraints.maxWidth < 340;
-            final isRoomy = constraints.maxWidth >= 430;
-            final fieldSpacing = isCompact ? 6.0 : (isRoomy ? 12.0 : 8.0);
-            final horizontalPadding = isCompact
-                ? 12.0
-                : (isRoomy ? 18.0 : 16.0);
-            final topFieldPadding = isCompact ? 12.0 : (isRoomy ? 18.0 : 14.0);
-            final resultTopPadding = isCompact ? 6.0 : (isRoomy ? 14.0 : 10.0);
-            final syntaxText = isCompact
-                ? '*, (), "", AND/OR/NOT'
-                : 'Supports *, (), "phrases", AND, OR, NOT';
-            final actionSpacing = isCompact ? 6.0 : 8.0;
+    final screenSize = MediaQuery.sizeOf(context);
+    final dialogWidth = _viewerSearchDialogWidthFor(screenSize.width);
 
-            final bibleBody = SingleChildScrollView(
-              padding: EdgeInsets.only(
-                bottom: 16 + MediaQuery.viewInsetsOf(context).bottom,
-              ),
-              child: Column(
-                children: [
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      horizontalPadding,
-                      topFieldPadding,
-                      horizontalPadding,
-                      fieldSpacing,
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      backgroundColor: theme.colorScheme.surface,
+      child: SizedBox(
+        width: dialogWidth,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minWidth: dialogWidth,
+            maxWidth: dialogWidth,
+            maxHeight: screenSize.height * 0.85,
+          ),
+          child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isCompact = constraints.maxWidth < 340;
+                  final isRoomy = constraints.maxWidth >= 430;
+                  final fieldSpacing = isCompact ? 6.0 : (isRoomy ? 12.0 : 8.0);
+                  final horizontalPadding = isCompact
+                      ? 12.0
+                      : (isRoomy ? 18.0 : 16.0);
+                  final topFieldPadding = isCompact
+                      ? 12.0
+                      : (isRoomy ? 18.0 : 14.0);
+                  final resultTopPadding = isCompact
+                      ? 6.0
+                      : (isRoomy ? 14.0 : 10.0);
+                  final resultsPanelHeight = (constraints.maxHeight * 0.42)
+                      .clamp(220.0, 360.0)
+                      .toDouble();
+                  final syntaxText = isCompact
+                      ? '*, (), "", AND/OR/NOT'
+                      : 'Supports *, (), "phrases", AND, OR, NOT';
+                  final actionSpacing = isCompact ? 6.0 : 8.0;
+
+                  final bibleBody = SingleChildScrollView(
+                    padding: EdgeInsets.only(
+                      bottom: 16 + MediaQuery.viewInsetsOf(context).bottom,
                     ),
-                    child: _lookupByHighlight
-                        ? ViewerSearchHighlightFilterField(
-                            selectedGroup: selectedHighlightGroup,
-                            groups: _highlightGroups,
-                            compact: true,
-                            onChanged: (value) {
-                              setState(() {
-                                _selectedHighlightGroupId = value;
-                                _results = const [];
-                                _hasSearched = false;
-                                _isBroadSearch = false;
-                                _totalResultsCount = 0;
-                              });
-                              if (value != null) {
-                                _performSearch();
-                              }
-                            },
-                          )
-                        : TextField(
-                            controller: _controller,
-                            focusNode: _focusNode,
-                            textInputAction: TextInputAction.search,
-                            onSubmitted: (_) => _performSearch(),
-                            decoration: InputDecoration(
-                              labelText: isCompact
-                                  ? 'Search phrase'
-                                  : 'Search for a phrase (e.g., "in the beginning")',
-                              hintText: 'Use * as a wildcard',
-                              border: const OutlineInputBorder(),
-                              suffixIcon: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_controller.text.isNotEmpty)
-                                    IconButton(
-                                      icon: const Icon(Icons.clear),
-                                      onPressed: () {
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            horizontalPadding,
+                            topFieldPadding,
+                            horizontalPadding,
+                            fieldSpacing,
+                          ),
+                          child: _lookupByHighlight
+                              ? ViewerSearchHighlightFilterField(
+                                  selectedGroup: selectedHighlightGroup,
+                                  groups: _highlightGroups,
+                                  compact: true,
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _selectedHighlightGroupId = value;
+                                      _results = const [];
+                                      _hasSearched = false;
+                                      _isBroadSearch = false;
+                                      _totalResultsCount = 0;
+                                    });
+                                    if (value != null) {
+                                      _performSearch();
+                                    }
+                                  },
+                                )
+                              : TextField(
+                                  controller: _controller,
+                                  focusNode: _focusNode,
+                                  textInputAction: TextInputAction.search,
+                                  onSubmitted: (_) => _performSearch(),
+                                  decoration: InputDecoration(
+                                    labelText: isCompact
+                                        ? 'Search phrase'
+                                        : 'Search for a phrase (e.g., "in the beginning")',
+                                    hintText: 'Use * as a wildcard',
+                                    border: const OutlineInputBorder(),
+                                    suffixIcon: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (_controller.text.isNotEmpty)
+                                          IconButton(
+                                            icon: const Icon(Icons.clear),
+                                            onPressed: () {
+                                              _controller.clear();
+                                              setState(() {
+                                                _results = const [];
+                                                _hasSearched = false;
+                                                _isBroadSearch = false;
+                                                _totalResultsCount = 0;
+                                                _activeSearchTerm = null;
+                                              });
+                                            },
+                                          ),
+                                        IconButton(
+                                          icon: const Icon(Icons.search),
+                                          onPressed: _performSearch,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                        ),
+                        Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
+                          ),
+                          child: isCompact
+                              ? Column(
+                                  children: [
+                                    ViewerSearchSectionFilterField(
+                                      selectedSection: _selectedSection,
+                                      sectionOptions:
+                                          viewerSearchSectionOptions,
+                                      sectionColor: _sectionColor,
+                                      compact: true,
+                                      onChanged: (value) {
+                                        if (value == _selectedSection) return;
+                                        setState(() {
+                                          _selectedSection = value;
+                                          _selectedBookNumber = null;
+                                          _results = const [];
+                                        });
+                                        if (_hasSearched && !_isLoading) {
+                                          _performSearch();
+                                        }
+                                      },
+                                    ),
+                                    SizedBox(height: fieldSpacing),
+                                    ViewerSearchBookFilterField(
+                                      selectedBookLabel: selectedBook.label,
+                                      selectedBookNumber: _selectedBookNumber,
+                                      bookOptions: bookOptions,
+                                      compact: true,
+                                      onChanged: (bookNumber) {
+                                        if (bookNumber == _selectedBookNumber) {
+                                          return;
+                                        }
+                                        setState(() {
+                                          _selectedBookNumber = bookNumber;
+                                          _results = const [];
+                                        });
+                                        if (_hasSearched && !_isLoading) {
+                                          _performSearch();
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                )
+                              : Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: ViewerSearchSectionFilterField(
+                                        selectedSection: _selectedSection,
+                                        sectionOptions:
+                                            viewerSearchSectionOptions,
+                                        sectionColor: _sectionColor,
+                                        compact: false,
+                                        onChanged: (value) {
+                                          if (value == _selectedSection) return;
+                                          setState(() {
+                                            _selectedSection = value;
+                                            _selectedBookNumber = null;
+                                            _results = const [];
+                                          });
+                                          if (_hasSearched && !_isLoading) {
+                                            _performSearch();
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                    SizedBox(width: fieldSpacing),
+                                    Expanded(
+                                      child: ViewerSearchBookFilterField(
+                                        selectedBookLabel: selectedBook.label,
+                                        selectedBookNumber: _selectedBookNumber,
+                                        bookOptions: bookOptions,
+                                        compact: false,
+                                        onChanged: (bookNumber) {
+                                          if (bookNumber ==
+                                              _selectedBookNumber) {
+                                            return;
+                                          }
+                                          setState(() {
+                                            _selectedBookNumber = bookNumber;
+                                            _results = const [];
+                                          });
+                                          if (_hasSearched && !_isLoading) {
+                                            _performSearch();
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                        ),
+                        if (rememberedBibleSearchLabel.isNotEmpty)
+                          Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              horizontalPadding,
+                              fieldSpacing,
+                              horizontalPadding,
+                              0,
+                            ),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton(
+                                style: TextButton.styleFrom(
+                                  alignment: Alignment.centerLeft,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  minimumSize: const Size(0, 44),
+                                  foregroundColor: theme.colorScheme.onSurface,
+                                  textStyle: theme.textTheme.bodyMedium
+                                      ?.copyWith(
+                                        color: theme.colorScheme.onSurface,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize:
+                                            ((theme
+                                                            .textTheme
+                                                            .bodyMedium
+                                                            ?.fontSize ??
+                                                        14) *
+                                                    dialogScale)
+                                                .clamp(14.0, 20.0),
+                                        height: 1.15,
+                                      ),
+                                ),
+                                onPressed: _resumeBibleRememberedSearch,
+                                child: Text.rich(
+                                  TextSpan(
+                                    text: rememberedBibleSearchLabel,
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: theme.colorScheme.onSurface,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize:
+                                          ((theme
+                                                          .textTheme
+                                                          .bodyMedium
+                                                          ?.fontSize ??
+                                                      14) *
+                                                  dialogScale)
+                                              .clamp(14.0, 20.0),
+                                      height: 1.15,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (!_lookupByHighlight) ...[
+                          Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              horizontalPadding,
+                              fieldSpacing,
+                              horizontalPadding,
+                              0,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  syntaxText,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                SizedBox(height: isCompact ? 4 : 6),
+                                Wrap(
+                                  spacing: actionSpacing,
+                                  runSpacing: actionSpacing,
+                                  children: [
+                                    ViewerSearchActionChip(
+                                      label: 'AND',
+                                      onTap: () => _insertSearchToken('AND'),
+                                    ),
+                                    ViewerSearchActionChip(
+                                      label: 'OR',
+                                      onTap: () => _insertSearchToken('OR'),
+                                    ),
+                                    ViewerSearchActionChip(
+                                      label: 'NOT',
+                                      onTap: () => _insertSearchToken('NOT'),
+                                    ),
+                                    ViewerSearchActionChip(
+                                      label: '(',
+                                      onTap: () => _insertSearchToken('('),
+                                    ),
+                                    ViewerSearchActionChip(
+                                      label: ')',
+                                      onTap: () => _insertSearchToken(')'),
+                                    ),
+                                    ViewerSearchActionChip(
+                                      label: 'Reset',
+                                      onTap: () {
                                         _controller.clear();
                                         setState(() {
                                           _results = const [];
                                           _hasSearched = false;
                                           _isBroadSearch = false;
                                           _totalResultsCount = 0;
-                                          _activeSearchTerm = null;
                                         });
                                       },
                                     ),
-                                  IconButton(
-                                    icon: const Icon(Icons.search),
-                                    onPressed: _performSearch,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                  ),
-                  Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: horizontalPadding,
-                    ),
-                    child: isCompact
-                        ? Column(
-                            children: [
-                              ViewerSearchSectionFilterField(
-                                selectedSection: _selectedSection,
-                                sectionOptions: viewerSearchSectionOptions,
-                                sectionColor: _sectionColor,
-                                compact: true,
-                                onChanged: (value) {
-                                  if (value == _selectedSection) return;
-                                  setState(() {
-                                    _selectedSection = value;
-                                    _selectedBookNumber = null;
-                                    _results = const [];
-                                  });
-                                  if (_hasSearched && !_isLoading) {
-                                    _performSearch();
-                                  }
-                                },
-                              ),
-                              SizedBox(height: fieldSpacing),
-                              ViewerSearchBookFilterField(
-                                selectedBookLabel: selectedBook.label,
-                                selectedBookNumber: _selectedBookNumber,
-                                bookOptions: bookOptions,
-                                compact: true,
-                                onChanged: (bookNumber) {
-                                  if (bookNumber == _selectedBookNumber) {
-                                    return;
-                                  }
-                                  setState(() {
-                                    _selectedBookNumber = bookNumber;
-                                    _results = const [];
-                                  });
-                                  if (_hasSearched && !_isLoading) {
-                                    _performSearch();
-                                  }
-                                },
-                              ),
-                            ],
-                          )
-                        : Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: ViewerSearchSectionFilterField(
-                                  selectedSection: _selectedSection,
-                                  sectionOptions: viewerSearchSectionOptions,
-                                  sectionColor: _sectionColor,
-                                  compact: false,
-                                  onChanged: (value) {
-                                    if (value == _selectedSection) return;
-                                    setState(() {
-                                      _selectedSection = value;
-                                      _selectedBookNumber = null;
-                                      _results = const [];
-                                    });
-                                    if (_hasSearched && !_isLoading) {
-                                      _performSearch();
-                                    }
-                                  },
+                                  ],
                                 ),
-                              ),
-                              SizedBox(width: fieldSpacing),
-                              Expanded(
-                                child: ViewerSearchBookFilterField(
-                                  selectedBookLabel: selectedBook.label,
-                                  selectedBookNumber: _selectedBookNumber,
-                                  bookOptions: bookOptions,
-                                  compact: false,
-                                  onChanged: (bookNumber) {
-                                    if (bookNumber == _selectedBookNumber) {
-                                      return;
-                                    }
-                                    setState(() {
-                                      _selectedBookNumber = bookNumber;
-                                      _results = const [];
-                                    });
-                                    if (_hasSearched && !_isLoading) {
-                                      _performSearch();
-                                    }
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                  ),
-                  if (!_lookupByHighlight) ...[
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        horizontalPadding,
-                        fieldSpacing,
-                        horizontalPadding,
-                        0,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            syntaxText,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
+                              ],
                             ),
-                          ),
-                          SizedBox(height: isCompact ? 4 : 6),
-                          Wrap(
-                            spacing: actionSpacing,
-                            runSpacing: actionSpacing,
-                            children: [
-                              ViewerSearchActionChip(
-                                label: 'AND',
-                                onTap: () => _insertSearchToken('AND'),
-                              ),
-                              ViewerSearchActionChip(
-                                label: 'OR',
-                                onTap: () => _insertSearchToken('OR'),
-                              ),
-                              ViewerSearchActionChip(
-                                label: 'NOT',
-                                onTap: () => _insertSearchToken('NOT'),
-                              ),
-                              ViewerSearchActionChip(
-                                label: '(',
-                                onTap: () => _insertSearchToken('('),
-                              ),
-                              ViewerSearchActionChip(
-                                label: ')',
-                                onTap: () => _insertSearchToken(')'),
-                              ),
-                              ViewerSearchActionChip(
-                                label: 'Reset',
-                                onTap: () {
-                                  _controller.clear();
-                                  setState(() {
-                                    _results = const [];
-                                    _hasSearched = false;
-                                    _isBroadSearch = false;
-                                    _totalResultsCount = 0;
-                                  });
-                                },
-                              ),
-                            ],
                           ),
                         ],
-                      ),
-                    ),
-                  ],
-                  if (_isBroadSearch)
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        horizontalPadding,
-                        resultTopPadding,
-                        horizontalPadding,
-                        0,
-                      ),
-                      child: Text(
-                        'Showing ${_results.length} of $_totalResultsCount matches',
-                        style: bodyStyle,
-                      ),
-                    ),
-                  ViewerSearchResultsPanel(
-                    results: _results,
-                    isLoading: _isLoading,
-                    hasSearched: _hasSearched,
-                    totalResultsCount: _totalResultsCount,
-                    titleStyle: titleStyle,
-                    bodyStyle: bodyStyle,
-                    highlightTerms: highlightTerms,
-                    currentTag: _currentDefaultTag,
-                    isCurrentTagLoading: _loadingCurrentDefaultTag,
-                    onLoadMore: () => _performSearch(append: true),
-                    onSelectResult: (result, index) {
-                      final session = BibleSearchSession(
-                        query: bibleSearchTerm,
-                        section: _selectedSection,
-                        bookNumber: _selectedBookNumber,
-                        lookupByHighlight: _lookupByHighlight,
-                        highlightGroupId: _lookupByHighlight
-                            ? _selectedHighlightGroupId
-                            : null,
-                        results: List<PassageSearchResult>.unmodifiable(
-                          _results,
+                        if (_isBroadSearch)
+                          Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              horizontalPadding,
+                              resultTopPadding,
+                              horizontalPadding,
+                              0,
+                            ),
+                            child: Text(
+                              'Showing ${_results.length} of $_totalResultsCount matches',
+                              style: bodyStyle,
+                            ),
+                          ),
+                        ViewerSearchResultsPanel(
+                          results: _results,
+                          isLoading: _isLoading,
+                          hasSearched: _hasSearched,
+                          totalResultsCount: _totalResultsCount,
+                          titleStyle: titleStyle,
+                          bodyStyle: bodyStyle,
+                          maxHeight: resultsPanelHeight,
+                          highlightTerms: highlightTerms,
+                          currentTag: _currentDefaultTag,
+                          isCurrentTagLoading: _loadingCurrentDefaultTag,
+                          selectedIndex:
+                              _rememberedBibleSearchSession?.hasCurrentIndex ==
+                                  true
+                              ? _rememberedBibleSearchSession!.currentIndex
+                              : null,
+                          scrollToIndex: _bibleSearchResultsScrollIndex,
+                          scrollRequestToken: _bibleSearchResultsScrollToken,
+                          onLoadMore: () => _performSearch(append: true),
+                          onSelectResult: (result, index) {
+                            final session = BibleSearchSession(
+                              query: bibleSearchTerm,
+                              section: _selectedSection,
+                              bookNumber: _selectedBookNumber,
+                              lookupByHighlight: _lookupByHighlight,
+                              highlightGroupId: _lookupByHighlight
+                                  ? _selectedHighlightGroupId
+                                  : null,
+                              results: List<PassageSearchResult>.unmodifiable(
+                                _results,
+                              ),
+                              currentIndex: index,
+                              totalResultCount: _totalResultsCount,
+                            );
+                            unawaited(
+                              AppSettingsService.instance
+                                  .saveLastBibleSearchSessionJson(
+                                    BibleSearchSessionSnapshot.fromSession(
+                                      session,
+                                    ).toJsonString(),
+                                  ),
+                            );
+                            Navigator.of(context).pop(
+                              ViewerSearchSelection(
+                                blockId: result.blockId,
+                                bookNumber: result.bookNumber,
+                                chapter: result.chapter,
+                                verse: result.verse,
+                                lastSearchTerm: bibleSearchTerm,
+                                bibleSearchSession: session,
+                              ),
+                            );
+                          },
+                          onQuickApplyResult: _quickApplyBibleSearchResult,
                         ),
-                        currentIndex: index,
-                        totalResultCount: _totalResultsCount,
-                      );
-                      Navigator.of(context).pop(
-                        ViewerSearchSelection(
-                          blockId: result.blockId,
-                          bookNumber: result.bookNumber,
-                          chapter: result.chapter,
-                          verse: result.verse,
-                          lastSearchTerm: bibleSearchTerm,
-                          bibleSearchSession: session,
-                        ),
-                      );
-                    },
-                    onQuickApplyResult: _quickApplyBibleSearchResult,
-                  ),
-                ],
-              ),
-            );
+                      ],
+                    ),
+                  );
 
-            final libraryBody = LibraryFontScaleScope(
-              scale: widget.fontScale,
-              child: LibraryCatalogSearchPanel(
-                onSelectItem: _openLibraryItem,
-                onQuickApplyItem: _quickApplyLibrarySearchResult,
-              ),
-            );
+                  final libraryBody = LibraryFontScaleScope(
+                    scale: widget.fontScale,
+                    child: LibraryCatalogSearchPanel(
+                      onSelectItem: _openLibraryItem,
+                      onQuickApplyItem: _quickApplyLibrarySearchResult,
+                    ),
+                  );
 
-            return Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  child: Row(
+                  return Column(
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.of(context).pop(),
-                        tooltip: 'Close Search',
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        child: Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => Navigator.of(context).pop(),
+                              tooltip: 'Close Search',
+                            ),
+                            Expanded(
+                              child: Center(
+                                child: Text('Search', style: titleStyle),
+                              ),
+                            ),
+                            const SizedBox(width: 48),
+                          ],
+                        ),
+                      ),
+                      Divider(height: 1, color: theme.dividerColor),
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          horizontalPadding,
+                          topFieldPadding,
+                          horizontalPadding,
+                          fieldSpacing,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Choose whether to search the Bible or the eLibrary.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            SizedBox(height: isCompact ? 8 : 10),
+                            SegmentedButton<ReaderSearchMode>(
+                              showSelectedIcon: false,
+                              segments: const [
+                                ButtonSegment<ReaderSearchMode>(
+                                  value: ReaderSearchMode.bible,
+                                  icon: Icon(
+                                    Icons.menu_book_outlined,
+                                    size: 18,
+                                  ),
+                                  label: Text('Bible'),
+                                ),
+                                ButtonSegment<ReaderSearchMode>(
+                                  value: ReaderSearchMode.elibrary,
+                                  icon: Icon(
+                                    Icons.library_books_outlined,
+                                    size: 18,
+                                  ),
+                                  label: Text('eLibrary'),
+                                ),
+                              ],
+                              selected: {_mode},
+                              onSelectionChanged: (selection) {
+                                if (selection.isEmpty) return;
+                                _setSearchMode(selection.first);
+                              },
+                            ),
+                          ],
+                        ),
                       ),
                       Expanded(
-                        child: Center(child: Text('Search', style: titleStyle)),
-                      ),
-                      const SizedBox(width: 48),
-                    ],
-                  ),
-                ),
-                Divider(height: 1, color: theme.dividerColor),
-                Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    horizontalPadding,
-                    topFieldPadding,
-                    horizontalPadding,
-                    fieldSpacing,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Choose whether to search the Bible or the eLibrary.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                        child: IndexedStack(
+                          index: isBibleMode ? 0 : 1,
+                          children: [bibleBody, libraryBody],
                         ),
                       ),
-                      SizedBox(height: isCompact ? 8 : 10),
-                      SegmentedButton<ReaderSearchMode>(
-                        showSelectedIcon: false,
-                        segments: const [
-                          ButtonSegment<ReaderSearchMode>(
-                            value: ReaderSearchMode.bible,
-                            icon: Icon(Icons.menu_book_outlined, size: 18),
-                            label: Text('Bible'),
-                          ),
-                          ButtonSegment<ReaderSearchMode>(
-                            value: ReaderSearchMode.elibrary,
-                            icon: Icon(Icons.library_books_outlined, size: 18),
-                            label: Text('eLibrary'),
-                          ),
-                        ],
-                        selected: {_mode},
-                        onSelectionChanged: (selection) {
-                          if (selection.isEmpty) return;
-                          _setSearchMode(selection.first);
-                        },
-                      ),
                     ],
-                  ),
-                ),
-                Expanded(
-                  child: IndexedStack(
-                    index: isBibleMode ? 0 : 1,
-                    children: [bibleBody, libraryBody],
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
+                  );
+                },
+              ),
+            ),
+          ),
     );
   }
 

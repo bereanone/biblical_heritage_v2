@@ -68,7 +68,6 @@ class _ViewerBodyState extends State<ViewerBody> {
   final ItemScrollController _itemScrollController = ItemScrollController();
   final ItemPositionsListener _itemPositionsListener =
       ItemPositionsListener.create();
-  final Map<int, GlobalKey> _verseTextKeys = <int, GlobalKey>{};
   final TextRangeGeometryRegistry _geometryRegistry =
       TextRangeGeometryRegistry();
   final Map<String, Map<int, List<String>>> _headingCache =
@@ -90,10 +89,6 @@ class _ViewerBodyState extends State<ViewerBody> {
   bool _selectionVisible = false;
 
   String get _geometryScopeId => 'viewer:${widget.anchorBlockId}';
-
-  GlobalKey _keyForVerseText(int blockId) {
-    return _verseTextKeys.putIfAbsent(blockId, GlobalKey.new);
-  }
 
   @override
   void initState() {
@@ -168,9 +163,6 @@ class _ViewerBodyState extends State<ViewerBody> {
           ((theme.textTheme.bodyLarge?.fontSize ?? 16) * widget.fontScale),
       height: 1.38,
     );
-    final redLetterColor = theme.brightness == Brightness.dark
-        ? const Color(0xFFFF3B30)
-        : const Color(0xFFC62828);
     final geometryScopeId = _geometryScopeId;
 
     return ListenableBuilder(
@@ -296,8 +288,6 @@ class _ViewerBodyState extends State<ViewerBody> {
                   previousVerseLine == null ||
                   previousVerseLine.bookNumber != line.bookNumber ||
                   previousVerseLine.chapter != line.chapter;
-              final textKey = _keyForVerseText(blockId);
-
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Column(
@@ -352,27 +342,11 @@ class _ViewerBodyState extends State<ViewerBody> {
                       onVerseNumberLongPress: () =>
                           widget.onSelectVerseNumber(line),
                       rangeSelection: widget.rangeSelection,
-                      textKey: textKey,
                       onTokenLongPress: (tokenIndex) {
                         widget.onSelectTokenLongPress?.call(line, tokenIndex);
                       },
                       onTokenLongPressMove: (tokenIndex) {
                         widget.onSelectTokenLongPressMove?.call(line, tokenIndex);
-                      },
-                      onTokenLongPressMoveDetails: (details) {
-                        final hit = _resolveVerseDragTokenHit(
-                          globalPosition: details.globalPosition,
-                          bodyStyle: bodyStyle,
-                          redLetterColor: redLetterColor,
-                          startsInRedLetter:
-                              blockContext?.startsInRedLetter ?? false,
-                          textDirection: Directionality.of(context),
-                        );
-                        if (hit == null) return;
-                        widget.onSelectTokenLongPressMove?.call(
-                          hit.line,
-                          hit.tokenIndex,
-                        );
                       },
                     ),
                   ],
@@ -384,63 +358,4 @@ class _ViewerBodyState extends State<ViewerBody> {
       },
     );
   }
-
-  ({VerseLine line, int tokenIndex})? _resolveVerseDragTokenHit({
-    required Offset globalPosition,
-    required TextStyle bodyStyle,
-    required Color redLetterColor,
-    required bool startsInRedLetter,
-    required TextDirection textDirection,
-  }) {
-    ({VerseLine line, int tokenIndex})? bestHit;
-    var bestDistance = double.infinity;
-
-    for (final entry in _verseTextKeys.entries) {
-      final blockId = entry.key;
-      final blockLine = widget.data.getBlock(blockId);
-      if (blockLine == null) continue;
-      final context = entry.value.currentContext;
-      final renderObject = context?.findRenderObject();
-      if (renderObject is! RenderBox || !renderObject.hasSize) continue;
-
-      final rect = renderObject.localToGlobal(Offset.zero) & renderObject.size;
-      final distance = _distanceSquaredToRect(globalPosition, rect);
-      if (distance > bestDistance) continue;
-
-      final localPosition = renderObject.globalToLocal(globalPosition);
-      final tokenIndex = hitTestViewerMarkupTokenIndex(
-        html: blockLine.html,
-        fallbackText: blockLine.text,
-        baseStyle: bodyStyle,
-        redLetterColor: redLetterColor,
-        localPosition: localPosition,
-        maxWidth: renderObject.size.width,
-        textDirection: textDirection,
-        textAlign: TextAlign.start,
-        startsInRedLetter: startsInRedLetter,
-      );
-      if (tokenIndex == null || tokenIndex <= 0) continue;
-      bestDistance = distance;
-      bestHit = (line: blockLine, tokenIndex: tokenIndex);
-    }
-
-    return bestHit;
-  }
-
-}
-
-double _distanceSquaredToRect(Offset point, Rect rect) {
-  final clampedX = point.dx < rect.left
-      ? rect.left
-      : point.dx > rect.right
-      ? rect.right
-      : point.dx;
-  final clampedY = point.dy < rect.top
-      ? rect.top
-      : point.dy > rect.bottom
-      ? rect.bottom
-      : point.dy;
-  final dx = point.dx - clampedX;
-  final dy = point.dy - clampedY;
-  return dx * dx + dy * dy;
 }

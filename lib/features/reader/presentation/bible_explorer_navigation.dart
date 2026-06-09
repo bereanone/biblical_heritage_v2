@@ -64,6 +64,23 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
     }
     final line = _viewerData.getBlock(blockId);
     if (line == null) return;
+    final session = _activeBibleSearchSession;
+    if (session != null &&
+        session.results.isNotEmpty) {
+      final currentResult = session.currentResult;
+      final isCurrentSearchResultVerse =
+          currentResult.bookNumber == line.bookNumber &&
+          currentResult.chapter == line.chapter &&
+          currentResult.verse == line.verse;
+      if (_isBibleSearchNavigationActive && isCurrentSearchResultVerse) {
+        _isBibleSearchNavigationActive = false;
+      } else if (!_isBibleSearchNavigationActive &&
+          !isCurrentSearchResultVerse) {
+        setState(() {
+          _activeBibleSearchSession = null;
+        });
+      }
+    }
     if (_bookNumber == line.bookNumber &&
         _chapter == line.chapter &&
         _verse == line.verse) {
@@ -80,6 +97,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
   Future<void> _navigateToBlockId(
     int blockId, {
     required bool recordHistory,
+    bool preserveBibleSearchSession = false,
   }) async {
     final reference = await StudyBibleDatabase.instance.loadReferenceForBlockId(
       blockId,
@@ -89,6 +107,10 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
     await _viewerData.ensureWindow(blockId);
     if (!mounted) return;
     setState(() {
+      if (!preserveBibleSearchSession) {
+        _activeBibleSearchSession = null;
+        _isBibleSearchNavigationActive = false;
+      }
       _bookNumber = reference.bookNumber;
       _chapter = reference.chapter;
       _verse = reference.verse;
@@ -132,24 +154,39 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
       _lastSearchTerm = selection.lastSearchTerm;
       _activeBibleSearchSession = selection.bibleSearchSession;
     });
-    await _openBlockId(selection.blockId);
+    final searchSession = selection.bibleSearchSession;
+    if (searchSession != null) {
+      unawaited(
+        AppSettingsService.instance.saveLastBibleSearchSessionJson(
+          BibleSearchSessionSnapshot.fromSession(searchSession).toJsonString(),
+        ),
+      );
+    }
+    await _openBibleSearchBlock(selection.blockId);
   }
 
   Future<void> _navigateBibleSearchHit(int delta) async {
     final session = _activeBibleSearchSession;
     if (session == null || session.results.isEmpty) return;
+    if (delta > 0 && !session.hasNext) return;
+    if (delta < 0 && !session.hasPrevious) return;
 
     final nextIndex = session.currentIndex + delta;
     if (nextIndex < 0 || nextIndex >= session.results.length) return;
 
     final nextSession = session.copyWithIndex(nextIndex);
-    final nextResult = nextSession.currentResult;
+    final nextResult = session.results[nextIndex];
     if (!mounted) return;
     setState(() {
       _activeBibleSearchSession = nextSession;
       _lastSearchTerm = nextSession.query;
     });
-    await _openBlockId(nextResult.blockId);
+    unawaited(
+      AppSettingsService.instance.saveLastBibleSearchSessionJson(
+        BibleSearchSessionSnapshot.fromSession(nextSession).toJsonString(),
+      ),
+    );
+    await _openBibleSearchBlock(nextResult.blockId);
   }
 
   Future<void> _openTopics(BuildContext context) async {
@@ -159,9 +196,24 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
     await _navigateToBlockId(blockId, recordHistory: true);
   }
 
-  Future<void> _openBlockId(int blockId) async {
+  Future<void> _openBlockId(
+    int blockId, {
+    bool preserveBibleSearchSession = false,
+  }) async {
     _resetRapidTagArmed();
-    await _navigateToBlockId(blockId, recordHistory: true);
+    await _navigateToBlockId(
+      blockId,
+      recordHistory: true,
+      preserveBibleSearchSession: preserveBibleSearchSession,
+    );
+  }
+
+  Future<void> _openBibleSearchBlock(int blockId) async {
+    _isBibleSearchNavigationActive = true;
+    await _openBlockId(
+      blockId,
+      preserveBibleSearchSession: true,
+    );
   }
 
   Future<void> _recordHistory() async {

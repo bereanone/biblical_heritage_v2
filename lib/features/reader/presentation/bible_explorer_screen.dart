@@ -79,6 +79,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
       PresentationAspectRatioPreset.auto;
   String? _lastSearchTerm;
   BibleSearchSession? _activeBibleSearchSession;
+  bool _isBibleSearchNavigationActive = false;
   ViewerRangeSelection _rangeSelection = const ViewerRangeSelection();
   int _highlightRefreshTick = 0;
   int _navigationTick = 0;
@@ -185,6 +186,8 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
     final displayBookName = _bookNames[displayBookNumber] ?? 'Bible Explorer';
     final displayChapter = displayLine?.chapter ?? _chapter;
     final displayVerse = displayLine?.verse ?? _verse;
+    final baseBibleFontSize =
+        (theme.textTheme.bodyLarge?.fontSize ?? 16) * _fontScale;
 
     return Scaffold(
       body: SafeArea(
@@ -195,6 +198,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
               chapter: displayChapter,
               verse: displayVerse,
               fontScale: _fontScale,
+              baseBibleFontSize: baseBibleFontSize,
               onSearch: () => _openSearch(context),
               bibleSearchSession: _activeBibleSearchSession,
               onPreviousBibleSearchHit: () => _navigateBibleSearchHit(-1),

@@ -1926,7 +1926,7 @@ class LibraryCatalogSearchSession {
 
   LibraryCatalogSearchResult get currentResult => results[currentIndex];
 
-  String get counterLabel => '${currentIndex + 1}/${results.length}';
+  String get counterLabel => '${currentIndex + 1} / ${results.length}';
 
   bool get hasPrevious => currentIndex > 0;
 
@@ -1938,6 +1938,107 @@ class LibraryCatalogSearchSession {
       collectionFilter: collectionFilter,
       results: results,
       currentIndex: index.clamp(0, results.length - 1),
+    );
+  }
+}
+
+class LibraryCatalogSearchSessionSnapshot {
+  const LibraryCatalogSearchSessionSnapshot({
+    required this.query,
+    required this.totalCount,
+    this.collectionFilter,
+    this.currentIndex,
+  });
+
+  final String query;
+  final String? collectionFilter;
+  final int? currentIndex;
+  final int totalCount;
+
+  bool get hasCurrentIndex => currentIndex != null && totalCount > 0;
+
+  String get counterLabel {
+    if (!hasCurrentIndex) {
+      return totalCount > 0 ? '$totalCount' : '0';
+    }
+    return '${currentIndex! + 1} / $totalCount';
+  }
+
+  bool get hasPrevious => hasCurrentIndex && currentIndex! > 0;
+
+  bool get hasNext => hasCurrentIndex && currentIndex! < totalCount - 1;
+
+  LibraryCatalogSearchSessionSnapshot copyWithIndex(int index) {
+    final clamped = totalCount <= 0 ? null : index.clamp(0, totalCount - 1);
+    return LibraryCatalogSearchSessionSnapshot(
+      query: query,
+      collectionFilter: collectionFilter,
+      currentIndex: clamped?.toInt(),
+      totalCount: totalCount,
+    );
+  }
+
+  LibraryCatalogSearchSessionSnapshot copyWith({
+    String? query,
+    String? collectionFilter,
+    int? currentIndex,
+    int? totalCount,
+  }) {
+    return LibraryCatalogSearchSessionSnapshot(
+      query: query ?? this.query,
+      collectionFilter: collectionFilter ?? this.collectionFilter,
+      currentIndex: currentIndex ?? this.currentIndex,
+      totalCount: totalCount ?? this.totalCount,
+    );
+  }
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'query': query,
+      if (collectionFilter != null && collectionFilter!.trim().isNotEmpty)
+        'collectionFilter': collectionFilter!.trim(),
+      if (currentIndex != null) 'currentIndex': currentIndex,
+      'totalCount': totalCount,
+    };
+  }
+
+  String toJsonString() => jsonEncode(toJson());
+
+  static LibraryCatalogSearchSessionSnapshot? fromJsonString(String? value) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(trimmed);
+      if (decoded is! Map) return null;
+      final query = decoded['query']?.toString().trim() ?? '';
+      final totalCount = (decoded['totalCount'] as num?)?.toInt() ?? 0;
+      final currentIndex = (decoded['currentIndex'] as num?)?.toInt();
+      final collectionFilter = decoded['collectionFilter']?.toString().trim();
+      if (query.isEmpty && totalCount <= 0 && currentIndex == null) {
+        return null;
+      }
+      return LibraryCatalogSearchSessionSnapshot(
+        query: query,
+        collectionFilter:
+            collectionFilter == null || collectionFilter.isEmpty
+            ? null
+            : collectionFilter,
+        currentIndex: currentIndex,
+        totalCount: totalCount,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static LibraryCatalogSearchSessionSnapshot fromSession(
+    LibraryCatalogSearchSession session,
+  ) {
+    return LibraryCatalogSearchSessionSnapshot(
+      query: session.query,
+      collectionFilter: session.collectionFilter,
+      currentIndex: session.currentIndex,
+      totalCount: session.results.length,
     );
   }
 }

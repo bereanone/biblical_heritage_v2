@@ -16,7 +16,14 @@ class LibraryCatalogSearchPanel extends StatefulWidget {
     this.initialQuery,
   });
 
-  final void Function(LibraryCatalogItem item, String searchQuery) onSelectItem;
+  final void Function(
+    LibraryCatalogSearchResult result,
+    int index,
+    List<LibraryCatalogSearchResult> results,
+    String searchQuery,
+    String collectionFilter,
+  )
+  onSelectItem;
   final Future<void> Function(
     LibraryCatalogSearchResult result,
     String searchQuery,
@@ -31,32 +38,33 @@ class LibraryCatalogSearchPanel extends StatefulWidget {
 
 const List<({String value, String label})> _kEgwCollectionFilters = [
   (value: 'all', label: 'All'),
-  (value: 'EGW Books', label: 'Books'),
-  (value: 'EGW Devotionals', label: 'Devotionals'),
-  (value: 'EGW Commentaries', label: 'Commentaries'),
-  (value: 'EGW Misc Collections', label: 'Misc Collections'),
-  (value: 'EGW Pamphlets', label: 'Pamphlets'),
-  (value: 'EGW Periodicals', label: 'Periodicals'),
-  (value: 'EGW Manuscript Releases', label: 'Manuscript Releases'),
+  (value: 'egw_books', label: 'Books'),
+  (value: 'egw_devotionals', label: 'Devotionals'),
+  (value: 'egw_commentaries', label: 'Commentaries'),
+  (value: 'egw_misc_collections', label: 'Misc Collections'),
+  (value: 'egw_pamphlets', label: 'Pamphlets'),
+  (value: 'egw_periodicals', label: 'Periodicals'),
+  (value: 'egw_manuscript_releases', label: 'Manuscript Releases'),
 ];
 
 class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
+  final _resultsScrollController = ScrollController();
   List<LibraryCatalogSearchResult> _results = const [];
   bool _loading = false;
   String? _error;
   String? _lastSearchTerm;
   String? _activeSearchTerm;
+  LibraryCatalogSearchSessionSnapshot? _rememberedSession;
   bool _hasSearched = false;
   int _searchRequestId = 0;
-  int _unindexedCount = 0;
   String _selectedCollection = 'all';
+  bool _selectedCollectionHasIndexedContent = true;
 
   @override
   void initState() {
     super.initState();
-    _loadUnindexedCount();
     final initialQuery = widget.initialQuery?.trim() ?? '';
     if (initialQuery.isNotEmpty) {
       _controller.text = initialQuery;
@@ -78,28 +86,28 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
   void dispose() {
     _controller.dispose();
     _focusNode.dispose();
+    _resultsScrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadUnindexedCount() async {
-    final count = await LibraryCatalogService.instance
-        .countUnindexedManagedItems();
-    if (!mounted) return;
-    setState(() => _unindexedCount = count);
-  }
-
   Future<void> _loadRememberedSearch() async {
+    final rememberedSession = LibraryCatalogSearchSessionSnapshot
+        .fromJsonString(
+          await AppSettingsService.instance
+              .loadLastElibrarySearchSessionJson(),
+        );
     final remembered = await AppSettingsService.instance
         .loadLastElibrarySearch();
     if (!mounted) return;
-    final query = remembered?.trim() ?? '';
+    final query = rememberedSession?.query.trim().isNotEmpty == true
+        ? rememberedSession!.query.trim()
+        : remembered?.trim() ?? '';
     if (query.isEmpty || _controller.text.trim().isNotEmpty) {
       return;
     }
     setState(() {
       _lastSearchTerm = query;
-      _controller.text = query;
-      _controller.selection = TextSelection.collapsed(offset: query.length);
+      _rememberedSession = rememberedSession?.copyWith(query: query);
     });
   }
 
@@ -110,16 +118,16 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
     _error = null;
     _hasSearched = false;
     _activeSearchTerm = null;
+    _selectedCollectionHasIndexedContent = true;
   }
 
   void _onFilterChanged(String filterValue) {
     if (_selectedCollection == filterValue) return;
     setState(() {
       _selectedCollection = filterValue;
+      _selectedCollectionHasIndexedContent = true;
     });
-    final hasQuery =
-        _controller.text.trim().isNotEmpty ||
-        (_lastSearchTerm?.trim().isNotEmpty ?? false);
+    final hasQuery = _controller.text.trim().isNotEmpty;
     if (hasQuery) {
       _performSearch();
     }
@@ -128,17 +136,10 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
   Future<void> _performSearch({String? overrideQuery}) async {
     final query = (overrideQuery ?? _controller.text).trim();
     if (query.isEmpty) {
-      final resume = _lastSearchTerm?.trim() ?? '';
-      if (resume.isEmpty) {
-        if (!mounted) return;
-        setState(() {
-          _resetSearchState();
-        });
-        return;
-      }
-      _controller.text = resume;
-      _controller.selection = TextSelection.collapsed(offset: resume.length);
-      await _performSearch(overrideQuery: resume);
+      if (!mounted) return;
+      setState(() {
+        _resetSearchState();
+      });
       return;
     }
 
@@ -155,24 +156,57 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
 
     await AppSettingsService.instance.saveLastElibrarySearch(query);
     try {
+      final normalizedCollectionFilter = _selectedCollection == 'all'
+          ? null
+          : _selectedCollection;
+      final totalCount = await LibraryCatalogService.instance
+          .countSearchContentResults(
+            query: query,
+            collectionFilter: normalizedCollectionFilter,
+          );
       final results = await LibraryCatalogService.instance.searchContent(
         query: query,
-        limit: 50,
-        collectionFilter: _selectedCollection == 'all'
-            ? null
-            : _selectedCollection,
+        limit: totalCount <= 0 ? 50 : totalCount,
+        collectionFilter: normalizedCollectionFilter,
       );
+      final hasCollectionFilter = _selectedCollection != 'all';
+      var hasIndexedContent = true;
+      if (hasCollectionFilter && results.isEmpty) {
+        hasIndexedContent = await LibraryCatalogService.instance
+            .countIndexedSearchableItems(
+              collectionFilter: _selectedCollection,
+            ) >
+            0;
+      }
       if (!mounted || requestId != _searchRequestId) return;
+      final snapshot = LibraryCatalogSearchSessionSnapshot(
+        query: query,
+        collectionFilter: normalizedCollectionFilter,
+        totalCount: results.length,
+      );
       setState(() {
         _results = results;
         _loading = false;
+        _selectedCollectionHasIndexedContent = hasIndexedContent;
+        _rememberedSession = snapshot;
       });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_resultsScrollController.hasClients) return;
+        if (_resultsScrollController.offset.abs() < 0.5) return;
+        _resultsScrollController.jumpTo(0);
+      });
+      unawaited(
+        AppSettingsService.instance.saveLastElibrarySearchSessionJson(
+          snapshot.toJsonString(),
+        ),
+      );
     } catch (error) {
       if (!mounted || requestId != _searchRequestId) return;
       setState(() {
         _error = 'Could not search the eLibrary: $error';
         _loading = false;
         _results = const [];
+        _selectedCollectionHasIndexedContent = true;
       });
     }
   }
@@ -181,12 +215,18 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final rememberedSearch = _lastSearchTerm?.trim() ?? '';
+    final rememberedSearch = _rememberedSession?.query.trim().isNotEmpty == true
+        ? _rememberedSession!.query.trim()
+        : _lastSearchTerm?.trim() ?? '';
     final displaySearchTerm = _activeSearchTerm ?? rememberedSearch;
     final highlightTerms = extractLibrarySearchHighlightTerms(
       displaySearchTerm,
     );
+    final rememberedSearchLabel = _buildRememberedSearchLabel();
     final results = _results;
+    final hasSelectedIndex = _rememberedSession?.hasCurrentIndex == true;
+    final selectedIndex =
+        hasSelectedIndex ? _rememberedSession!.currentIndex : null;
 
     return Column(
       children: [
@@ -271,7 +311,7 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
             onChanged: _onFilterChanged,
           ),
         ),
-        if (rememberedSearch.isNotEmpty)
+        if (rememberedSearchLabel.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Align(
@@ -279,31 +319,30 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
               child: TextButton(
                 style: TextButton.styleFrom(
                   alignment: Alignment.centerLeft,
-                  padding: EdgeInsets.zero,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  minimumSize: const Size(0, 44),
+                  foregroundColor: scheme.onSurface,
+                  textStyle: libraryBodyTextStyle(
+                    context,
+                    theme.textTheme.bodyMedium,
+                    color: scheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 onPressed: () =>
-                    _performSearch(overrideQuery: rememberedSearch),
+                    _resumeRememberedSearch(),
                 child: Text.rich(
                   TextSpan(
-                    children: [
-                      TextSpan(
-                        text: 'Last search: ',
-                        style: libraryCaptionTextStyle(
-                          context,
-                          theme.textTheme.bodySmall,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
-                      TextSpan(
-                        text: stripWrappingSearchQuotes(displaySearchTerm),
-                        style: libraryCaptionTextStyle(
-                          context,
-                          theme.textTheme.bodySmall,
-                          color: scheme.onSurface,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
+                    text: rememberedSearchLabel,
+                    style: libraryBodyTextStyle(
+                      context,
+                      theme.textTheme.bodyMedium,
+                      color: scheme.onSurface,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
@@ -333,8 +372,8 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                       final hasDraftQuery = value.text.trim().isNotEmpty;
                       final message = hasDraftQuery
                           ? 'Type a search term, then press Search.'
-                          : rememberedSearch.isNotEmpty
-                          ? 'Press Search to rerun the remembered query.'
+                          : rememberedSearchLabel.isNotEmpty
+                          ? 'Tap the remembered search below to restore the last session.'
                           : 'Type a search term, then press Search.';
                       return Center(
                         child: Padding(
@@ -351,32 +390,13 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                                   color: scheme.onSurfaceVariant,
                                 ),
                               ),
-                              if (!hasDraftQuery && rememberedSearch.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 12),
-                                  child: TextButton.icon(
-                                    onPressed: () => _performSearch(
-                                      overrideQuery: rememberedSearch,
-                                    ),
-                                    icon: const Icon(Icons.history),
-                                    label: Text(
-                                      'Resume last search',
-                                      style: libraryControlTextStyle(
-                                        context,
-                                        theme.textTheme.labelLarge,
-                                        fontWeight: FontWeight.w800,
-                                        color: scheme.primary,
-                                      ),
-                                    ),
-                                  ),
-                                ),
                             ],
                           ),
                         ),
                       );
                     },
-                  )
-                : results.isEmpty
+                    )
+                  : results.isEmpty
                 ? Center(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -384,7 +404,10 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            'No eLibrary matches found.',
+                            _selectedCollection != 'all' &&
+                                    !_selectedCollectionHasIndexedContent
+                                ? 'No indexed books are available in this section yet. You can index missing books from eLibrary Setup.'
+                                : 'No eLibrary matches found.',
                             textAlign: TextAlign.center,
                             style: libraryBodyTextStyle(
                               context,
@@ -392,26 +415,12 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                               color: scheme.onSurface,
                             ),
                           ),
-                          if (_unindexedCount > 0) ...[
-                            const SizedBox(height: 10),
-                            Text(
-                              '$_unindexedCount book${_unindexedCount == 1 ? '' : 's'} '
-                              'in your library ${_unindexedCount == 1 ? 'has' : 'have'} '
-                              'not been indexed yet and cannot be searched. '
-                              'Open the Commentary panel and tap Refresh to index them.',
-                              textAlign: TextAlign.center,
-                              style: libraryCaptionTextStyle(
-                                context,
-                                theme.textTheme.bodySmall,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                     ),
                   )
                 : ListView.separated(
+                    controller: _resultsScrollController,
                     itemCount: results.length,
                     separatorBuilder: (context, index) =>
                         const Divider(height: 1),
@@ -427,6 +436,9 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 4,
                         ),
+                        selected: selectedIndex == index,
+                        selectedTileColor: scheme.secondaryContainer
+                            .withValues(alpha: 0.45),
                         leading: widget.onQuickApplyItem == null
                             ? Icon(
                                 item.isPdf
@@ -494,14 +506,116 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                           ],
                         ),
                         isThreeLine: true,
-                        onTap: () =>
-                            widget.onSelectItem(item, displaySearchTerm),
+                      onTap: () => widget.onSelectItem(
+                          result,
+                          index,
+                          results,
+                          displaySearchTerm,
+                          _selectedCollection,
+                        ),
                       );
                     },
                   ),
           ),
         ),
       ],
+    );
+  }
+
+  String _collectionFilterLabel(String? filterValue) {
+    final normalized = filterValue?.trim().toLowerCase() ?? '';
+    if (normalized.isEmpty || normalized == 'all') {
+      return '';
+    }
+    for (final filter in _kEgwCollectionFilters) {
+      if (filter.value.toLowerCase() == normalized) {
+        return filter.label;
+      }
+    }
+    return filterValue!.trim();
+  }
+
+  String _buildRememberedSearchLabel() {
+    final session = _rememberedSession;
+    final query = session?.query.trim().isNotEmpty == true
+        ? session!.query.trim()
+        : _lastSearchTerm?.trim() ?? '';
+    if (query.isEmpty) {
+      return '';
+    }
+
+    final parts = <String>[
+      stripWrappingSearchQuotes(query),
+    ];
+
+    final collectionLabel = _collectionFilterLabel(session?.collectionFilter);
+    if (collectionLabel.isNotEmpty) {
+      parts.add(collectionLabel);
+    }
+
+    if (session?.hasCurrentIndex == true) {
+      parts.add(session!.counterLabel);
+    } else if (session != null) {
+      parts.add('${session.totalCount} results');
+    }
+
+    return 'Last search: ${parts.join(' — ')}';
+  }
+
+  Future<void> _resumeRememberedSearch() async {
+    final session = _rememberedSession;
+    final query = session?.query.trim().isNotEmpty == true
+        ? session!.query.trim()
+        : _lastSearchTerm?.trim() ?? '';
+    if (query.isEmpty) {
+      return;
+    }
+
+    final collectionFilter = session?.collectionFilter?.trim().isNotEmpty == true
+        ? session!.collectionFilter!.trim()
+        : 'all';
+    if (!mounted) return;
+    setState(() {
+      _selectedCollection = collectionFilter;
+      _controller.text = query;
+      _controller.selection = TextSelection.collapsed(offset: query.length);
+      _selectedCollectionHasIndexedContent = true;
+    });
+
+    await _performSearch(overrideQuery: query);
+    if (!mounted) {
+      return;
+    }
+    if (session == null || !session.hasCurrentIndex || _results.isEmpty) {
+      return;
+    }
+
+    final index = session.currentIndex!.clamp(0, _results.length - 1).toInt();
+    final normalizedCollectionFilter = collectionFilter == 'all'
+        ? null
+        : collectionFilter;
+    final restoredSnapshot = LibraryCatalogSearchSessionSnapshot(
+      query: query,
+      collectionFilter: normalizedCollectionFilter,
+      currentIndex: index,
+      totalCount: _results.length,
+    );
+    setState(() {
+      _rememberedSession = restoredSnapshot;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_resultsScrollController.hasClients) return;
+      final viewport = _resultsScrollController.position.viewportDimension;
+      final estimatedOffset = (index * 88.0) - (viewport * 0.2);
+      final target = estimatedOffset
+          .clamp(0.0, _resultsScrollController.position.maxScrollExtent)
+          .toDouble();
+      if ((target - _resultsScrollController.offset).abs() >= 0.5) {
+        _resultsScrollController.jumpTo(target);
+      }
+    });
+    await AppSettingsService.instance.saveLastElibrarySearchSessionJson(
+      restoredSnapshot.toJsonString(),
     );
   }
 }

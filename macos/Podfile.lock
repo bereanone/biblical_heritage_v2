@@ -1,5 +1,7 @@
 PODS:
-  - file_selector_macos (0.0.1):
+  - file_picker (0.0.1):
+    - FlutterMacOS
+  - flutter_paste_input (0.0.1):
     - FlutterMacOS
   - FlutterMacOS (1.0.0)
   - sqflite_darwin (0.0.4):
@@ -7,20 +9,24 @@ PODS:
     - FlutterMacOS
 
 DEPENDENCIES:
-  - file_selector_macos (from `Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos`)
+  - file_picker (from `Flutter/ephemeral/.symlinks/plugins/file_picker/macos`)
+  - flutter_paste_input (from `Flutter/ephemeral/.symlinks/plugins/flutter_paste_input/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - sqflite_darwin (from `Flutter/ephemeral/.symlinks/plugins/sqflite_darwin/darwin`)
 
 EXTERNAL SOURCES:
-  file_selector_macos:
-    :path: Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos
+  file_picker:
+    :path: Flutter/ephemeral/.symlinks/plugins/file_picker/macos
+  flutter_paste_input:
+    :path: Flutter/ephemeral/.symlinks/plugins/flutter_paste_input/macos
   FlutterMacOS:
     :path: Flutter/ephemeral
   sqflite_darwin:
     :path: Flutter/ephemeral/.symlinks/plugins/sqflite_darwin/darwin
 
 SPEC CHECKSUMS:
-  file_selector_macos: 9e9e068e90ebee155097d00e89ae91edb2374db7
+  file_picker: 7584aae6fa07a041af2b36a2655122d42f578c1a
+  flutter_paste_input: d87d0632979e91ff433b0da678e92526ae247c7c
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   sqflite_darwin: 20b2a3a3b70e43edae938624ce550a3cbf66a3d0
 

@@ -129,6 +129,25 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         entry.verseRef.startsWith('note:');
   }
 
+  String _friendlyTagName() {
+    return widget.tag.replaceFirst(RegExp(r'^[#\$@]+'), '');
+  }
+
+  int _noteOnlyIndexOf(HashTagEntry entry) {
+    var count = 0;
+    for (final e in _entries) {
+      if (_isNoteOnlyEntry(e)) count++;
+      if (e.id == entry.id) return count;
+    }
+    return 1;
+  }
+
+  String _friendlyNoteLabel(HashTagEntry entry) {
+    final userTitle = entry.userTitle?.trim() ?? '';
+    if (userTitle.isNotEmpty) return userTitle;
+    return '${_friendlyTagName()} Note ${_noteOnlyIndexOf(entry)}';
+  }
+
   bool _hasEntryNote(HashTagEntry entry) {
     if (_isDollarRepository) {
       return entry.contentHtml?.trim().isNotEmpty == true;
@@ -575,9 +594,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     if (_defaultTag == widget.tag) {
       await widget.repository.saveDefaultTagCategory(normalizedTarget);
     }
-    _showSnack(
-      'Moved ${widget.tag} from $sourceLabel to $targetLabel',
-    );
+    _showSnack('Moved ${widget.tag} from $sourceLabel to $targetLabel');
   }
 
   Future<void> _deleteEntry(HashTagEntry entry) async {
@@ -665,17 +682,71 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     final lines = <String>[
       '*The following is a formatted sharing list for use in the Biblical Heritage #StudyBible app. Learn more at BiblicalHeritage.net for tutorials, downloads, shared lists, and related links.*',
       '',
-      '${widget.tag} (${_entries.length} verse${_entries.length == 1 ? '' : 's'})',
+      '${widget.tag} (${_entries.length} item${_entries.length == 1 ? '' : 's'})',
       '',
     ];
 
     for (final entry in _entries) {
-      final citation = _displayCitationForEntry(
-        entry,
-        bookName: _bookNames[entry.bookNumber] ?? 'Book ${entry.bookNumber}',
-      );
+      // Note-only cards (standalone notes and image-only items)
+      if (_isNoteOnlyEntry(entry)) {
+        final noteLabel = _friendlyNoteLabel(entry);
+        lines.add(noteLabel);
+        for (final _ in entry.mediaRefs) {
+          lines.add('[Image: $noteLabel image]');
+        }
+        final noteText = _entryNoteText(entry).trim();
+        if (noteText.isNotEmpty) {
+          lines.addAll(noteText.split('\n'));
+        }
+        lines.add('');
+        continue;
+      }
+
+      // eLibrary cards
+      final metadata = _eLibraryNoteMetadata(entry);
+      if (metadata != null) {
+        final title = (_eLibraryNoteTitle(entry) ?? '').trim();
+        if (title.isNotEmpty && !title.startsWith('note:')) {
+          lines.add(title);
+        }
+        for (final _ in entry.mediaRefs) {
+          final imageLabel = title.isNotEmpty ? '$title image' : 'image';
+          lines.add('[Image: $imageLabel]');
+        }
+        final displayOverride = entry.displayTextOverride?.trim() ?? '';
+        final metaExcerpt = metadata.excerpt.trim();
+        final metaSelectedText = metadata.selectedTextSnapshot.trim();
+        final noteTextValue = entry.noteText?.trim() ?? '';
+        final sourceParagraph = metadata.sourceParagraph.trim();
+        final excerpt = displayOverride.isNotEmpty
+            ? displayOverride
+            : metaExcerpt.isNotEmpty
+                ? metaExcerpt
+                : metaSelectedText.isNotEmpty
+                    ? metaSelectedText
+                    : noteTextValue.isNotEmpty
+                        ? noteTextValue
+                        : sourceParagraph;
+        if (excerpt.isNotEmpty) {
+          lines.add('"$excerpt"');
+        }
+        if (noteTextValue.isNotEmpty && noteTextValue != excerpt) {
+          lines.add('Note: ${noteTextValue.replaceAll('\n', ' ')}');
+        }
+        lines.add('');
+        continue;
+      }
+
+      // Bible cards
+      final bookName =
+          _bookNames[entry.bookNumber] ?? 'Book ${entry.bookNumber}';
+      final citation = _displayCitationForEntry(entry, bookName: bookName);
       if (citation.isNotEmpty) {
         lines.add(citation);
+      }
+      for (final _ in entry.mediaRefs) {
+        final imageLabel = citation.isNotEmpty ? '$citation image' : 'image';
+        lines.add('[Image: $imageLabel]');
       }
       final verseText = (entry.displayTextOverride?.trim().isNotEmpty == true)
           ? entry.displayTextOverride!.trim()
@@ -692,6 +763,10 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         if (resolvedText.isNotEmpty) {
           lines.add(resolvedText);
         }
+      }
+      final noteText = _entryNoteText(entry).trim();
+      if (noteText.isNotEmpty) {
+        lines.add('Note: ${noteText.replaceAll('\n', ' ')}');
       }
       lines.add('');
     }
@@ -713,8 +788,8 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   }
 
   String _entryTitle(HashTagEntry entry, String bookName) {
-    final eLibraryTitle = _eLibraryNoteTitle(entry);
-    if (eLibraryTitle != null) return eLibraryTitle;
+    final eLibraryTitle = _eLibraryNoteTitle(entry)?.trim() ?? '';
+    if (eLibraryTitle.isNotEmpty) return eLibraryTitle;
     final referenceCode = _displayCitationForEntry(entry, bookName: bookName);
     final userTitle = entry.userTitle?.trim() ?? '';
     if (userTitle.isNotEmpty) return userTitle;
@@ -722,7 +797,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     final metadata = _eLibraryNoteMetadata(entry);
     if (metadata != null) return '';
     if (_isNoteOnlyEntry(entry)) {
-      return 'Note';
+      return _friendlyNoteLabel(entry);
     }
     final verseLabel = entry.verseEnd > entry.verse
         ? '${entry.verse}-${entry.verseEnd}'
@@ -792,6 +867,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     if (_looksLikeRawBibleReference(verseRef)) {
       return '';
     }
+    if (verseRef.startsWith('note:')) {
+      return '';
+    }
     return verseRef;
   }
 
@@ -810,31 +888,21 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   String? _eLibraryNoteTitle(HashTagEntry entry) {
     final metadata = _eLibraryNoteMetadata(entry);
     if (metadata == null) return null;
-    final title = _safeELibraryTitle(metadata.sourceTitle);
-    final referenceCode = _referenceCodeForEntry(entry);
-    if (referenceCode.isNotEmpty) {
-      if (title.isNotEmpty) {
-        final lowerTitle = title.toLowerCase();
-        final lowerReference = referenceCode.toLowerCase();
-        if (lowerReference == lowerTitle ||
-            lowerReference.startsWith('$lowerTitle — ')) {
-          return referenceCode;
-        }
-        return '$title — $referenceCode';
-      }
-      return referenceCode;
-    }
-    if (title.isNotEmpty) return title;
-    final abbreviation = metadata.sourceTitleAcronym.trim();
-    if (abbreviation.isNotEmpty) {
-      final paragraphIndex =
-          metadata.sourceParagraphNumber ?? metadata.sourceParagraphIndex;
-      if (paragraphIndex != null && paragraphIndex > 0) {
-        return '$abbreviation ¶$paragraphIndex';
-      }
-      return abbreviation;
-    }
-    return 'eLibrary Quote';
+    return libraryUserFacingELibraryDisplayLabel(
+      sourceTitle: metadata.sourceTitle,
+      sourceTitleAcronym: metadata.sourceTitleAcronym,
+      sourceLocation: metadata.sourceLocation,
+      sourceReferenceText: metadata.sourceReferenceText,
+      fileName: metadata.sourceRelativePath.trim().isNotEmpty
+          ? p.basename(metadata.sourceRelativePath)
+          : null,
+      relativePath: metadata.sourceRelativePath,
+      pageCitation: metadata.citationText.isNotEmpty
+          ? metadata.citationText
+          : null,
+      paragraphIndex:
+          metadata.sourceParagraphNumber ?? metadata.sourceParagraphIndex,
+    );
   }
 
   String _referenceCodeForEntry(HashTagEntry entry) {
@@ -844,34 +912,21 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
 
     final metadata = _eLibraryNoteMetadata(entry);
     if (metadata == null) return '';
-
-    final referenceText = _safeELibraryReferenceText(
-      metadata.sourceReferenceText,
+    return libraryUserFacingELibraryCitationText(
+      sourceTitle: metadata.sourceTitle,
+      sourceTitleAcronym: metadata.sourceTitleAcronym,
+      sourceLocation: metadata.sourceLocation,
+      sourceReferenceText: metadata.sourceReferenceText,
+      fileName: metadata.sourceRelativePath.trim().isNotEmpty
+          ? p.basename(metadata.sourceRelativePath)
+          : null,
+      relativePath: metadata.sourceRelativePath,
+      pageCitation: metadata.citationText.isNotEmpty
+          ? metadata.citationText
+          : null,
+      paragraphIndex:
+          metadata.sourceParagraphNumber ?? metadata.sourceParagraphIndex,
     );
-    if (referenceText.isNotEmpty) {
-      return referenceText;
-    }
-
-    final sourceLocation = _safeELibraryReferenceText(metadata.sourceLocation);
-    if (sourceLocation.isNotEmpty) {
-      return sourceLocation;
-    }
-
-    final sourceTitleAcronym = metadata.sourceTitleAcronym.trim();
-    final citationText = metadata.citationText;
-    if (sourceTitleAcronym.isNotEmpty && citationText.isNotEmpty) {
-      return '$sourceTitleAcronym $citationText';
-    }
-
-    final paragraphIndex =
-        metadata.sourceParagraphNumber ?? metadata.sourceParagraphIndex;
-    if (sourceTitleAcronym.isNotEmpty &&
-        paragraphIndex != null &&
-        paragraphIndex > 0) {
-      return '$sourceTitleAcronym ¶$paragraphIndex';
-    }
-
-    return sourceTitleAcronym;
   }
 
   String _safeELibraryTitle(String value) {
@@ -891,7 +946,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         ? p.basename(metadata.sourceRelativePath)
         : '';
     final officialReferenceText =
-        _safeELibraryReferenceText(metadata.sourceLocation).isNotEmpty
+        librarySafeUserFacingReferenceText(metadata.sourceLocation) != null
         ? metadata.sourceLocation
         : metadata.sourceReferenceText;
     final friendlyLocation = libraryUserFacingSearchLocationText(
@@ -1232,6 +1287,16 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         });
         return;
       }
+      _showSnack(
+        'This eLibrary source is no longer available locally, but the card was preserved.',
+      );
+      return;
+    }
+    if (metadata != null) {
+      _showSnack(
+        'This eLibrary card is preserved for reading, but navigation is unavailable.',
+      );
+      return;
     }
     await _openVerse(entry);
   }
@@ -2385,7 +2450,8 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
         );
         if (!mounted) return;
         setState(() {
-          _errorText = 'Could not merge ${widget.tag} into '
+          _errorText =
+              'Could not merge ${widget.tag} into '
               '${target ?? 'None'}.';
         });
       }
@@ -2450,13 +2516,12 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
                         value: null,
                         child: Text('None'),
                       ),
-                      ..._categoryOptions
-                        .map(
-                          (category) => DropdownMenuItem<String?>(
-                            value: category,
-                            child: Text(category),
-                          ),
+                      ..._categoryOptions.map(
+                        (category) => DropdownMenuItem<String?>(
+                          value: category,
+                          child: Text(category),
                         ),
+                      ),
                     ],
                     onChanged: (value) {
                       setState(() {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -981,18 +983,25 @@ class _HashTagDialogState extends State<HashTagDialog>
     final result = await _repository.importSharedListFromText(imported);
     if (result == null) {
       _showSnack(
-        'No usable $_tagLabel list found. Verse + text blocks import best, and note text is preserved.',
+        'No usable $_tagLabel list found. Bible and eLibrary cards import best, and note text is preserved.',
       );
       return;
     }
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_completeImportRefresh(result));
+    });
+  }
+
+  Future<void> _completeImportRefresh(HashTagImportResult result) async {
+    if (!mounted) return;
     await _reloadSelectedTag(result.tag);
+    if (!mounted) return;
     await _showImportResultsDialog(result);
   }
 
   Future<void> _showImportResultsDialog(HashTagImportResult result) async {
-    final isDollar = _repository is DollarTagRepository;
-    final parsedLabel = isDollar ? 'Parsed slides' : 'Parsed refs';
-    final itemLabel = isDollar ? 'slide' : 'verse';
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -1034,7 +1043,7 @@ class _HashTagDialogState extends State<HashTagDialog>
                       ),
                     ),
                     Text(
-                      '$parsedLabel: ${result.parsedCount}',
+                      'Parsed items: ${result.parsedCount}',
                       style: TagDialogStyles.bodyTextStyle(
                         theme,
                         widget.fontScale,
@@ -1042,7 +1051,7 @@ class _HashTagDialogState extends State<HashTagDialog>
                       ),
                     ),
                     Text(
-                      'Inserted: ${result.insertedCount}',
+                      'Bible cards imported: ${result.bibleImportedCount}',
                       style: TagDialogStyles.bodyTextStyle(
                         theme,
                         widget.fontScale,
@@ -1050,7 +1059,23 @@ class _HashTagDialogState extends State<HashTagDialog>
                       ),
                     ),
                     Text(
-                      'Reordered existing: ${result.updatedExistingCount}',
+                      'eLibrary cards imported: ${result.eLibraryImportedCount}',
+                      style: TagDialogStyles.bodyTextStyle(
+                        theme,
+                        widget.fontScale,
+                        color: TagDialogStyles.body(theme),
+                      ),
+                    ),
+                    Text(
+                      'Unsupported/skipped cards: ${result.unsupportedCount}',
+                      style: TagDialogStyles.bodyTextStyle(
+                        theme,
+                        widget.fontScale,
+                        color: TagDialogStyles.body(theme),
+                      ),
+                    ),
+                    Text(
+                      'Inserted/updated rows: ${result.insertedCount + result.updatedExistingCount}',
                       style: TagDialogStyles.bodyTextStyle(
                         theme,
                         widget.fontScale,
@@ -1073,6 +1098,32 @@ class _HashTagDialogState extends State<HashTagDialog>
                         color: TagDialogStyles.body(theme),
                       ),
                     ),
+                    if (result.warnings.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        'Warnings',
+                        style: TagDialogStyles.bodyTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.title(theme),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      ...result.warnings.map(
+                        (warning) => Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text(
+                            warning,
+                            style: TagDialogStyles.bodyTextStyle(
+                              theme,
+                              widget.fontScale,
+                              color: TagDialogStyles.body(theme),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                     if (result.failures.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       Text(
@@ -1119,10 +1170,6 @@ class _HashTagDialogState extends State<HashTagDialog>
           ),
         );
       },
-    );
-    if (!mounted) return;
-    _showSnack(
-      'Imported ${result.insertedCount} $itemLabel${result.insertedCount == 1 ? '' : 's'} into ${result.tag}.',
     );
   }
 

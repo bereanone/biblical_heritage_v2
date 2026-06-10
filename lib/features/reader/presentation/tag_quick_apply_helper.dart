@@ -3304,16 +3304,46 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
 
     final tagName = _detectSharedListName(lines) ?? _fallbackImportedTagName();
     final blocks = _splitSharedListBlocks(lines, tagName);
+    if (kDebugMode) {
+      debugPrint(
+        '[ImportDiag] _splitSharedListBlocks → ${blocks.length} block(s) for tag="$tagName"',
+      );
+      for (var i = 0; i < blocks.length; i++) {
+        final b = blocks[i];
+        debugPrint(
+          '[ImportDiag] block[$i]: lines=${b.length} first="${b.isNotEmpty ? b.first.trim() : ''}"',
+        );
+      }
+    }
     final slides = <_ParsedSharedSlide>[];
     final seen = <String>{};
 
-    for (final block in blocks) {
+    for (var i = 0; i < blocks.length; i++) {
+      final block = blocks[i];
       final slide = _parseSharedSlideBlock(block, bookLookup, tagName);
+      final kind = slide.target != null
+          ? 'scripture'
+          : slide.elibraryMetadata != null
+              ? 'elibrary'
+              : slide.noteRef.startsWith('note:')
+                  ? 'note'
+                  : 'unsupported';
+      if (kDebugMode) {
+        debugPrint(
+          '[ImportDiag] block[$i] → kind=$kind noteRef=${slide.noteRef.substring(0, slide.noteRef.length.clamp(0, 60))} contentLen=${slide.contentText.length}',
+        );
+      }
       final dedupeKey = slide.target?.verseRef ?? slide.noteRef;
-      if (!seen.add(dedupeKey)) continue;
+      if (!seen.add(dedupeKey)) {
+        if (kDebugMode) debugPrint('[ImportDiag] block[$i] DEDUPED (key already seen)');
+        continue;
+      }
       slides.add(slide);
     }
 
+    if (kDebugMode) {
+      debugPrint('[ImportDiag] _parseSharedListFromText → ${slides.length} unique slide(s)');
+    }
     if (slides.isEmpty) return null;
     return _ParsedSharedList(tag: normalizeTagName(tagName), slides: slides);
   }
@@ -3411,7 +3441,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
 
   String? _detectSharedListName(List<String> lines) {
     final headerRegex = RegExp(
-      r'^\s*([#\$@][^\s(]+)\s*(?:\(\s*\d+\s+(?:verse|slide)(?:s)?\s*\))?\s*$',
+      r'^\s*([#\$@][^\s(]+)\s*(?:\(\s*\d+\s+(?:verse|slide|item)(?:s)?\s*\))?\s*$',
       caseSensitive: false,
     );
     for (final rawLine in lines) {
@@ -3434,6 +3464,18 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     for (final rawLine in lines) {
       final line = rawLine.replaceAll('\r', '');
       final normalized = line.trim();
+      // A blank line ends the current card. This must be checked BEFORE the
+      // wrapper/header skip below, because _isSharedListWrapperLine() returns
+      // true for empty strings — if the wrapper check ran first it would
+      // `continue` past this break, silently merging blank-separated cards
+      // (e.g. a trailing readable eLibrary block) into the preceding card.
+      if (normalized.isEmpty) {
+        if (current.isNotEmpty) {
+          blocks.add(current);
+          current = <String>[];
+        }
+        continue;
+      }
       if (_isSharedListWrapperLine(normalized) ||
           _isSharedListHeaderLine(normalized, tagName)) {
         continue;
@@ -3441,13 +3483,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       if (current.isNotEmpty && _isSharedSlideStartLine(normalized)) {
         blocks.add(current);
         current = <String>[];
-      }
-      if (normalized.isEmpty) {
-        if (current.isNotEmpty) {
-          blocks.add(current);
-          current = <String>[];
-        }
-        continue;
       }
       current.add(line);
     }
@@ -3471,19 +3506,23 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     }
     final firstLine = block.first.trim();
     if (firstLine.isEmpty) {
+      final content = _extractSharedNoteContent(block, tagName);
       return _ParsedSharedSlide(
         target: null,
-        contentText: _extractSharedNoteContent(block, tagName),
-        noteRef:
-            'unsupported:${DateTime.now().microsecondsSinceEpoch}:${block.join('|')}',
+        contentText: content,
+        noteRef: content.isNotEmpty
+            ? 'note:${DateTime.now().microsecondsSinceEpoch}:${block.join('|')}'
+            : 'unsupported:${DateTime.now().microsecondsSinceEpoch}:empty',
       );
     }
     if (_detectSharedListName([firstLine]) == firstLine) {
+      final content = _extractSharedNoteContent(block, tagName);
       return _ParsedSharedSlide(
         target: null,
-        contentText: _extractSharedNoteContent(block, tagName),
-        noteRef:
-            'unsupported:${DateTime.now().microsecondsSinceEpoch}:${block.join('|')}',
+        contentText: content,
+        noteRef: content.isNotEmpty
+            ? 'note:${DateTime.now().microsecondsSinceEpoch}:${block.join('|')}'
+            : 'unsupported:${DateTime.now().microsecondsSinceEpoch}:empty',
       );
     }
 
@@ -3550,9 +3589,12 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final elibraryMetadata = _extractSharedELibraryMetadata(block);
     if (elibraryMetadata != null) {
       final stableRef = _s(elibraryMetadata['stable_ref']).trim();
+      // When stable_ref is absent the block can't be re-linked to the eLibrary,
+      // so use a deterministic note: ref derived from content. This ensures the
+      // slide routes to noteSlides and is never silently dropped.
       final noteRef = stableRef.isNotEmpty
           ? stableRef
-          : 'elibrary:${block.join('|').hashCode}:${block.length}';
+          : 'note:${_sharedStudyBibleMetadataKey(metadata: elibraryMetadata, block: block, kind: 'elibrary_note')}';
       final content = _extractSharedELibraryContent(block);
       return _ParsedSharedSlide(
         target: null,
@@ -3576,7 +3618,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       target: null,
       contentText: _extractSharedNoteContent(block, tagName),
       noteRef:
-          'unsupported:${DateTime.now().microsecondsSinceEpoch}:${block.join('|')}',
+          'note:${DateTime.now().microsecondsSinceEpoch}:${block.join('|')}',
     );
   }
 
@@ -3626,7 +3668,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     return normalized.isNotEmpty &&
         normalizedTag.isNotEmpty &&
         normalized.startsWith(normalizedTag) &&
-        (normalized.contains('slide') || normalized.contains('verse'));
+        (normalized.contains('slide') ||
+            normalized.contains('verse') ||
+            normalized.contains('item'));
   }
 
   bool _isSharedSlideStartLine(String line) {
@@ -3660,9 +3704,24 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   }
 
   String _extractSharedNoteContent(List<String> lines, String tagName) {
+    // A generated note label (e.g. "SoulSleep2 Note 1") is the first line of
+    // the exported block but also appears at the start of the stored noteText,
+    // producing duplication. Strip it — and its repeat if present — so the
+    // body begins with the real content.
+    var startIndex = 0;
+    if (lines.isNotEmpty) {
+      final firstTrimmed = lines[0].trim();
+      if (RegExp(r'^[A-Za-z0-9 _-]+ Note \d+$').hasMatch(firstTrimmed)) {
+        startIndex = 1;
+        if (lines.length > 1 && lines[1].trim() == firstTrimmed) {
+          startIndex = 2;
+        }
+      }
+    }
     final contentLines = <String>[];
     var skipNotesMarker = true;
-    for (final rawLine in lines) {
+    for (var i = startIndex; i < lines.length; i++) {
+      final rawLine = lines[i];
       final normalized = rawLine.trim();
       if (normalized.isEmpty) {
         contentLines.add('');
@@ -3672,6 +3731,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         continue;
       }
       if (normalized.toLowerCase().startsWith('note slide')) {
+        continue;
+      }
+      if (normalized.toLowerCase() == 'note item') {
         continue;
       }
       if (skipNotesMarker && normalized.toLowerCase() == 'notes:') {
@@ -3746,11 +3808,16 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       _s(metadata['source_paragraph']),
       _s(metadata['excerpt']),
     ];
-    final seed = seedParts
+    final identifyingParts = seedParts
+        .skip(1)
         .map((value) => value.trim())
         .where((value) => value.isNotEmpty)
-        .join('|');
-    final rawSeed = seed.isEmpty ? block.join('|') : seed;
+        .toList(growable: false);
+    // When there are no identifying metadata fields, derive the key from block
+    // content so two different human-readable blocks never share the same key.
+    final rawSeed = identifyingParts.isEmpty
+        ? block.join('|')
+        : [kind, ...identifyingParts].join('|');
     return sha1.convert(utf8.encode(rawSeed)).toString().substring(0, 16);
   }
 
@@ -3938,6 +4005,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
               slide.noteRef.startsWith('note:'),
         )
         .toList(growable: false);
+    // Slides that could not be routed to scripture/eLibrary/note.
+    // Any with non-empty content are recovered as note cards below so no
+    // readable block is silently dropped.
     final unsupportedSlides = parsed.slides
         .where(
           (slide) =>
@@ -3946,6 +4016,26 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
               !slide.noteRef.startsWith('note:'),
         )
         .toList(growable: false);
+    if (kDebugMode) {
+      debugPrint(
+        '[ImportDiag] _importHashSharedList buckets: total=${parsed.slides.length} '
+        'scripture=${scriptureSlides.length} eLibrary=${eLibrarySlides.length} '
+        'note=${noteSlides.length} unsupported=${unsupportedSlides.length}',
+      );
+      for (var i = 0; i < parsed.slides.length; i++) {
+        final s = parsed.slides[i];
+        final bucket = s.target != null
+            ? 'scripture'
+            : s.elibraryMetadata != null
+                ? 'elibrary'
+                : s.noteRef.startsWith('note:')
+                    ? 'note'
+                    : 'unsupported';
+        debugPrint(
+          '[ImportDiag] slide[$i] bucket=$bucket noteRef=${s.noteRef.substring(0, s.noteRef.length.clamp(0, 60))}',
+        );
+      }
+    }
     if (parsed.slides.isEmpty) return null;
 
     final failures = <HashTagImportFailure>[];
@@ -3959,23 +4049,36 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final now = DateTime.now().millisecondsSinceEpoch;
     final warnings = <String>[];
 
-    if (unsupportedSlides.isNotEmpty) {
-      warnings.add(
-        'Skipped ${unsupportedSlides.length} unsupported item${unsupportedSlides.length == 1 ? '' : 's'}.',
-      );
-      for (var index = 0; index < unsupportedSlides.length; index++) {
-        final slide = unsupportedSlides[index];
+    // Recover unsupported slides with readable content as note cards so no
+    // block is silently dropped.
+    final recoveredAsNotes = <_ParsedSharedSlide>[];
+    for (final slide in unsupportedSlides) {
+      final content = slide.contentText.trim();
+      if (content.isNotEmpty) {
+        if (kDebugMode) {
+          debugPrint(
+            '[ImportDiag] unsupported slide recovered as note: noteRef=${slide.noteRef.substring(0, slide.noteRef.length.clamp(0, 60))}',
+          );
+        }
+        recoveredAsNotes.add(slide);
+      } else {
         failures.add(
           HashTagImportFailure(
-            lineNumber: index + 1,
-            reason: 'Unsupported card type',
-            line: slide.contentText,
+            lineNumber: unsupportedSlides.indexOf(slide) + 1,
+            reason: 'Unsupported card type (empty content)',
+            line: slide.noteRef,
           ),
         );
       }
     }
+    if (unsupportedSlides.isNotEmpty && recoveredAsNotes.length < unsupportedSlides.length) {
+      final droppedCount = unsupportedSlides.length - recoveredAsNotes.length;
+      warnings.add(
+        'Skipped $droppedCount unsupported item${droppedCount == 1 ? '' : 's'} with no readable content.',
+      );
+    }
 
-    for (final slide in noteSlides) {
+    for (final slide in [...noteSlides, ...recoveredAsNotes]) {
       final metadata = slide.studyBibleMetadata ?? const <String, Object?>{};
       final noteText =
           _s(metadata['note_text']).trim().isNotEmpty
@@ -3992,6 +4095,11 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
               kind: 'note',
             );
       final verseRef = 'note:$noteKey';
+      if (kDebugMode) {
+        debugPrint(
+          '[ImportDiag] note slide: first="${slide.contentText.split('\n').first.substring(0, slide.contentText.split('\n').first.length.clamp(0, 60))}" verseRef=$verseRef',
+        );
+      }
       final categoryArgs = <Object?>[];
       final categoryClause = _legacyCategoryWhereClause(
         'category',
@@ -4032,6 +4140,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       if (exists.isNotEmpty) {
         final existingId = (exists.first['id'] as num?)?.toInt();
         if (existingId != null) {
+          if (kDebugMode) debugPrint('[ImportDiag] note UPDATE existing id=$existingId verseRef=$verseRef');
           await db.update(
             tableName,
             values,
@@ -4044,8 +4153,10 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           continue;
         }
         skippedExisting++;
+        if (kDebugMode) debugPrint('[ImportDiag] note SKIPPED (null id) verseRef=$verseRef');
         continue;
       }
+      if (kDebugMode) debugPrint('[ImportDiag] note INSERT verseRef=$verseRef contentLen=${noteText.length}');
       await db.insert(tableName, values);
       inserted++;
       noteImportedCount++;
@@ -4054,6 +4165,15 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
 
     for (final slide in scriptureSlides) {
       final target = slide.target!;
+      String? importedNoteText;
+      for (final contentLine in slide.contentText.split('\n')) {
+        final trimmed = contentLine.trim();
+        if (trimmed.toLowerCase().startsWith('note:')) {
+          final noteContent = trimmed.substring(5).trim();
+          if (noteContent.isNotEmpty) importedNoteText = noteContent;
+          break;
+        }
+      }
       final categoryArgs = <Object?>[];
       final categoryClause = _legacyCategoryWhereClause(
         'category',
@@ -4076,6 +4196,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         'chapter_number': target.chapter,
         'verse_number': target.verse,
         'token_number': target.tokenNumber,
+        if (importedNoteText != null) 'note_text': importedNoteText,
         'sort_order': studyOrder,
         'created_at': now + inserted + updatedExisting,
       };

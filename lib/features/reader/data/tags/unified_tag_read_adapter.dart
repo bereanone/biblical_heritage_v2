@@ -5,6 +5,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../../core/database/user_database.dart';
 import '../../../../core/database/study_bible_database.dart';
+import '../../../../features/library/data/library_citation_display_helper.dart';
 import 'tag_models.dart';
 import 'tag_repository.dart';
 import 'unified_tag_models.dart';
@@ -13,10 +14,9 @@ class UnifiedTagReadAdapter {
   UnifiedTagReadAdapter({
     TagDatabaseProvider? databaseProvider,
     Future<Map<int, String>> Function()? bookNamesProvider,
-  })
-    : _databaseProvider =
-          databaseProvider ?? (() => UserDatabase.instance.database),
-      _bookNamesProvider = bookNamesProvider;
+  }) : _databaseProvider =
+           databaseProvider ?? (() => UserDatabase.instance.database),
+       _bookNamesProvider = bookNamesProvider;
 
   final TagDatabaseProvider _databaseProvider;
   final Future<Map<int, String>> Function()? _bookNamesProvider;
@@ -118,7 +118,8 @@ class UnifiedTagReadAdapter {
             storageKind: storageKind,
             tagName: tag,
             media: _mergeMediaLists(
-              mediaByItemId[_readString(row['id'])] ?? const <UnifiedTagMedia>[],
+              mediaByItemId[_readString(row['id'])] ??
+                  const <UnifiedTagMedia>[],
               _legacyMediaForRow(
                 itemId: _readString(row['id']),
                 tableName: tableName,
@@ -198,6 +199,7 @@ class UnifiedTagReadAdapter {
       if (groupId.isEmpty) continue;
       final groupName = _readString(groupRow['name']);
       final tagKind = _readString(groupRow['tag_kind']);
+      if (tagKind == 'import_root' || tagKind == 'import_package') continue;
       final storageKind = _storageKindFromTagKind(tagKind);
       final parentId = _readStringOrNull(groupRow['parent_group_id']);
       final parentName = parentId == null ? null : categoryNames[parentId];
@@ -270,8 +272,9 @@ class UnifiedTagReadAdapter {
     final contentHtml = _readStringOrNull(row['content_html']);
     final noteFormatJson = _readStringOrNull(row['note_format_json']);
     final overlayUserTitle = _legacyOverlayUserTitle(noteFormatJson);
-    final overlayDisplayTextOverride =
-        _legacyOverlayDisplayTextOverride(noteFormatJson);
+    final overlayDisplayTextOverride = _legacyOverlayDisplayTextOverride(
+      noteFormatJson,
+    );
     final bibleAnchor = _legacyBibleAnchor(
       row: row,
       bookNumber: bookNumber,
@@ -498,25 +501,43 @@ class UnifiedTagReadAdapter {
       final decoded = jsonDecode(raw);
       if (decoded is! Map<String, dynamic>) return null;
       if (decoded['kind']?.toString() != 'elibrary_note') return null;
-      final compactRef = _firstNonEmptyString([
-        _readStringOrNull(decoded['source_location']),
-        _readStringOrNull(decoded['source_reference_text']),
-        _readStringOrNull(decoded['source_title_acronym']),
-        'eLibrary',
-      ]);
+      final sourceTitle = _readStringOrNull(decoded['source_title']) ?? '';
+      final sourceTitleAcronym =
+          _readStringOrNull(decoded['source_title_acronym']) ?? '';
+      final sourceLocation =
+          _readStringOrNull(decoded['source_location']) ?? '';
+      final sourceReferenceText =
+          _readStringOrNull(decoded['source_reference_text']) ?? '';
+      final sourceRelativePath =
+          _readStringOrNull(decoded['source_relative_path']) ?? '';
+      final sourcePageNumber = _int(decoded['source_page_number']);
+      final sourceParagraphNumber = _int(decoded['source_paragraph_number']);
+      final sourceParagraphIndex = _int(decoded['source_paragraph_index']);
+      final compactRef = libraryUserFacingELibraryDisplayLabel(
+        sourceTitle: sourceTitle,
+        sourceTitleAcronym: sourceTitleAcronym,
+        sourceLocation: sourceLocation,
+        sourceReferenceText: sourceReferenceText,
+        fileName: sourceRelativePath.isNotEmpty
+            ? p.basename(sourceRelativePath)
+            : null,
+        relativePath: sourceRelativePath,
+        pageCitation: sourcePageNumber != null && sourceParagraphNumber != null
+            ? '$sourcePageNumber.$sourceParagraphNumber'
+            : null,
+        paragraphIndex: sourceParagraphIndex,
+      );
       return UnifiedTagELibraryAnchor(
         compactRef: compactRef,
-        sourceTitle: _readStringOrNull(decoded['source_title']),
-        sourceTitleAcronym: _readStringOrNull(decoded['source_title_acronym']),
-        sourceLocation: _readStringOrNull(decoded['source_location']),
-        sourceReferenceText: _readStringOrNull(
-          decoded['source_reference_text'],
-        ),
+        sourceTitle: sourceTitle,
+        sourceTitleAcronym: sourceTitleAcronym,
+        sourceLocation: sourceLocation,
+        sourceReferenceText: sourceReferenceText,
         sourceHref: _readStringOrNull(decoded['source_href']),
         sourceAnchorId: _readStringOrNull(decoded['source_anchor_id']),
         sourceSpineIndex: _int(decoded['source_spine_index']),
         sourceParagraphIndex: _int(decoded['source_paragraph_index']),
-        sourceRelativePath: _readStringOrNull(decoded['source_relative_path']),
+        sourceRelativePath: sourceRelativePath,
         sourceLibraryItemId: _readStringOrNull(
           decoded['source_library_item_id'],
         ),
@@ -529,8 +550,8 @@ class UnifiedTagReadAdapter {
         selectionEndCharOffset: _int(decoded['selection_end_char_offset']),
         selectionStartTokenIndex: _int(decoded['selection_start_token_index']),
         selectionEndTokenIndex: _int(decoded['selection_end_token_index']),
-        sourcePageNumber: _int(decoded['source_page_number']),
-        sourceParagraphNumber: _int(decoded['source_paragraph_number']),
+        sourcePageNumber: sourcePageNumber,
+        sourceParagraphNumber: sourceParagraphNumber,
         searchQuery: _readStringOrNull(decoded['search_query']),
         sourceParagraph: _readStringOrNull(decoded['source_paragraph']),
         excerpt: _readStringOrNull(decoded['excerpt']),
@@ -559,25 +580,43 @@ class UnifiedTagReadAdapter {
         return null;
       }
       if (decoded['kind']?.toString() != 'elibrary_note') return null;
-      final compactRef = _firstNonEmptyString([
-        _readStringOrNull(decoded['source_location']),
-        _readStringOrNull(decoded['source_reference_text']),
-        _readStringOrNull(decoded['source_title_acronym']),
-        'eLibrary',
-      ]);
+      final sourceTitle = _readStringOrNull(decoded['source_title']) ?? '';
+      final sourceTitleAcronym =
+          _readStringOrNull(decoded['source_title_acronym']) ?? '';
+      final sourceLocation =
+          _readStringOrNull(decoded['source_location']) ?? '';
+      final sourceReferenceText =
+          _readStringOrNull(decoded['source_reference_text']) ?? '';
+      final sourceRelativePath =
+          _readStringOrNull(decoded['source_relative_path']) ?? '';
+      final sourcePageNumber = _int(decoded['source_page_number']);
+      final sourceParagraphNumber = _int(decoded['source_paragraph_number']);
+      final sourceParagraphIndex = _int(decoded['source_paragraph_index']);
+      final compactRef = libraryUserFacingELibraryDisplayLabel(
+        sourceTitle: sourceTitle,
+        sourceTitleAcronym: sourceTitleAcronym,
+        sourceLocation: sourceLocation,
+        sourceReferenceText: sourceReferenceText,
+        fileName: sourceRelativePath.isNotEmpty
+            ? p.basename(sourceRelativePath)
+            : null,
+        relativePath: sourceRelativePath,
+        pageCitation: sourcePageNumber != null && sourceParagraphNumber != null
+            ? '$sourcePageNumber.$sourceParagraphNumber'
+            : null,
+        paragraphIndex: sourceParagraphIndex,
+      );
       return UnifiedTagELibraryAnchor(
         compactRef: compactRef,
-        sourceTitle: _readStringOrNull(decoded['source_title']),
-        sourceTitleAcronym: _readStringOrNull(decoded['source_title_acronym']),
-        sourceLocation: _readStringOrNull(decoded['source_location']),
-        sourceReferenceText: _readStringOrNull(
-          decoded['source_reference_text'],
-        ),
+        sourceTitle: sourceTitle,
+        sourceTitleAcronym: sourceTitleAcronym,
+        sourceLocation: sourceLocation,
+        sourceReferenceText: sourceReferenceText,
         sourceHref: _readStringOrNull(decoded['source_href']),
         sourceAnchorId: _readStringOrNull(decoded['source_anchor_id']),
         sourceSpineIndex: _int(decoded['source_spine_index']),
         sourceParagraphIndex: _int(decoded['source_paragraph_index']),
-        sourceRelativePath: _readStringOrNull(decoded['source_relative_path']),
+        sourceRelativePath: sourceRelativePath,
         sourceLibraryItemId: _readStringOrNull(
           decoded['source_library_item_id'],
         ),
@@ -590,8 +629,8 @@ class UnifiedTagReadAdapter {
         selectionEndCharOffset: _int(decoded['selection_end_char_offset']),
         selectionStartTokenIndex: _int(decoded['selection_start_token_index']),
         selectionEndTokenIndex: _int(decoded['selection_end_token_index']),
-        sourcePageNumber: _int(decoded['source_page_number']),
-        sourceParagraphNumber: _int(decoded['source_paragraph_number']),
+        sourcePageNumber: sourcePageNumber,
+        sourceParagraphNumber: sourceParagraphNumber,
         searchQuery: _readStringOrNull(decoded['search_query']),
         sourceParagraph: _readStringOrNull(decoded['source_paragraph']),
         excerpt: _readStringOrNull(decoded['excerpt']),
@@ -743,7 +782,9 @@ class UnifiedTagReadAdapter {
       }
       return _LegacyBibleItemOverlay(
         userTitle: _readStringOrNull(decoded['user_title']),
-        displayTextOverride: _readStringOrNull(decoded['display_text_override']),
+        displayTextOverride: _readStringOrNull(
+          decoded['display_text_override'],
+        ),
       );
     } catch (_) {
       return null;
@@ -761,8 +802,6 @@ class UnifiedTagReadAdapter {
     if (elibraryAnchor != null) {
       final title = elibraryAnchor.sourceTitle?.trim() ?? '';
       if (title.isNotEmpty) return title;
-      final location = elibraryAnchor.sourceLocation?.trim() ?? '';
-      if (location.isNotEmpty) return location;
       return elibraryAnchor.compactRef;
     }
     if (bibleAnchor != null) {
@@ -893,7 +932,9 @@ class UnifiedTagReadAdapter {
         legacyTagName: null,
         legacyTagId: _readStringOrNull(row['legacy_group_id']),
         legacyItemId: legacyItemId,
-        legacyImportPackageId: _readStringOrNull(row['legacy_import_package_id']),
+        legacyImportPackageId: _readStringOrNull(
+          row['legacy_import_package_id'],
+        ),
         createdAt: _parseTimestamp(row['created_at']),
         updatedAt: _parseTimestamp(row['updated_at']),
         deletedAt: _parseTimestamp(row['deleted_at']),
@@ -964,7 +1005,8 @@ class UnifiedTagReadAdapter {
     final merged = <UnifiedTagMedia>[];
     final seen = <String>{};
     for (final media in [...first, ...second]) {
-      final key = '${media.relativePath}|${media.caption ?? ''}|${media.mediaType}';
+      final key =
+          '${media.relativePath}|${media.caption ?? ''}|${media.mediaType}';
       if (!seen.add(key)) continue;
       merged.add(media);
     }
@@ -994,9 +1036,7 @@ class UnifiedTagReadAdapter {
 
     try {
       final books = await StudyBibleDatabase.instance.loadBooks();
-      return {
-        for (final book in books) book.bookNumber: book.bookName,
-      };
+      return {for (final book in books) book.bookNumber: book.bookName};
     } catch (_) {
       return const <int, String>{};
     }
@@ -1127,14 +1167,6 @@ class UnifiedTagReadAdapter {
     return Map<String, Object?>.unmodifiable({...source});
   }
 
-  String _firstNonEmptyString(List<String?> values) {
-    for (final value in values) {
-      final trimmed = value?.trim() ?? '';
-      if (trimmed.isNotEmpty) return trimmed;
-    }
-    return '';
-  }
-
   String _normalizeMediaPath(String raw) {
     final cleaned = raw.trim();
     if (cleaned.isEmpty) return cleaned;
@@ -1191,10 +1223,7 @@ class _LegacyDollarNotePayload {
 }
 
 class _LegacyBibleItemOverlay {
-  const _LegacyBibleItemOverlay({
-    this.userTitle,
-    this.displayTextOverride,
-  });
+  const _LegacyBibleItemOverlay({this.userTitle, this.displayTextOverride});
 
   final String? userTitle;
   final String? displayTextOverride;

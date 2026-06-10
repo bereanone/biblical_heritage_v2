@@ -708,6 +708,47 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         if (value.isNotEmpty) values.add(value);
       }
 
+      if (await _tableExists(db, 'tag_groups')) {
+        final tagKind = _tagKindForTable();
+        final groupRows = await db.rawQuery(
+          '''
+          SELECT DISTINCT name
+          FROM tag_groups
+          WHERE tag_kind = ?
+            AND (parent_group_id IS NULL OR TRIM(parent_group_id) = '')
+            AND (deleted_at IS NULL OR TRIM(deleted_at) = '')
+            AND TRIM(name) <> ''
+            AND tag_kind NOT IN ('import_root', 'import_package')
+          ORDER BY name COLLATE NOCASE ASC
+          ''',
+          [tagKind],
+        );
+        for (final row in groupRows) {
+          final value = row['name']?.toString().trim() ?? '';
+          if (value.isNotEmpty) values.add(value);
+        }
+        // Also capture categories that appear as parent group names in the tag
+        // browser (mirrors the loadSummaries JOIN query), so categories created
+        // via any path are included.
+        final parentRows = await db.rawQuery(
+          '''
+          SELECT DISTINCT parent.name AS cat
+          FROM tag_groups AS groups
+          JOIN tag_groups AS parent ON parent.id = groups.parent_group_id
+          WHERE groups.tag_kind = ?
+            AND COALESCE(groups.deleted_at, '') = ''
+            AND TRIM(parent.name) <> ''
+            AND parent.tag_kind NOT IN ('import_root', 'import_package')
+          ORDER BY cat COLLATE NOCASE ASC
+          ''',
+          [tagKind],
+        );
+        for (final row in parentRows) {
+          final value = row['cat']?.toString().trim() ?? '';
+          if (value.isNotEmpty) values.add(value);
+        }
+      }
+
       final normalized = <String, String>{};
       for (final value in values) {
         normalized.putIfAbsent(value.toLowerCase(), () => value);

@@ -2290,14 +2290,27 @@ class _MoveTagCategoryResult {
 
 class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
   List<String> _categoryOptions = const <String>[];
-  String? _selectedCategory;
+  String _typedCategory = '';
   bool _loading = true;
   String? _errorText;
+  bool _fieldEdited = false;
+  late final TextEditingController _catController;
+  late final FocusNode _catFocusNode;
 
   @override
   void initState() {
     super.initState();
+    _typedCategory = widget.currentCategory?.trim() ?? '';
+    _catController = TextEditingController(text: _typedCategory);
+    _catFocusNode = FocusNode();
     _loadCategories();
+  }
+
+  @override
+  void dispose() {
+    _catFocusNode.dispose();
+    _catController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadCategories() async {
@@ -2307,28 +2320,35 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
     if (!mounted) return;
 
     final current = widget.currentCategory?.trim() ?? '';
-    final normalizedCurrent = current.isEmpty
-        ? null
-        : options.firstWhere(
-            (value) => value.toLowerCase() == current.toLowerCase(),
-            orElse: () => current,
-          );
-    if (normalizedCurrent != null &&
+    if (current.isNotEmpty &&
         !options.any(
-          (value) => value.toLowerCase() == normalizedCurrent.toLowerCase(),
+          (value) => value.toLowerCase() == current.toLowerCase(),
         )) {
-      options.insert(0, normalizedCurrent);
+      options.insert(0, current);
     }
 
     setState(() {
       _categoryOptions = options;
-      _selectedCategory = normalizedCurrent;
       _loading = false;
+    });
+
+    // Populate RawAutocomplete's internal _options immediately after the
+    // widget appears.  RawAutocomplete only calls optionsBuilder on text
+    // changes; it starts with an empty _options list, which means tapping
+    // the field shows nothing.  Two synchronous value swaps (empty → saved)
+    // trigger the listener twice without visible flicker; the second result
+    // wins via the _onChangedCallId mechanism, leaving _options = all
+    // existing categories so the dropdown opens on first tap.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final saved = _catController.value;
+      _catController.value = TextEditingValue.empty;
+      _catController.value = saved;
     });
   }
 
   Future<void> _save() async {
-    final target = _selectedCategory?.trim();
+    final target = _typedCategory.trim().isEmpty ? null : _typedCategory.trim();
     final current = widget.currentCategory?.trim() ?? '';
     if ((target ?? '').toLowerCase() == current.toLowerCase()) {
       Navigator.of(context).pop();
@@ -2505,28 +2525,73 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
                     style: bodyStyle,
                   ),
                   const SizedBox(height: 14),
-                  DropdownButtonFormField<String?>(
-                    initialValue: _selectedCategory,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Move to category',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: <DropdownMenuItem<String?>>[
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('None'),
-                      ),
-                      ..._categoryOptions.map(
-                        (category) => DropdownMenuItem<String?>(
-                          value: category,
-                          child: Text(category),
+                  Autocomplete<String>(
+                    textEditingController: _catController,
+                    focusNode: _catFocusNode,
+                    optionsBuilder: (TextEditingValue textEditingValue) {
+                      if (!_fieldEdited) return _categoryOptions;
+                      final text = textEditingValue.text.trim();
+                      if (text.isEmpty) return _categoryOptions;
+                      return _categoryOptions.where(
+                        (opt) =>
+                            opt.toLowerCase().contains(text.toLowerCase()),
+                      );
+                    },
+                    optionsViewBuilder: (context, onSelected, options) {
+                      return Align(
+                        alignment: AlignmentDirectional.topStart,
+                        child: Material(
+                          elevation: 4,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 200),
+                            child: ListView.builder(
+                              padding: EdgeInsets.zero,
+                              shrinkWrap: true,
+                              itemCount: options.length,
+                              itemBuilder: (context, index) {
+                                final option = options.elementAt(index);
+                                return InkWell(
+                                  onTap: () => onSelected(option),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 12,
+                                    ),
+                                    child: Text(option),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
                         ),
-                      ),
-                    ],
-                    onChanged: (value) {
+                      );
+                    },
+                    fieldViewBuilder: (
+                      context,
+                      textController,
+                      focusNode,
+                      onFieldSubmitted,
+                    ) {
+                      return TextFormField(
+                        controller: textController,
+                        focusNode: focusNode,
+                        decoration: const InputDecoration(
+                          labelText: 'Move to category',
+                          hintText: 'Type a name, or clear for None',
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (value) {
+                          setState(() {
+                            _typedCategory = value;
+                            _errorText = null;
+                            _fieldEdited = true;
+                          });
+                        },
+                      );
+                    },
+                    onSelected: (String selection) {
                       setState(() {
-                        _selectedCategory = value;
+                        _typedCategory = selection;
                         _errorText = null;
                       });
                     },

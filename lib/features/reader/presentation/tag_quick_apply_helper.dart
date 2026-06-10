@@ -588,18 +588,32 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     required String oldTag,
     required String newTag,
     String? category,
+    bool categoryKnown = false,
   }) async {
     final normalizedOld = normalizeTagName(oldTag);
     final normalizedNew = normalizeTagName(newTag);
     if (normalizedOld.isEmpty || normalizedNew.isEmpty) return 0;
+    final normalizedCategory = _normalizeCategoryName(category);
+    // Refuse name-only rename: without knowing the category we cannot safely
+    // scope the UPDATE — same-name tags in other categories would be affected.
+    if (!categoryKnown && normalizedCategory == null) {
+      debugPrint(
+        'renameTag: refused name-only rename for "$normalizedOld" — '
+        'category unknown; pass categoryKnown: true to rename a root-category tag',
+      );
+      return 0;
+    }
     await ensureSchema();
     final db = await _db();
-    final normalizedCategory = _normalizeCategoryName(category);
     final whereArgs = <Object?>[normalizedOld];
     var where = 'tag = ?';
     if (normalizedCategory != null) {
       where += ' AND category = ?';
       whereArgs.add(normalizedCategory);
+    } else {
+      // categoryKnown=true with null category → root/uncategorized tag.
+      // Use IS NULL so the clause works correctly in SQLite.
+      where += ' AND (category IS NULL OR TRIM(category) = \'\')';
     }
     final count = await db.update(
       tableName,
@@ -752,8 +766,17 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       final whereArgs = <Object?>[normalizedTag];
       var where = 'tag = ?';
       if (currentCategoryKnown) {
+        // Caller knows the current category; scope the UPDATE precisely.
+        // COALESCE handles NULL so this correctly matches root-category rows
+        // when normalizedCurrentCategory is null ('').
         where += ' AND COALESCE(TRIM(category), \'\') = ?';
         whereArgs.add(normalizedCurrentCategory ?? '');
+      } else {
+        // Category is unknown: only update rows that currently have no
+        // category.  This is safe for initial category assignments on newly
+        // created tags while preventing cross-category contamination for
+        // same-name tags that already have a category.
+        where += ' AND (category IS NULL OR TRIM(category) = \'\')';
       }
 
       final values = <String, Object?>{'category': normalizedCategory};
@@ -787,30 +810,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           );
         }
         if (normalizedUpdated > 0) return true;
-      }
-
-      if (currentCategoryKnown) {
-        final categoryRows = await db.rawQuery(
-          '''
-          SELECT DISTINCT COALESCE(TRIM(category), '') AS category
-          FROM $tableName
-          WHERE tag = ?
-          ''',
-          [normalizedTag],
-        );
-        final categories = categoryRows
-            .map((row) => row['category']?.toString().trim() ?? '')
-            .toSet()
-            .toList(growable: false);
-        if (categories.length == 1) {
-          final fallbackUpdated = await db.update(
-            tableName,
-            values,
-            where: 'tag = ?',
-            whereArgs: [normalizedTag],
-          );
-          if (fallbackUpdated > 0) return true;
-        }
       }
 
       return false;

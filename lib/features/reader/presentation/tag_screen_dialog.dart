@@ -785,6 +785,7 @@ class _HashTagDialogState extends State<HashTagDialog>
       oldTag: current,
       newTag: normalized,
       category: _tagCategory,
+      categoryKnown: true,
     );
     if (!mounted) return;
     await _reloadSelectedTag(normalized, category: _tagCategory);

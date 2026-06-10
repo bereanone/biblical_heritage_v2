@@ -495,6 +495,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       oldTag: widget.tag,
       newTag: normalized,
       category: _resolvedCategory,
+      categoryKnown: true,
     );
     if (!mounted) return;
     Navigator.of(context).pop(true);

@@ -27,7 +27,11 @@ class ThemePreferences {
       themeModeListenable.value = AppThemeMode.sepia;
       return AppThemeMode.sepia;
     }
-    final mode = AppThemeMode.values.byName(rows.first['value'] as String);
+    final rawMode = rows.first['value']?.toString().trim() ?? '';
+    final mode = AppThemeMode.values
+            .where((candidate) => candidate.name == rawMode)
+            .firstOrNull ??
+        AppThemeMode.sepia;
     themeModeListenable.value = mode;
     return mode;
   }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,12 +7,11 @@ import 'package:path/path.dart' as p;
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../library/data/library_catalog_service.dart';
 import '../../library/presentation/library_book_reader_screen.dart';
+import '../../utilities/presentation/elibrary_setup_screen.dart';
 import '../data/commentary_research_library_service.dart';
 import '../data/commentary_research_filters.dart';
 
 enum _ReaderMode { commentary, research }
-
-const bool _debugCommentaryResearchLogs = false;
 
 class CommentaryResearchScreen extends StatefulWidget {
   const CommentaryResearchScreen({
@@ -38,45 +38,83 @@ class _CommentaryResearchScreenState extends State<CommentaryResearchScreen> {
   final _service = CommentaryResearchLibraryService.instance;
   _ReaderMode _mode = _ReaderMode.commentary;
   bool _loading = true;
-  CommentaryResearchPassageData? _data;
+  CommentaryResearchSectionData? _commentarySection;
+  CommentaryResearchSectionData? _researchSection;
+  int _loadRequestId = 0;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    unawaited(_loadActiveSection(_mode));
   }
 
-  Future<void> _load({bool refresh = false}) async {
-    if (_debugCommentaryResearchLogs) {
-      debugPrint(
-        '[CommentaryResearch] load mode=${_mode.name} '
-        'bookId=${widget.bookId} ref=${widget.bookName} '
-        '${widget.chapter}:${widget.verse} refresh=$refresh',
+  Future<void> _loadActiveSection(
+    _ReaderMode mode, {
+    bool refresh = false,
+  }) async {
+    final requestId = ++_loadRequestId;
+    setState(() => _loading = true);
+    final selection = await LibraryRootService.instance.loadSelection();
+    final rootPath =
+        (await LibraryRootService.instance.accessibleLibraryRootPath())
+            ?.trim() ??
+        (selection.exists ? selection.path?.trim() ?? '' : '');
+    final folderType = mode == _ReaderMode.commentary
+        ? 'commentary'
+        : 'research';
+    final folderLabel = mode == _ReaderMode.commentary
+        ? 'Commentary'
+        : 'Research';
+    final candidatePaths = [
+      p.join(rootPath, 'ePubs', 'EGW'),
+      p.join(rootPath, 'PDFs', 'EGW'),
+      p.join(rootPath, 'ePubs', 'Commentaries'),
+      p.join(rootPath, 'PDFs', 'Commentaries'),
+      p.join(rootPath, 'ePubs', 'Research'),
+      p.join(rootPath, 'PDFs', 'Research'),
+    ];
+    CommentaryResearchSectionData section;
+    try {
+      section = await _service.loadSection(
+        bookId: widget.bookId,
+        chapter: widget.chapter,
+        verse: widget.verse,
+        bookName: widget.bookName,
+        folderType: folderType,
+        folderLabel: folderLabel,
+        candidatePaths: candidatePaths,
+        preferredVolumeCode: mode == _ReaderMode.commentary
+            ? _service.preferredCommentaryVolumeCodeForBook(widget.bookId)
+            : null,
+        chapterWideMatches: true,
+        refresh: refresh,
+      );
+    } catch (error) {
+      if (!mounted || requestId != _loadRequestId) return;
+      section = CommentaryResearchSectionData(
+        folderType: folderType,
+        title: folderLabel,
+        statusMessage: 'Could not load $folderLabel: $error',
+        files: const <CommentaryResearchFileItem>[],
+        matches: const <CommentaryResearchMatchItem>[],
+        discoveredCount: 0,
+        indexedCount: 0,
+        matchCount: 0,
       );
     }
-    setState(() => _loading = true);
-    final data = await _service.loadPassage(
-      bookId: widget.bookId,
-      chapter: widget.chapter,
-      verse: widget.verse,
-      bookName: widget.bookName,
-      refresh: refresh,
-    );
-    if (!mounted) return;
+    if (!mounted || requestId != _loadRequestId) return;
     setState(() {
-      _data = data;
+      if (mode == _ReaderMode.commentary) {
+        _commentarySection = section;
+      } else {
+        _researchSection = section;
+      }
       _loading = false;
     });
-    if (_debugCommentaryResearchLogs) {
-      debugPrint(
-        '[CommentaryResearch] loaded commentary=${data.commentary.matchCount} '
-        'research=${data.research.matchCount}',
-      );
-    }
   }
 
   String _passageTitle({required bool includeVerse}) {
-    final bookName = _data?.bookName ?? widget.bookName;
+    final bookName = widget.bookName;
     if (!includeVerse || widget.verse <= 0) {
       return '$bookName ${widget.chapter}';
     }
@@ -85,7 +123,6 @@ class _CommentaryResearchScreenState extends State<CommentaryResearchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final data = _data;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final scale = widget.fontScale.clamp(0.85, 2.4);
@@ -95,9 +132,15 @@ class _CommentaryResearchScreenState extends State<CommentaryResearchScreen> {
         '${isCommentary ? 'Commentary' : 'Research'}: $passageTitle';
     final segmentSelectedColor = const Color(0xFFF6D2C1);
     final segmentBorderColor = scheme.outlineVariant.withValues(alpha: 0.95);
-    final activeSection = isCommentary ? data?.commentary : data?.research;
-    final needsRefresh =
-        activeSection?.statusMessage == 'Library index needs refresh.';
+    final section = isCommentary ? _commentarySection : _researchSection;
+    final statusMessage = section?.statusMessage ?? '';
+    final showSetupAction =
+        statusMessage.contains('library not found') ||
+        statusMessage.contains('root not found') ||
+        statusMessage.contains('Open eLibrary Setup');
+    final showIndexAction =
+        statusMessage.contains('index needed') ||
+        statusMessage.contains('not indexed');
 
     return Scaffold(
       appBar: AppBar(
@@ -156,33 +199,52 @@ class _CommentaryResearchScreenState extends State<CommentaryResearchScreen> {
                   if (selection.isEmpty) return;
                   final mode = selection.first;
                   if (mode == _mode) return;
-                  if (_debugCommentaryResearchLogs) {
-                    debugPrint(
-                      '[CommentaryResearch] tab ${_mode.name} -> ${mode.name} '
-                      'bookId=${widget.bookId} ref=${widget.bookName} '
-                      '${widget.chapter}:${widget.verse}',
-                    );
-                  }
                   setState(() => _mode = mode);
+                  final loadedSection = mode == _ReaderMode.commentary
+                      ? _commentarySection
+                      : _researchSection;
+                  if (loadedSection == null) {
+                    unawaited(_loadActiveSection(mode));
+                  }
                 },
               ),
             ),
             const SizedBox(height: 12),
-            if (needsRefresh) ...[
+            if (statusMessage.isNotEmpty &&
+                (showSetupAction || showIndexAction)) ...[
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Text(
-                          'Library index needs refresh',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                      ),
-                      FilledButton(
-                        onPressed: _loading ? null : () => _load(refresh: true),
-                        child: const Text('Refresh Library Index'),
+                      Text(statusMessage, style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: showSetupAction
+                            ? FilledButton(
+                                onPressed: _loading
+                                    ? null
+                                    : () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                const ELibrarySetupScreen(),
+                                          ),
+                                        );
+                                      },
+                                child: const Text('Open eLibrary Setup'),
+                              )
+                            : FilledButton(
+                                onPressed: _loading
+                                    ? null
+                                    : () => _loadActiveSection(
+                                        _mode,
+                                        refresh: true,
+                                      ),
+                                child: const Text('Index Now'),
+                              ),
                       ),
                     ],
                   ),
@@ -207,12 +269,12 @@ class _CommentaryResearchScreenState extends State<CommentaryResearchScreen> {
                         ],
                       ),
                     )
-                  : data == null
+                  : section == null
                   ? const SizedBox.shrink()
                   : isCommentary
-                  ? _CommentaryBody(data: data, fontScale: scale)
+                  ? _CommentaryBody(section: section, fontScale: scale)
                   : _ResearchBody(
-                      data: data,
+                      section: section,
                       passageTitle: passageTitle,
                       fontScale: scale,
                     ),
@@ -225,16 +287,15 @@ class _CommentaryResearchScreenState extends State<CommentaryResearchScreen> {
 }
 
 class _CommentaryBody extends StatelessWidget {
-  const _CommentaryBody({required this.data, required this.fontScale});
+  const _CommentaryBody({required this.section, required this.fontScale});
 
-  final CommentaryResearchPassageData data;
+  final CommentaryResearchSectionData section;
   final double fontScale;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final section = data.commentary;
     final scale = fontScale.clamp(0.85, 2.4);
     final titleStyle = theme.textTheme.titleMedium?.copyWith(
       fontSize: ((theme.textTheme.titleMedium?.fontSize ?? 16) * scale).clamp(
@@ -262,9 +323,13 @@ class _CommentaryBody extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         if (section.matches.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(top: 12),
-            child: Text('No commentary source is installed yet for this book.'),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(
+              section.statusMessage.isNotEmpty
+                  ? section.statusMessage
+                  : 'No commentary found for this passage.',
+            ),
           )
         else
           ..._commentaryGroups(context, section.matches, fontScale),
@@ -275,18 +340,17 @@ class _CommentaryBody extends StatelessWidget {
 
 class _ResearchBody extends StatelessWidget {
   const _ResearchBody({
-    required this.data,
+    required this.section,
     required this.passageTitle,
     required this.fontScale,
   });
 
-  final CommentaryResearchPassageData data;
+  final CommentaryResearchSectionData section;
   final String passageTitle;
   final double fontScale;
 
   @override
   Widget build(BuildContext context) {
-    final section = data.research;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final scale = fontScale.clamp(0.85, 2.4);
@@ -668,24 +732,6 @@ Future<void> _openEpubSource(
     return;
   }
 
-  final metadata = <String>[
-    if ((match.epubCfi ?? '').trim().isNotEmpty) 'epub_cfi',
-    if ((sourceTarget.initialHref ?? '').trim().isNotEmpty) 'epub_href',
-    if ((sourceTarget.initialAnchorId ?? '').trim().isNotEmpty) 'anchor_id',
-    if (sourceTarget.initialSpineIndex != null) 'spine_index',
-    if (sourceTarget.initialParagraphIndex != null) 'paragraph_index',
-  ];
-  if (_debugCommentaryResearchLogs) {
-    debugPrint(
-      '[CommentaryResearch] EPUB badge tapped '
-      'itemTitle=${match.itemTitle} '
-      'libraryItemId=${sourceTarget.item.id} '
-      'relativePath=${sourceTarget.item.relativePath} '
-      'resolvedFilePath=$resolvedFilePath '
-      'availableJumpMetadata=${metadata.isEmpty ? 'none' : metadata.join(', ')}',
-    );
-  }
-
   try {
     await Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute<void>(
@@ -699,9 +745,6 @@ Future<void> _openEpubSource(
       ),
     );
   } catch (error) {
-    if (_debugCommentaryResearchLogs) {
-      debugPrint('[CommentaryResearch] EPUB launch failed error=$error');
-    }
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -736,26 +779,11 @@ Future<_ResolvedSourceEpubTarget?> _resolveSourceEpubTarget(
     if (candidates.length == 1) {
       item = candidates.first;
     } else if (candidates.length > 1) {
-      if (_debugCommentaryResearchLogs) {
-        debugPrint(
-          '[CommentaryResearch] EPUB source lookup ambiguous '
-          'title=${match.itemTitle} '
-          'candidates=${candidates.map((candidate) => candidate.id).join(', ')}',
-        );
-      }
       return null;
     }
   }
 
   if (item == null) {
-    if (_debugCommentaryResearchLogs) {
-      debugPrint(
-        '[CommentaryResearch] EPUB source lookup failed '
-        'libraryItemId=${match.libraryItemId} '
-        'relativePath=${match.relativePath} '
-        'title=${match.itemTitle}',
-      );
-    }
     return null;
   }
 

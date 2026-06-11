@@ -4,6 +4,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   static const Set<String> _supportedCollectionFilterValues = <String>{
     'egw_books',
     'egw_devotionals',
+    'egw_commentaries',
     'egw_misc_collections',
     'egw_pamphlets',
     'egw_periodicals',
@@ -15,6 +16,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   final FocusNode _searchFocusNode = FocusNode();
   LibraryRootSelection? _selection;
   bool _loading = true;
+  String _loadingStatus = 'Loading library...';
+  String? _loadingError;
   _LibraryTab _tab = _LibraryTab.books;
   _LibraryView _view = _LibraryView.shelf;
   double _viewerFontScale = 1.3;
@@ -39,21 +42,46 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _load() async {
-    final selection = await LibraryRootService.instance.loadSelection();
-    final viewerFontScale = await AppSettingsService.instance
-        .loadViewerFontScale();
-    final items = await _service.loadItems();
-    if (!mounted) return;
-    setState(() {
-      _selection = selection;
-      _items = items;
-      _viewerFontScale = viewerFontScale;
-      _loading = false;
-    });
-    await _syncSelectionAndNavigation(
-      _filteredBooks,
-      preferExistingSelection: false,
-    );
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _loadingStatus = 'Loading library...';
+        _loadingError = null;
+      });
+    }
+    try {
+      final selection = await LibraryRootService.instance.loadSelection();
+      final viewerFontScale = await AppSettingsService.instance
+          .loadViewerFontScale();
+      var items = await _service.loadItems();
+      final hasCommentaryItems = items.any(
+        (item) => item.collectionGroupKey == 'egw_commentaries',
+      );
+      if (!hasCommentaryItems && selection.exists) {
+        await _service.refreshManagedItemsFromDisk();
+        items = await _service.loadItems();
+      }
+      if (!mounted) return;
+      setState(() {
+        _selection = selection;
+        _items = items;
+        _viewerFontScale = viewerFontScale;
+        _loading = false;
+        _loadingStatus = 'Library loaded.';
+        _loadingError = null;
+      });
+      await _syncSelectionAndNavigation(
+        _filteredBooks,
+        preferExistingSelection: false,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadingStatus = 'Library could not finish loading.';
+        _loadingError = error.toString();
+      });
+    }
   }
 
   Future<void> _reloadItems() async {
@@ -112,6 +140,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         builder: (_) => LibraryBookReaderScreen(
           item: item,
           initialHref: initialHref,
+          onReturnToBible: _returnToBibleFromBookReader,
           themeMode: widget.themeMode,
           onThemeChanged: widget.onThemeChanged,
         ),
@@ -119,6 +148,25 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
     if (!mounted) return;
     await _reloadItems();
+  }
+
+  void _returnToBibleFromBookReader() {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final openBible = widget.onOpenBible;
+    if (openBible != null) {
+      if (navigator.canPop()) {
+        navigator.pop();
+      }
+      openBible();
+      return;
+    }
+
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
   }
 
   Future<void> _refreshFolders() async {
@@ -377,13 +425,26 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   List<LibraryCollectionFilterOption> get _availableCollectionFilters {
-    return buildLibraryCollectionFilterOptions(_items)
+    final discovered = buildLibraryCollectionFilterOptions(_items)
         .where(
           (option) =>
               option.value == 'all' ||
               _supportedCollectionFilterValues.contains(option.value),
         )
         .toList(growable: false);
+    final hasCommentaries = discovered.any(
+      (option) => option.value == 'egw_commentaries',
+    );
+    if (hasCommentaries) {
+      return discovered;
+    }
+    return <LibraryCollectionFilterOption>[
+      ...discovered,
+      const LibraryCollectionFilterOption(
+        value: 'egw_commentaries',
+        label: 'EGW Commentaries',
+      ),
+    ];
   }
 
   void _syncInitialLetterSelection(List<LibraryCatalogItem> books) {
@@ -453,7 +514,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final background = theme.scaffoldBackgroundColor;
     final cardBackground = _librarySurfaceLowColor(theme);
     final selection = _selection;
-    final hasRoot = selection?.path != null && selection!.exists;
     final collectionOptions = _availableCollectionFilters;
 
     return Scaffold(
@@ -467,8 +527,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _LibraryHeader(
-                  hasRoot: hasRoot,
-                  rootPath: selection?.path,
+                  selection: selection,
                   onOpenBible: _openBibleApp,
                   onOpenLibraryRootSetup: _openLibraryRootSetup,
                   onOpenELibrarySetup: _openELibrarySetup,
@@ -490,7 +549,58 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               .clamp(200.0, 300.0)
                               .toDouble();
                           return _loading
-                              ? const Center(child: CircularProgressIndicator())
+                              ? Center(
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 520,
+                                    ),
+                                    child: Card(
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(20),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const CircularProgressIndicator(),
+                                            const SizedBox(height: 16),
+                                            Text(
+                                              _loadingStatus,
+                                              textAlign: TextAlign.center,
+                                            ),
+                                            if (_loadingError != null) ...[
+                                              const SizedBox(height: 12),
+                                              SelectableText(
+                                                _loadingError!,
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  color:
+                                                      theme.colorScheme.error,
+                                                ),
+                                              ),
+                                            ],
+                                            const SizedBox(height: 16),
+                                            Wrap(
+                                              spacing: 12,
+                                              runSpacing: 12,
+                                              alignment: WrapAlignment.center,
+                                              children: [
+                                                FilledButton(
+                                                  onPressed: _load,
+                                                  child: const Text('Retry'),
+                                                ),
+                                                OutlinedButton(
+                                                  onPressed: _openELibrarySetup,
+                                                  child: const Text(
+                                                    'Open eLibrary Setup',
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                )
                               : Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
@@ -529,6 +639,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                               showLibraryCatalogSearchDialog(
                                                 context,
                                                 fontScale: _viewerFontScale,
+                                                onReturnToBible:
+                                                    _returnToBibleFromBookReader,
                                               ),
                                         ),
                                       ],

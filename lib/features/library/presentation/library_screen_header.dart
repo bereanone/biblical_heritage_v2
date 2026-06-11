@@ -2,16 +2,14 @@ part of 'library_screen.dart';
 
 class _LibraryHeader extends StatelessWidget {
   const _LibraryHeader({
-    required this.hasRoot,
-    required this.rootPath,
+    required this.selection,
     required this.onOpenBible,
     required this.onOpenLibraryRootSetup,
     required this.onOpenELibrarySetup,
     required this.onRefresh,
   });
 
-  final bool hasRoot;
-  final String? rootPath;
+  final LibraryRootSelection? selection;
   final VoidCallback onOpenBible;
   final VoidCallback onOpenLibraryRootSetup;
   final VoidCallback onOpenELibrarySetup;
@@ -21,9 +19,17 @@ class _LibraryHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final fontScale = libraryFontScaleOf(context);
-    final chipColor = hasRoot
-        ? theme.colorScheme.primary
-        : theme.colorScheme.onSurfaceVariant;
+    final currentSelection = selection;
+    final hasRoot = currentSelection?.exists == true;
+    final label = currentSelection?.badgeLabel ?? 'No root';
+    final rootPath = currentSelection?.path;
+    final chipColor = switch (selection?.source) {
+      LibraryRootSource.userSelected => theme.colorScheme.primary,
+      LibraryRootSource.defaultAppFolder => theme.colorScheme.tertiary,
+      LibraryRootSource.legacyImplicit => theme.colorScheme.secondary,
+      LibraryRootSource.unknown => theme.colorScheme.error,
+      null => theme.colorScheme.onSurfaceVariant,
+    };
 
     return Row(
       children: [
@@ -58,11 +64,20 @@ class _LibraryHeader extends StatelessWidget {
         ),
         const Spacer(),
         Tooltip(
-          message: rootPath ?? 'Choose a Library Root',
-          child: _StatusPill(
-            icon: hasRoot ? Icons.folder_open : Icons.folder_off_outlined,
-            label: hasRoot ? 'Ready' : 'No root',
-            color: chipColor,
+          message: currentSelection == null
+              ? 'Choose a Library Root'
+              : '${currentSelection.statusLabel}\n${rootPath ?? 'No path selected.'}',
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onOpenLibraryRootSetup,
+              borderRadius: BorderRadius.circular(999),
+              child: _StatusPill(
+                icon: hasRoot ? Icons.folder_open : Icons.folder_off_outlined,
+                label: label,
+                color: chipColor,
+              ),
+            ),
           ),
         ),
         const SizedBox(width: 8),

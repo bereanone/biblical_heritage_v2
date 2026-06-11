@@ -1,10 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/theme/app_theme_mode.dart';
+import '../data/study_bible_backup_service.dart';
+import '../data/study_bible_storage_index_report_service.dart';
 import 'library_root_setup_screen.dart';
 import '../../reader/presentation/bible_explorer_screen.dart';
-import 'demo_download_screen.dart';
+import 'elibrary_download_screen.dart';
 import 'elibrary_setup_screen.dart';
 
 class UtilitiesScreen extends StatelessWidget {
@@ -47,50 +50,95 @@ class UtilitiesScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _showCloudBackupDialog(BuildContext context) async {
-    final choice = await showDialog<String>(
+  Future<void> _showBackupUserDataDialog(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final shouldStart = await showDialog<bool>(
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Cloud Backup'),
+        title: const Text('Backup User Data'),
         content: const Text(
-          'Back up or restore your study data. '
-          'Use Export to Files for a real backup you can reach later in Files or iCloud Drive. '
-          'App storage is only for local in-app snapshots.',
+          'Saves your tags, notes, highlights, markup, bookmarks, '
+          'presentations, and settings. Downloaded EGW books are not included '
+          'because they can be downloaded again.',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop('restore'),
-            child: const Text('Restore'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop('app'),
-            child: const Text('Save in App'),
-          ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop('files'),
-            child: const Text('Export to Files'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Back Up'),
           ),
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Close'),
           ),
         ],
       ),
     );
 
-    if (!context.mounted || choice == null) return;
-    final message = switch (choice) {
-      'restore' => 'Restore workflow is not yet migrated into StudyBible2.',
-      'app' => 'App storage snapshots are not yet wired in this rebuild.',
-      'files' =>
-        'Export to Files will be connected when backup storage is ported.',
-      _ => null,
-    };
-    if (message == null) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    if (!context.mounted || shouldStart != true) return;
+    await _runBackup(messenger);
+  }
+
+  Future<void> _showStorageAndIndexReport(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final report = await StudyBibleStorageIndexReportService.instance.build();
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Storage and Index Report'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: SingleChildScrollView(
+              child: SelectableText(report.toDiagnosticText()),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Could not build the storage report: $error'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _runBackup(ScaffoldMessengerState messenger) async {
+    try {
+      final result = await StudyBibleBackupService.instance.createBackup();
+      if (result == null) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Backup cancelled')),
+        );
+        return;
+      }
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Backup complete: ${result.backupPath}'),
+        ),
+      );
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Backup failed: ${_friendlyBackupError(error)}'),
+        ),
+      );
+    }
+  }
+
+  String _friendlyBackupError(Object error) {
+    final text = error.toString();
+    return text.startsWith('StateError: ')
+        ? text.substring('StateError: '.length)
+        : text;
   }
 
   Future<void> _showCommentaryInstructionsDialog(BuildContext context) async {
@@ -332,7 +380,8 @@ class UtilitiesScreen extends StatelessWidget {
             fontWeight: FontWeight.bold,
           ),
         ),
-        leading: const BackButton(),
+        leading: _setupLeading(context),
+        leadingWidth: _setupLeadingWidth(),
       ),
       body: SafeArea(
         child: DecoratedBox(
@@ -367,10 +416,17 @@ class UtilitiesScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   _UtilityActionButton(
-                    label: 'Cloud Backup',
+                    label: 'Backup User Data',
                     icon: Icons.cloud,
                     filled: true,
-                    onPressed: () => _showCloudBackupDialog(context),
+                    onPressed: () => _showBackupUserDataDialog(context),
+                  ),
+                  const SizedBox(height: 12),
+                  _UtilityActionButton(
+                    label: 'Storage and Index Report',
+                    icon: Icons.storage_rounded,
+                    filled: false,
+                    onPressed: () => _showStorageAndIndexReport(context),
                   ),
                   const SizedBox(height: 12),
                   _UtilityActionButton(
@@ -387,13 +443,13 @@ class UtilitiesScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   _UtilityActionButton(
-                    label: 'Demo Download',
+                    label: 'eLibrary Downloads',
                     icon: Icons.download_rounded,
                     filled: true,
                     onPressed: () {
                       Navigator.of(context).push(
                         MaterialPageRoute<void>(
-                          builder: (_) => const DemoDownloadScreen(),
+                          builder: (_) => const ELibraryDownloadScreen(),
                         ),
                       );
                     },
@@ -465,7 +521,11 @@ class CommentaryLibrarySetupScreen extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Commentary Library Setup')),
+      appBar: AppBar(
+        title: const Text('Commentary Library Setup'),
+        leading: _setupLeading(context),
+        leadingWidth: _setupLeadingWidth(),
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -537,6 +597,18 @@ class CommentaryLibrarySetupScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _setupLeading(BuildContext context) {
+    final inset = defaultTargetPlatform == TargetPlatform.macOS ? 48.0 : 0.0;
+    return Padding(
+      padding: EdgeInsets.only(left: inset),
+      child: const BackButton(),
+    );
+  }
+
+  double _setupLeadingWidth() {
+    return 56 + (defaultTargetPlatform == TargetPlatform.macOS ? 48.0 : 0.0);
   }
 }
 
@@ -617,4 +689,16 @@ class _SetupActionTile extends StatelessWidget {
 
 void _showPlaceholderSnackBar(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+}
+
+Widget _setupLeading(BuildContext context) {
+  final inset = defaultTargetPlatform == TargetPlatform.macOS ? 48.0 : 0.0;
+  return Padding(
+    padding: EdgeInsets.only(left: inset),
+    child: const BackButton(),
+  );
+}
+
+double _setupLeadingWidth() {
+  return 56 + (defaultTargetPlatform == TargetPlatform.macOS ? 48.0 : 0.0);
 }

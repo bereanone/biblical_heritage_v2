@@ -280,8 +280,11 @@ class _GridItemBody extends StatelessWidget {
 }
 
 bool _hasMedia(UnifiedTagChainItem item) {
-  return item.media.isNotEmpty ||
-      item.itemType == UnifiedTagItemType.image ||
+  // Only items whose primary purpose is to display media should show a media
+  // lead. Note/bible/elibrary items may have attached media but it is always
+  // expanded into separate image items by _expandPresentationItems, so the
+  // parent item itself should render as its text type without a media lead.
+  return item.itemType == UnifiedTagItemType.image ||
       item.itemType == UnifiedTagItemType.media;
 }
 

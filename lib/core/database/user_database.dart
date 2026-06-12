@@ -32,6 +32,15 @@ class UserDatabase {
     }
   }
 
+  Future<void> close() async {
+    final database = _database;
+    _database = null;
+    _opening = null;
+    if (database != null) {
+      await database.close();
+    }
+  }
+
   Future<Database> _openDatabase() async {
     final dbPath = await _ensureWritableUserDb();
     final deviceId = await LocalSettingsStore.instance.ensureDeviceId();

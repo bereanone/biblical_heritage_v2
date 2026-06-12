@@ -51,7 +51,6 @@ class UtilitiesScreen extends StatelessWidget {
   }
 
   Future<void> _showBackupUserDataDialog(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
     final shouldStart = await showDialog<bool>(
       context: context,
       barrierDismissible: true,
@@ -76,7 +75,82 @@ class UtilitiesScreen extends StatelessWidget {
     );
 
     if (!context.mounted || shouldStart != true) return;
-    await _runBackup(messenger);
+    await _runBackup(context);
+  }
+
+  Future<void> _showRestoreBackupDialog(BuildContext context) async {
+    final archivePath = await StudyBibleBackupService.instance
+        .chooseBackupArchivePath();
+    if (!context.mounted || archivePath == null) return;
+
+    final inspection = await StudyBibleBackupService.instance
+        .inspectBackupArchive(archivePath);
+    if (!context.mounted) return;
+    if (!inspection.isPass) {
+      await _showReportDialog(
+        context,
+        title: 'Restore Backup',
+        reportText: inspection.toDiagnosticText(),
+      );
+      return;
+    }
+
+    final restoreChoice = await showDialog<_RestoreChoice>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Restore Backup'),
+        content: SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: Text(
+              'This will replace your current user data.\n\n'
+              'Backups are for your own personal data and personal-use library files. '
+              'You are responsible for following copyright and source-site rules. '
+              'Library PDF/EPUB files should not be shared or redistributed.\n\n'
+              'If the backup includes personal-use library/media files, those files will be restored too.\n\n'
+              'Would you like to create a safety backup of the current user data before restoring?',
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(_RestoreChoice.cancel),
+            child: const Text('Cancel'),
+          ),
+          OutlinedButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(_RestoreChoice.restoreOnly),
+            child: const Text('Restore Without Safety Backup'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(
+              dialogContext,
+            ).pop(_RestoreChoice.backupThenRestore),
+            child: const Text('Create Safety Backup First'),
+          ),
+        ],
+      ),
+    );
+
+    if (!context.mounted ||
+        restoreChoice == null ||
+        restoreChoice == _RestoreChoice.cancel) {
+      return;
+    }
+
+    final restoreResult = await StudyBibleBackupService.instance
+        .restoreBackupArchive(
+          archivePath,
+          createSafetyBackup: restoreChoice == _RestoreChoice.backupThenRestore,
+        );
+    if (!context.mounted) return;
+    await _showReportDialog(
+      context,
+      title: 'Restore Backup',
+      reportText: restoreResult.toDiagnosticText(),
+    );
   }
 
   Future<void> _showStorageAndIndexReport(BuildContext context) async {
@@ -104,32 +178,34 @@ class UtilitiesScreen extends StatelessWidget {
       );
     } catch (error) {
       messenger.showSnackBar(
-        SnackBar(
-          content: Text('Could not build the storage report: $error'),
-        ),
+        SnackBar(content: Text('Could not build the storage report: $error')),
       );
     }
   }
 
-  Future<void> _runBackup(ScaffoldMessengerState messenger) async {
+  Future<void> _runBackup(BuildContext context) async {
     try {
       final result = await StudyBibleBackupService.instance.createBackup();
-      if (result == null) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Backup cancelled')),
-        );
-        return;
-      }
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Backup complete: ${result.backupPath}'),
-        ),
+      if (!context.mounted) return;
+      final reportText = result == null
+          ? 'Backup was cancelled.'
+          : [
+              'Backup complete.',
+              'Saved to: ${result.backupPath}',
+              'Included files:',
+              ...result.includedFiles.map((file) => '  $file'),
+            ].join('\n');
+      await _showReportDialog(
+        context,
+        title: 'Backup User Data',
+        reportText: reportText,
       );
     } catch (error) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Backup failed: ${_friendlyBackupError(error)}'),
-        ),
+      if (!context.mounted) return;
+      await _showReportDialog(
+        context,
+        title: 'Backup User Data',
+        reportText: 'Backup failed: ${_friendlyBackupError(error)}',
       );
     }
   }
@@ -139,6 +215,29 @@ class UtilitiesScreen extends StatelessWidget {
     return text.startsWith('StateError: ')
         ? text.substring('StateError: '.length)
         : text;
+  }
+
+  Future<void> _showReportDialog(
+    BuildContext context, {
+    required String title,
+    required String reportText,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: SingleChildScrollView(child: SelectableText(reportText)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _showCommentaryInstructionsDialog(BuildContext context) async {
@@ -423,6 +522,13 @@ class UtilitiesScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   _UtilityActionButton(
+                    label: 'Restore Backup',
+                    icon: Icons.restore,
+                    filled: false,
+                    onPressed: () => _showRestoreBackupDialog(context),
+                  ),
+                  const SizedBox(height: 12),
+                  _UtilityActionButton(
                     label: 'Storage and Index Report',
                     icon: Icons.storage_rounded,
                     filled: false,
@@ -690,6 +796,8 @@ class _SetupActionTile extends StatelessWidget {
 void _showPlaceholderSnackBar(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 }
+
+enum _RestoreChoice { cancel, restoreOnly, backupThenRestore }
 
 Widget _setupLeading(BuildContext context) {
   final inset = defaultTargetPlatform == TargetPlatform.macOS ? 48.0 : 0.0;

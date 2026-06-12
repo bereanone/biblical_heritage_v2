@@ -29,8 +29,7 @@ class LibraryRootSelection {
     LibraryRootSource.unknown => false,
   };
 
-  bool get isDefaultAppManaged =>
-      source == LibraryRootSource.defaultAppFolder;
+  bool get isDefaultAppManaged => source == LibraryRootSource.defaultAppFolder;
 
   bool get isUserSelected => source == LibraryRootSource.userSelected;
 
@@ -155,9 +154,7 @@ class LibraryRootService {
     );
 
     if (resolvedPath != null && resolvedPath.trim().isNotEmpty) {
-      if (Platform.isMacOS &&
-          bookmark != null &&
-          bookmark.trim().isNotEmpty) {
+      if (Platform.isMacOS && bookmark != null && bookmark.trim().isNotEmpty) {
         final activated = await LibraryRootNative.activateBookmark(bookmark);
         final activatedPath = activated?.trim() ?? '';
         if (activatedPath.isNotEmpty) {
@@ -469,15 +466,16 @@ class LibraryRootService {
     return LibraryRootSource.unknown;
   }
 
-  Future<({String path, LibraryRootSource source})?> _detectImplicitLibraryRoot({
-    required List<String> preferredRoots,
-  }) async {
+  Future<({String path, LibraryRootSource source})?>
+  _detectImplicitLibraryRoot({required List<String> preferredRoots}) async {
     for (final candidate in preferredRoots) {
       final normalized = candidate.trim();
       if (normalized.isEmpty) continue;
       if (await _looksLikeLibraryRoot(normalized)) {
-        final source = Platform.isIOS &&
-                p.normalize(normalized) == p.normalize(await defaultAppLibraryRootPath())
+        final source =
+            Platform.isIOS &&
+                p.normalize(normalized) ==
+                    p.normalize(await defaultAppLibraryRootPath())
             ? LibraryRootSource.defaultAppFolder
             : LibraryRootSource.legacyImplicit;
         return (path: normalized, source: source);
@@ -524,5 +522,10 @@ class LibraryRootService {
   Future<String> _legacyDocumentsRootPath() async {
     final documentsDir = await getApplicationDocumentsDirectory();
     return p.join(documentsDir.path, 'BiblicalHeritage', 'v2');
+  }
+
+  void invalidateCachedSelection() {
+    _cachedSelection = null;
+    _cachedAccessiblePath = null;
   }
 }

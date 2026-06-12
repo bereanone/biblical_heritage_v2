@@ -78,8 +78,12 @@ class ViewerTopBar extends StatelessWidget {
 
         // Center-relative cluster positions: both inner clusters are equidistant
         // from the title edges, so neither side can push the title off-center.
+        // On narrow phones the ideal lower bound can exceed the upper bound;
+        // clamp the lower bound first so dart's clamp never throws.
+        final presClampMax = (halfBar - presClusterW).clamp(0.0, double.infinity);
+        final presClampMin = (24.0 + 2.0 * actionExtent + 8.0).clamp(0.0, presClampMax);
         final presLeft = (halfBar - halfTitle - clusterGap - presClusterW)
-            .clamp(24.0 + 2.0 * actionExtent + 8.0, halfBar - presClusterW);
+            .clamp(presClampMin, presClampMax);
         final tagLeft = halfBar + halfTitle + clusterGap;
 
         return Material(

@@ -46,3 +46,60 @@ TextStyle presentationTextStyle(
   );
 }
 
+void showReadableSnackBar(
+  BuildContext context,
+  String message, {
+  required double fontScale,
+  bool isRapid = false,
+  String dismissLabel = 'Dismiss',
+  Duration duration = const Duration(seconds: 4),
+}) {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  if (messenger == null) return;
+
+  final theme = Theme.of(context);
+  final textStyle = presentationTextStyle(
+    context,
+    theme.textTheme.bodyMedium,
+    fontScale,
+    color: theme.colorScheme.onInverseSurface,
+    fontWeight: isRapid ? FontWeight.w500 : FontWeight.w600,
+    fontSize: isRapid ? 13 : 15,
+    minFontSize: isRapid ? 12 : 13,
+    maxFontSize: isRapid ? 15 : 18,
+    height: 1.2,
+  );
+
+  if (isRapid) {
+    messenger.removeCurrentSnackBar();
+  } else {
+    messenger.hideCurrentSnackBar();
+    messenger.clearSnackBars();
+  }
+  messenger.showSnackBar(
+    SnackBar(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: theme.colorScheme.inverseSurface,
+      content: Text(message, style: textStyle),
+      action: isRapid
+          ? null
+          : SnackBarAction(
+              label: dismissLabel,
+              textColor: theme.colorScheme.onInverseSurface,
+              onPressed: () => messenger.hideCurrentSnackBar(),
+            ),
+      duration: isRapid ? const Duration(milliseconds: 1100) : duration,
+      elevation: 6,
+      margin: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        bottom: (isRapid ? 8 : 16) + MediaQuery.viewPaddingOf(context).bottom,
+      ),
+      padding: EdgeInsets.symmetric(
+        horizontal: isRapid ? 12 : 16,
+        vertical: isRapid ? 10 : 14,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    ),
+  );
+}

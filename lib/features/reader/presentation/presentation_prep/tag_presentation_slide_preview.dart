@@ -2,9 +2,11 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../../core/bootstrap/library_root_service.dart';
 import '../../../../core/database/study_bible_database.dart';
+import '../../../../features/library/data/library_citation_display_helper.dart';
 import '../../data/tags/unified_tag_models.dart';
 import 'tag_presentation_auto_fit_text.dart';
 import 'tag_presentation_media_path_resolver.dart';
@@ -51,6 +53,60 @@ Future<void> showTagPresentationSlidePreview(
       );
     },
   );
+}
+
+// ---------------------------------------------------------------------------
+// Shared slide-content builder — used by both Preview and Run screen
+// ---------------------------------------------------------------------------
+
+/// Shared data needed to render any slide in a presentation.
+/// Load once via [loadPresentationSharedData] and reuse across slides.
+class PresentationSharedData {
+  const PresentationSharedData({
+    required this.bookNames,
+    required this.mediaRoots,
+  });
+
+  final Map<int, String> bookNames;
+  final List<String> mediaRoots;
+}
+
+/// Loads book names and media root paths once for a full presentation run.
+Future<PresentationSharedData> loadPresentationSharedData() async {
+  final mediaRootPath = await LibraryRootService.instance
+      .accessibleLibraryRootPath();
+  final mediaRoots =
+      await TagPresentationMediaPathResolver.collectRootCandidates(
+        preferredRootPath: mediaRootPath,
+      );
+  final books = await StudyBibleDatabase.instance.loadBooks();
+  return PresentationSharedData(
+    bookNames: {for (final book in books) book.bookNumber: book.bookName},
+    mediaRoots: mediaRoots,
+  );
+}
+
+/// Builds the item widget map for [slide] using the same visual rendering
+/// as Preview. Pass the result to [TagPreparedSlideRenderer.itemWidgetsById].
+Future<Map<String, Widget>> buildPresentationSlideWidgets({
+  required TagPresentationPrepSlide slide,
+  required TagPresentationPrepWorkspace workspace,
+  required PresentationSharedData sharedData,
+}) async {
+  final result = <String, Widget>{};
+  for (final itemId in slide.gridLayout.assignedItemIds) {
+    final item = workspace.itemById(itemId);
+    if (item == null) continue;
+    final resolved = await _resolveItemForPreview(
+      item: item,
+      bookNames: sharedData.bookNames,
+    );
+    result[itemId] = _PreviewItemCard(
+      item: resolved,
+      mediaRoots: sharedData.mediaRoots,
+    );
+  }
+  return result;
 }
 
 class TagPresentationSlidePreview extends StatefulWidget {
@@ -305,11 +361,23 @@ String _fallbackReference(
 
   final elibrary = item.elibraryAnchor;
   if (elibrary != null) {
-    final title = _cleanText(elibrary.sourceTitle);
-    if (title != null) return title;
-    final location = _cleanText(elibrary.sourceLocation);
-    if (location != null) return location;
-    return elibrary.compactRef;
+    return libraryUserFacingELibraryDisplayLabel(
+      sourceTitle: elibrary.sourceTitle ?? '',
+      sourceTitleAcronym: elibrary.sourceTitleAcronym,
+      sourceLocation: elibrary.sourceLocation,
+      sourceReferenceText: elibrary.sourceReferenceText,
+      fileName: elibrary.sourceRelativePath?.trim().isNotEmpty == true
+          ? p.basename(elibrary.sourceRelativePath!)
+          : null,
+      relativePath: elibrary.sourceRelativePath,
+      pageCitation:
+          elibrary.sourcePageNumber != null &&
+              elibrary.sourceParagraphNumber != null
+          ? '${elibrary.sourcePageNumber}.${elibrary.sourceParagraphNumber}'
+          : null,
+      paragraphIndex:
+          elibrary.sourceParagraphNumber ?? elibrary.sourceParagraphIndex,
+    );
   }
 
   final title = _cleanText(item.displayTitle);
@@ -340,13 +408,23 @@ String _noteBody(UnifiedTagChainItem item) {
 String _elibraryReference(UnifiedTagChainItem item) {
   final elibrary = item.elibraryAnchor;
   if (elibrary == null) return 'eLibrary';
-  final title = _cleanText(elibrary.sourceTitle);
-  if (title != null) return title;
-  final location = _cleanText(elibrary.sourceLocation);
-  if (location != null) return location;
-  final referenceText = _cleanText(elibrary.sourceReferenceText);
-  if (referenceText != null) return referenceText;
-  return elibrary.compactRef;
+  return libraryUserFacingELibraryCitationText(
+    sourceTitle: elibrary.sourceTitle ?? '',
+    sourceTitleAcronym: elibrary.sourceTitleAcronym,
+    sourceLocation: elibrary.sourceLocation,
+    sourceReferenceText: elibrary.sourceReferenceText,
+    fileName: elibrary.sourceRelativePath?.trim().isNotEmpty == true
+        ? p.basename(elibrary.sourceRelativePath!)
+        : null,
+    relativePath: elibrary.sourceRelativePath,
+    pageCitation:
+        elibrary.sourcePageNumber != null &&
+            elibrary.sourceParagraphNumber != null
+        ? '${elibrary.sourcePageNumber}.${elibrary.sourceParagraphNumber}'
+        : null,
+    paragraphIndex:
+        elibrary.sourceParagraphNumber ?? elibrary.sourceParagraphIndex,
+  );
 }
 
 String _elibraryBody(UnifiedTagChainItem item) {
@@ -372,15 +450,9 @@ String? _mediaPresentationCaption(UnifiedTagChainItem item) {
   final displayTitle = _presentationLabelOrNull(item.displayTitle);
   if (displayTitle != null) return displayTitle;
   if (item.media.isEmpty) return null;
-  final media = item.media.first;
-  final caption = _presentationLabelOrNull(media.caption);
-  if (caption != null) return caption;
-  final path = _presentationLabelOrNull(media.relativePath);
-  if (path != null) {
-    final segments = path.split('/');
-    return segments.isEmpty ? path : segments.last;
-  }
-  return null;
+  // Only use an explicit user-set caption; never fall back to relativePath
+  // since that would expose raw internal filenames.
+  return _presentationLabelOrNull(item.media.first.caption);
 }
 
 String? _mediaPresentationBody(UnifiedTagChainItem item) {
@@ -426,18 +498,35 @@ String _presentationLabelOrFallback(String? value, {required String fallback}) {
 
 bool _looksLikeTechnicalPresentationText(String text) {
   final lower = text.toLowerCase();
+  // Exact generic fallback type labels are never real user captions.
+  if (lower == 'image' || lower == 'media' || lower == 'attached' ||
+      lower == 'attached image' || lower == 'attached media') {
+    return true;
+  }
   if (lower.startsWith('note:')) return true;
   if (lower.startsWith('content_')) return true;
   if (lower.startsWith('media_')) return true;
   if (lower.startsWith('file_')) return true;
   if (lower.startsWith('img_')) return true;
   if (lower.startsWith('hash:')) return true;
+  // Path separators → internal path
+  if (text.contains('/') || text.contains('\\')) return true;
+  // file: / content: URI schemes
+  if (lower.startsWith('file:') || lower.startsWith('content:')) return true;
+  // Embedded content_<digits> anywhere (e.g. "Media: content_1781030663171_...")
+  if (RegExp(r'content_\d{7,}').hasMatch(lower)) return true;
   if (lower.contains('tag_item_media')) return true;
   if (lower.contains('contentid') || lower.contains('noteid')) return true;
   if (lower.contains('selectedtextsnapshot')) return true;
   if (lower.contains('sourceparagraph')) return true;
   if (lower.contains('relativepath')) return true;
-  if (lower.contains('/') && text.length > 18) return true;
+  // Long image filename with no spaces (hash/timestamp-derived)
+  if (!text.contains(' ') &&
+      text.length > 20 &&
+      RegExp(r'\.(png|jpg|jpeg|gif|webp|bmp|heic)$').hasMatch(lower) &&
+      RegExp(r'\d{8,}').hasMatch(text)) {
+    return true;
+  }
   if (RegExp(r'^[a-f0-9]{12,}$', caseSensitive: false).hasMatch(text)) {
     return true;
   }
@@ -446,6 +535,29 @@ bool _looksLikeTechnicalPresentationText(String text) {
     caseSensitive: false,
   ).hasMatch(text)) {
     return true;
+  }
+  // Constructed type-prefix labels where the suffix is an internal filename,
+  // e.g. "Image: content_1781030663171_..." or "Media: media_abc123..."
+  for (final prefix in const ['image: ', 'media: ']) {
+    if (lower.startsWith(prefix)) {
+      final tail = text.substring(prefix.length);
+      final tailLower = tail.toLowerCase();
+      if (tailLower.startsWith('content_') ||
+          tailLower.startsWith('media_') ||
+          tailLower.startsWith('file_') ||
+          tailLower.startsWith('img_') ||
+          tailLower.startsWith('hash_') ||
+          tailLower.startsWith('hash:') ||
+          tail.contains('/') ||
+          tail.contains('\\') ||
+          RegExp(r'^[a-f0-9]{12,}$', caseSensitive: false).hasMatch(tail) ||
+          RegExp(
+            r'^(note|content|media)[:_-]?\d+',
+            caseSensitive: false,
+          ).hasMatch(tail)) {
+        return true;
+      }
+    }
   }
   return false;
 }
@@ -609,21 +721,173 @@ class _PreviewTextBlock extends StatelessWidget {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
         final isHeading = style == _PreviewTextStyle.heading;
-        final referenceMax = 30.0;
-        final referenceMin = 12.0;
+        final isScripture = style == _PreviewTextStyle.scripture;
         final bodyMax = _previewBodyMaxFontSize(
           item.body,
           width: width,
           height: height,
         );
         final bodyMin = isHeading ? 12.0 : 14.0;
+        final secondaryText = _presentationFriendlyText(item.secondary);
+        final inset = math.max(4.0, width * 0.012);
+
+        if (isScripture) {
+          // Scripture / eLibrary: measure body + secondary + reference as one
+          // combined block. Iterate from maxFont down, taking the largest font
+          // where the whole block fits — this maximises vertical fill
+          // (target 55–85 %).  Reference scales with body so merged /
+          // full-slide zones get a proportionally larger reference.
+          final body = (item.body ?? '').trim();
+          final hasSecondary = (secondaryText ?? '').trim().isNotEmpty;
+          final availW = math.max(8.0, width - 2 * inset);
+          final availH = math.max(8.0, height - 2 * inset);
+
+          const bodyLineH = 1.20;
+          const refLineH = 1.02;
+          const minFont = 14.0;
+          final maxFont = _scriptureBodyMaxFontSize(
+            body,
+            width: availW,
+            height: availH,
+          );
+
+          // Secondary occupies a fixed-height slot regardless of body font.
+          final secGapH = hasSecondary ? math.max(4.0, availH * 0.01) : 0.0;
+          final secSlotH = hasSecondary
+              ? math.max(14.0, math.min(18.0, availH * 0.08))
+              : 0.0;
+
+          // Reference font ceiling scales generously with zone height so that
+          // merged / full-slide zones show a visibly larger reference.
+          // Scale factor raised to 0.55 and hard cap raised to 54.
+          final refScaleMax = math.max(22.0, math.min(availH * 0.15, 54.0));
+          var bestFont = minFont;
+          for (var fs = maxFont; fs >= minFont; fs -= 1.0) {
+            final rfs = (fs * 0.55).clamp(13.0, refScaleMax);
+            final gap = math.max(4.0, math.min(fs * 0.28, 22.0));
+            final bH = body.isNotEmpty
+                ? (_makePainterForFit(body, fs, bodyLineH)
+                      ..layout(maxWidth: availW))
+                    .height
+                : 0.0;
+            final rH = (_makePainterForFit(
+                  item.reference,
+                  rfs,
+                  refLineH,
+                  maxLines: 1,
+                )..layout(maxWidth: availW))
+                .height;
+            if (bH + secGapH + secSlotH + gap + rH <= availH + 0.5) {
+              bestFont = fs;
+              break;
+            }
+          }
+
+          final bestRfs = (bestFont * 0.55).clamp(13.0, refScaleMax);
+          final bestGap = math.max(4.0, math.min(bestFont * 0.28, 22.0));
+
+          // Re-measure at chosen font to compute centering offset.
+          final finalBodyH = body.isNotEmpty
+              ? (_makePainterForFit(body, bestFont, bodyLineH)
+                    ..layout(maxWidth: availW))
+                  .height
+              : 0.0;
+          final finalRefH = (_makePainterForFit(
+                item.reference,
+                bestRfs,
+                refLineH,
+                maxLines: 1,
+              )..layout(maxWidth: availW))
+              .height;
+
+          // Reserve space for secondary + gap + reference so the body SizedBox
+          // never pushes the Column beyond availH (prevents overflow stripe).
+          final fixedFooterH = secGapH + secSlotH + bestGap + finalRefH;
+          final bodyAlloc = math.max(0.0, availH - fixedFooterH);
+          final clampedBodyH = finalBodyH.clamp(0.0, bodyAlloc);
+          final clampedBlockH = clampedBodyH + fixedFooterH;
+          final topPad = math.max(0.0, (availH - clampedBlockH) / 2.0);
+
+          // Justify only for long passages with many lines; prefer left
+          // for typical short/medium verses to avoid ugly word gaps.
+          final approxLines = bestFont * bodyLineH > 0 && clampedBodyH > 0
+              ? (clampedBodyH / (bestFont * bodyLineH)).round()
+              : 0;
+          final bodyAlign = approxLines >= 5 && body.length >= 300
+              ? TextAlign.justify
+              : TextAlign.left;
+
+          return Padding(
+            padding: EdgeInsets.all(inset),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                SizedBox(height: topPad),
+                if (body.isNotEmpty)
+                  SizedBox(
+                    height: clampedBodyH,
+                    child: Text(
+                      body,
+                      textAlign: bodyAlign,
+                      softWrap: true,
+                      overflow: TextOverflow.clip,
+                      style: TextStyle(
+                        color: const Color(0xFFF2EFE8),
+                        fontWeight: FontWeight.w400,
+                        height: bodyLineH,
+                        fontSize: bestFont,
+                      ),
+                    ),
+                  ),
+                if (hasSecondary) ...[
+                  SizedBox(height: secGapH),
+                  SizedBox(
+                    height: secSlotH,
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: TagPresentationAutoFitText(
+                        text: secondaryText!.trim(),
+                        style: const TextStyle(
+                          color: Color(0xFFD7CBB4),
+                          fontWeight: FontWeight.w400,
+                          height: 1.16,
+                          fontStyle: FontStyle.italic,
+                        ),
+                        minFontSize: 10,
+                        maxFontSize: 16,
+                        maxLines: 2,
+                        textAlign: TextAlign.left,
+                      ),
+                    ),
+                  ),
+                ],
+                SizedBox(height: bestGap),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    item.reference,
+                    textAlign: TextAlign.right,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: const Color(0xFFF0D68A),
+                      fontWeight: FontWeight.w600,
+                      height: refLineH,
+                      fontSize: bestRfs,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        // Heading: reference at top-left, body below.
         final referenceSlotHeight = math.max(
           18.0,
           math.min(30.0, height * 0.09),
         );
-        final secondaryText = _presentationFriendlyText(item.secondary);
-
-        final inset = math.max(4.0, width * 0.012);
         return Padding(
           padding: EdgeInsets.all(inset),
           child: Column(
@@ -641,11 +905,11 @@ class _PreviewTextBlock extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                       height: 1.02,
                     ),
-                    minFontSize: referenceMin,
-                    maxFontSize: referenceMax,
+                    minFontSize: 12.0,
+                    maxFontSize: 30.0,
                     maxLines: 1,
                     textAlign: TextAlign.left,
-                    letterSpacing: isHeading ? 0.1 : 0.0,
+                    letterSpacing: 0.1,
                   ),
                 ),
               ),
@@ -662,7 +926,7 @@ class _PreviewTextBlock extends StatelessWidget {
                         height: 1.20,
                       ),
                       minFontSize: bodyMin,
-                      maxFontSize: math.min(26.0, bodyMax),
+                      maxFontSize: bodyMax,
                       maxLines: null,
                       textAlign: TextAlign.left,
                     ),
@@ -713,58 +977,130 @@ class _PreviewNotePanel extends StatelessWidget {
         final height = constraints.maxHeight;
         final body = item.body?.trim() ?? '';
         final inset = math.max(4.0, width * 0.012);
+        final availW = math.max(8.0, width - 2 * inset);
+        final availH = math.max(8.0, height - 2 * inset);
+
+        // Only show the reference label when it is a real citation/title, not
+        // the generic fallback word "Note".
+        final refLabel = item.reference.trim();
+        final hasRef =
+            refLabel.isNotEmpty && refLabel.toLowerCase() != 'note';
+
+        const bodyLineH = 1.20;
+        const refLineH = 1.02;
+        // Allow font to shrink to 8 px for small cells before clipping.
+        const minFont = 8.0;
+
+        // Combined-block fitting: body + optional reference at bottom-right,
+        // vertically centred.  Same approach as the scripture block so note
+        // slides in merged / full-slide zones fill the space aggressively.
+        final refScaleMax = math.max(22.0, math.min(availH * 0.15, 54.0));
+        final maxFont = _noteBodyMaxFontSize(
+          body,
+          width: availW,
+          height: availH,
+        );
+
+        var bestFont = minFont;
+        if (body.isNotEmpty) {
+          for (var fs = maxFont; fs >= minFont; fs -= 1.0) {
+            final rfs = hasRef
+                ? (fs * 0.55).clamp(13.0, refScaleMax)
+                : 0.0;
+            final gap = hasRef
+                ? math.max(4.0, math.min(fs * 0.28, 20.0))
+                : 0.0;
+            final bH = (_makePainterForFit(body, fs, bodyLineH)
+                  ..layout(maxWidth: availW))
+                .height;
+            final rH = hasRef
+                ? (_makePainterForFit(refLabel, rfs, refLineH, maxLines: 1)
+                      ..layout(maxWidth: availW))
+                    .height
+                : 0.0;
+            if (bH + gap + rH <= availH + 0.5) {
+              bestFont = fs;
+              break;
+            }
+          }
+        }
+
+        final bestRfs = hasRef
+            ? (bestFont * 0.55).clamp(13.0, refScaleMax)
+            : 0.0;
+        final bestGap = hasRef
+            ? math.max(4.0, math.min(bestFont * 0.28, 20.0))
+            : 0.0;
+
+        final finalBodyH = body.isNotEmpty
+            ? (_makePainterForFit(body, bestFont, bodyLineH)
+                  ..layout(maxWidth: availW))
+                .height
+            : 0.0;
+        final finalRefH = hasRef
+            ? (_makePainterForFit(refLabel, bestRfs, refLineH, maxLines: 1)
+                  ..layout(maxWidth: availW))
+                .height
+            : 0.0;
+
+        // Cap body height so Column children never exceed availH.
+        final bodyAlloc = math.max(
+          0.0,
+          availH - (hasRef ? bestGap + finalRefH : 0.0),
+        );
+        final clampedBodyH = finalBodyH.clamp(0.0, bodyAlloc);
+        final clampedBlockH =
+            clampedBodyH + (hasRef ? bestGap + finalRefH : 0.0);
+        final topPad = math.max(0.0, (availH - clampedBlockH) / 2.0);
+
+        final approxLines = bestFont * bodyLineH > 0 && clampedBodyH > 0
+            ? (clampedBodyH / (bestFont * bodyLineH)).round()
+            : 0;
+        final bodyAlign = body.length >= 300 && approxLines >= 5
+            ? TextAlign.justify
+            : TextAlign.left;
+
         return Padding(
           padding: EdgeInsets.all(inset),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisAlignment: MainAxisAlignment.start,
             children: [
-              SizedBox(
-                height: math.max(16.0, math.min(22.0, height * 0.09)),
-                child: Align(
-                  alignment: Alignment.topLeft,
-                  child: TagPresentationAutoFitText(
-                    text: item.reference,
-                    style: const TextStyle(
-                      color: Color(0xFFF0D68A),
-                      fontWeight: FontWeight.w700,
-                      height: 1.04,
+              SizedBox(height: topPad),
+              if (body.isNotEmpty)
+                SizedBox(
+                  height: clampedBodyH,
+                  child: Text(
+                    body,
+                    textAlign: bodyAlign,
+                    softWrap: true,
+                    overflow: TextOverflow.clip,
+                    style: TextStyle(
+                      color: const Color(0xFFF2EFE8),
+                      fontWeight: FontWeight.w400,
+                      height: bodyLineH,
+                      fontSize: bestFont,
                     ),
-                    minFontSize: 12,
-                    maxFontSize: 30,
+                  ),
+                ),
+              if (hasRef) ...[
+                SizedBox(height: bestGap),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    refLabel,
+                    textAlign: TextAlign.right,
                     maxLines: 1,
-                    textAlign: TextAlign.left,
-                  ),
-                ),
-              ),
-              if (body.isNotEmpty) ...[
-                SizedBox(height: math.max(4.0, height * 0.01)),
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.topLeft,
-                    child: TagPresentationAutoFitText(
-                      text: body,
-                      style: const TextStyle(
-                        color: Color(0xFFF2EFE8),
-                        fontWeight: FontWeight.w400,
-                        height: 1.18,
-                      ),
-                      minFontSize: 14,
-                      maxFontSize: math.min(
-                        26.0,
-                        _previewBodyMaxFontSize(
-                          body,
-                          width: width,
-                          height: height,
-                        ),
-                      ),
-                      maxLines: null,
-                      textAlign: TextAlign.left,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: const Color(0xFFF0D68A),
+                      fontWeight: FontWeight.w600,
+                      height: refLineH,
+                      fontSize: bestRfs,
                     ),
                   ),
                 ),
-              ] else
-                const Spacer(),
+              ],
             ],
           ),
         );
@@ -799,13 +1135,13 @@ class _PreviewMediaPanel extends StatelessWidget {
               ? Stack(
                   fit: StackFit.expand,
                   children: [
-                    Center(
+                    SizedBox.expand(
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(8),
                         child: Image.file(
                           File(mediaPath),
                           fit: BoxFit.contain,
-                          alignment: Alignment.center,
+                          filterQuality: FilterQuality.medium,
                         ),
                       ),
                     ),
@@ -872,16 +1208,109 @@ double _previewBodyMaxFontSize(
   double height = 0.0,
 }) {
   final length = (body ?? '').trim().length;
+  // Length-based ceiling: shorter text can render larger.
   final lengthBased = switch (length) {
-    <= 60 => 26.0,
-    <= 140 => 24.0,
-    <= 260 => 22.0,
-    <= 420 => 20.0,
-    _ => 18.0,
+    <= 40 => 48.0,
+    <= 100 => 40.0,
+    <= 200 => 34.0,
+    <= 350 => 28.0,
+    <= 500 => 24.0,
+    _ => 20.0,
+  };
+  // Zone-based ceiling: merged/larger zones allow the font to grow further.
+  // TagPresentationAutoFitText steps down from this cap until the text fits,
+  // so setting it high is safe — it only governs the search upper bound.
+  final zoneBased = math.min(
+    48.0,
+    math.max(16.0, math.min(width / 10.0, height / 3.0)),
+  );
+  return math.min(lengthBased, zoneBased);
+}
+
+/// Creates a [TextPainter] configured for combined-block scripture fitting.
+/// Call `..layout(maxWidth: w)` on the result before reading dimensions.
+TextPainter _makePainterForFit(
+  String text,
+  double fontSize,
+  double lineHeight, {
+  int? maxLines,
+  FontWeight fontWeight = FontWeight.w400,
+}) {
+  return TextPainter(
+    text: TextSpan(
+      text: text,
+      style: TextStyle(
+        fontSize: fontSize,
+        height: lineHeight,
+        fontWeight: fontWeight,
+      ),
+    ),
+    textAlign: TextAlign.left,
+    textDirection: TextDirection.ltr,
+    maxLines: maxLines,
+    ellipsis: maxLines != null ? '…' : null,
+  );
+}
+
+/// Upper-bound font size for the scripture / eLibrary combined-block fitter.
+/// The fitter iterates from this ceiling downward, taking the largest font
+/// whose combined body + reference block fits within the zone height
+/// (target vertical fill 55–85 %).
+///
+/// The ceiling is zone-aware: merged / full-slide zones are allowed to start
+/// the search much higher so medium-length passages are not artificially
+/// capped at a small size.  The zone-based formula `height / 2.0` keeps
+/// the starting point proportional to the zone while the `zoneBoost` factor
+/// scales the length-based ceiling upward for larger zones.
+double _scriptureBodyMaxFontSize(
+  String? body, {
+  required double width,
+  required double height,
+}) {
+  final length = (body ?? '').trim().length;
+  // Zone boost: merged / full-slide zones (height > 140) raise the length-based
+  // starting point so the fitter can explore larger fonts.
+  final zoneBoost = (height / 140.0).clamp(1.0, 1.8);
+  // Length-based ceiling — zone-boosted for medium/long text so that the same
+  // verse in a 4-cell merged zone can grow well past the single-cell cap.
+  final lengthBased = switch (length) {
+    <= 50 => 96.0,
+    <= 100 => 88.0,
+    <= 200 => 76.0,
+    <= 350 => (58.0 * zoneBoost).clamp(58.0, 88.0),
+    <= 600 => (42.0 * zoneBoost).clamp(42.0, 68.0),
+    _ => 30.0,
+  };
+  // Zone-based ceiling: proportional to zone size; width / 3.5 and height / 2.0
+  // let the search start high for wide / tall zones.
+  final zoneBased = math.min(
+    96.0,
+    math.max(18.0, math.min(width / 3.5, height / 2.0)),
+  );
+  return math.min(lengthBased, zoneBased);
+}
+
+/// Upper-bound font size for the note body fitter.
+/// Zone-aware: larger zones allow the search to start higher so note text
+/// fills merged / full-slide zones more aggressively.
+double _noteBodyMaxFontSize(
+  String? body, {
+  required double width,
+  required double height,
+}) {
+  final length = (body ?? '').trim().length;
+  final zoneBoost = (height / 140.0).clamp(1.0, 1.8);
+  final lengthBased = switch (length) {
+    <= 50 => 96.0,
+    <= 100 => 80.0,
+    <= 200 => 68.0,
+    <= 350 => (52.0 * zoneBoost).clamp(52.0, 82.0),
+    <= 600 => (38.0 * zoneBoost).clamp(38.0, 62.0),
+    _ => 26.0,
   };
   final zoneBased = math.min(
-    26.0,
-    math.max(16.0, math.min(width / 20.0, height / 5.0)),
+    96.0,
+    math.max(18.0, math.min(width / 3.5, height / 2.0)),
   );
   return math.min(lengthBased, zoneBased);
 }

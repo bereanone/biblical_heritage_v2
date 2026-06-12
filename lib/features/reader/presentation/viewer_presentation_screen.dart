@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
-import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../data/presentation/presentation_models.dart';
 import '../data/presentation/presentation_slide_settings.dart';
+import 'presentation_prep/tag_presentation_media_path_resolver.dart';
 import 'presentation_slide_canvas.dart';
 import 'viewer_presentation_settings.dart';
 
@@ -30,7 +28,7 @@ class _ViewerPresentationScreenState extends State<ViewerPresentationScreen> {
   final Map<int, String> _bookNames = <int, String>{};
   int _index = 0;
   bool _loadingBooks = true;
-  String? _mediaRootPath;
+  List<String> _mediaRootPaths = const <String>[];
   bool _loadingMediaRoot = true;
 
   @override
@@ -54,21 +52,13 @@ class _ViewerPresentationScreenState extends State<ViewerPresentationScreen> {
   }
 
   Future<void> _loadMediaRootPath() async {
-    final root = await _resolveMediaRootPath();
+    final roots =
+        await TagPresentationMediaPathResolver.collectRootCandidates();
     if (!mounted) return;
     setState(() {
-      _mediaRootPath = root;
+      _mediaRootPaths = roots;
       _loadingMediaRoot = false;
     });
-  }
-
-  Future<String?> _resolveMediaRootPath() async {
-    final libraryRoot = await LibraryRootService.instance.libraryRootPath();
-    if (libraryRoot != null && libraryRoot.trim().isNotEmpty) {
-      return libraryRoot;
-    }
-    final support = await getApplicationSupportDirectory();
-    return p.join(support.path, 'studybible_media');
   }
 
   PresentationSlide get _currentSlide => widget.slides[_index];
@@ -107,7 +97,7 @@ class _ViewerPresentationScreenState extends State<ViewerPresentationScreen> {
                 aspectRatioPreset: widget.aspectRatioPreset,
                 bookNames: _bookNames,
                 settings: PresentationSlideSettings.defaults(),
-                mediaRootPath: _mediaRootPath,
+                mediaRootPaths: _mediaRootPaths,
               ),
             ),
             Positioned(

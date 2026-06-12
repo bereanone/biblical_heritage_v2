@@ -4,14 +4,19 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/bootstrap/library_root_service.dart';
 import '../../../../core/database/study_bible_database.dart';
+import '../../../../core/theme/app_settings_service.dart';
+import '../../data/presentation/presentation_prep_db_models.dart';
+import '../../data/presentation/presentation_prep_repository.dart';
 import '../../data/tags/unified_tag_models.dart';
 import '../../data/tags/unified_tag_read_adapter.dart';
+import 'presentation_ui_helpers.dart';
 import 'tag_presentation_prep_empty_state.dart';
 import 'tag_presentation_prep_models.dart';
 import 'tag_presentation_prep_state.dart';
 import 'tag_card_picker_sheet.dart';
 import 'tag_presentation_title_dialog.dart';
 import 'tag_presentation_slide_preview.dart';
+import 'tag_saved_presentations_screen.dart';
 import 'tag_slide_navigator_panel.dart';
 import 'tag_slide_grid_models.dart';
 import 'tag_unassigned_card_tray.dart';
@@ -24,11 +29,13 @@ class TagPresentationPrepScreen extends StatefulWidget {
   const TagPresentationPrepScreen({
     super.key,
     required this.request,
-    required this.adapter,
+    this.adapter,
+    this.editPresentation,
   });
 
   final TagPresentationPrepRequest request;
-  final UnifiedTagReadAdapter adapter;
+  final UnifiedTagReadAdapter? adapter;
+  final PresentationGroupRecord? editPresentation;
 
   @override
   State<TagPresentationPrepScreen> createState() =>
@@ -38,21 +45,36 @@ class TagPresentationPrepScreen extends StatefulWidget {
 class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
   bool _loading = true;
   String? _error;
+  double _fontScale = 1.3;
   TagPresentationPrepPreview? _preview;
   TagPresentationPrepWorkspace? _workspace;
   String? _mediaRootPath;
+  PresentationGroupRecord? _editGroupRecord;
+
+  bool get _editMode => widget.editPresentation != null;
 
   @override
   void initState() {
     super.initState();
+    _loadFontScale();
     _load();
+  }
+
+  Future<void> _loadFontScale() async {
+    final scale = await AppSettingsService.instance.loadViewerFontScale();
+    if (!mounted) return;
+    setState(() => _fontScale = scale.clamp(0.8, 2.4).toDouble());
   }
 
   Future<void> _load() async {
     try {
-      final preview = await _resolvePreview();
       final mediaRootPath = await LibraryRootService.instance
           .accessibleLibraryRootPath();
+      if (_editMode) {
+        await _loadEditMode(mediaRootPath);
+        return;
+      }
+      final preview = await _resolvePreview();
       if (!mounted) return;
       final workspace = TagPresentationPrepWorkspace.fromPreview(preview);
       assert(() {
@@ -77,10 +99,75 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
     }
   }
 
+  Future<void> _loadEditMode(String? mediaRootPath) async {
+    final rec = widget.editPresentation!;
+    PresentationLoadedGroup? loaded;
+    try {
+      loaded = await PresentationPrepRepository.instance.loadPresentation(
+        rec.id,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Could not load "${rec.name}": ${e.toString()}';
+      });
+      return;
+    }
+    if (loaded == null) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Presentation "${rec.name}" was not found.';
+      });
+      return;
+    }
+    // Try to reload the full source-tag card list so the picker can offer
+    // cards that weren't included in the original saved deck. Best-effort:
+    // a failure here must not block the editor from opening.
+    List<UnifiedTagChainItem> sourceItems = const [];
+    List<UnifiedTagChain> sourceChains = const [];
+    String sourceSummary;
+    try {
+      final reloaded = await _reloadSourceTagItems(loaded.group);
+      sourceItems = reloaded.$1;
+      sourceChains = reloaded.$2;
+      sourceSummary = sourceItems.isNotEmpty
+          ? 'Editing "${rec.name}" — source tag loaded.'
+          : _hasSourceTag(loaded.group)
+              ? 'Editing "${rec.name}" — source tag unavailable.'
+              : 'Editing saved presentation.';
+    } catch (_) {
+      sourceSummary = 'Editing saved presentation.';
+    }
+
+    if (!mounted) return;
+    final workspace = buildWorkspaceFromSaved(
+      loaded,
+      additionalItems: sourceItems,
+      resolvedChains: sourceChains,
+    );
+    final preview = TagPresentationPrepPreview(
+      requestedTagName: loaded.group.sourceTagName ?? loaded.group.name,
+      sourceSummary: sourceSummary,
+      resolvedChains: const [],
+      items: const [],
+      slides: const [],
+    );
+    setState(() {
+      _editGroupRecord = loaded!.group;
+      _preview = preview;
+      _workspace = workspace;
+      _mediaRootPath = mediaRootPath;
+      _loading = false;
+      _error = null;
+    });
+  }
+
   Future<TagPresentationPrepPreview> _resolvePreview() async {
     final requestedTag = (widget.request.tagName ?? '').trim();
     if ((widget.request.chainId ?? '').trim().isNotEmpty) {
-      final chain = await widget.adapter.loadChainById(widget.request.chainId!);
+      final chain = await widget.adapter!.loadChainById(widget.request.chainId!);
       if (chain != null) {
         final items =
             chain.items.where((item) => !item.isDeleted).toList(growable: false)
@@ -117,7 +204,7 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
       );
     }
 
-    final snapshot = await widget.adapter.loadSnapshot();
+    final snapshot = await widget.adapter!.loadSnapshot();
     final matchingChains =
         snapshot.chains
             .where((chain) {
@@ -204,6 +291,82 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
     );
   }
 
+  bool _hasSourceTag(PresentationGroupRecord group) {
+    return (group.sourceTagKey?.isNotEmpty ?? false) ||
+        (group.sourceTagId?.isNotEmpty ?? false) ||
+        (group.sourceTagName?.isNotEmpty ?? false);
+  }
+
+  /// Reloads all items from the original source tag so the card picker can
+  /// offer unused cards when editing a saved presentation. Returns empty lists
+  /// when no source metadata is stored or the tag no longer exists.
+  Future<(List<UnifiedTagChainItem>, List<UnifiedTagChain>)>
+  _reloadSourceTagItems(
+    PresentationGroupRecord group,
+  ) async {
+    final tagKey = group.sourceTagKey?.trim() ?? '';
+    final tagId = group.sourceTagId?.trim() ?? '';
+    final tagName = group.sourceTagName?.trim() ?? '';
+
+    final colon = tagKey.indexOf(':');
+    final parsedKind = colon > 0 ? tagKey.substring(0, colon) : '';
+    final parsedName = colon > 0 ? tagKey.substring(colon + 1).trim() : '';
+
+    // Hash tags must use the same ID-generation path as original creation so
+    // saved sourceItemIds match the reloaded item IDs for deduplication.
+    if (parsedKind == 'hash' && parsedName.isNotEmpty) {
+      final preview = await _resolveLegacyHashPreview(
+        requestedTagName: parsedName,
+      );
+      if (preview != null && preview.items.isNotEmpty) {
+        return (preview.items, preview.resolvedChains);
+      }
+    }
+
+    // Adapter path for unified / dollar / unknown storage kinds.
+    // Load the snapshot once and do all lookups against it.
+    if (tagId.isEmpty && parsedName.isEmpty && tagName.isEmpty) {
+      return (const <UnifiedTagChainItem>[], const <UnifiedTagChain>[]);
+    }
+    final adapter = UnifiedTagReadAdapter();
+    final snapshot = await adapter.loadSnapshot();
+
+    // Try exact chain ID match first (most precise).
+    if (tagId.isNotEmpty) {
+      for (final chain in snapshot.chains) {
+        if (chain.id == tagId) return _itemsFromAdapterChain(chain);
+      }
+    }
+
+    // Name-based fallback.
+    final lookupName = parsedName.isNotEmpty ? parsedName : tagName;
+    if (lookupName.isNotEmpty) {
+      final matching =
+          snapshot.chains
+              .where((chain) {
+                if (!(_tagMatches(chain.name, lookupName) ||
+                    _tagMatches(chain.legacyTagName, lookupName))) {
+                  return false;
+                }
+                return chain.storageKind != UnifiedTagStorageKind.dollar;
+              })
+              .toList()
+            ..sort(_compareChainPriority);
+      if (matching.isNotEmpty) return _itemsFromAdapterChain(matching.first);
+    }
+
+    return (const <UnifiedTagChainItem>[], const <UnifiedTagChain>[]);
+  }
+
+  (List<UnifiedTagChainItem>, List<UnifiedTagChain>) _itemsFromAdapterChain(
+    UnifiedTagChain chain,
+  ) {
+    final items =
+        chain.items.where((item) => !item.isDeleted).toList(growable: false)
+          ..sort(_comparePreviewItems);
+    return (_expandPresentationItems(items), [chain]);
+  }
+
   Future<Map<int, String>> _loadBookNames() async {
     final books = await StudyBibleDatabase.instance.loadBooks();
     return {for (final book in books) book.bookNumber: book.bookName};
@@ -228,9 +391,18 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
     ];
     final title = _legacyHashEntryTitle(entry, bookNames);
     final body = _legacyHashEntryBody(entry);
-    final itemType = hasMedia
+    // Only use image/media as the base type for pure-media entries (no text
+    // content, no bible anchor). When an entry has both media and text/verse
+    // content, use the text-based type so _expandPresentationItems can create
+    // independent image items that the user can place in separate zones.
+    final hasTextContent =
+        (entry.noteText?.trim() ?? '').isNotEmpty ||
+        (entry.contentHtml?.trim() ?? '').isNotEmpty;
+    final isBibleAnchor =
+        entry.bookNumber > 0 && entry.chapter > 0 && entry.verse > 0;
+    final itemType = hasMedia && !hasTextContent && !isBibleAnchor
         ? (media.every(
-                (entry) => entry.mediaType.toLowerCase().startsWith('image/'),
+                (m) => m.mediaType.toLowerCase().startsWith('image/'),
               )
               ? UnifiedTagItemType.image
               : UnifiedTagItemType.media)
@@ -449,6 +621,7 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
     if (workspace == null) return;
     final draft = await showTagPresentationTitleDialog(
       context,
+      fontScale: _fontScale,
       topHeaderText: workspace.selectedSlide?.topHeaderText,
       bottomFooterText: workspace.selectedSlide?.bottomFooterText,
     );
@@ -493,6 +666,234 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
       return;
     }
     await showTagPresentationSlidePreview(context, workspace: workspace);
+  }
+
+  Future<void> _savePresentation() async {
+    final workspace = _workspace;
+    if (workspace == null) return;
+    final String defaultName;
+    if (_editMode) {
+      defaultName = widget.editPresentation!.name;
+    } else {
+      final rawTag = workspace.requestedTagName.trim();
+      final tag = rawTag.startsWith('#') ? rawTag.substring(1) : rawTag;
+      defaultName = tag.isNotEmpty ? tag : 'Untitled Presentation';
+    }
+    final name = await _showSaveNameDialog(
+      defaultName: defaultName,
+      title: _editMode ? 'Update Presentation' : 'Save Presentation',
+      confirmLabel: _editMode ? 'Update' : 'Save',
+    );
+    if (name == null || name.trim().isEmpty) return;
+    try {
+      final request = await _buildSaveRequest(
+        name: name.trim(),
+        workspace: workspace,
+      );
+      await PresentationPrepRepository.instance.savePresentation(request);
+      if (_editMode) {
+        if (!mounted) return;
+        Navigator.of(context).pop();
+      } else {
+        _showSnack('Presentation "${name.trim()}" saved.');
+      }
+    } catch (_) {
+      await _showErrorDialog(
+        'Could not save the presentation.',
+        title: 'Save failed',
+      );
+    }
+  }
+
+  Future<void> _openSavedPresentations() async {
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const TagSavedPresentationsScreen(),
+      ),
+    );
+  }
+
+  Future<String?> _showSaveNameDialog({
+    required String defaultName,
+    String title = 'Save Presentation',
+    String confirmLabel = 'Save',
+  }) async {
+    if (!mounted) return null;
+    final controller = TextEditingController(text: defaultName);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: 'Presentation name',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+          onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: Text(confirmLabel),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
+  }
+
+  Future<PresentationSaveRequest> _buildSaveRequest({
+    required String name,
+    required TagPresentationPrepWorkspace workspace,
+  }) async {
+    final bibleBodyById = await _preloadBibleBodies(workspace);
+    final firstChain = workspace.resolvedChains.isNotEmpty
+        ? workspace.resolvedChains.first
+        : null;
+    final editGroup = _editGroupRecord;
+    final sourceTagId = firstChain?.id ?? editGroup?.sourceTagId;
+    final sourceTagKey = firstChain != null
+        ? '${firstChain.storageKind.name}:${firstChain.name}'
+        : editGroup?.sourceTagKey;
+    final sourceTagNameStr = workspace.requestedTagName.trim();
+    final sourceTagName = sourceTagNameStr.isNotEmpty
+        ? sourceTagNameStr
+        : editGroup?.sourceTagName;
+    return PresentationSaveRequest(
+      name: name,
+      sourceTagId: sourceTagId,
+      sourceTagKey: sourceTagKey,
+      sourceTagName: sourceTagName,
+      defaultDisplayTarget: workspace.slides.isNotEmpty
+          ? workspace.slides.first.aspectRatio.preset.name
+          : null,
+      slides: [
+        for (var i = 0; i < workspace.slides.length; i++)
+          _buildSlideSaveRequest(
+            workspace.slides[i],
+            i,
+            workspace.itemsById,
+            bibleBodyById,
+          ),
+      ],
+    );
+  }
+
+  /// Pre-loads verse text from the Bible DB for any Bible verse/range item that
+  /// has a [bibleAnchor] but no [textSnapshot]. This ensures [bodyOverride] is
+  /// populated in the saved DB record so playback can render the verse without
+  /// a live DB lookup (which requires a reconstructed bibleAnchor).
+  Future<Map<String, String>> _preloadBibleBodies(
+    TagPresentationPrepWorkspace workspace,
+  ) async {
+    final result = <String, String>{};
+    for (final item in workspace.items) {
+      if (item.itemType != UnifiedTagItemType.bibleVerse &&
+          item.itemType != UnifiedTagItemType.bibleRange) {
+        continue;
+      }
+      if ((item.textSnapshot ?? '').trim().isNotEmpty) continue;
+      final bible = item.bibleAnchor;
+      if (bible == null) continue;
+      final start = bible.verseStart;
+      final end = bible.verseEnd < start ? start : bible.verseEnd;
+      if (start <= 0) continue;
+      final verses = <String>[];
+      for (var verse = start; verse <= end; verse++) {
+        final text = await StudyBibleDatabase.instance.loadVerseText(
+          bookNumber: bible.bookNumber,
+          chapter: bible.chapter,
+          verse: verse,
+        );
+        final cleaned = (text ?? '').trim();
+        if (cleaned.isNotEmpty) verses.add(cleaned);
+      }
+      if (verses.isNotEmpty) result[item.id] = verses.join('\n');
+    }
+    return result;
+  }
+
+  PresentationSlideSaveRequest _buildSlideSaveRequest(
+    TagPresentationPrepSlide slide,
+    int slideOrder,
+    Map<String, UnifiedTagChainItem> itemsById,
+    Map<String, String> bibleBodyById,
+  ) {
+    final zones = <PresentationZoneSaveRequest>[];
+    for (final region in slide.gridLayout.sortedMergedRegions) {
+      final zoneKey = 'merge:${region.id}';
+      zones.add(PresentationZoneSaveRequest(
+        zoneKey: zoneKey,
+        zoneType: 'merged',
+        startRow: region.startRow,
+        startColumn: region.startColumn,
+        rowSpan: region.rowSpan,
+        columnSpan: region.columnSpan,
+        items: [
+          for (var j = 0; j < region.itemIds.length; j++)
+            _buildItemSaveRequest(j, itemsById[region.itemIds[j]], bibleBodyById),
+        ],
+      ));
+    }
+    for (final cell in slide.gridLayout.visibleCells) {
+      final zoneKey = 'cell:${cell.row}:${cell.column}';
+      zones.add(PresentationZoneSaveRequest(
+        zoneKey: zoneKey,
+        zoneType: 'cell',
+        startRow: cell.row,
+        startColumn: cell.column,
+        rowSpan: 1,
+        columnSpan: 1,
+        items: [
+          for (var j = 0; j < cell.itemIds.length; j++)
+            _buildItemSaveRequest(j, itemsById[cell.itemIds[j]], bibleBodyById),
+        ],
+      ));
+    }
+    return PresentationSlideSaveRequest(
+      slideOrder: slideOrder,
+      title: slide.label,
+      topHeaderText: slide.topHeaderText,
+      bottomFooterText: slide.bottomFooterText,
+      displayTarget: slide.aspectRatio.label,
+      aspectRatioPreset: slide.aspectRatio.preset.name,
+      aspectRatioValue: slide.aspectRatio.aspectRatio,
+      rows: slide.gridLayout.rows,
+      columns: slide.gridLayout.columns,
+      zones: zones,
+    );
+  }
+
+  PresentationItemSaveRequest _buildItemSaveRequest(
+    int order,
+    UnifiedTagChainItem? item,
+    Map<String, String> bibleBodyById,
+  ) {
+    final existingSnapshot = item?.textSnapshot?.trim() ?? '';
+    final bodyOverride = existingSnapshot.isNotEmpty
+        ? item!.textSnapshot
+        : (item?.id != null ? bibleBodyById[item!.id] : null);
+    return PresentationItemSaveRequest(
+      itemOrder: order,
+      sourceItemId: item?.id,
+      itemType: item?.itemType.name,
+      titleOverride: item?.displayTitle,
+      bodyOverride: bodyOverride,
+      mediaPath: item?.media.isNotEmpty == true
+          ? item!.media.first.relativePath
+          : null,
+      mediaCaption: item?.media.isNotEmpty == true
+          ? item!.media.first.caption
+          : null,
+    );
   }
 
   void _showSnack(String message) {
@@ -635,6 +1036,9 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
       for (var index = 0; index < item.media.length; index++) {
         final media = item.media[index];
         final isImage = media.mediaType.toLowerCase().startsWith('image/');
+        // Expanded image/media items render ONLY their assigned media in the
+        // zone. Text content and anchors from the parent are intentionally
+        // omitted so note text never leaks into image zones and vice-versa.
         expanded.add(
           UnifiedTagChainItem(
             id: '${item.id}::media:${media.id}',
@@ -648,15 +1052,12 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
                 : UnifiedTagItemType.media,
             sortOrder: item.sortOrder * 1000 + index + 1,
             displayTitle: _mediaDisplayTitle(item, media),
-            textSnapshot:
-                _cleanText(item.noteText) ??
-                _cleanText(item.textSnapshot) ??
-                _cleanText(item.htmlContent),
-            noteText: item.noteText,
-            htmlContent: item.htmlContent,
+            textSnapshot: null,
+            noteText: null,
+            htmlContent: null,
             media: [media],
-            bibleAnchor: item.bibleAnchor,
-            elibraryAnchor: item.elibraryAnchor,
+            bibleAnchor: null,
+            elibraryAnchor: null,
             layoutHint: item.layoutHint,
             legacyTable: item.legacyTable,
             legacyTagName: item.legacyTagName,
@@ -683,17 +1084,38 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
 
   String _mediaDisplayTitle(UnifiedTagChainItem item, UnifiedTagMedia media) {
     final isImage = media.mediaType.toLowerCase().startsWith('image/');
-    final typeLabel = isImage ? 'Image' : 'Media';
+    // Use an explicit user-provided caption when available and not internal.
     final caption = _cleanText(media.caption);
-    if (caption != null) return '$typeLabel: $caption';
-    final path = _cleanText(media.relativePath);
-    if (path != null) {
-      final filename = path.split('/').last;
-      return '$typeLabel: $filename';
+    if (caption != null && !_isInternalMediaLabel(caption)) {
+      return isImage ? 'Image: $caption' : 'Media: $caption';
     }
-    final parentTitle = _cleanText(item.displayTitle);
-    if (parentTitle != null) return '$typeLabel: $parentTitle';
-    return typeLabel;
+    // Never expose raw filenames, hashes, or internal paths.
+    return isImage ? 'Attached image' : 'Attached media';
+  }
+
+  bool _isInternalMediaLabel(String value) {
+    final lower = value.toLowerCase();
+    if (lower.startsWith('content_') ||
+        lower.startsWith('media_') ||
+        lower.startsWith('file_') ||
+        lower.startsWith('img_')) {
+      return true;
+    }
+    if (value.contains('/') || value.contains('\\')) {
+      return true;
+    }
+    if (RegExp(r'content_\d{7,}').hasMatch(lower)) {
+      return true;
+    }
+    if (!value.contains(' ') &&
+        value.length > 20 &&
+        RegExp(r'\.(png|jpg|jpeg|gif|webp|bmp|heic)$').hasMatch(lower)) {
+      return true;
+    }
+    if (RegExp(r'^[a-f0-9]{12,}$', caseSensitive: false).hasMatch(value)) {
+      return true;
+    }
+    return false;
   }
 
   void _logPrepDiagnostics({
@@ -716,7 +1138,9 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
         preview?.requestedTagName ?? widget.request.displayTitle;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Presentation Preparation')),
+      appBar: AppBar(
+        title: Text(_editMode ? 'Edit Presentation' : 'Presentation Preparation'),
+      ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, viewportConstraints) {
@@ -730,6 +1154,7 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
                       title: 'Presentation Preparation',
                       message: 'Unable to load the selected #tag chain.',
                       hint: _error,
+                      fontScale: _fontScale,
                     ),
                   )
                 : SingleChildScrollView(
@@ -744,21 +1169,27 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              _HeaderCard(tagName: requestedTag),
+                              _HeaderCard(
+                                tagName: requestedTag,
+                                fontScale: _fontScale,
+                                isEditMode: _editMode,
+                              ),
                               const SizedBox(height: 12),
                               if (workspace == null)
-                                const TagPresentationPrepEmptyState(
+                                TagPresentationPrepEmptyState(
                                   title: 'No workspace loaded',
                                   message:
                                       'Open this screen from a #tag detail view.',
                                   hint:
                                       'The selected #tag name is passed into this screen.',
+                                  fontScale: _fontScale,
                                 )
                               else
                                 _PresentationPrepWorkspaceLayout(
                                   workspace: workspace,
                                   mediaRootPath: _mediaRootPath,
                                   viewportHeight: viewportHeight,
+                                  fontScale: _fontScale,
                                   onWorkspaceChanged: () => setState(() {}),
                                   onCardSelected: _handleItemSelected,
                                   onCardDropped: _handleCardDropped,
@@ -834,6 +1265,9 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
                                   canApplyMerge: !workspace.mergeSelectionMode
                                       ? true
                                       : workspace.canApplySelectedMerge,
+                                  onSavePresentation: _savePresentation,
+                                  onSavedPresentations:
+                                      _openSavedPresentations,
                                 ),
                             ],
                           ),
@@ -849,9 +1283,15 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
 }
 
 class _HeaderCard extends StatelessWidget {
-  const _HeaderCard({required this.tagName});
+  const _HeaderCard({
+    required this.tagName,
+    required this.fontScale,
+    this.isEditMode = false,
+  });
 
   final String tagName;
+  final double fontScale;
+  final bool isEditMode;
 
   @override
   Widget build(BuildContext context) {
@@ -864,17 +1304,39 @@ class _HeaderCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Presentation Preparation',
-              style: theme.textTheme.headlineSmall?.copyWith(
+              isEditMode ? 'Edit Presentation' : 'Presentation Preparation',
+              style: presentationTextStyle(
+                context,
+                theme.textTheme.headlineSmall,
+                fontScale,
                 fontWeight: FontWeight.w700,
+                minFontSize: 22,
+                maxFontSize: 30,
               ),
             ),
             const SizedBox(height: 8),
-            Text('Preparing: $tagName', style: theme.textTheme.titleMedium),
+            Text(
+              '${isEditMode ? "Editing" : "Preparing"}: $tagName',
+              style: presentationTextStyle(
+                context,
+                theme.textTheme.titleMedium,
+                fontScale,
+                minFontSize: 17,
+                maxFontSize: 24,
+              ),
+            ),
             const SizedBox(height: 8),
             Text(
-              'Use Choose Card to place cards, edit the slide frame above, and preview when ready.',
-              style: theme.textTheme.bodyMedium,
+              isEditMode
+                  ? 'Make changes to slides, then tap Update to save.'
+                  : 'Use Choose Card to place cards, edit the slide frame above, and preview when ready.',
+              style: presentationTextStyle(
+                context,
+                theme.textTheme.bodyMedium,
+                fontScale,
+                minFontSize: 14,
+                maxFontSize: 18,
+              ),
             ),
           ],
         ),
@@ -888,6 +1350,7 @@ class _PresentationPrepWorkspaceLayout extends StatelessWidget {
     required this.workspace,
     required this.mediaRootPath,
     required this.viewportHeight,
+    required this.fontScale,
     required this.onWorkspaceChanged,
     required this.onCardSelected,
     required this.onCardDropped,
@@ -905,11 +1368,14 @@ class _PresentationPrepWorkspaceLayout extends StatelessWidget {
     required this.onUnmergePressed,
     required this.onCancelMergePressed,
     required this.canApplyMerge,
+    required this.onSavePresentation,
+    required this.onSavedPresentations,
   });
 
   final TagPresentationPrepWorkspace workspace;
   final String? mediaRootPath;
   final double viewportHeight;
+  final double fontScale;
   final VoidCallback onWorkspaceChanged;
   final ValueChanged<String> onCardSelected;
   final void Function(
@@ -935,6 +1401,8 @@ class _PresentationPrepWorkspaceLayout extends StatelessWidget {
   final VoidCallback onUnmergePressed;
   final VoidCallback onCancelMergePressed;
   final bool canApplyMerge;
+  final VoidCallback onSavePresentation;
+  final VoidCallback onSavedPresentations;
 
   @override
   Widget build(BuildContext context) {
@@ -947,7 +1415,7 @@ class _PresentationPrepWorkspaceLayout extends StatelessWidget {
         final compactWidth = availableWidth < 760;
         final controlsWidth = compactWidth
             ? availableWidth
-            : math.min(360.0, math.max(320.0, availableWidth * 0.26));
+            : math.min(400.0, math.max(340.0, availableWidth * 0.28));
         final gap = compactWidth ? 0.0 : 16.0;
         final slideWidth = compactWidth
             ? availableWidth
@@ -960,6 +1428,7 @@ class _PresentationPrepWorkspaceLayout extends StatelessWidget {
 
         final navigator = TagSlideNavigatorPanel(
           workspace: workspace,
+          fontScale: fontScale,
           onNewBlankSlide: onNewBlankSlide,
           onPreviewSlide: onPreviewSlide,
           onChooseCardPressed: onChooseCardPressed,
@@ -972,6 +1441,8 @@ class _PresentationPrepWorkspaceLayout extends StatelessWidget {
           onUnmergePressed: onUnmergePressed,
           onCancelMergePressed: onCancelMergePressed,
           canApplyMerge: canApplyMerge,
+          onSavePresentation: onSavePresentation,
+          onSavedPresentations: onSavedPresentations,
         );
 
         final canvas = SizedBox(

@@ -1,5 +1,101 @@
 import 'package:flutter/material.dart';
 
+String _referenceText(String name, int chapter, int? verse) {
+  if (chapter <= 0) return name;
+  return verse != null ? '$name $chapter:$verse' : '$name $chapter';
+}
+
+String _compactBook(String name) {
+  const bookAbbreviations = ViewerReferenceTitle._bookAbbreviations;
+  final mapped = bookAbbreviations[name] ?? name;
+  if (mapped.length <= 10) return mapped;
+  final parts = mapped.split(' ');
+  if (parts.length >= 2 && int.tryParse(parts.first) != null) {
+    final word = parts[1];
+    final short = word.length <= 5 ? word : '${word.substring(0, 4)}.';
+    return '${parts.first} $short';
+  }
+  final token = parts.first;
+  return token.length <= 5 ? token : '${token.substring(0, 4)}.';
+}
+
+bool _fits(
+  BuildContext context,
+  String text,
+  TextStyle style,
+  double width,
+) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    maxLines: 1,
+    textDirection: Directionality.of(context),
+    textScaler: TextScaler.noScaling,
+  )..layout(maxWidth: double.infinity);
+  return painter.width <= width;
+}
+
+class _ViewerReferenceTitleResolution {
+  const _ViewerReferenceTitleResolution({
+    required this.text,
+    required this.fontSize,
+  });
+
+  final String text;
+  final double fontSize;
+}
+
+_ViewerReferenceTitleResolution _resolveViewerReferenceTitle(
+  BuildContext context, {
+  required String bookName,
+  required int chapter,
+  required int? verse,
+  required TextStyle baseStyle,
+  required double minimumFontSize,
+  required double maxWidth,
+}) {
+  final baseFontSize = baseStyle.fontSize ?? 20;
+  final minFontSize = minimumFontSize.clamp(0, baseFontSize);
+  final candidates = <String>[
+    _referenceText(bookName, chapter, verse),
+    _referenceText(ViewerReferenceTitle._bookAbbreviations[bookName] ?? bookName, chapter, verse),
+    _referenceText(_compactBook(bookName), chapter, verse),
+  ];
+
+  for (final candidate in candidates) {
+    for (double size = baseFontSize; size >= minFontSize; size -= 1) {
+      final trialStyle = baseStyle.copyWith(fontSize: size);
+      if (_fits(context, candidate, trialStyle, maxWidth)) {
+        return _ViewerReferenceTitleResolution(text: candidate, fontSize: size);
+      }
+    }
+  }
+
+  return _ViewerReferenceTitleResolution(
+    text: candidates.last,
+    fontSize: minFontSize.toDouble(),
+  );
+}
+
+double resolveViewerReferenceTitleFontSize(
+  BuildContext context, {
+  required String bookName,
+  required int chapter,
+  required int? verse,
+  required TextStyle baseStyle,
+  required double minimumFontSize,
+  required double maxWidth,
+}) {
+  return _resolveViewerReferenceTitle(
+    context,
+    bookName: bookName,
+    chapter: chapter,
+    verse: verse,
+    baseStyle: baseStyle,
+    minimumFontSize: minimumFontSize,
+    maxWidth: maxWidth,
+  ).fontSize;
+}
+
 class ViewerReferenceTitle extends StatelessWidget {
   const ViewerReferenceTitle({
     super.key,
@@ -65,72 +161,23 @@ class ViewerReferenceTitle extends StatelessWidget {
     'Revelation': 'Rev.',
   };
 
-  String _referenceText(String name) {
-    if (chapter <= 0) return name;
-    return verse != null ? '$name $chapter:$verse' : '$name $chapter';
-  }
-
-  String _compactBook(String name) {
-    final mapped = _bookAbbreviations[name] ?? name;
-    if (mapped.length <= 10) return mapped;
-    final parts = mapped.split(' ');
-    if (parts.length >= 2 && int.tryParse(parts.first) != null) {
-      final word = parts[1];
-      final short = word.length <= 5 ? word : '${word.substring(0, 4)}.';
-      return '${parts.first} $short';
-    }
-    final token = parts.first;
-    return token.length <= 5 ? token : '${token.substring(0, 4)}.';
-  }
-
-  bool _fits(
-    BuildContext context,
-    String text,
-    TextStyle style,
-    double width,
-  ) {
-    final painter = TextPainter(
-      text: TextSpan(text: text, style: style),
-      maxLines: 1,
-      textDirection: Directionality.of(context),
-      textScaler: TextScaler.noScaling,
-    )..layout(maxWidth: double.infinity);
-    return painter.width <= width;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final baseFontSize = baseStyle.fontSize ?? 20;
-    final minFontSize = minimumFontSize.clamp(0, baseFontSize);
-    final candidates = <String>[
-      _referenceText(bookName),
-      _referenceText(_bookAbbreviations[bookName] ?? bookName),
-      _referenceText(_compactBook(bookName)),
-    ];
-
-    for (final candidate in candidates) {
-      for (double size = baseFontSize; size >= minFontSize; size -= 1) {
-        final trialStyle = baseStyle.copyWith(fontSize: size);
-        if (_fits(context, candidate, trialStyle, maxWidth)) {
-          return Text(
-            candidate,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: trialStyle,
-          );
-        }
-      }
-    }
-
-    final fallbackStyle = baseStyle.copyWith(fontSize: minFontSize.toDouble());
-    final fallbackText = candidates.last;
+    final resolution = _resolveViewerReferenceTitle(
+      context,
+      bookName: bookName,
+      chapter: chapter,
+      verse: verse,
+      baseStyle: baseStyle,
+      minimumFontSize: minimumFontSize,
+      maxWidth: maxWidth,
+    );
     return Text(
-      fallbackText,
+      resolution.text,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       textAlign: TextAlign.center,
-      style: fallbackStyle,
+      style: baseStyle.copyWith(fontSize: resolution.fontSize),
     );
   }
 }

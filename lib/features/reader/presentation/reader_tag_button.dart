@@ -12,6 +12,9 @@ class ReaderTagButtons extends StatelessWidget {
     required this.onStandardTap,
     required this.onDollarTap,
     required this.onRapidTap,
+    this.showStandard = true,
+    this.showDollar = true,
+    this.showRapid = true,
   });
 
   final double fontScale;
@@ -19,6 +22,9 @@ class ReaderTagButtons extends StatelessWidget {
   final VoidCallback onStandardTap;
   final VoidCallback onDollarTap;
   final VoidCallback onRapidTap;
+  final bool showStandard;
+  final bool showDollar;
+  final bool showRapid;
 
   @override
   Widget build(BuildContext context) {
@@ -54,9 +60,10 @@ class ReaderTagButtons extends StatelessWidget {
     );
     final inactiveBorder = inactiveForeground.withValues(alpha: 0.18);
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
+    final children = <Widget>[];
+
+    if (showStandard) {
+      children.add(
         Tooltip(
           message: '# Tags',
           child: _GlyphButton(
@@ -76,7 +83,14 @@ class ReaderTagButtons extends StatelessWidget {
             elevated: activeFamily == ReaderTagFamily.hash,
           ),
         ),
-        const SizedBox(width: 8),
+      );
+    }
+
+    if (showDollar) {
+      if (children.isNotEmpty) {
+        children.add(const SizedBox(width: 8));
+      }
+      children.add(
         Tooltip(
           message: 'Presentation Setup',
           child: _IconButton(
@@ -96,7 +110,14 @@ class ReaderTagButtons extends StatelessWidget {
             elevated: activeFamily == ReaderTagFamily.dollar,
           ),
         ),
-        const SizedBox(width: 8),
+      );
+    }
+
+    if (showRapid) {
+      if (children.isNotEmpty) {
+        children.add(const SizedBox(width: 8));
+      }
+      children.add(
         Tooltip(
           message: '! Rapid tag',
           child: _GlyphButton(
@@ -110,7 +131,16 @@ class ReaderTagButtons extends StatelessWidget {
             elevated: true,
           ),
         ),
-      ],
+      );
+    }
+
+    if (children.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: children,
     );
   }
 }

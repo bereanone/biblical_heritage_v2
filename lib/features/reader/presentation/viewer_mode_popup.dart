@@ -10,6 +10,7 @@ Future<void> showViewerModePopup(
   required VoidCallback onOpenBibleMemory,
   required VoidCallback onOpenInterlinearSettings,
   required VoidCallback onOpenColorSetup,
+  required VoidCallback onApplyDefaultMarkup,
   required PresentationAspectRatioPreset presentationAspectRatio,
   required ValueChanged<PresentationAspectRatioPreset>
       onPresentationAspectRatioChanged,
@@ -59,6 +60,18 @@ Future<void> showViewerModePopup(
                       onTap: () {
                         Navigator.of(dialogContext).pop();
                         onOpenInterlinearSettings();
+                      },
+                    ),
+                    Divider(
+                      height: 8,
+                      color: theme.dividerColor.withValues(alpha: 0.55),
+                    ),
+                    _ModeRow(
+                      title: 'Apply Markup',
+                      subtitle: 'Highlight selection',
+                      onTap: () {
+                        Navigator.of(dialogContext).pop();
+                        onApplyDefaultMarkup();
                       },
                     ),
                     Divider(

@@ -162,6 +162,11 @@ class HashTagImportResult {
     required this.skippedExistingCount,
     required this.failedCount,
     required this.failures,
+    this.bibleImportedCount = 0,
+    this.eLibraryImportedCount = 0,
+    this.noteImportedCount = 0,
+    this.unsupportedCount = 0,
+    this.warnings = const <String>[],
   });
 
   final String tag;
@@ -171,6 +176,11 @@ class HashTagImportResult {
   final int skippedExistingCount;
   final int failedCount;
   final List<HashTagImportFailure> failures;
+  final int bibleImportedCount;
+  final int eLibraryImportedCount;
+  final int noteImportedCount;
+  final int unsupportedCount;
+  final List<String> warnings;
 
   int get importedCount => insertedCount;
 }
@@ -199,9 +209,13 @@ class _ParsedSharedSlide {
     required this.target,
     required this.contentText,
     required this.noteRef,
+    this.elibraryMetadata,
+    this.studyBibleMetadata,
   });
 
   final HashTagTarget? target;
   final String contentText;
   final String noteRef;
+  final Map<String, Object?>? elibraryMetadata;
+  final Map<String, Object?>? studyBibleMetadata;
 }

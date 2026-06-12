@@ -317,7 +317,14 @@ void main() {
           .toInt();
       expect(dollarCountAfter, 2);
 
-      final adapter = UnifiedTagReadAdapter(databaseProvider: () async => db);
+      final adapter = UnifiedTagReadAdapter(
+        databaseProvider: () async => db,
+        bookNamesProvider: () async => {
+          43: 'John',
+          2: 'Exodus',
+          6: 'Joshua',
+        },
+      );
       final snapshot = await adapter.loadSnapshot();
       final importedChain = snapshot.chains.firstWhere(
         (chain) => chain.legacyGroupId == r'dollar_tags|$LegacyChain',

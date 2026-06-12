@@ -117,14 +117,11 @@ class TagDialogEntryList extends StatelessWidget {
   String _eLibrarySubtitle(HashTagEntry entry) {
     final metadata = _eLibraryMetadata(entry);
     if (metadata == null) return '';
-
-    final officialReferenceText =
-        _cleanVisibleText(metadata.sourceLocation).isNotEmpty
-        ? metadata.sourceLocation
-        : metadata.sourceReferenceText;
-    final friendlyLocation = libraryUserFacingSearchLocationText(
-      title: metadata.sourceTitle,
-      officialReferenceText: officialReferenceText,
+    return libraryUserFacingELibraryDisplayLabel(
+      sourceTitle: metadata.sourceTitle,
+      sourceTitleAcronym: metadata.sourceTitleAcronym,
+      sourceLocation: metadata.sourceLocation,
+      sourceReferenceText: metadata.sourceReferenceText,
       fileName: metadata.sourceRelativePath.trim().isNotEmpty
           ? p.basename(metadata.sourceRelativePath)
           : null,
@@ -135,15 +132,6 @@ class TagDialogEntryList extends StatelessWidget {
       paragraphIndex:
           metadata.sourceParagraphNumber ?? metadata.sourceParagraphIndex,
     );
-    if (friendlyLocation.isNotEmpty) return friendlyLocation;
-
-    final title = metadata.sourceTitle.trim().replaceAll(RegExp(r'\s+'), ' ');
-    if (title.isNotEmpty && !_looksInternal(title)) return title;
-
-    final abbreviation = metadata.sourceTitleAcronym.trim();
-    if (abbreviation.isNotEmpty) return abbreviation;
-
-    return '';
   }
 
   _TagDialogELibraryMetadata? _eLibraryMetadata(HashTagEntry entry) {

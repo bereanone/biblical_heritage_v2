@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'presentation_ui_helpers.dart';
+
 class TagPresentationHeaderFooterDraft {
   const TagPresentationHeaderFooterDraft({
     required this.topHeaderText,
@@ -12,6 +14,7 @@ class TagPresentationHeaderFooterDraft {
 
 Future<TagPresentationHeaderFooterDraft?> showTagPresentationTitleDialog(
   BuildContext context, {
+  required double fontScale,
   String? topHeaderText,
   String? bottomFooterText,
 }) {
@@ -19,6 +22,7 @@ Future<TagPresentationHeaderFooterDraft?> showTagPresentationTitleDialog(
     context: context,
     builder: (context) {
       return _TagPresentationHeaderFooterDialog(
+        fontScale: fontScale,
         topHeaderText: topHeaderText,
         bottomFooterText: bottomFooterText,
       );
@@ -28,10 +32,12 @@ Future<TagPresentationHeaderFooterDraft?> showTagPresentationTitleDialog(
 
 class _TagPresentationHeaderFooterDialog extends StatefulWidget {
   const _TagPresentationHeaderFooterDialog({
+    required this.fontScale,
     this.topHeaderText,
     this.bottomFooterText,
   });
 
+  final double fontScale;
   final String? topHeaderText;
   final String? bottomFooterText;
 
@@ -64,8 +70,41 @@ class _TagPresentationHeaderFooterDialogState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final inputStyle = presentationTextStyle(
+      context,
+      theme.textTheme.bodyMedium,
+      widget.fontScale,
+      minFontSize: 15,
+      maxFontSize: 19,
+    );
+    final fieldLabelStyle = presentationTextStyle(
+      context,
+      theme.textTheme.labelLarge,
+      widget.fontScale,
+      fontWeight: FontWeight.w700,
+      minFontSize: 13.5,
+      maxFontSize: 17.5,
+    );
+    final fieldHintStyle = presentationTextStyle(
+      context,
+      theme.textTheme.bodySmall,
+      widget.fontScale,
+      color: theme.colorScheme.outline,
+      minFontSize: 12.5,
+      maxFontSize: 16,
+    );
     return AlertDialog(
-      title: const Text('Header / Footer'),
+      title: Text(
+        'Header / Footer',
+        style: presentationTextStyle(
+          context,
+          theme.textTheme.titleMedium,
+          widget.fontScale,
+          fontWeight: FontWeight.w700,
+          minFontSize: 16,
+          maxFontSize: 22,
+        ),
+      ),
       content: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 440),
         child: Column(
@@ -77,9 +116,12 @@ class _TagPresentationHeaderFooterDialogState
               autofocus: true,
               textAlign: TextAlign.center,
               textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
+              style: inputStyle,
+              decoration: InputDecoration(
                 labelText: 'Top title/header',
                 hintText: 'Top title/header',
+                labelStyle: fieldLabelStyle,
+                hintStyle: fieldHintStyle,
               ),
             ),
             const SizedBox(height: 14),
@@ -87,17 +129,25 @@ class _TagPresentationHeaderFooterDialogState
               controller: _bottomController,
               textAlign: TextAlign.center,
               textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(
+              style: inputStyle,
+              decoration: InputDecoration(
                 labelText: 'Bottom title/footer',
                 hintText: 'Bottom title/footer',
+                labelStyle: fieldLabelStyle,
+                hintStyle: fieldHintStyle,
               ),
               onSubmitted: (_) => _submit(context),
             ),
             const SizedBox(height: 10),
             Text(
               'These fields live outside the content grid and appear in preview/presentation only when filled.',
-              style: theme.textTheme.bodySmall?.copyWith(
+              style: presentationTextStyle(
+                context,
+                theme.textTheme.bodySmall,
+                widget.fontScale,
                 color: theme.colorScheme.outline,
+                minFontSize: 12.5,
+                maxFontSize: 16,
               ),
             ),
           ],

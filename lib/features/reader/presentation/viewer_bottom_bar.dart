@@ -18,7 +18,6 @@ class ViewerBottomBar extends StatelessWidget {
     required this.onDecreaseFont,
     required this.onIncreaseFont,
     required this.onCommentary,
-    required this.onMarkup,
     required this.canDecreaseFont,
     required this.canIncreaseFont,
     required this.backgroundColor,
@@ -35,7 +34,6 @@ class ViewerBottomBar extends StatelessWidget {
   final VoidCallback onDecreaseFont;
   final VoidCallback onIncreaseFont;
   final VoidCallback onCommentary;
-  final VoidCallback onMarkup;
   final bool canDecreaseFont;
   final bool canIncreaseFont;
   final Color backgroundColor;
@@ -52,7 +50,8 @@ class ViewerBottomBar extends StatelessWidget {
         builder: (context, constraints) {
           final isCompact = constraints.maxWidth < 320;
           final sidePadding = isCompact ? 4.0 : 8.0;
-          final controlGap = isCompact ? 2.0 : 4.0;
+          final controlGap = isCompact ? 4.0 : 6.0;
+          final libraryAlignmentX = isCompact ? 0.2 : 0.42;
 
           return SafeArea(
             top: false,
@@ -73,31 +72,31 @@ class ViewerBottomBar extends StatelessWidget {
                             onPressed: onHistory,
                             padding: EdgeInsets.zero,
                             constraints: BoxConstraints.tightFor(
-                              width: isCompact ? 30 : 40,
-                              height: isCompact ? 30 : 40,
+                              width: isCompact ? 36 : 44,
+                              height: isCompact ? 36 : 44,
                             ),
                             icon: Icon(
                               Icons.history_rounded,
                               color: buttonColor,
-                              size: isCompact ? 20 : 24,
+                              size: isCompact ? 22 : 26,
                             ),
                           ),
                           SizedBox(width: controlGap),
                           _FontScaleButton(
                             onPressed: canDecreaseFont ? onDecreaseFont : null,
                             color: buttonColor,
-                            baseSize: 17,
-                            sign: '-',
-                            signSize: 15,
+                            baseSize: isCompact ? 14 : 15,
+                            sign: 'A-',
+                            signSize: isCompact ? 10 : 11,
                             compact: isCompact,
                           ),
                           SizedBox(width: controlGap),
                           _FontScaleButton(
                             onPressed: canIncreaseFont ? onIncreaseFont : null,
                             color: buttonColor,
-                            baseSize: 20,
-                            sign: '+',
-                            signSize: 15,
+                            baseSize: isCompact ? 19 : 23,
+                            sign: 'A+',
+                            signSize: isCompact ? 11 : 12,
                             compact: isCompact,
                           ),
                         ],
@@ -105,22 +104,19 @@ class ViewerBottomBar extends StatelessWidget {
                     ),
                     Align(
                       alignment: Alignment.center,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _BottomIconButton(
-                            tooltip: 'Commentary',
-                            icon: Icons.menu_book_outlined,
-                            color: buttonColor,
-                            compact: isCompact,
-                            onPressed: onCommentary,
-                          ),
-                          const SizedBox(width: 2),
-                          _LibraryButton(
-                            compact: isCompact,
-                            onPressed: onLibrary,
-                          ),
-                        ],
+                      child: _BottomIconButton(
+                        tooltip: 'Commentary',
+                        icon: Icons.menu_book_outlined,
+                        color: buttonColor,
+                        compact: isCompact,
+                        onPressed: onCommentary,
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment(libraryAlignmentX, 0),
+                      child: _LibraryButton(
+                        compact: isCompact,
+                        onPressed: onLibrary,
                       ),
                     ),
                     Align(
@@ -128,14 +124,6 @@ class ViewerBottomBar extends StatelessWidget {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          _BottomIconButton(
-                            tooltip: 'Mode',
-                            icon: Icons.slideshow_rounded,
-                            color: buttonColor,
-                            compact: isCompact,
-                            onPressed: onMode,
-                          ),
-                          const SizedBox(width: 2),
                           _InterlinearToggleButton(
                             bookNumber: bookNumber,
                             interlinearEnabled: interlinearEnabled,
@@ -151,11 +139,11 @@ class ViewerBottomBar extends StatelessWidget {
                           ),
                           const SizedBox(width: 2),
                           _BottomIconButton(
-                            tooltip: 'Apply markup',
-                            icon: Icons.format_paint_outlined,
+                            tooltip: 'Mode',
+                            icon: Icons.settings_rounded,
                             color: buttonColor,
                             compact: isCompact,
-                            onPressed: onMarkup,
+                            onPressed: onMode,
                           ),
                         ],
                       ),

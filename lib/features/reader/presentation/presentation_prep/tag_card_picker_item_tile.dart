@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../../features/library/data/library_citation_display_helper.dart';
 import '../../../../core/database/study_bible_database.dart';
 import '../../data/tags/unified_tag_models.dart';
 import 'tag_presentation_media_path_resolver.dart';
@@ -51,16 +52,26 @@ class _TagCardPickerItemTileState extends State<TagCardPickerItemTile> {
     final mediaSource = _resolveMediaSource(item);
     final title = _displayTitle(item, mediaSource: mediaSource);
     final typeLabel = _typeLabel(item.itemType);
-    final hasMedia =
-        mediaSource != null ||
-        item.hasMedia ||
+    // Only show media UI (thumbnail lead, media chip) for items whose primary
+    // purpose is to display media. Note/bible/elibrary items that have attached
+    // media always have separate image items in the picker via
+    // _expandPresentationItems, so the parent item renders as its text type.
+    final isMediaItem =
         item.itemType == UnifiedTagItemType.image ||
         item.itemType == UnifiedTagItemType.media;
+    final hasMedia =
+        isMediaItem &&
+        (mediaSource != null ||
+            item.hasMedia ||
+            item.itemType == UnifiedTagItemType.image ||
+            item.itemType == UnifiedTagItemType.media);
     final secondaryLabel = _secondaryLabel(item, mediaSource: mediaSource);
-    final mediaCount = item.media.isNotEmpty
-        ? item.media.length
-        : mediaSource != null
-        ? 1
+    final mediaCount = isMediaItem
+        ? (item.media.isNotEmpty
+              ? item.media.length
+              : mediaSource != null
+              ? 1
+              : 0)
         : 0;
 
     return Card(
@@ -249,13 +260,15 @@ class _TagCardPickerItemTileState extends State<TagCardPickerItemTile> {
           secondary: _cleanText(item.noteText),
         );
       case UnifiedTagItemType.note:
+        final noteSnapshot = _cleanText(item.textSnapshot);
         return _PickerPreviewData(
           reference: _noteTitle(item),
           body: _noteBody(item),
           secondary:
-              _cleanText(item.textSnapshot) ??
-              _mediaSourceLabel(mediaSource) ??
-              _cleanText(item.htmlContent),
+              (noteSnapshot != null && !_isTechnicalFilename(noteSnapshot))
+                  ? noteSnapshot
+                  : _mediaSourceLabel(mediaSource) ??
+                        _cleanText(item.htmlContent),
         );
       case UnifiedTagItemType.image:
       case UnifiedTagItemType.media:
@@ -344,7 +357,7 @@ class _TagCardPickerItemTileState extends State<TagCardPickerItemTile> {
     _PickerMediaSource? mediaSource,
   }) {
     final title = item.displayTitle?.trim() ?? '';
-    if (title.isNotEmpty) return title;
+    if (title.isNotEmpty && !_isTechnicalFilename(title)) return title;
     final bible = item.bibleAnchor;
     if (bible != null) {
       final verseRef = bible.verseRef?.trim() ?? '';
@@ -354,11 +367,24 @@ class _TagCardPickerItemTileState extends State<TagCardPickerItemTile> {
     }
     final elibrary = item.elibraryAnchor;
     if (elibrary != null) {
-      final sourceTitle = elibrary.sourceTitle?.trim() ?? '';
-      if (sourceTitle.isNotEmpty) return sourceTitle;
-      final sourceRef = elibrary.sourceReferenceText?.trim() ?? '';
-      if (sourceRef.isNotEmpty) return sourceRef;
-      if (elibrary.compactRef.trim().isNotEmpty) return elibrary.compactRef;
+      final displayLabel = libraryUserFacingELibraryDisplayLabel(
+        sourceTitle: elibrary.sourceTitle ?? '',
+        sourceTitleAcronym: elibrary.sourceTitleAcronym,
+        sourceLocation: elibrary.sourceLocation,
+        sourceReferenceText: elibrary.sourceReferenceText,
+        fileName: elibrary.sourceRelativePath?.trim().isNotEmpty == true
+            ? p.basename(elibrary.sourceRelativePath!)
+            : null,
+        relativePath: elibrary.sourceRelativePath,
+        pageCitation:
+            elibrary.sourcePageNumber != null &&
+                elibrary.sourceParagraphNumber != null
+            ? '${elibrary.sourcePageNumber}.${elibrary.sourceParagraphNumber}'
+            : null,
+        paragraphIndex:
+            elibrary.sourceParagraphNumber ?? elibrary.sourceParagraphIndex,
+      );
+      if (displayLabel.isNotEmpty) return displayLabel;
     }
     final noteTitle = _noteTitle(item);
     if (noteTitle.isNotEmpty) return noteTitle;
@@ -396,7 +422,10 @@ class _TagCardPickerItemTileState extends State<TagCardPickerItemTile> {
       _cleanPlain(item.displayTitle),
     ];
     for (final candidate in candidates) {
-      if (candidate != null && candidate.isNotEmpty && candidate != 'Note') {
+      if (candidate != null &&
+          candidate.isNotEmpty &&
+          candidate != 'Note' &&
+          !_isTechnicalFilename(candidate)) {
         return candidate;
       }
     }
@@ -416,13 +445,23 @@ class _TagCardPickerItemTileState extends State<TagCardPickerItemTile> {
   String _eLibraryReference(UnifiedTagChainItem item) {
     final elibrary = item.elibraryAnchor;
     if (elibrary == null) return 'eLibrary';
-    final title = _cleanPlain(elibrary.sourceTitle);
-    if (title != null) return title;
-    final location = _cleanPlain(elibrary.sourceLocation);
-    if (location != null) return location;
-    final referenceText = _cleanPlain(elibrary.sourceReferenceText);
-    if (referenceText != null) return referenceText;
-    return elibrary.compactRef;
+    return libraryUserFacingELibraryCitationText(
+      sourceTitle: elibrary.sourceTitle ?? '',
+      sourceTitleAcronym: elibrary.sourceTitleAcronym,
+      sourceLocation: elibrary.sourceLocation,
+      sourceReferenceText: elibrary.sourceReferenceText,
+      fileName: elibrary.sourceRelativePath?.trim().isNotEmpty == true
+          ? p.basename(elibrary.sourceRelativePath!)
+          : null,
+      relativePath: elibrary.sourceRelativePath,
+      pageCitation:
+          elibrary.sourcePageNumber != null &&
+              elibrary.sourceParagraphNumber != null
+          ? '${elibrary.sourcePageNumber}.${elibrary.sourceParagraphNumber}'
+          : null,
+      paragraphIndex:
+          elibrary.sourceParagraphNumber ?? elibrary.sourceParagraphIndex,
+    );
   }
 
   String _eLibraryBody(UnifiedTagChainItem item) {
@@ -460,15 +499,14 @@ class _TagCardPickerItemTileState extends State<TagCardPickerItemTile> {
     UnifiedTagChainItem item, {
     _PickerMediaSource? mediaSource,
   }) {
-    final media = mediaSource ?? _resolveMediaSource(item);
-    if (media == null) {
-      final note = _cleanPlain(item.noteText);
-      if (note != null) return note;
-      return 'Media item';
-    }
-    final label = _mediaSourceLabel(media);
-    if (label != null) return label;
-    return 'Media item';
+    final note = _cleanPlain(item.noteText);
+    if (note != null && !_isTechnicalFilename(note)) return note;
+    final snapshot = _cleanPlain(item.textSnapshot);
+    if (snapshot != null && !_isTechnicalFilename(snapshot)) return snapshot;
+    final isImage =
+        (mediaSource ?? _resolveMediaSource(item))?.isImage ??
+        (item.itemType == UnifiedTagItemType.image);
+    return isImage ? 'Attached image' : 'Media item';
   }
 
   String? _mediaSecondary(
@@ -476,14 +514,9 @@ class _TagCardPickerItemTileState extends State<TagCardPickerItemTile> {
     _PickerMediaSource? mediaSource,
   }) {
     final note = _cleanPlain(item.noteText);
-    if (note != null) return note;
+    if (note != null && !_isTechnicalFilename(note)) return note;
     final snapshot = _cleanPlain(item.textSnapshot);
-    if (snapshot != null) return snapshot;
-    final media = mediaSource ?? _resolveMediaSource(item);
-    if (media != null) {
-      final path = _cleanPlain(media.relativePath);
-      if (path != null) return path;
-    }
+    if (snapshot != null && !_isTechnicalFilename(snapshot)) return snapshot;
     return null;
   }
 
@@ -500,11 +533,23 @@ class _TagCardPickerItemTileState extends State<TagCardPickerItemTile> {
     }
     final elibrary = item.elibraryAnchor;
     if (elibrary != null) {
-      final sourceTitle = elibrary.sourceTitle?.trim() ?? '';
-      if (sourceTitle.isNotEmpty) return sourceTitle;
-      final sourceRef = elibrary.sourceReferenceText?.trim() ?? '';
-      if (sourceRef.isNotEmpty) return sourceRef;
-      return elibrary.compactRef;
+      return libraryUserFacingELibraryCitationText(
+        sourceTitle: elibrary.sourceTitle ?? '',
+        sourceTitleAcronym: elibrary.sourceTitleAcronym,
+        sourceLocation: elibrary.sourceLocation,
+        sourceReferenceText: elibrary.sourceReferenceText,
+        fileName: elibrary.sourceRelativePath?.trim().isNotEmpty == true
+            ? p.basename(elibrary.sourceRelativePath!)
+            : null,
+        relativePath: elibrary.sourceRelativePath,
+        pageCitation:
+            elibrary.sourcePageNumber != null &&
+                elibrary.sourceParagraphNumber != null
+            ? '${elibrary.sourcePageNumber}.${elibrary.sourceParagraphNumber}'
+            : null,
+        paragraphIndex:
+            elibrary.sourceParagraphNumber ?? elibrary.sourceParagraphIndex,
+      );
     }
     final noteTitle = _noteTitle(item);
     if (noteTitle.isNotEmpty && noteTitle != 'Note') return noteTitle;
@@ -595,14 +640,47 @@ class _TagCardPickerItemTileState extends State<TagCardPickerItemTile> {
   String? _mediaSourceLabel(_PickerMediaSource? media) {
     if (media == null) return null;
     final caption = media.caption?.trim() ?? '';
-    if (caption.isNotEmpty) {
+    if (caption.isNotEmpty && !_isTechnicalFilename(caption)) {
       return '${media.isImage ? 'Image' : 'Media'}: $caption';
     }
-    final path = media.relativePath.trim();
-    if (path.isNotEmpty) {
-      return '${media.isImage ? 'Image' : 'Media'}: ${p.basename(path)}';
-    }
     return media.isImage ? 'Image' : 'Media';
+  }
+
+  bool _isTechnicalFilename(String name) {
+    if (name.isEmpty) return false;
+    final lower = name.toLowerCase();
+    // Any path separator → definitely an internal path, not a user label
+    if (name.contains('/') || name.contains('\\')) return true;
+    // file: URL scheme
+    if (lower.startsWith('file:') || lower.startsWith('content:')) return true;
+    // Known internal prefixes
+    if (RegExp(r'^(content|media|file|img|hash)[_-]').hasMatch(lower)) {
+      return true;
+    }
+    // Embedded content_<digits> anywhere (e.g. "Media: content_1781030663171_...")
+    if (RegExp(r'content_\d{7,}').hasMatch(lower)) return true;
+    // Long name ending in image extension with no spaces (hash/timestamp filename)
+    if (!name.contains(' ') &&
+        name.length > 20 &&
+        RegExp(
+          r'\.(png|jpg|jpeg|gif|webp|bmp|heic)$',
+        ).hasMatch(lower)) {
+      return true;
+    }
+    // Pure hex hash (optionally with one extension)
+    if (RegExp(
+      r'^[a-f0-9]{12,}(\.[a-z]{1,5})?$',
+      caseSensitive: false,
+    ).hasMatch(name)) {
+      return true;
+    }
+    // Long name with 8+ consecutive digit sequence (timestamp) and no spaces
+    if (name.length > 20 &&
+        !name.contains(' ') &&
+        RegExp(r'\d{8,}').hasMatch(name)) {
+      return true;
+    }
+    return false;
   }
 }
 
@@ -691,7 +769,7 @@ class _MediaPreview extends StatelessWidget {
   }
 
   Widget _placeholder(ThemeData theme, String relativePath) {
-    final label = p.basename(relativePath.trim());
+    final label = item.itemType == UnifiedTagItemType.image ? 'Image' : 'Media';
     return Padding(
       padding: const EdgeInsets.all(8),
       child: Column(
@@ -706,8 +784,8 @@ class _MediaPreview extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            label.isEmpty ? 'Image unavailable' : label,
-            maxLines: 2,
+            label,
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
             style: theme.textTheme.labelSmall?.copyWith(

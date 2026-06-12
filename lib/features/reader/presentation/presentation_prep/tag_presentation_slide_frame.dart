@@ -30,20 +30,27 @@ class TagPresentationSlideFrame extends StatelessWidget {
         final topText = _cleanText(topTitleText);
         final bottomText = _cleanText(bottomTitleText);
         final availableHeight = constraints.maxHeight;
-        final topHeight = topText == null
-            ? 0.0
-            : topBandHeightOverride ??
-                  TagPresentationSlideFrameLayout.bandHeight(
-                    availableHeight,
-                    topText,
-                  );
-        final bottomHeight = bottomText == null
-            ? 0.0
-            : bottomBandHeightOverride ??
-                  TagPresentationSlideFrameLayout.bandHeight(
-                    availableHeight,
-                    bottomText,
-                  );
+        // When a custom band widget is provided (topBand/bottomBand), topTitleText
+        // is null so topText is null — but the widget still occupies real height.
+        // Use the override height for the layout so gridBodySize reflects reality.
+        final topHeight = topBand != null
+            ? (topBandHeightOverride ?? 40.0)
+            : topText == null
+                ? 0.0
+                : topBandHeightOverride ??
+                      TagPresentationSlideFrameLayout.bandHeight(
+                        availableHeight,
+                        topText,
+                      );
+        final bottomHeight = bottomBand != null
+            ? (bottomBandHeightOverride ?? 40.0)
+            : bottomText == null
+                ? 0.0
+                : bottomBandHeightOverride ??
+                      TagPresentationSlideFrameLayout.bandHeight(
+                        availableHeight,
+                        bottomText,
+                      );
         final layout = TagPresentationSlideFrameLayout(
           slideSize: Size(constraints.maxWidth, constraints.maxHeight),
           topBandHeight: topHeight,
@@ -56,7 +63,7 @@ class TagPresentationSlideFrame extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (topBand != null)
-                topBand!
+                SizedBox(height: topHeight, child: topBand!)
               else if (topText != null)
                 SizedBox(
                   height: topHeight,
@@ -64,7 +71,7 @@ class TagPresentationSlideFrame extends StatelessWidget {
                 ),
               Expanded(child: body),
               if (bottomBand != null)
-                bottomBand!
+                SizedBox(height: bottomHeight, child: bottomBand!)
               else if (bottomText != null)
                 SizedBox(
                   height: bottomHeight,

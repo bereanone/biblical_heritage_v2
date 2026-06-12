@@ -12,7 +12,7 @@ class _LibraryButton extends StatelessWidget {
     final textStyle = TextStyle(
       color: iconColor,
       fontWeight: FontWeight.w700,
-      fontSize: compact ? 8 : 9,
+      fontSize: compact ? 9 : 10,
       height: 1,
     );
 
@@ -27,15 +27,15 @@ class _LibraryButton extends StatelessWidget {
             onTap: onPressed,
             borderRadius: BorderRadius.circular(10),
             child: SizedBox(
-              width: compact ? 38 : 46,
-              height: compact ? 38 : 46,
+              width: compact ? 44 : 58,
+              height: compact ? 44 : 50,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
                     Icons.library_books_outlined,
                     color: iconColor,
-                    size: compact ? 18 : 20,
+                    size: compact ? 20 : 22,
                   ),
                   if (!compact) ...[
                     const SizedBox(height: 1),
@@ -127,9 +127,8 @@ class _InterlinearToggleButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isOldTestament = bookNumber >= 1 && bookNumber <= 39;
-    final glyph = isOldTestament ? 'א' : 'Α';
+    final glyph = isOldTestament ? 'א' : 'α';
     final glyphColor = interlinearEnabled ? const Color(0xFFD00000) : baseColor;
-    final size = compact ? 24.0 : 28.0;
 
     return Tooltip(
       message: 'Toggle Interlinear Mode',
@@ -142,15 +141,15 @@ class _InterlinearToggleButton extends StatelessWidget {
             onTap: onToggleInterlinear,
             borderRadius: BorderRadius.circular(8),
             child: SizedBox(
-              width: compact ? 34 : 40,
-              height: compact ? 34 : 40,
+              width: compact ? 38 : 44,
+              height: compact ? 38 : 44,
               child: Center(
                 child: Text(
                   glyph,
                   style: TextStyle(
                     color: glyphColor,
                     fontWeight: FontWeight.w800,
-                    fontSize: size,
+                    fontSize: compact ? 26.0 : 30.0,
                     height: 1,
                   ),
                 ),
@@ -186,10 +185,10 @@ class _BottomIconButton extends StatelessWidget {
         onPressed: onPressed,
         padding: EdgeInsets.zero,
         constraints: BoxConstraints.tightFor(
-          width: compact ? 34 : 40,
-          height: compact ? 34 : 40,
+          width: compact ? 38 : 44,
+          height: compact ? 38 : 44,
         ),
-        icon: Icon(icon, color: color, size: compact ? 18 : 22),
+        icon: Icon(icon, color: color, size: compact ? 20 : 24),
       ),
     );
   }
@@ -218,16 +217,31 @@ class _FontScaleButton extends StatelessWidget {
       onPressed: onPressed,
       padding: EdgeInsets.zero,
       constraints: BoxConstraints.tightFor(
-        width: compact ? 28 : 36,
-        height: compact ? 28 : 36,
+        width: compact ? 36 : 44,
+        height: compact ? 36 : 44,
       ),
-      icon: Text(
-        sign,
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w800,
-          fontSize: signSize,
-          height: 1,
+      icon: Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: sign.substring(0, 1),
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w800,
+                fontSize: baseSize,
+                height: 1,
+              ),
+            ),
+            TextSpan(
+              text: sign.substring(1),
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w800,
+                fontSize: signSize,
+                height: 1,
+              ),
+            ),
+          ],
         ),
       ),
     );

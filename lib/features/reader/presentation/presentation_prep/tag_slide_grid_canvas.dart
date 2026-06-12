@@ -86,9 +86,6 @@ class TagSlideGridCanvas extends StatelessWidget {
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final slideLayout = TagPresentationSlideLayoutScope.maybeOf(
-                  context,
-                );
                 if (selectedSlide == null) {
                   return const TagPresentationPrepEmptyState(
                     title: 'No working slide selected',
@@ -98,12 +95,6 @@ class TagSlideGridCanvas extends StatelessWidget {
                   );
                 }
 
-                final stageSize =
-                    slideLayout?.gridBodySize ??
-                    Size(
-                      math.max(0.0, constraints.maxWidth),
-                      math.max(0.0, constraints.maxHeight),
-                    );
                 final helper = TagSlideGridLayoutHelper(
                   rows: selectedSlide.gridLayout.rows,
                   columns: selectedSlide.gridLayout.columns,
@@ -121,30 +112,27 @@ class TagSlideGridCanvas extends StatelessWidget {
                     final box =
                         canvasKey.currentContext?.findRenderObject()
                             as RenderBox?;
-                    if (box == null ||
-                        stageSize.width <= 0 ||
-                        stageSize.height <= 0) {
-                      return;
-                    }
-
+                    if (box == null) return;
+                    final gridSize = box.size;
+                    if (gridSize.width <= 0 || gridSize.height <= 0) return;
                     final local = box.globalToLocal(details.offset);
                     final normalized = Offset(
-                      (local.dx / stageSize.width).clamp(0.0, 1.0).toDouble(),
-                      (local.dy / stageSize.height).clamp(0.0, 1.0).toDouble(),
+                      (local.dx / gridSize.width).clamp(0.0, 1.0).toDouble(),
+                      (local.dy / gridSize.height).clamp(0.0, 1.0).toDouble(),
                     );
                     final item = workspace.itemById(details.data.itemId);
                     if (item == null) return;
                     final size = _cellApproximateCardSize(
                       item,
-                      stageSize,
+                      gridSize,
                       selectedSlide.gridLayout.rows,
                       selectedSlide.gridLayout.columns,
                     );
                     onCardDropped(
                       item.id,
                       normalized,
-                      size.width / stageSize.width,
-                      size.height / stageSize.height,
+                      size.width / gridSize.width,
+                      size.height / gridSize.height,
                       details.data.sourceSlideIndex == null ||
                           details.data.sourceSlideIndex !=
                               workspace.selectedSlideIndex,
@@ -153,7 +141,6 @@ class TagSlideGridCanvas extends StatelessWidget {
                   builder: (_, candidateData, _) {
                     final highlight = candidateData.isNotEmpty && !readOnly;
                     return AnimatedContainer(
-                      key: canvasKey,
                       duration: const Duration(milliseconds: 150),
                       margin: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
@@ -195,37 +182,51 @@ class TagSlideGridCanvas extends StatelessWidget {
                           },
                         ),
                         bottomBandHeightOverride: 40.0,
-                        body: Stack(
-                          children: [
-                            Positioned.fill(
-                              child: ExcludeSemantics(
-                                child: IgnorePointer(
-                                  child: CustomPaint(
-                                    painter: _GridPainter(
-                                      rows: selectedSlide.gridLayout.rows,
-                                      columns: selectedSlide.gridLayout.columns,
-                                      color: theme.colorScheme.outlineVariant,
+                        body: Builder(
+                          builder: (bodyCtx) {
+                            final bodyLayout =
+                                TagPresentationSlideLayoutScope.maybeOf(bodyCtx);
+                            final gridSize = bodyLayout?.gridBodySize ??
+                                Size(
+                                  math.max(0.0, constraints.maxWidth),
+                                  math.max(0.0, constraints.maxHeight),
+                                );
+                            return Stack(
+                              key: canvasKey,
+                              children: [
+                                Positioned.fill(
+                                  child: ExcludeSemantics(
+                                    child: IgnorePointer(
+                                      child: CustomPaint(
+                                        painter: _GridPainter(
+                                          rows: selectedSlide.gridLayout.rows,
+                                          columns:
+                                              selectedSlide.gridLayout.columns,
+                                          color:
+                                              theme.colorScheme.outlineVariant,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ),
-                            ..._buildGridZones(
-                              workspace: workspace,
-                              helper: helper,
-                              layout: slideLayout,
-                              canvasSize: stageSize,
-                              selectedCell: selectedCell,
-                              selectedRegion: selectedRegion,
-                              mergedRegions: mergedRegions,
-                              cells: cells,
-                              mediaRootPath: mediaRootPath,
-                              readOnly: readOnly,
-                              onCellSelected: onCellSelected,
-                              onCardSelected: onCardSelected,
-                              onRemoveCard: onRemoveCard,
-                            ),
-                          ],
+                                ..._buildGridZones(
+                                  workspace: workspace,
+                                  helper: helper,
+                                  layout: bodyLayout,
+                                  canvasSize: gridSize,
+                                  selectedCell: selectedCell,
+                                  selectedRegion: selectedRegion,
+                                  mergedRegions: mergedRegions,
+                                  cells: cells,
+                                  mediaRootPath: mediaRootPath,
+                                  readOnly: readOnly,
+                                  onCellSelected: onCellSelected,
+                                  onCardSelected: onCardSelected,
+                                  onRemoveCard: onRemoveCard,
+                                ),
+                              ],
+                            );
+                          },
                         ),
                       ),
                     );

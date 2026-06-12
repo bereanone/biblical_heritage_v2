@@ -230,6 +230,27 @@ void main() {
       'last_synced_at': null,
       'change_id': null,
     });
+    await db.insert('hash_tags', {
+      'user_id': 1,
+      'tag': '#Grace',
+      'category': 'Favorites',
+      'verse_ref': '2:2:35-37',
+      'book_number': 2,
+      'chapter_number': 2,
+      'verse_number': 35,
+      'token_number': null,
+      'note_text': null,
+      'sort_order': 5,
+      'created_at': 130,
+      'created_at_utc': '2026-01-01T00:03:00Z',
+      'updated_at_utc': '2026-01-01T00:03:01Z',
+      'deleted_at_utc': null,
+      'device_id': 'device-a',
+      'revision': 1,
+      'sync_status': 'pending',
+      'last_synced_at': null,
+      'change_id': null,
+    });
 
     await db.insert('dollar_tags', {
       'user_id': 1,
@@ -367,6 +388,34 @@ void main() {
       'last_synced_at': null,
       'change_id': null,
     });
+    await db.insert('tag_items', {
+      'id': 'item-4',
+      'tag_group_id': 'group-1',
+      'tag_kind': 'hash',
+      'book_id': 6,
+      'chapter': 2,
+      'verse_start': 2,
+      'verse_end': 2,
+      'reference_code': null,
+      'presentation_slide_number': null,
+      'presentation_slide_region': null,
+      'note_text': null,
+      'note_format_json': null,
+      'sort_order': 4,
+      'source_device_name': null,
+      'legacy_group_id': null,
+      'legacy_item_id': null,
+      'legacy_import_package_id': null,
+      'imported_at': '2026-01-01T02:00:04Z',
+      'created_at': '2026-01-01T02:00:04Z',
+      'updated_at': '2026-01-01T02:00:04Z',
+      'deleted_at': null,
+      'device_id': 'device-c',
+      'revision': 1,
+      'sync_status': 'pending',
+      'last_synced_at': null,
+      'change_id': null,
+    });
     await db.insert('tag_item_media', {
       'id': 'media-1',
       'tag_item_id': 'item-1',
@@ -391,7 +440,14 @@ void main() {
       'change_id': null,
     });
 
-    final adapter = UnifiedTagReadAdapter(databaseProvider: () async => db);
+    final adapter = UnifiedTagReadAdapter(
+      databaseProvider: () async => db,
+      bookNamesProvider: () async => {
+        2: 'Exodus',
+        6: 'Joshua',
+        43: 'John',
+      },
+    );
     final snapshot = await adapter.loadSnapshot();
     final chains = snapshot.chains;
 
@@ -400,12 +456,15 @@ void main() {
     final legacyHash = chains.firstWhere((chain) => chain.name == '#Grace');
     expect(legacyHash.storageKind, UnifiedTagStorageKind.hash);
     expect(legacyHash.isDefault, isTrue);
-    expect(legacyHash.items.length, 2);
+    expect(legacyHash.items.length, 3);
     expect(legacyHash.items.first.sortOrder, 2);
     expect(legacyHash.items.first.itemType, UnifiedTagItemType.bibleVerse);
+    expect(legacyHash.items.first.displayTitle, 'John 3:16');
+    expect(legacyHash.items.last.displayTitle, 'Exodus 2:35-37');
     expect(legacyHash.items.first.layoutHint?.presentationSlideNumber, 7);
     expect(legacyHash.items.first.media, isEmpty);
-    expect(legacyHash.items.last.itemType, UnifiedTagItemType.unknownLegacy);
+    expect(legacyHash.items[1].itemType, UnifiedTagItemType.unknownLegacy);
+    expect(legacyHash.items.last.itemType, UnifiedTagItemType.bibleRange);
 
     final legacyDollar = chains.firstWhere((chain) => chain.name == r'$Chain');
     expect(legacyDollar.storageKind, UnifiedTagStorageKind.dollar);
@@ -417,11 +476,14 @@ void main() {
 
     final unified = chains.firstWhere((chain) => chain.name == '#Unified');
     expect(unified.storageKind, UnifiedTagStorageKind.unified);
-    expect(unified.items.length, 3);
+    expect(unified.items.length, 4);
     expect(unified.items.first.itemType, UnifiedTagItemType.bibleRange);
+    expect(unified.items.first.displayTitle, 'John 3:16-17');
+    expect(unified.items.last.displayTitle, 'Joshua 2:2');
     expect(unified.items.first.media.single.relativePath, 'Media/Unified/chart.png');
     expect(unified.items[1].itemType, UnifiedTagItemType.note);
-    expect(unified.items.last.itemType, UnifiedTagItemType.unknownLegacy);
+    expect(unified.items[2].itemType, UnifiedTagItemType.unknownLegacy);
+    expect(unified.items.last.itemType, UnifiedTagItemType.bibleVerse);
     expect(unified.items.first.bibleAnchor?.verseEnd, 17);
     expect(unified.items.first.layoutHint?.presentationSlideRegion, 'right');
   });

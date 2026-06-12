@@ -71,12 +71,7 @@ class PresentationGroupingAdapter {
         legacyGroupKey: legacyGroupKey,
         slideNumber: index + 1,
         layoutType: layoutType,
-        items: _itemsForEntries(
-          draft.entries,
-          slideId,
-          layoutType,
-          bookNames,
-        ),
+        items: _itemsForEntries(draft.entries, slideId, layoutType, bookNames),
       );
       slides.add(slide);
       _logSlide(slide, index);
@@ -132,8 +127,8 @@ class PresentationGroupingAdapter {
           layoutRegion: PresentationLayoutRegion.full,
           layoutOrder: 0,
           itemKind: PresentationItemKind.note,
-          itemPlacement: entry.presentationSlideRegion ??
-              PresentationItemPlacement.auto,
+          itemPlacement:
+              entry.presentationSlideRegion ?? PresentationItemPlacement.auto,
           displayTitle:
               displayData?.displayTitle ??
               _displayTitleForEntry(entry, bookNames: bookNames),
@@ -338,8 +333,10 @@ class PresentationGroupingAdapter {
         return displayTitle;
       }
       final entry = groupedEntry.entry;
-      final bibleTitle = _displayTitleForEntry(entry, bookNames: bookNames)
-          .trim();
+      final bibleTitle = _displayTitleForEntry(
+        entry,
+        bookNames: bookNames,
+      ).trim();
       if (bibleTitle.isNotEmpty &&
           (_isBibleVerseEntry(entry) || _isNoteOnlyEntry(entry))) {
         return bibleTitle;
@@ -724,46 +721,27 @@ class PresentationGroupingAdapter {
 
     final noteMetadata = metadata ?? _elibraryNoteMetadata(entry);
     if (noteMetadata == null) return '';
-
-    final sourceReferenceText = noteMetadata.sourceReferenceText.trim();
-    final safeReferenceText = _safeELibraryReferenceText(sourceReferenceText);
-    if (safeReferenceText.isNotEmpty) {
-      return safeReferenceText;
-    }
-
-    final sourceLocation = noteMetadata.sourceLocation.trim();
-    final safeLocationText = _safeELibraryReferenceText(sourceLocation);
-    if (safeLocationText.isNotEmpty) {
-      return safeLocationText;
-    }
-
-    final bookAbbreviation = noteMetadata.sourceTitleAcronym.trim().isNotEmpty
-        ? _safeELibraryBookAbbreviation(noteMetadata.sourceTitleAcronym.trim())
-        : _safeELibraryBookAbbreviation(lookup?.bookAbbreviation ?? '');
     final lookupCitation = lookup?.citation;
     final citationText = noteMetadata.citationText.isNotEmpty
         ? noteMetadata.citationText
         : lookupCitation == null
         ? ''
         : '${lookupCitation.pageNumber}.${lookupCitation.paragraphNumber}';
-    if (bookAbbreviation.isNotEmpty && citationText.isNotEmpty) {
-      return '$bookAbbreviation $citationText';
-    }
-    if (citationText.isNotEmpty) {
-      return citationText;
-    }
-
-    final paragraphIndex =
-        noteMetadata.sourceParagraphNumber ??
-        noteMetadata.sourceParagraphIndex ??
-        lookup?.parsed?.paragraphIndex;
-    if (bookAbbreviation.isNotEmpty &&
-        paragraphIndex != null &&
-        paragraphIndex > 0) {
-      return '$bookAbbreviation ¶$paragraphIndex';
-    }
-
-    return bookAbbreviation;
+    return libraryUserFacingELibraryCitationText(
+      sourceTitle: noteMetadata.sourceTitle,
+      sourceTitleAcronym: noteMetadata.sourceTitleAcronym,
+      sourceLocation: noteMetadata.sourceLocation,
+      sourceReferenceText: noteMetadata.sourceReferenceText,
+      fileName: noteMetadata.sourceRelativePath.trim().isNotEmpty
+          ? p.basename(noteMetadata.sourceRelativePath)
+          : null,
+      relativePath: noteMetadata.sourceRelativePath,
+      pageCitation: citationText.isNotEmpty ? citationText : null,
+      paragraphIndex:
+          noteMetadata.sourceParagraphNumber ??
+          noteMetadata.sourceParagraphIndex ??
+          lookup?.parsed?.paragraphIndex,
+    );
   }
 
   String _composeELibraryDisplayTitle({
@@ -990,25 +968,27 @@ class PresentationGroupingAdapter {
     final title = _safeELibraryTitle(metadata.sourceTitle);
     if (title.isNotEmpty) return title;
 
-    final abbreviation = metadata.sourceTitleAcronym.trim().isNotEmpty
-        ? _safeELibraryBookAbbreviation(metadata.sourceTitleAcronym.trim())
-        : _safeELibraryBookAbbreviation(lookup.bookAbbreviation ?? '');
     final citation = lookup.citation;
-    if (abbreviation.isNotEmpty) {
-      if (citation != null) {
-        return '$abbreviation ${citation.pageNumber}.${citation.paragraphNumber}';
-      }
-      final paragraphIndex =
+    final citationText = citation == null
+        ? ''
+        : '${citation.pageNumber}.${citation.paragraphNumber}';
+    return libraryUserFacingELibraryDisplayLabel(
+      sourceTitle: metadata.sourceTitle,
+      sourceTitleAcronym: metadata.sourceTitleAcronym.isNotEmpty
+          ? metadata.sourceTitleAcronym
+          : (lookup.bookAbbreviation ?? ''),
+      sourceLocation: metadata.sourceLocation,
+      sourceReferenceText: metadata.sourceReferenceText,
+      fileName: metadata.sourceRelativePath.trim().isNotEmpty
+          ? p.basename(metadata.sourceRelativePath)
+          : null,
+      relativePath: metadata.sourceRelativePath,
+      pageCitation: citationText.isNotEmpty ? citationText : null,
+      paragraphIndex:
           metadata.sourceParagraphNumber ??
           metadata.sourceParagraphIndex ??
-          lookup.parsed?.paragraphIndex;
-      if (paragraphIndex != null && paragraphIndex > 0) {
-        return '$abbreviation ¶$paragraphIndex';
-      }
-      return abbreviation;
-    }
-
-    return 'eLibrary Quote';
+          lookup.parsed?.paragraphIndex,
+    );
   }
 
   bool _looksLikeInternalELibraryText(String value) {

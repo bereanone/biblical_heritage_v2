@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import 'tag_presentation_prep_models.dart';
 import 'tag_presentation_prep_state.dart';
+import 'presentation_ui_helpers.dart';
 
 class TagSlideNavigatorPanel extends StatefulWidget {
   const TagSlideNavigatorPanel({
     super.key,
     required this.workspace,
+    required this.fontScale,
     required this.onNewBlankSlide,
     required this.onPreviewSlide,
     required this.onChooseCardPressed,
@@ -19,9 +21,12 @@ class TagSlideNavigatorPanel extends StatefulWidget {
     required this.onUnmergePressed,
     required this.onCancelMergePressed,
     required this.canApplyMerge,
+    required this.onSavePresentation,
+    required this.onSavedPresentations,
   });
 
   final TagPresentationPrepWorkspace workspace;
+  final double fontScale;
   final VoidCallback onNewBlankSlide;
   final VoidCallback onPreviewSlide;
   final VoidCallback onChooseCardPressed;
@@ -35,6 +40,8 @@ class TagSlideNavigatorPanel extends StatefulWidget {
   final VoidCallback onUnmergePressed;
   final VoidCallback onCancelMergePressed;
   final bool canApplyMerge;
+  final VoidCallback onSavePresentation;
+  final VoidCallback onSavedPresentations;
 
   @override
   State<TagSlideNavigatorPanel> createState() => _TagSlideNavigatorPanelState();
@@ -57,17 +64,23 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
     final rows = widget.workspace.selectedGridRows;
     final columns = widget.workspace.selectedGridColumns;
     final aspectRatio = widget.workspace.selectedAspectRatioSetting;
+    final headerStyle = presentationTextStyle(
+      context,
+      theme.textTheme.titleMedium,
+      widget.fontScale,
+      fontWeight: FontWeight.w700,
+      minFontSize: 17,
+      maxFontSize: 26,
+    );
     final headerRow = Row(
       children: [
         Expanded(
           child: Text(
             'Slide Controls',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+            style: headerStyle,
           ),
         ),
-        _SlideBadge(label: selectedSlideLabel),
+        _SlideBadge(label: selectedSlideLabel, fontScale: widget.fontScale),
       ],
     );
     return Card(
@@ -133,38 +146,60 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
     required TagPresentationAspectRatio aspectRatio,
   }) {
     final theme = Theme.of(context);
+    final buttonTextStyle = presentationTextStyle(
+      context,
+      theme.textTheme.labelLarge,
+      widget.fontScale,
+      fontWeight: FontWeight.w700,
+      minFontSize: 14.5,
+      maxFontSize: 18.5,
+    );
+    final dropdownItemStyle = presentationTextStyle(
+      context,
+      theme.textTheme.bodyMedium,
+      widget.fontScale,
+      minFontSize: 14,
+      maxFontSize: 18,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           'Choose a slide, adjust the grid, open a blank slide, or preview the active canvas.',
-          style: theme.textTheme.bodySmall,
+          style: presentationTextStyle(
+            context,
+            theme.textTheme.bodyMedium,
+            widget.fontScale,
+            minFontSize: 14,
+            maxFontSize: 18,
+          ),
         ),
         const SizedBox(height: 12),
         _DropdownRow<TagPresentationAspectRatioPreset>(
           label: 'Display target',
+          fontScale: widget.fontScale,
           value: aspectRatio.preset,
-          items: const [
+          items: [
             DropdownMenuItem(
               value: TagPresentationAspectRatioPreset.sixteenByNine,
-              child: Text('16:9 Widescreen'),
+              child: Text('16:9 Widescreen', style: dropdownItemStyle),
             ),
             DropdownMenuItem(
               value: TagPresentationAspectRatioPreset.fourByThree,
-              child: Text('4:3 Projector'),
+              child: Text('4:3 Projector', style: dropdownItemStyle),
             ),
             DropdownMenuItem(
               value: TagPresentationAspectRatioPreset.sixteenByTen,
-              child: Text('16:10'),
+              child: Text('16:10', style: dropdownItemStyle),
             ),
             DropdownMenuItem(
               value: TagPresentationAspectRatioPreset.nineBySixteen,
-              child: Text('9:16 Phone Portrait'),
+              child: Text('9:16 Phone Portrait', style: dropdownItemStyle),
             ),
             DropdownMenuItem(
               value: TagPresentationAspectRatioPreset.custom,
-              child: Text('Custom'),
+              child: Text('Custom', style: dropdownItemStyle),
             ),
           ],
           onChanged: widget.onAspectRatioPresetChanged,
@@ -178,6 +213,13 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
               icon: const Icon(Icons.tune),
               label: Text(
                 'Custom ${aspectRatio.customAspectRatio.toStringAsFixed(2)}:1',
+                style: presentationTextStyle(
+                  context,
+                  theme.textTheme.labelLarge,
+                  widget.fontScale,
+                  minFontSize: 13.5,
+                  maxFontSize: 17.5,
+                ),
               ),
             ),
           ),
@@ -185,6 +227,7 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
         const SizedBox(height: 12),
         _DimensionStepper(
           label: 'Rows',
+          fontScale: widget.fontScale,
           value: rows,
           min: 1,
           max: 4,
@@ -194,6 +237,7 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
         const SizedBox(height: 8),
         _DimensionStepper(
           label: 'Columns',
+          fontScale: widget.fontScale,
           value: columns,
           min: 1,
           max: 4,
@@ -209,7 +253,13 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
           workspace.mergeSelectionMode
               ? 'Select adjacent cells that form a rectangle.'
               : 'Tap a cell to select it. Merge zones can be created from adjacent cells.',
-          style: theme.textTheme.bodySmall,
+          style: presentationTextStyle(
+            context,
+            theme.textTheme.bodyMedium,
+            widget.fontScale,
+            minFontSize: 14,
+            maxFontSize: 18,
+          ),
         ),
         const SizedBox(height: 12),
         if (workspace.hasSelectedZone) ...[
@@ -217,19 +267,26 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
             onPressed: widget.onChooseCardPressed,
             icon: const Icon(Icons.playlist_add_outlined),
             label: const Text('Choose Card'),
+            style: FilledButton.styleFrom(textStyle: buttonTextStyle),
           ),
           const SizedBox(height: 6),
           FilledButton.tonalIcon(
             onPressed: widget.onAddTitlePressed,
             icon: const Icon(Icons.title_outlined),
             label: const Text('Header / Footer'),
+            style: FilledButton.styleFrom(textStyle: buttonTextStyle),
           ),
           const SizedBox(height: 6),
           Text(
             workspace.selectedZoneLabel,
-            style: theme.textTheme.labelMedium?.copyWith(
+            style: presentationTextStyle(
+              context,
+              theme.textTheme.labelLarge,
+              widget.fontScale,
               color: theme.colorScheme.outline,
               fontWeight: FontWeight.w600,
+              minFontSize: 12.5,
+              maxFontSize: 15.5,
             ),
           ),
         ] else ...[
@@ -237,19 +294,26 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
             onPressed: null,
             icon: const Icon(Icons.playlist_add_outlined),
             label: const Text('Choose Card'),
+            style: OutlinedButton.styleFrom(textStyle: buttonTextStyle),
           ),
           const SizedBox(height: 6),
           FilledButton.tonalIcon(
             onPressed: widget.onAddTitlePressed,
             icon: const Icon(Icons.title_outlined),
             label: const Text('Header / Footer'),
+            style: FilledButton.styleFrom(textStyle: buttonTextStyle),
           ),
           const SizedBox(height: 6),
           Text(
             'Header/Footer stays outside the grid. Normal title cards can still be added for later placement.',
-            style: theme.textTheme.labelMedium?.copyWith(
+            style: presentationTextStyle(
+              context,
+              theme.textTheme.labelLarge,
+              widget.fontScale,
               color: theme.colorScheme.outline,
               fontWeight: FontWeight.w600,
+              minFontSize: 12.5,
+              maxFontSize: 15.5,
             ),
           ),
         ],
@@ -257,9 +321,14 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
           const SizedBox(height: 8),
           Text(
             workspace.mergeSelectionMessage!,
-            style: theme.textTheme.bodySmall?.copyWith(
+            style: presentationTextStyle(
+              context,
+              theme.textTheme.bodyMedium,
+              widget.fontScale,
               color: theme.colorScheme.error,
               fontWeight: FontWeight.w600,
+              minFontSize: 14,
+              maxFontSize: 18,
             ),
           ),
         ],
@@ -280,6 +349,7 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
               label: Text(
                 workspace.mergeSelectionMode ? 'Apply Merge' : 'Merge Cells',
               ),
+              style: FilledButton.styleFrom(textStyle: buttonTextStyle),
             ),
             OutlinedButton.icon(
               onPressed: workspace.mergeSelectionMode
@@ -295,6 +365,7 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
               label: Text(
                 workspace.mergeSelectionMode ? 'Cancel Merge' : 'Unmerge',
               ),
+              style: OutlinedButton.styleFrom(textStyle: buttonTextStyle),
             ),
           ],
         ),
@@ -307,16 +378,27 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
               onPressed: widget.onNewBlankSlide,
               icon: const Icon(Icons.add),
               label: const Text('New Blank Slide'),
+              style: FilledButton.styleFrom(textStyle: buttonTextStyle),
             ),
             OutlinedButton.icon(
               onPressed: canPreview ? widget.onPreviewSlide : null,
               icon: const Icon(Icons.visibility_outlined),
               label: const Text('Preview Slide'),
+              style: OutlinedButton.styleFrom(textStyle: buttonTextStyle),
             ),
             OutlinedButton.icon(
-              onPressed: null,
+              onPressed: workspace.hasSlides
+                  ? widget.onSavePresentation
+                  : null,
               icon: const Icon(Icons.save_outlined),
-              label: const Text('Save Slide (Coming Later)'),
+              label: const Text('Save Presentation'),
+              style: OutlinedButton.styleFrom(textStyle: buttonTextStyle),
+            ),
+            OutlinedButton.icon(
+              onPressed: widget.onSavedPresentations,
+              icon: const Icon(Icons.folder_open_outlined),
+              label: const Text('Saved Presentations'),
+              style: OutlinedButton.styleFrom(textStyle: buttonTextStyle),
             ),
           ],
         ),
@@ -328,12 +410,14 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
 class _DropdownRow<T> extends StatelessWidget {
   const _DropdownRow({
     required this.label,
+    required this.fontScale,
     required this.value,
     required this.items,
     required this.onChanged,
   });
 
   final String label;
+  final double fontScale;
   final T value;
   final List<DropdownMenuItem<T>> items;
   final ValueChanged<T?> onChanged;
@@ -346,8 +430,13 @@ class _DropdownRow<T> extends StatelessWidget {
       children: [
         Text(
           label,
-          style: theme.textTheme.labelLarge?.copyWith(
+          style: presentationTextStyle(
+            context,
+            theme.textTheme.labelLarge,
+            fontScale,
             fontWeight: FontWeight.w700,
+            minFontSize: 13.5,
+            maxFontSize: 17.5,
           ),
         ),
         const SizedBox(height: 4),
@@ -355,6 +444,13 @@ class _DropdownRow<T> extends StatelessWidget {
           initialValue: value,
           items: items,
           onChanged: onChanged,
+          style: presentationTextStyle(
+            context,
+            theme.textTheme.bodyMedium,
+            fontScale,
+            minFontSize: 14,
+            maxFontSize: 18,
+          ),
           isDense: true,
           decoration: const InputDecoration(
             border: OutlineInputBorder(),
@@ -370,6 +466,7 @@ class _DropdownRow<T> extends StatelessWidget {
 class _DimensionStepper extends StatelessWidget {
   const _DimensionStepper({
     required this.label,
+    required this.fontScale,
     required this.value,
     required this.min,
     required this.max,
@@ -378,6 +475,7 @@ class _DimensionStepper extends StatelessWidget {
   });
 
   final String label;
+  final double fontScale;
   final int value;
   final int min;
   final int max;
@@ -387,60 +485,142 @@ class _DimensionStepper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Row(
-      children: [
-        SizedBox(
-          width: 82,
-          child: Text(
-            '$label:',
-            style: theme.textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w700,
+    final buttonExtent = presentationScaledSize(
+      context,
+      44,
+      fontScale,
+      min: 42,
+      max: 52,
+    );
+    final iconSize = presentationScaledSize(
+      context,
+      22,
+      fontScale,
+      min: 18,
+      max: 26,
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 360;
+        final labelStyle = presentationTextStyle(
+          context,
+          theme.textTheme.labelLarge,
+          fontScale,
+          fontWeight: FontWeight.w700,
+          minFontSize: 13.5,
+          maxFontSize: 17.5,
+        );
+        final valueStyle = presentationTextStyle(
+          context,
+          theme.textTheme.labelLarge,
+          fontScale,
+          fontWeight: FontWeight.w700,
+          minFontSize: 13.5,
+          maxFontSize: 17.5,
+        );
+        final rangeStyle = presentationTextStyle(
+          context,
+          theme.textTheme.labelLarge ?? theme.textTheme.labelSmall,
+          fontScale,
+          color: theme.colorScheme.outline,
+          minFontSize: 12.5,
+          maxFontSize: 15.5,
+        );
+
+        if (isNarrow) {
+          return Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text('$label:', style: labelStyle),
+              IconButton(
+                onPressed: onDecrement,
+                constraints: BoxConstraints.tightFor(
+                  width: buttonExtent,
+                  height: buttonExtent,
+                ),
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                icon: Icon(Icons.remove_circle_outline, size: iconSize),
+                tooltip: 'Decrease $label',
+              ),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Text('$value', style: valueStyle),
+                ),
+              ),
+              IconButton(
+                onPressed: onIncrement,
+                constraints: BoxConstraints.tightFor(
+                  width: buttonExtent,
+                  height: buttonExtent,
+                ),
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                icon: Icon(Icons.add_circle_outline, size: iconSize),
+                tooltip: 'Increase $label',
+              ),
+              Text('$min-$max', style: rangeStyle),
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            SizedBox(width: 90, child: Text('$label:', style: labelStyle)),
+            IconButton(
+              onPressed: onDecrement,
+              constraints: BoxConstraints.tightFor(
+                width: buttonExtent,
+                height: buttonExtent,
+              ),
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.remove_circle_outline, size: iconSize),
+              tooltip: 'Decrease $label',
             ),
-          ),
-        ),
-        IconButton(
-          onPressed: onDecrement,
-          visualDensity: VisualDensity.compact,
-          icon: const Icon(Icons.remove_circle_outline),
-          tooltip: 'Decrease $label',
-        ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            child: Text(
-              '$value',
-              style: theme.textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w700,
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Text('$value', style: valueStyle),
               ),
             ),
-          ),
-        ),
-        IconButton(
-          onPressed: onIncrement,
-          visualDensity: VisualDensity.compact,
-          icon: const Icon(Icons.add_circle_outline),
-          tooltip: 'Increase $label',
-        ),
-        const Spacer(),
-        Text(
-          '$min-$max',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.outline,
-          ),
-        ),
-      ],
+            IconButton(
+              onPressed: onIncrement,
+              constraints: BoxConstraints.tightFor(
+                width: buttonExtent,
+                height: buttonExtent,
+              ),
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.add_circle_outline, size: iconSize),
+              tooltip: 'Increase $label',
+            ),
+            const Spacer(),
+            Text('$min-$max', style: rangeStyle),
+          ],
+        );
+      },
     );
   }
 }
 
 class _SlideBadge extends StatelessWidget {
-  const _SlideBadge({required this.label});
+  const _SlideBadge({required this.label, required this.fontScale});
 
   final String label;
+  final double fontScale;
 
   @override
   Widget build(BuildContext context) {
@@ -457,9 +637,14 @@ class _SlideBadge extends StatelessWidget {
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(
+            style: presentationTextStyle(
               context,
-            ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
+              Theme.of(context).textTheme.labelLarge,
+              fontScale,
+              fontWeight: FontWeight.w700,
+              minFontSize: 12.5,
+              maxFontSize: 15.5,
+            ),
           ),
         ),
       ),

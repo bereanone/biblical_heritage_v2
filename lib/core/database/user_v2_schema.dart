@@ -12,6 +12,7 @@ class UserV2Schema {
       await _ensureElibraryRefIndex(db);
       await _ensureLibraryTextBlocks(db);
       await _ensureElibraryMarkups(db);
+      await _ensurePresentationPrepTables(db);
       await _seedDevicesTable(db, deviceId: deviceId);
       await _seedSyncState(db, deviceId: deviceId);
     });
@@ -946,6 +947,79 @@ class UserV2Schema {
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_elibrary_markups_item_type
       ON elibrary_markups (library_item_id, markup_type, deleted_at)
+    ''');
+  }
+
+  static Future<void> _ensurePresentationPrepTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS presentation_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        source_tag_id TEXT,
+        source_tag_key TEXT,
+        source_tag_name TEXT,
+        default_display_target TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS presentation_prep_slides (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        presentation_id INTEGER NOT NULL,
+        slide_order INTEGER NOT NULL,
+        title TEXT,
+        top_header_text TEXT,
+        bottom_footer_text TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS presentation_prep_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slide_id INTEGER NOT NULL,
+        display_target TEXT NOT NULL,
+        aspect_ratio_preset TEXT NOT NULL,
+        aspect_ratio_value REAL NOT NULL,
+        rows INTEGER NOT NULL,
+        columns INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS presentation_prep_zones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        profile_id INTEGER NOT NULL,
+        zone_key TEXT NOT NULL,
+        zone_type TEXT NOT NULL,
+        start_row INTEGER NOT NULL,
+        start_column INTEGER NOT NULL,
+        row_span INTEGER NOT NULL,
+        column_span INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS presentation_prep_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slide_id INTEGER NOT NULL,
+        zone_key TEXT NOT NULL,
+        item_order INTEGER NOT NULL,
+        source_item_id TEXT,
+        item_type TEXT,
+        title_override TEXT,
+        body_override TEXT,
+        media_path TEXT,
+        media_caption TEXT,
+        style_overrides_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
     ''');
   }
 

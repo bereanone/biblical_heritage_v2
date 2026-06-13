@@ -48,10 +48,114 @@ class ViewerBottomBar extends StatelessWidget {
       color: backgroundColor,
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 700;
           final isCompact = constraints.maxWidth < 320;
           final sidePadding = isCompact ? 4.0 : 8.0;
+
+          if (!isWide) {
+            // Phone layout: Row with two equal Expanded clusters so
+            // Commentary stays geometrically centered regardless of cluster widths.
+            // All buttons use compact sizing; theme and eLibrary are icon-only.
+            return SafeArea(
+              top: false,
+              child: SizedBox(
+                height: 56,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: sidePadding),
+                  child: Row(
+                    children: [
+                      // Left cluster
+                      Expanded(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.start,
+                          children: [
+                            IconButton(
+                              tooltip: 'History',
+                              onPressed: onHistory,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints.tightFor(
+                                width: 36,
+                                height: 36,
+                              ),
+                              icon: Icon(
+                                Icons.history_rounded,
+                                color: buttonColor,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(width: 2),
+                            _FontScaleButton(
+                              onPressed: canDecreaseFont ? onDecreaseFont : null,
+                              color: buttonColor,
+                              baseSize: 14,
+                              sign: 'A-',
+                              signSize: 10,
+                              compact: true,
+                            ),
+                            const SizedBox(width: 2),
+                            _FontScaleButton(
+                              onPressed: canIncreaseFont ? onIncreaseFont : null,
+                              color: buttonColor,
+                              baseSize: 19,
+                              sign: 'A+',
+                              signSize: 11,
+                              compact: true,
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Commentary — permanently centered between the two Expanded clusters
+                      _BottomIconButton(
+                        tooltip: 'Commentary',
+                        icon: Icons.menu_book_outlined,
+                        color: buttonColor,
+                        compact: true,
+                        onPressed: onCommentary,
+                      ),
+                      // Right cluster
+                      Expanded(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            _LibraryButton(
+                              compact: true,
+                              onPressed: onLibrary,
+                            ),
+                            const SizedBox(width: 2),
+                            _InterlinearToggleButton(
+                              bookNumber: bookNumber,
+                              interlinearEnabled: interlinearEnabled,
+                              compact: true,
+                              baseColor: buttonColor,
+                              onToggleInterlinear: onToggleInterlinear,
+                            ),
+                            const SizedBox(width: 2),
+                            _ThemeToggleButton(
+                              themeMode: themeMode,
+                              compact: true,
+                              onToggleThemeMode: onToggleThemeMode,
+                            ),
+                            const SizedBox(width: 2),
+                            _BottomIconButton(
+                              tooltip: 'Mode',
+                              icon: Icons.settings_rounded,
+                              color: buttonColor,
+                              compact: true,
+                              onPressed: onMode,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+
+          // Wide layout (iPad / macOS): Stack/Positioned with full-size buttons.
           final controlGap = isCompact ? 4.0 : 6.0;
-          final libraryAlignmentX = isCompact ? 0.2 : 0.42;
+          const libraryAlignmentX = 0.42;
 
           return SafeArea(
             top: false,
@@ -113,7 +217,7 @@ class ViewerBottomBar extends StatelessWidget {
                       ),
                     ),
                     Align(
-                      alignment: Alignment(libraryAlignmentX, 0),
+                      alignment: const Alignment(libraryAlignmentX, 0),
                       child: _LibraryButton(
                         compact: isCompact,
                         onPressed: onLibrary,

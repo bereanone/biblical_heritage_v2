@@ -9,12 +9,9 @@ class _LibraryButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final iconColor = const Color(0xFF2E6FD6);
-    final textStyle = TextStyle(
-      color: iconColor,
-      fontWeight: FontWeight.w700,
-      fontSize: compact ? 9 : 10,
-      height: 1,
-    );
+    // Show the text label only on wide screens (iPad / macOS).
+    final showLabel =
+        !compact && MediaQuery.sizeOf(context).width >= 700;
 
     return Tooltip(
       message: 'eLibrary',
@@ -27,19 +24,27 @@ class _LibraryButton extends StatelessWidget {
             onTap: onPressed,
             borderRadius: BorderRadius.circular(10),
             child: SizedBox(
-              width: compact ? 44 : 58,
-              height: compact ? 44 : 50,
+              width: compact ? 38 : (showLabel ? 58 : 44),
+              height: compact ? 38 : (showLabel ? 50 : 44),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
-                    Icons.library_books_outlined,
+                    Icons.local_library,
                     color: iconColor,
                     size: compact ? 20 : 22,
                   ),
-                  if (!compact) ...[
+                  if (showLabel) ...[
                     const SizedBox(height: 1),
-                    Text('eLibrary', style: textStyle),
+                    Text(
+                      'eLibrary',
+                      style: TextStyle(
+                        color: iconColor,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 10,
+                        height: 1,
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -67,7 +72,9 @@ class _ThemeToggleButton extends StatelessWidget {
     final isNight = themeMode == AppThemeMode.night;
     final label = isNight ? 'Sepia' : 'Night';
     final icon = isNight ? Icons.wb_sunny_outlined : Icons.nightlight_round;
-    final showLabel = !compact;
+    // Show the text label only on wide screens (iPad / macOS).
+    final showLabel =
+        !compact && MediaQuery.sizeOf(context).width >= 700;
 
     return Tooltip(
       message: 'Switch to $label mode',

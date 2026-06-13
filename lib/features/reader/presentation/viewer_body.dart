@@ -34,6 +34,7 @@ class ViewerBody extends StatefulWidget {
     this.onSelectVerseNumber = _noopVerseSelection,
     this.onSelectTokenLongPress,
     this.onSelectTokenLongPressMove,
+    this.onSelectVerseNumberLongPressMove,
     this.onTapSelectedRange = _noop,
     this.rangeSelection = const ViewerRangeSelection(),
     this.highlightRefreshTick = 0,
@@ -52,6 +53,7 @@ class ViewerBody extends StatefulWidget {
   final void Function(VerseLine line, int tokenIndex)? onSelectTokenLongPress;
   final void Function(VerseLine line, int tokenIndex)?
   onSelectTokenLongPressMove;
+  final ValueChanged<VerseLine>? onSelectVerseNumberLongPressMove;
   final VoidCallback onTapSelectedRange;
   final ViewerRangeSelection rangeSelection;
   final int highlightRefreshTick;
@@ -79,6 +81,7 @@ class _ViewerBodyState extends State<ViewerBody> {
   final Map<String, Map<String, List<VerseHighlightRecord>>>
   _tokenHighlightCache = <String, Map<String, List<VerseHighlightRecord>>>{};
 
+  final Map<int, GlobalKey> _verseKeys = {};
   Timer? _scrollDebounce;
   Timer? _geometryDebounce;
   int? _lastScrolledBlockId;
@@ -121,6 +124,78 @@ class _ViewerBodyState extends State<ViewerBody> {
     _geometryDebounce?.cancel();
     _itemPositionsListener.itemPositions.removeListener(_onScroll);
     super.dispose();
+  }
+
+  GlobalKey _keyForBlock(int blockId) =>
+      _verseKeys.putIfAbsent(blockId, GlobalKey.new);
+
+  int? _blockIdAtGlobalPosition(Offset globalPosition) {
+    int? nearest;
+    var nearestDist = double.infinity;
+    for (final entry in _verseKeys.entries) {
+      final ro = entry.value.currentContext?.findRenderObject() as RenderBox?;
+      if (ro == null || !ro.attached) continue;
+      final local = ro.globalToLocal(globalPosition);
+      final size = ro.size;
+      if (local.dy >= 0 && local.dy <= size.height) return entry.key;
+      final dist = local.dy < 0 ? -local.dy : local.dy - size.height;
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = entry.key;
+      }
+    }
+    return nearest;
+  }
+
+  void _handleCrossVerseDrag(LongPressMoveUpdateDetails details) {
+    final onMove = widget.onSelectTokenLongPressMove;
+    if (onMove == null) return;
+    final blockId = _blockIdAtGlobalPosition(details.globalPosition);
+    if (blockId == null) return;
+    final targetLine = widget.data.getBlock(blockId);
+    if (targetLine == null) return;
+    final ro = _verseKeys[blockId]?.currentContext?.findRenderObject()
+        as RenderBox?;
+    if (ro == null || !ro.attached) return;
+    final localPos = ro.globalToLocal(details.globalPosition);
+    final theme = Theme.of(context);
+    final bodyStyle = (theme.textTheme.bodyLarge ?? const TextStyle()).copyWith(
+      fontSize: (theme.textTheme.bodyLarge?.fontSize ?? 16) * widget.fontScale,
+      height: 1.38,
+    );
+    final brightness = theme.brightness;
+    final redLetterColor = brightness == Brightness.dark
+        ? const Color(0xFFFF3B30)
+        : const Color(0xFFC62828);
+    // Approximate gutter width; the text hit-test clamps via nearest-token fallback.
+    final gutterWidth = (48.0 * widget.fontScale).clamp(0.0, ro.size.width);
+    final textWidth = (ro.size.width - gutterWidth).clamp(1.0, double.infinity);
+    final textLocalPos = Offset(
+      (localPos.dx - gutterWidth).clamp(0.0, textWidth),
+      localPos.dy.clamp(0.0, ro.size.height),
+    );
+    final tokenIndex = hitTestViewerMarkupTokenIndex(
+      html: targetLine.html,
+      fallbackText: targetLine.text,
+      baseStyle: bodyStyle,
+      redLetterColor: redLetterColor,
+      localPosition: textLocalPos,
+      maxWidth: textWidth,
+      textDirection: Directionality.of(context),
+      textAlign: TextAlign.start,
+    );
+    if (tokenIndex == null) return;
+    onMove(targetLine, tokenIndex);
+  }
+
+  void _handleVerseGutterDrag(LongPressMoveUpdateDetails details) {
+    final onMove = widget.onSelectVerseNumberLongPressMove;
+    if (onMove == null) return;
+    final blockId = _blockIdAtGlobalPosition(details.globalPosition);
+    if (blockId == null) return;
+    final targetLine = widget.data.getBlock(blockId);
+    if (targetLine == null) return;
+    onMove(targetLine);
   }
 
   void _onScroll() {
@@ -288,68 +363,76 @@ class _ViewerBodyState extends State<ViewerBody> {
                   previousVerseLine == null ||
                   previousVerseLine.bookNumber != line.bookNumber ||
                   previousVerseLine.chapter != line.chapter;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (acrostic != null)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: ViewerAcrosticBlock(
-                          hebrew: acrostic.hebrew,
-                          transliteration: acrostic.transliteration,
-                          fontScale: widget.fontScale,
-                        ),
-                      ),
-                    for (final heading in headings)
-                      if (heading.trim().isNotEmpty)
+              return KeyedSubtree(
+                key: _keyForBlock(blockId),
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (acrostic != null)
                         Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          child: ViewerHeadingBlock(
-                            text: heading,
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: ViewerAcrosticBlock(
+                            hebrew: acrostic.hebrew,
+                            transliteration: acrostic.transliteration,
                             fontScale: widget.fontScale,
                           ),
                         ),
-                    ViewerVerseLine(
-                      line: line,
-                      style: bodyStyle,
-                      isSelected: selectedBlockId == blockId,
-                      isRangeSelected: rangeSelected,
-                      geometryRegistry: _enableTextRangeGeometry
-                          ? _geometryRegistry
-                          : null,
-                      geometryScopeId: _enableTextRangeGeometry
-                          ? geometryScopeId
-                          : null,
-                      geometryRevision: _enableTextRangeGeometry
-                          ? _geometryTick
-                          : 0,
-                      highlight:
-                          (cachedHighlights ??
-                              const <String, VerseHighlightRecord>{})[verseKey],
-                      tokenHighlights:
-                          (cachedTokenHighlights ??
-                              const <
-                                String,
-                                List<VerseHighlightRecord>
-                              >{})[verseKey] ??
-                          const <VerseHighlightRecord>[],
-                      showChapterNumber: showChapterNumber,
-                      startsInRedLetter:
-                          blockContext?.startsInRedLetter ?? false,
-                      onTap: () => widget.onSelectVerse(line),
-                      onVerseNumberLongPress: () =>
-                          widget.onSelectVerseNumber(line),
-                      rangeSelection: widget.rangeSelection,
-                      onTokenLongPress: (tokenIndex) {
-                        widget.onSelectTokenLongPress?.call(line, tokenIndex);
-                      },
-                      onTokenLongPressMove: (tokenIndex) {
-                        widget.onSelectTokenLongPressMove?.call(line, tokenIndex);
-                      },
-                    ),
-                  ],
+                      for (final heading in headings)
+                        if (heading.trim().isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: ViewerHeadingBlock(
+                              text: heading,
+                              fontScale: widget.fontScale,
+                            ),
+                          ),
+                      ViewerVerseLine(
+                        line: line,
+                        style: bodyStyle,
+                        isSelected: selectedBlockId == blockId,
+                        isRangeSelected: rangeSelected,
+                        geometryRegistry: _enableTextRangeGeometry
+                            ? _geometryRegistry
+                            : null,
+                        geometryScopeId: _enableTextRangeGeometry
+                            ? geometryScopeId
+                            : null,
+                        geometryRevision: _enableTextRangeGeometry
+                            ? _geometryTick
+                            : 0,
+                        highlight:
+                            (cachedHighlights ??
+                                const <String, VerseHighlightRecord>{})[verseKey],
+                        tokenHighlights:
+                            (cachedTokenHighlights ??
+                                const <
+                                  String,
+                                  List<VerseHighlightRecord>
+                                >{})[verseKey] ??
+                            const <VerseHighlightRecord>[],
+                        showChapterNumber: showChapterNumber,
+                        startsInRedLetter:
+                            blockContext?.startsInRedLetter ?? false,
+                        onTap: () => widget.onSelectVerse(line),
+                        onVerseNumberLongPress: () =>
+                            widget.onSelectVerseNumber(line),
+                        onVerseNumberLongPressMoveDetails:
+                            widget.onSelectVerseNumberLongPressMove != null
+                            ? _handleVerseGutterDrag
+                            : null,
+                        rangeSelection: widget.rangeSelection,
+                        onTokenLongPress: (tokenIndex) {
+                          widget.onSelectTokenLongPress?.call(line, tokenIndex);
+                        },
+                        onTokenLongPressMoveDetails:
+                            widget.onSelectTokenLongPressMove != null
+                            ? _handleCrossVerseDrag
+                            : null,
+                      ),
+                    ],
+                  ),
                 ),
               );
             },

@@ -237,6 +237,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
                           _handleSelectedVisibilityChanged,
                       onSelectVerse: _selectLine,
                       onSelectVerseNumber: _selectMarkupAnchor,
+                      onSelectVerseNumberLongPressMove: _dragVerseAnchor,
                       onSelectTokenLongPress: _selectTokenAnchor,
                       onSelectTokenLongPressMove: _dragTokenAnchor,
                       onTapSelectedRange: _openRangeActions,

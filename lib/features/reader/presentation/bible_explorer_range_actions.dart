@@ -112,9 +112,20 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
     setState(() {
       _rangeSelection = _rangeSelection.beginTokenRange(blockId, tokenIndex);
     });
-    _showRangeActionMessage(
-      'Token range start set. Long-press the ending word.',
-    );
+  }
+
+  void _dragVerseAnchor(VerseLine line) {
+    final blockId = line.blockId ?? 0;
+    if (blockId <= 0) return;
+    if (!_rangeSelection.hasSelection) {
+      setState(() {
+        _rangeSelection = _rangeSelection.beginVerseRange(blockId);
+      });
+      return;
+    }
+    setState(() {
+      _rangeSelection = _rangeSelection.completeVerseRange(blockId);
+    });
   }
 
   void _dragTokenAnchor(VerseLine line, int tokenIndex) {

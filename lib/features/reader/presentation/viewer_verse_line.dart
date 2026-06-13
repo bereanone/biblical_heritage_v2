@@ -24,6 +24,7 @@ class ViewerVerseLine extends StatelessWidget {
     this.isRangeSelected = false,
     required this.onTap,
     this.onVerseNumberLongPress,
+    this.onVerseNumberLongPressMoveDetails,
     this.rangeSelection,
     this.onTokenLongPress,
     this.onTokenLongPressMove,
@@ -44,6 +45,7 @@ class ViewerVerseLine extends StatelessWidget {
   final bool isRangeSelected;
   final VoidCallback onTap;
   final VoidCallback? onVerseNumberLongPress;
+  final ValueChanged<LongPressMoveUpdateDetails>? onVerseNumberLongPressMoveDetails;
   final ViewerRangeSelection? rangeSelection;
   final ValueChanged<int>? onTokenLongPress;
   final ValueChanged<int>? onTokenLongPressMove;
@@ -184,6 +186,7 @@ class ViewerVerseLine extends StatelessWidget {
                 isTagged: isTagged,
                 textDirection: textDirection,
                 onLongPress: onVerseNumberLongPress,
+                onLongPressMoveDetails: onVerseNumberLongPressMoveDetails,
               ),
               Expanded(child: textWidget),
             ],
@@ -222,6 +225,7 @@ class _VerseGutter extends StatelessWidget {
     required this.isTagged,
     required this.textDirection,
     this.onLongPress,
+    this.onLongPressMoveDetails,
   });
 
   final int chapter;
@@ -233,6 +237,7 @@ class _VerseGutter extends StatelessWidget {
   final bool isTagged;
   final TextDirection textDirection;
   final VoidCallback? onLongPress;
+  final ValueChanged<LongPressMoveUpdateDetails>? onLongPressMoveDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -272,6 +277,7 @@ class _VerseGutter extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onLongPress: onLongPress,
+      onLongPressMoveUpdate: onLongPressMoveDetails,
       child: SizedBox(
         width: width,
         child: Padding(

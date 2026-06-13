@@ -31,26 +31,104 @@ class _LibraryHeader extends StatelessWidget {
       null => theme.colorScheme.onSurfaceVariant,
     };
 
+    final bibleButton = FilledButton.tonalIcon(
+      onPressed: onOpenBible,
+      icon: const Icon(Icons.arrow_back),
+      label: Text(
+        'Bible',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: libraryControlTextStyle(
+          context,
+          theme.textTheme.labelLarge,
+          color: theme.colorScheme.onSurface,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      style: _libraryTonalButtonStyle(context),
+    );
+
+    final statusPill = Tooltip(
+      message: currentSelection == null
+          ? 'Choose a Library Root'
+          : '${currentSelection.statusLabel}\n${rootPath ?? 'No path selected.'}',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onOpenLibraryRootSetup,
+          borderRadius: BorderRadius.circular(999),
+          child: _StatusPill(
+            icon: hasRoot ? Icons.folder_open : Icons.folder_off_outlined,
+            label: label,
+            color: chipColor,
+          ),
+        ),
+      ),
+    );
+
+    final actionsMenu = _LibraryActionsMenu(
+      onSelected: (value) {
+        switch (value) {
+          case 'root':
+            onOpenLibraryRootSetup();
+            break;
+          case 'setup':
+            onOpenELibrarySetup();
+            break;
+          case 'refresh':
+            onRefresh();
+            break;
+        }
+      },
+    );
+
+    final isNarrow = MediaQuery.sizeOf(context).width < 600;
+
+    if (isNarrow) {
+      // Phone portrait: two-row layout to prevent right overflow.
+      // Row 1: back button + title (Expanded so it never overflows).
+      // Row 2: status pill + actions menu.
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              bibleButton,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'eLibrary',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: libraryScaledTextStyle(
+                    theme.textTheme.titleLarge,
+                    libraryTitleScale(fontScale),
+                    fontWeight: FontWeight.w800,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              statusPill,
+              const SizedBox(width: 8),
+              actionsMenu,
+            ],
+          ),
+        ],
+      );
+    }
+
+    // Wide layout (iPad / macOS): original single-row layout.
     return Row(
       children: [
         Padding(
           padding: const EdgeInsets.only(left: 48),
-          child: FilledButton.tonalIcon(
-            onPressed: onOpenBible,
-            icon: const Icon(Icons.arrow_back),
-            label: Text(
-              'Bible',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: libraryControlTextStyle(
-                context,
-                theme.textTheme.labelLarge,
-                color: theme.colorScheme.onSurface,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            style: _libraryTonalButtonStyle(context),
-          ),
+          child: bibleButton,
         ),
         const SizedBox(width: 12),
         Text(
@@ -63,39 +141,9 @@ class _LibraryHeader extends StatelessWidget {
           ),
         ),
         const Spacer(),
-        Tooltip(
-          message: currentSelection == null
-              ? 'Choose a Library Root'
-              : '${currentSelection.statusLabel}\n${rootPath ?? 'No path selected.'}',
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onOpenLibraryRootSetup,
-              borderRadius: BorderRadius.circular(999),
-              child: _StatusPill(
-                icon: hasRoot ? Icons.folder_open : Icons.folder_off_outlined,
-                label: label,
-                color: chipColor,
-              ),
-            ),
-          ),
-        ),
+        statusPill,
         const SizedBox(width: 8),
-        _LibraryActionsMenu(
-          onSelected: (value) {
-            switch (value) {
-              case 'root':
-                onOpenLibraryRootSetup();
-                break;
-              case 'setup':
-                onOpenELibrarySetup();
-                break;
-              case 'refresh':
-                onRefresh();
-                break;
-            }
-          },
-        ),
+        actionsMenu,
         const SizedBox(width: 8),
       ],
     );

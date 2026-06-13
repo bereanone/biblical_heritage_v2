@@ -87,6 +87,12 @@ class TagDialogHashTab extends StatelessWidget {
             final isNarrow = constraints.maxWidth < 460;
             final tagField = TextField(
               controller: tagController,
+              autocorrect: false,
+              enableSuggestions: false,
+              keyboardType: TextInputType.visiblePassword,
+              textCapitalization: TextCapitalization.none,
+              smartDashesType: SmartDashesType.disabled,
+              smartQuotesType: SmartQuotesType.disabled,
               style: TagDialogStyles.titleTextStyle(
                 theme,
                 fontScale,

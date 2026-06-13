@@ -728,6 +728,12 @@ class _HashTagDialogState extends State<HashTagDialog>
           content: TextField(
             controller: controller,
             autofocus: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            keyboardType: TextInputType.visiblePassword,
+            textCapitalization: TextCapitalization.none,
+            smartDashesType: SmartDashesType.disabled,
+            smartQuotesType: SmartQuotesType.disabled,
             decoration: InputDecoration(
               labelText: '$_tagLabel tag',
               border: OutlineInputBorder(),
@@ -1317,6 +1323,12 @@ class _HashTagDialogState extends State<HashTagDialog>
                   controller: controller,
                   autofocus: true,
                   textInputAction: TextInputAction.done,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  keyboardType: TextInputType.visiblePassword,
+                  textCapitalization: TextCapitalization.none,
+                  smartDashesType: SmartDashesType.disabled,
+                  smartQuotesType: SmartQuotesType.disabled,
                   decoration: InputDecoration(
                     labelText: 'Category name',
                     border: const OutlineInputBorder(),

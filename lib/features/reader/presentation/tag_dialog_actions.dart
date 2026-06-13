@@ -256,6 +256,12 @@ class TagDialogActions extends StatelessWidget {
             final isNarrow = constraints.maxWidth < 460;
             final tagField = TextField(
               controller: tagController,
+              autocorrect: false,
+              enableSuggestions: false,
+              keyboardType: TextInputType.visiblePassword,
+              textCapitalization: TextCapitalization.none,
+              smartDashesType: SmartDashesType.disabled,
+              smartQuotesType: SmartQuotesType.disabled,
               style: TagDialogStyles.titleTextStyle(
                 theme,
                 fontScale,
@@ -334,6 +340,12 @@ class TagDialogActions extends StatelessWidget {
         const SizedBox(height: 6),
         TextField(
           controller: categoryController,
+          autocorrect: false,
+          enableSuggestions: false,
+          keyboardType: TextInputType.visiblePassword,
+          textCapitalization: TextCapitalization.none,
+          smartDashesType: SmartDashesType.disabled,
+          smartQuotesType: SmartQuotesType.disabled,
           decoration: InputDecoration(
             labelText: 'Category',
             border: const OutlineInputBorder(),

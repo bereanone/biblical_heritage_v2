@@ -2575,6 +2575,12 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
                       return TextFormField(
                         controller: textController,
                         focusNode: focusNode,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        keyboardType: TextInputType.visiblePassword,
+                        textCapitalization: TextCapitalization.none,
+                        smartDashesType: SmartDashesType.disabled,
+                        smartQuotesType: SmartQuotesType.disabled,
                         decoration: const InputDecoration(
                           labelText: 'Move to category',
                           hintText: 'Type a name, or clear for None',
@@ -2671,6 +2677,12 @@ class _RenameTagDialogState extends State<_RenameTagDialog> {
         controller: _controller,
         autofocus: true,
         textInputAction: TextInputAction.done,
+        autocorrect: false,
+        enableSuggestions: false,
+        keyboardType: TextInputType.visiblePassword,
+        textCapitalization: TextCapitalization.none,
+        smartDashesType: SmartDashesType.disabled,
+        smartQuotesType: SmartQuotesType.disabled,
         decoration: const InputDecoration(
           labelText: '#tag',
           border: OutlineInputBorder(),

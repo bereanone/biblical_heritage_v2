@@ -599,6 +599,28 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   }
 
   Future<void> _deleteEntry(HashTagEntry entry) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Move to Trash?'),
+          content: const Text(
+            'Move this card to Trash? You can restore it later.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: TagDialogStyles.fittedButtonLabel('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: TagDialogStyles.fittedButtonLabel('Move to Trash'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) return;
     await widget.repository.deleteEntry(
       entry.id,
       normalized: entry.isNormalized,
@@ -2216,9 +2238,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                             ),
                                       ),
                                       IconButton(
-                                        tooltip: _isNoteOnlyEntry(entry)
-                                            ? 'Delete note'
-                                            : 'Delete verse',
+                                        tooltip: 'Move to Trash',
                                         onPressed: () => _deleteEntry(entry),
                                         icon: Icon(
                                           Icons.delete,

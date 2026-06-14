@@ -463,6 +463,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       FROM tag_items
       WHERE tag_group_id IN ($placeholders)
         AND COALESCE(deleted_at, '') = ''
+        AND COALESCE(trashed_at, '') = ''
       ORDER BY tag_group_id ASC, sort_order ASC, created_at ASC, id ASC
       ''', groupIds);
   }
@@ -1491,7 +1492,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           'note_text',
           'legacy_item_id',
         ],
-        where: 'tag_group_id = ? AND COALESCE(deleted_at, \'\') = \'\'',
+        where: "tag_group_id = ? AND COALESCE(deleted_at, '') = '' AND COALESCE(trashed_at, '') = ''",
         whereArgs: [groupId],
         orderBy: orderBy,
       );
@@ -2773,11 +2774,99 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   Future<void> deleteEntry(int id, {bool normalized = false}) async {
     await ensureSchema();
     final db = await _db();
+    final now = _utcNow();
+    final batchId = 'trash_${DateTime.now().millisecondsSinceEpoch}_$id';
     if (normalized) {
-      await db.delete('tag_items', where: 'rowid = ?', whereArgs: [id]);
+      final itemRows = await db.query(
+        'tag_items',
+        columns: ['id', 'tag_group_id'],
+        where: 'rowid = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      final itemId = itemRows.isEmpty ? null : itemRows.first['id']?.toString();
+      final tagGroupId =
+          itemRows.isEmpty ? null : itemRows.first['tag_group_id']?.toString();
+      await db.transaction((txn) async {
+        await txn.update(
+          'tag_items',
+          {
+            'trashed_at': now,
+            'trashed_reason': 'user_delete_item',
+            'original_tag_group_id': tagGroupId,
+            'trash_batch_id': batchId,
+            'updated_at': now,
+          },
+          where: 'rowid = ?',
+          whereArgs: [id],
+        );
+        if (itemId != null && itemId.isNotEmpty) {
+          await txn.update(
+            'tag_item_media',
+            {
+              'trashed_at': now,
+              'trashed_reason': 'user_delete_item',
+              'trash_batch_id': batchId,
+            },
+            where:
+                "tag_item_id = ? AND COALESCE(deleted_at, '') = '' AND COALESCE(trashed_at, '') = ''",
+            whereArgs: [itemId],
+          );
+        }
+      });
       return;
     }
-    await db.delete(tableName, where: 'id = ?', whereArgs: [id]);
+    // Legacy path (hash_tags / dollar_tags / at_tags)
+    final legacyRows = await db.query(
+      tableName,
+      columns: ['category'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    final currentCategory =
+        legacyRows.isEmpty ? null : legacyRows.first['category']?.toString();
+    await db.transaction((txn) async {
+      await txn.update(
+        tableName,
+        {
+          'trashed_at_utc': now,
+          'trashed_reason': 'user_delete_item',
+          'original_category': currentCategory,
+          'trash_batch_id': batchId,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await txn.update(
+        'tag_item_media',
+        {
+          'trashed_at': now,
+          'trashed_reason': 'user_delete_item',
+          'trash_batch_id': batchId,
+        },
+        where:
+            "tag_item_id = ? AND COALESCE(deleted_at, '') = '' AND COALESCE(trashed_at, '') = ''",
+        whereArgs: [id.toString()],
+      );
+    });
+  }
+
+  /// Permanently removes an entry that was just inserted but whose creation
+  /// failed before the user ever saw it.  Use ONLY in failed-insert rollback
+  /// paths — NOT for user-facing delete, which must use [deleteEntry] (Trash).
+  Future<void> hardDeleteInsertedEntryForRollback(int id) async {
+    await ensureSchema();
+    final db = await _db();
+    await db.transaction((txn) async {
+      // Remove any media rows attached during the aborted insertion.
+      await txn.delete(
+        'tag_item_media',
+        where: 'tag_item_id = ?',
+        whereArgs: [id.toString()],
+      );
+      await txn.delete(tableName, where: 'id = ?', whereArgs: [id]);
+    });
   }
 
   Future<void> updateEntry({

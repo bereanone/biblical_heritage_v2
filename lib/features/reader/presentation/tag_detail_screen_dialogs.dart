@@ -450,7 +450,10 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
             // Best-effort cleanup.
           }
         }
-        await widget.repository.deleteEntry(inserted);
+        // Permanently remove the aborted row — the user never completed
+        // creation, so it must not appear in Trash.  Do not use deleteEntry()
+        // here; that is the user-facing path which moves items to Trash.
+        await widget.repository.hardDeleteInsertedEntryForRollback(inserted);
         rethrow;
       }
 
@@ -1302,8 +1305,6 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
         (displayTextOverride ?? '').isEmpty &&
         _media.isEmpty) {
       if (!_isBibleItem) {
-        await widget.repository.deleteMediaAttachmentsForEntry(widget.entry.id);
-        await _deleteMediaFilesForRefs(widget.entry.mediaRefs);
         await widget.repository.deleteEntry(
           widget.entry.id,
           normalized: widget.entry.isNormalized,

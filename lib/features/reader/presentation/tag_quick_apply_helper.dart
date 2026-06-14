@@ -689,6 +689,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         SELECT DISTINCT category AS category
         FROM $tableName
         WHERE category IS NOT NULL AND TRIM(category) <> ''
+          AND COALESCE(trashed_at_utc, '') = ''
         ORDER BY category COLLATE NOCASE ASC
       ''');
       for (final row in tagRows) {
@@ -717,6 +718,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           WHERE tag_kind = ?
             AND (parent_group_id IS NULL OR TRIM(parent_group_id) = '')
             AND (deleted_at IS NULL OR TRIM(deleted_at) = '')
+            AND (trashed_at IS NULL OR TRIM(trashed_at) = '')
             AND TRIM(name) <> ''
             AND tag_kind NOT IN ('import_root', 'import_package')
           ORDER BY name COLLATE NOCASE ASC
@@ -737,6 +739,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           JOIN tag_groups AS parent ON parent.id = groups.parent_group_id
           WHERE groups.tag_kind = ?
             AND COALESCE(groups.deleted_at, '') = ''
+            AND COALESCE(groups.trashed_at, '') = ''
+            AND COALESCE(parent.trashed_at, '') = ''
             AND TRIM(parent.name) <> ''
             AND parent.tag_kind NOT IN ('import_root', 'import_package')
           ORDER BY cat COLLATE NOCASE ASC
@@ -1259,6 +1263,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final legacyRows = await db.rawQuery('''
       SELECT tag, COALESCE(TRIM(category), '') AS category, COUNT(*) AS cnt
       FROM $tableName
+      WHERE COALESCE(trashed_at_utc, '') = ''
       GROUP BY tag, COALESCE(TRIM(category), '')
     ''');
     final normalizedRows = await db.rawQuery(
@@ -1359,7 +1364,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       final rows = await db.query(
         tableName,
         columns: columns,
-        where: 'tag = ? AND $whereClause',
+        where: "tag = ? AND $whereClause AND COALESCE(trashed_at_utc, '') = ''",
         whereArgs: whereArgs,
         orderBy: orderBy,
       );
@@ -1641,6 +1646,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         WHERE user_id = ?
           AND tag = ?
           AND $categoryClause
+          AND COALESCE(trashed_at_utc, '') = ''
           AND ((book_number = ? AND chapter_number = ? AND verse_number = ?) OR verse_ref = ?)
         LIMIT 1
         ''',
@@ -1795,6 +1801,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           '''
         tag = ?
         AND $legacyCategoryClause
+        AND COALESCE(trashed_at_utc, '') = ''
         AND book_number = ?
         AND chapter_number = ?
         AND verse_number = ?
@@ -1923,6 +1930,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           '''
         tag = ?
         AND $legacyCategoryClause
+        AND COALESCE(trashed_at_utc, '') = ''
         AND book_number = ?
         AND chapter_number = ?
         AND verse_number = ?
@@ -2092,6 +2100,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         user_id = ?
         AND tag = ?
         AND $categoryClause
+        AND COALESCE(trashed_at_utc, '') = ''
         AND verse_ref = ?
       ''',
       whereArgs: [userId, normalizedTag, ...categoryArgs, cleanStableRef],
@@ -2883,8 +2892,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       tableName,
       columns: ['id'],
       where: normalizedCategory == null
-          ? 'tag = ?'
-          : 'tag = ? AND COALESCE(TRIM(category), \'\') = ?',
+          ? "tag = ? AND COALESCE(trashed_at_utc, '') = ''"
+          : "tag = ? AND COALESCE(TRIM(category), '') = ? AND COALESCE(trashed_at_utc, '') = ''",
       whereArgs: normalizedCategory == null
           ? [normalizedTag]
           : [normalizedTag, normalizedCategory],
@@ -2955,6 +2964,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       SELECT tag_item_id, relative_path, sort_order
       FROM tag_item_media
       WHERE tag_item_id IN ($placeholders)
+        AND COALESCE(trashed_at, '') = ''
       ORDER BY tag_item_id ASC, sort_order ASC, id ASC
       ''',
       [for (final id in entryIds) id.toString()],
@@ -3024,6 +3034,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       SELECT COALESCE(MAX(COALESCE($orderColumn, created_at)), 0) AS max_sort_order
       FROM $tableName
       WHERE tag = ?
+        AND COALESCE(trashed_at_utc, '') = ''
       ''',
       [normalizedTag],
     );
@@ -3142,6 +3153,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       SELECT COALESCE(MAX(COALESCE(sort_order, created_at)), 0) AS max_sort_order
       FROM $tableName
       WHERE tag = ?
+        AND COALESCE(trashed_at_utc, '') = ''
       ''',
       [normalizedTag],
     );

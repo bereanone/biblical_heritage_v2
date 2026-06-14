@@ -99,7 +99,11 @@ class UnifiedTagReadAdapter {
     required Set<String> defaultTag,
     required Map<int, String> bookNames,
   }) async {
-    final rows = await db.query(tableName, orderBy: 'created_at ASC, id ASC');
+    final rows = await db.query(
+      tableName,
+      where: "COALESCE(trashed_at_utc, '') = ''",
+      orderBy: 'created_at ASC, id ASC',
+    );
     final mediaByItemId = await _loadLegacyMediaByItemId(db);
     final rowsByTag = <String, List<Map<String, Object?>>>{};
     for (final row in rows) {
@@ -175,6 +179,7 @@ class UnifiedTagReadAdapter {
   }) async {
     final groupRows = await db.query(
       'tag_groups',
+      where: "COALESCE(trashed_at, '') = ''",
       orderBy: 'sort_order ASC, created_at ASC, id ASC',
     );
     if (groupRows.isEmpty) return const <UnifiedTagChain>[];
@@ -183,6 +188,7 @@ class UnifiedTagReadAdapter {
     final itemsByGroupId = <String, List<Map<String, Object?>>>{};
     final itemRows = await db.query(
       'tag_items',
+      where: "COALESCE(trashed_at, '') = ''",
       orderBy: 'sort_order ASC, created_at ASC, id ASC',
     );
     for (final row in itemRows) {
@@ -866,6 +872,7 @@ class UnifiedTagReadAdapter {
   ) async {
     final rows = await db.query(
       'tag_item_media',
+      where: "COALESCE(trashed_at, '') = ''",
       orderBy: 'tag_item_id ASC, sort_order ASC, id ASC',
     );
     final grouped = <String, List<UnifiedTagMedia>>{};
@@ -911,6 +918,7 @@ class UnifiedTagReadAdapter {
   ) async {
     final rows = await db.query(
       'tag_item_media',
+      where: "COALESCE(trashed_at, '') = ''",
       orderBy: 'tag_item_id ASC, sort_order ASC, id ASC',
     );
     final grouped = <String, List<UnifiedTagMedia>>{};
@@ -1017,6 +1025,7 @@ class UnifiedTagReadAdapter {
     final rows = await db.query(
       'tag_groups',
       columns: ['id', 'name'],
+      where: "COALESCE(trashed_at, '') = ''",
       orderBy: 'sort_order ASC, created_at ASC, id ASC',
     );
     return {

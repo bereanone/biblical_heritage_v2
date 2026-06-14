@@ -77,7 +77,11 @@ class LegacyTagAdapter implements TagRepository {
     final db = await _databaseProvider();
     final tableName = _tableNames[mode]!;
     final defaultTag = await _loadDefaultTag(db, mode);
-    final rows = await db.query(tableName, orderBy: 'created_at ASC, id ASC');
+    final rows = await db.query(
+      tableName,
+      where: "COALESCE(trashed_at_utc, '') = ''",
+      orderBy: 'created_at ASC, id ASC',
+    );
     final rowsByTag = <String, List<Map<String, Object?>>>{};
     for (final row in rows) {
       final tag = _readString(row['tag']);

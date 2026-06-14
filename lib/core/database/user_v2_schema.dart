@@ -12,6 +12,7 @@ class UserV2Schema {
       await _ensureElibraryRefIndex(db);
       await _ensureLibraryTextBlocks(db);
       await _ensureElibraryMarkups(db);
+      await _ensureTagTrashColumns(db);
       await _ensurePresentationPrepTables(db);
       await _seedDevicesTable(db, deviceId: deviceId);
       await _seedSyncState(db, deviceId: deviceId);
@@ -1021,6 +1022,48 @@ class UserV2Schema {
         updated_at TEXT NOT NULL
       )
     ''');
+  }
+
+  static Future<void> _ensureTagTrashColumns(Database db) async {
+    final tagGroupColumns = await _tableColumns(db, 'tag_groups');
+    await _addColumnIfMissing(
+      db, 'tag_groups', tagGroupColumns, 'trashed_at', 'TEXT');
+    await _addColumnIfMissing(
+      db, 'tag_groups', tagGroupColumns, 'trashed_reason', 'TEXT');
+    await _addColumnIfMissing(
+      db, 'tag_groups', tagGroupColumns, 'original_parent_group_id', 'TEXT');
+    await _addColumnIfMissing(
+      db, 'tag_groups', tagGroupColumns, 'trash_batch_id', 'TEXT');
+
+    final tagItemColumns = await _tableColumns(db, 'tag_items');
+    await _addColumnIfMissing(
+      db, 'tag_items', tagItemColumns, 'trashed_at', 'TEXT');
+    await _addColumnIfMissing(
+      db, 'tag_items', tagItemColumns, 'trashed_reason', 'TEXT');
+    await _addColumnIfMissing(
+      db, 'tag_items', tagItemColumns, 'original_tag_group_id', 'TEXT');
+    await _addColumnIfMissing(
+      db, 'tag_items', tagItemColumns, 'trash_batch_id', 'TEXT');
+
+    final tagItemMediaColumns = await _tableColumns(db, 'tag_item_media');
+    await _addColumnIfMissing(
+      db, 'tag_item_media', tagItemMediaColumns, 'trashed_at', 'TEXT');
+    await _addColumnIfMissing(
+      db, 'tag_item_media', tagItemMediaColumns, 'trashed_reason', 'TEXT');
+    await _addColumnIfMissing(
+      db, 'tag_item_media', tagItemMediaColumns, 'trash_batch_id', 'TEXT');
+
+    for (final legacyTable in ['hash_tags', 'dollar_tags', 'at_tags']) {
+      final cols = await _tableColumns(db, legacyTable);
+      await _addColumnIfMissing(
+        db, legacyTable, cols, 'trashed_at_utc', 'TEXT');
+      await _addColumnIfMissing(
+        db, legacyTable, cols, 'trashed_reason', 'TEXT');
+      await _addColumnIfMissing(
+        db, legacyTable, cols, 'original_category', 'TEXT');
+      await _addColumnIfMissing(
+        db, legacyTable, cols, 'trash_batch_id', 'TEXT');
+    }
   }
 
   static Future<Set<String>> _tableColumns(

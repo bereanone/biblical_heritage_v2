@@ -13,6 +13,7 @@ class SandboxBootstrap {
 
   static const _bibleDbName = 'bible_base.db';
   static const _userDbName = 'user.db';
+  static const _eLibraryDbName = 'eLibrary.db';
   static bool _sqfliteInitialized = false;
 
   static Future<String> bibleDatabasePath() async {
@@ -33,9 +34,27 @@ class SandboxBootstrap {
     return legacyV2UserDatabasePath();
   }
 
+  static Future<String> eLibraryDatabasePath() async {
+    final root = await LibraryRootService.instance.accessibleLibraryRootPath();
+    if (root != null) {
+      final supportDir = await getApplicationDocumentsDirectory();
+      final mirrorRoot = p.join(supportDir.path, 'BiblicalHeritage', 'v2');
+      if (p.normalize(root) == p.normalize(mirrorRoot)) {
+        return legacyV2ELibraryDatabasePath();
+      }
+      return p.join(root, 'Databases', _eLibraryDbName);
+    }
+    return legacyV2ELibraryDatabasePath();
+  }
+
   static Future<String> legacyV2UserDatabasePath() async {
     final documentsDir = await getApplicationDocumentsDirectory();
     return p.join(documentsDir.path, 'BiblicalHeritage', 'v2', _userDbName);
+  }
+
+  static Future<String> legacyV2ELibraryDatabasePath() async {
+    final documentsDir = await getApplicationDocumentsDirectory();
+    return p.join(documentsDir.path, 'BiblicalHeritage', 'v2', _eLibraryDbName);
   }
 
   static Future<String> legacyUserDatabasePath() async {
@@ -105,10 +124,7 @@ class SandboxBootstrap {
     file.writeAsBytesSync(assetBytes, flush: true);
   }
 
-  static Future<void> _touchDatabase(
-    String path, {
-    String? assetPath,
-  }) async {
+  static Future<void> _touchDatabase(String path, {String? assetPath}) async {
     try {
       final db = await openDatabase(path, singleInstance: false);
       await db.close();

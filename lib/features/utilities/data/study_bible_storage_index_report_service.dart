@@ -4,7 +4,11 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/library_root_service.dart';
+import '../../../core/bootstrap/local_settings_store.dart';
+import '../../../core/bootstrap/sandbox_bootstrap.dart';
+import '../../../core/database/elibrary_schema.dart';
 import '../../../core/database/user_database.dart';
+import 'elibrary_storage_policy.dart';
 import 'elibrary_file_management_service.dart';
 
 class StudyBibleStorageIndexReport {
@@ -23,6 +27,14 @@ class StudyBibleStorageIndexReport {
     required this.downloadReportsPath,
     required this.coverImagesPath,
     required this.backupPath,
+    required this.userDatabasePath,
+    required this.eLibraryDatabasePath,
+    required this.eLibraryDatabaseExists,
+    required this.eLibraryDatabaseSizeBytes,
+    required this.eLibrarySchemaVersion,
+    required this.eLibrarySchemaStatus,
+    required this.storagePolicyLabel,
+    required this.sourceCleanupStatus,
     required this.epubCount,
     required this.pdfCount,
     required this.commentaryItemCount,
@@ -54,6 +66,14 @@ class StudyBibleStorageIndexReport {
   final String? downloadReportsPath;
   final String? coverImagesPath;
   final String? backupPath;
+  final String userDatabasePath;
+  final String eLibraryDatabasePath;
+  final bool eLibraryDatabaseExists;
+  final int eLibraryDatabaseSizeBytes;
+  final int? eLibrarySchemaVersion;
+  final String eLibrarySchemaStatus;
+  final String storagePolicyLabel;
+  final String sourceCleanupStatus;
   final int epubCount;
   final int pdfCount;
   final int commentaryItemCount;
@@ -86,6 +106,14 @@ class StudyBibleStorageIndexReport {
       'download_reports_path': downloadReportsPath,
       'cover_images_path': coverImagesPath,
       'backup_path': backupPath,
+      'user_database_path': userDatabasePath,
+      'elibrary_database_path': eLibraryDatabasePath,
+      'elibrary_database_exists': eLibraryDatabaseExists,
+      'elibrary_database_size_bytes': eLibraryDatabaseSizeBytes,
+      'elibrary_schema_version': eLibrarySchemaVersion,
+      'elibrary_schema_status': eLibrarySchemaStatus,
+      'storage_policy_label': storagePolicyLabel,
+      'source_cleanup_status': sourceCleanupStatus,
       'epub_count': epubCount,
       'pdf_count': pdfCount,
       'commentary_item_count': commentaryItemCount,
@@ -117,7 +145,10 @@ class StudyBibleStorageIndexReport {
     line('Library open path', libraryOpenPath);
     line('Downloader path', downloaderPath);
     line('Storage summary path', storageSummaryPath);
-    line('Indexer paths', indexerPaths.isEmpty ? null : indexerPaths.join('\n  '));
+    line(
+      'Indexer paths',
+      indexerPaths.isEmpty ? null : indexerPaths.join('\n  '),
+    );
     line(
       'Commentary source path',
       commentarySourcePaths.isEmpty ? null : commentarySourcePaths.join('\n  '),
@@ -128,15 +159,32 @@ class StudyBibleStorageIndexReport {
     );
     line('Commentary index path', commentaryIndexPath);
     line('Commentary index status', commentaryIndexStatus);
-    line('Commentary index report', commentaryIndexReportExists ? 'present' : 'missing');
+    line(
+      'Commentary index report',
+      commentaryIndexReportExists ? 'present' : 'missing',
+    );
     line('Download reports path', downloadReportsPath);
     line('Cover images path', coverImagesPath);
     line('Backup path', backupPath);
+    line('user.db path', userDatabasePath);
+    line('eLibrary.db path', eLibraryDatabasePath);
+    line('eLibrary.db exists', eLibraryDatabaseExists ? 'yes' : 'no');
+    line('eLibrary.db size', eLibraryDatabaseSizeBytes);
+    line('eLibrary schema version', eLibrarySchemaVersion);
+    line('eLibrary schema status', eLibrarySchemaStatus);
     line('Backup status', backupStatus);
+    line('eLibrary storage policy', storagePolicyLabel);
+    line('eLibrary source cleanup', sourceCleanupStatus);
     line('EPUB count', epubCount);
     line('PDF count', pdfCount);
-    line('Commentary items/indexed/links', '$commentaryItemCount / $commentaryIndexedCount / $commentaryLinkCount');
-    line('Research items/indexed/links', '$researchItemCount / $researchIndexedCount / $researchLinkCount');
+    line(
+      'Commentary items/indexed/links',
+      '$commentaryItemCount / $commentaryIndexedCount / $commentaryLinkCount',
+    );
+    line(
+      'Research items/indexed/links',
+      '$researchItemCount / $researchIndexedCount / $researchLinkCount',
+    );
     line('Paths match', pathsMatch ? 'yes' : 'no');
     line(
       'Legacy folders detected',
@@ -160,7 +208,11 @@ class StudyBibleStorageIndexReportService {
     final rootPath = selection.path?.trim() ?? '';
     final hasRoot = rootPath.isNotEmpty && selection.exists;
     final storageSummary = await ELibraryFileManagementService.instance
-        .computeDownloadedStorageSummary(rootPath: rootPath.isEmpty ? null : rootPath);
+        .computeDownloadedStorageSummary(
+          rootPath: rootPath.isEmpty ? null : rootPath,
+        );
+    final storagePolicy = await LocalSettingsStore.instance
+        .loadELibraryStoragePolicy();
     final db = await UserDatabase.instance.database;
     final counts = await _loadTableCounts(db);
     final commentaryItemStats = await _countLibraryItems(
@@ -206,10 +258,13 @@ class StudyBibleStorageIndexReportService {
         ? null
         : p.join(rootPath, 'Graphics', 'eLibraryCovers');
     final backupPath = await LibraryRootService.instance.backupRootPath();
+    final userDatabasePath = await SandboxBootstrap.userDatabasePath();
+    final eLibraryDatabaseSummary = await _loadELibraryDatabaseSummary();
     final legacyFoldersDetected = await _detectLegacyFolders(rootPath);
     final commentaryIndexReportExists =
         commentaryIndexPath != null && await File(commentaryIndexPath).exists();
-    final pathsMatch = hasRoot &&
+    final pathsMatch =
+        hasRoot &&
         _allDerivedPathsShareRoot(
           rootPath: rootPath,
           paths: <String?>[
@@ -249,6 +304,14 @@ class StudyBibleStorageIndexReportService {
       downloadReportsPath: downloadReportsPath,
       coverImagesPath: coverImagesPath,
       backupPath: backupPath,
+      userDatabasePath: userDatabasePath,
+      eLibraryDatabasePath: eLibraryDatabaseSummary.path,
+      eLibraryDatabaseExists: eLibraryDatabaseSummary.exists,
+      eLibraryDatabaseSizeBytes: eLibraryDatabaseSummary.sizeBytes,
+      eLibrarySchemaVersion: eLibraryDatabaseSummary.schemaVersion,
+      eLibrarySchemaStatus: eLibraryDatabaseSummary.schemaStatus,
+      storagePolicyLabel: storagePolicy.label,
+      sourceCleanupStatus: 'Deferred until verified import-to-db is wired.',
       epubCount: storageSummary.epubCount,
       pdfCount: storageSummary.pdfCount,
       commentaryItemCount: commentaryItemStats.itemCount,
@@ -287,6 +350,56 @@ class StudyBibleStorageIndexReportService {
           : (countRows.first['cnt'] as num?)?.toInt() ?? 0;
     }
     return counts;
+  }
+
+  Future<_ELibraryDatabaseSummary> _loadELibraryDatabaseSummary() async {
+    final path = await SandboxBootstrap.eLibraryDatabasePath();
+    final file = File(path);
+    final exists = await file.exists();
+    final sizeBytes = exists ? await file.length() : 0;
+
+    if (!exists) {
+      return _ELibraryDatabaseSummary(
+        path: path,
+        exists: false,
+        sizeBytes: 0,
+        schemaVersion: null,
+        schemaStatus: 'missing',
+      );
+    }
+
+    if (sizeBytes == 0) {
+      return _ELibraryDatabaseSummary(
+        path: path,
+        exists: true,
+        sizeBytes: 0,
+        schemaVersion: null,
+        schemaStatus: 'empty',
+      );
+    }
+
+    try {
+      final db = await openDatabase(path, singleInstance: false);
+      try {
+        return _ELibraryDatabaseSummary(
+          path: path,
+          exists: true,
+          sizeBytes: sizeBytes,
+          schemaVersion: await ELibrarySchema.currentAppliedVersion(db),
+          schemaStatus: await ELibrarySchema.schemaStatus(db),
+        );
+      } finally {
+        await db.close();
+      }
+    } catch (error) {
+      return _ELibraryDatabaseSummary(
+        path: path,
+        exists: true,
+        sizeBytes: sizeBytes,
+        schemaVersion: null,
+        schemaStatus: 'unreadable: $error',
+      );
+    }
   }
 
   Future<({int itemCount, int indexedCount})> _countLibraryItems({
@@ -391,4 +504,20 @@ class StudyBibleStorageIndexReportService {
     }
     return 'Commentary index ready.';
   }
+}
+
+class _ELibraryDatabaseSummary {
+  const _ELibraryDatabaseSummary({
+    required this.path,
+    required this.exists,
+    required this.sizeBytes,
+    required this.schemaVersion,
+    required this.schemaStatus,
+  });
+
+  final String path;
+  final bool exists;
+  final int sizeBytes;
+  final int? schemaVersion;
+  final String schemaStatus;
 }

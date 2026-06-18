@@ -116,6 +116,28 @@ void main() {
     );
   });
 
+  test('generates Acts-style ref codes from DB text blocks', () {
+    final codes = generateLibraryTextBlockReferenceCodes(
+      itemAbbreviation: 'AA',
+      plainTexts: const <String>[
+        'The church is God’s appointed agency for the salvation of men.',
+        'Many and wonderful are the promises recorded in the Scriptures [10] regarding the church.',
+        '“Ye are My witnesses, saith the Lord...”',
+      ],
+    );
+
+    expect(codes, const <String?>['AA 9.1', 'AA 9.2', 'AA 10.1']);
+
+    final block = LibraryBookBlock(
+      html:
+          '<p>The church is God’s appointed agency for the salvation of men.</p>',
+      text: 'The church is God’s appointed agency for the salvation of men.',
+      kind: 'paragraph',
+      referenceCode: codes.first,
+    );
+    expect(block.referenceCode, 'AA 9.1');
+  });
+
   test('skips devotional scripture subtitles for fallback numbering', () {
     final item = _catalogItem(
       id: 'ct',

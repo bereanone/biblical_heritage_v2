@@ -134,14 +134,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
 
   Timer? _geometryDebounce;
 
-  void _onBodyScroll() {
-  }
+  void _onBodyScroll() {}
 
   Future<void> _load() async {
-    final savedFontScale =
-        await AppSettingsService.instance.loadViewerFontScale();
-    final savedZoomScale =
-        await AppSettingsService.instance.loadElibraryZoomScale();
+    final savedFontScale = await AppSettingsService.instance
+        .loadViewerFontScale();
+    final savedZoomScale = await AppSettingsService.instance
+        .loadElibraryZoomScale();
     final savedShowRefCodes = await LocalSettingsStore.instance
         .loadLibraryReaderShowRefCodes();
     final selection = await LibraryRootService.instance.loadSelection();
@@ -198,9 +197,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
               bySection: <String, Map<int, String>>{},
               byLocation: <String, String>{},
             );
-      final elibraryMarkupsByHref = await _loadElibraryMarkupHighlights(
-        widget.item.id,
-      );
+      final elibraryMarkupsByHref = await _loadElibraryMarkups(widget.item.id);
       if (!mounted) return;
       setState(() {
         _fontScale = savedFontScale;
@@ -260,8 +257,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     final nextResult = nextSession.currentResult;
     await _saveCurrentLocation();
     await AppSettingsService.instance.saveLastElibrarySearchSessionJson(
-      LibraryCatalogSearchSessionSnapshot.fromSession(nextSession)
-          .toJsonString(),
+      LibraryCatalogSearchSessionSnapshot.fromSession(
+        nextSession,
+      ).toJsonString(),
     );
     await AppSettingsService.instance.saveLastElibrarySearch(nextSession.query);
     if (!mounted) return;
@@ -274,9 +272,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
           initialSpineIndex: nextResult.item.spineIndex,
           initialParagraphIndex: nextResult.item.paragraphIndex,
           searchQuery: nextSession.query,
-          highlightTerms: extractLibrarySearchHighlightTerms(
-            nextSession.query,
-          ),
+          highlightTerms: extractLibrarySearchHighlightTerms(nextSession.query),
           searchSession: nextSession,
           onReturnToBible: widget.onReturnToBible,
           themeMode: widget.themeMode,
@@ -621,17 +617,15 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     await Clipboard.setData(ClipboardData(text: payload));
   }
 
-  Future<Map<String, List<ElibraryMarkupRecord>>> _loadElibraryMarkupHighlights(
+  Future<Map<String, List<ElibraryMarkupRecord>>> _loadElibraryMarkups(
     String libraryItemId,
   ) async {
     try {
-      return await ElibraryMarkupRepository().loadHighlightsBySectionForItem(
+      return await ElibraryMarkupRepository().loadMarkupsBySectionForItem(
         libraryItemId,
       );
     } catch (error) {
-      debugPrint(
-        '[LibraryBookReader] Failed to load eLibrary highlights: $error',
-      );
+      debugPrint('[LibraryBookReader] Failed to load eLibrary markups: $error');
       return const <String, List<ElibraryMarkupRecord>>{};
     }
   }
@@ -2370,7 +2364,6 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
       if (referenceCode != null) {
         resolved[paragraphIndex] = referenceCode;
       }
-
     }
 
     return resolved;
@@ -2721,11 +2714,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         ? const <ElibraryMarkupRecord>[]
         : _elibraryMarkupsByHref[currentSection.entryName] ??
               const <ElibraryMarkupRecord>[];
+    final sectionHasUserMarkup = sectionMarkups.isNotEmpty;
     final geometryScopeId = _geometryScopeId;
 
     final bodyFontSize =
         (theme.textTheme.bodyLarge?.fontSize ?? 16) * _fontScale * _zoomScale;
-    final titleFontSize = (theme.textTheme.headlineSmall?.fontSize ?? 24) *
+    final titleFontSize =
+        (theme.textTheme.headlineSmall?.fontSize ?? 24) *
         _fontScale *
         _zoomScale;
     final sectionBlockWidgets = <Widget>[];
@@ -2764,7 +2759,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                           href: currentSection?.entryName ?? '',
                           paragraphIndex: paragraphIndex,
                         )] ??
-                        sectionReferenceCodes[paragraphIndex])
+                        sectionReferenceCodes[paragraphIndex] ??
+                        block.referenceCode)
             : null;
         if (item.isDevotional && referenceCode != null) {
           devotionalFallbackParagraphCount += 1;
@@ -2792,6 +2788,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
             isNightMode: isNight,
             showRefCodes: _showRefCodes,
             referenceCode: referenceCode,
+            hasUserMarkup: sectionHasUserMarkup,
             selectionHighlightSpec: selectionHighlightSpec,
             rangeSelection: _rangeSelection,
             persistedHighlights: sectionMarkups,
@@ -3262,10 +3259,7 @@ class _SearchHitNavigator extends StatelessWidget {
               icon: const Icon(Icons.chevron_left),
               color: textColor,
               visualDensity: VisualDensity.compact,
-              constraints: const BoxConstraints.tightFor(
-                width: 30,
-                height: 30,
-              ),
+              constraints: const BoxConstraints.tightFor(width: 30, height: 30),
               padding: EdgeInsets.zero,
               tooltip: 'Previous hit',
             ),
@@ -3278,10 +3272,7 @@ class _SearchHitNavigator extends StatelessWidget {
               icon: const Icon(Icons.chevron_right),
               color: textColor,
               visualDensity: VisualDensity.compact,
-              constraints: const BoxConstraints.tightFor(
-                width: 30,
-                height: 30,
-              ),
+              constraints: const BoxConstraints.tightFor(width: 30, height: 30),
               padding: EdgeInsets.zero,
               tooltip: 'Next hit',
             ),

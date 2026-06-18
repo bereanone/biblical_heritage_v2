@@ -12,6 +12,7 @@ import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../../core/database/user_database.dart';
 import '../../library/data/library_author_resolver.dart';
+import '../../library/data/library_citation_display_helper.dart';
 import '../../library/data/library_item_identity.dart';
 import 'commentary_research_models.dart';
 import 'commentary_research_filters.dart';
@@ -45,13 +46,25 @@ class CommentaryResearchLibraryService
     bool includeFrontMatter = true,
   }) async {
     final file = File(filePath);
-    if (!await file.exists()) return const [];
-    final chunks = await _readBodySections(
-      file: file,
-      libraryItemId: libraryItemId,
-      includeFrontMatter: includeFrontMatter,
-      preserveHeadingBlocks: true,
-    );
+    if (await file.exists()) {
+      final chunks = await _readBodySections(
+        file: file,
+        libraryItemId: libraryItemId,
+        includeFrontMatter: includeFrontMatter,
+        preserveHeadingBlocks: true,
+      );
+      final sections = _sectionsFromChunks(chunks);
+      if (sections.isNotEmpty) {
+        return sections;
+      }
+    }
+
+    // If the EPUB parser cannot expose body sections, reuse the indexed text
+    // blocks so books that already have stored content still open in the reader.
+    return _loadBookSectionsFromTextBlocks(libraryItemId: libraryItemId);
+  }
+
+  List<LibraryBookSection> _sectionsFromChunks(List<_EpubSectionChunk> chunks) {
     final sectionsWithOrder = chunks
         .asMap()
         .entries
@@ -79,6 +92,86 @@ class CommentaryResearchLibraryService
     return sectionsWithOrder
         .map((entry) => entry.section)
         .toList(growable: false);
+  }
+
+  Future<List<LibraryBookSection>> _loadBookSectionsFromTextBlocks({
+    required String libraryItemId,
+  }) async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'library_text_blocks',
+      columns: const [
+        'id',
+        'epub_href',
+        'spine_index',
+        'paragraph_index',
+        'paragraph_on_section',
+        'section_title',
+        'plain_text',
+      ],
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+      orderBy:
+          'COALESCE(spine_index, 1073741824), epub_href COLLATE NOCASE ASC, paragraph_index ASC',
+    );
+
+    if (rows.isEmpty) {
+      return const [];
+    }
+
+    final itemRows = await db.query(
+      'library_items',
+      columns: const ['title', 'file_name', 'relative_path'],
+      where: 'id = ?',
+      whereArgs: [libraryItemId],
+      limit: 1,
+    );
+    final itemRow = itemRows.isEmpty
+        ? const <String, Object?>{}
+        : itemRows.first;
+    final itemAbbreviation = libraryUserFacingBookAbbreviation(
+      title: itemRow['title']?.toString() ?? '',
+      fileName: itemRow['file_name']?.toString(),
+      relativePath: itemRow['relative_path']?.toString(),
+    );
+    final referenceCodes = generateLibraryTextBlockReferenceCodes(
+      plainTexts: rows
+          .map((row) => row['plain_text']?.toString() ?? '')
+          .toList(growable: false),
+      itemAbbreviation: itemAbbreviation,
+    );
+
+    final orderedKeys = <String>[];
+    final builders = <String, _LibraryTextBlockSectionBuilder>{};
+
+    for (var index = 0; index < rows.length; index++) {
+      final row = rows[index];
+      final text = row['plain_text']?.toString().trim() ?? '';
+      if (text.isEmpty) continue;
+
+      final href = row['epub_href']?.toString().trim() ?? '';
+      final fallbackKey = 'row_${row['id']?.toString() ?? orderedKeys.length}';
+      final key = href.isNotEmpty
+          ? p.normalize(href).toLowerCase()
+          : fallbackKey;
+      final builder = builders.putIfAbsent(key, () {
+        orderedKeys.add(key);
+        return _LibraryTextBlockSectionBuilder(
+          entryName: href.isNotEmpty ? href : fallbackKey,
+          title: row['section_title']?.toString().trim() ?? '',
+          spineIndex: (row['spine_index'] as num?)?.toInt(),
+        );
+      });
+      builder.addRow(row, text, referenceCode: referenceCodes[index]);
+    }
+
+    final sections = <LibraryBookSection>[];
+    for (final key in orderedKeys) {
+      final builder = builders[key];
+      if (builder == null || builder.paragraphs.isEmpty) continue;
+      sections.add(builder.build());
+    }
+    return sections;
   }
 
   Future<CommentaryResearchPassageData> loadPassage({
@@ -778,6 +871,7 @@ class LibraryBookBlock {
     this.headingLevel,
     this.anchorId,
     this.bodyOrder,
+    this.referenceCode,
   });
 
   final String html;
@@ -788,7 +882,121 @@ class LibraryBookBlock {
   final int? headingLevel;
   final String? anchorId;
   final int? bodyOrder;
+  final String? referenceCode;
 
   bool get isHeading => kind == 'heading';
   bool get isBlockquote => kind == 'blockquote';
+}
+
+class _LibraryTextBlockSectionBuilder {
+  _LibraryTextBlockSectionBuilder({
+    required this.entryName,
+    required this.title,
+    required this.spineIndex,
+  });
+
+  final String entryName;
+  String title;
+  int? spineIndex;
+  final List<String> paragraphs = <String>[];
+  final List<LibraryBookBlock> blocks = <LibraryBookBlock>[];
+
+  void addRow(Map<String, Object?> row, String text, {String? referenceCode}) {
+    final plainText = text.trim();
+    if (plainText.isEmpty) return;
+
+    final rowTitle = row['section_title']?.toString().trim() ?? '';
+    if (title.trim().isEmpty && rowTitle.isNotEmpty) {
+      title = rowTitle;
+    }
+
+    final rowSpineIndex = (row['spine_index'] as num?)?.toInt();
+    if (spineIndex == null && rowSpineIndex != null) {
+      spineIndex = rowSpineIndex;
+    }
+
+    final paragraphIndex = (row['paragraph_index'] as num?)?.toInt();
+    final paragraphOnSection = (row['paragraph_on_section'] as num?)?.toInt();
+    paragraphs.add(plainText);
+    blocks.add(
+      LibraryBookBlock(
+        html: plainText,
+        text: plainText,
+        kind: 'paragraph',
+        bodyOrder: paragraphIndex ?? paragraphOnSection,
+        referenceCode: referenceCode,
+      ),
+    );
+  }
+
+  LibraryBookSection build() {
+    final displayTitle = title.trim().isNotEmpty
+        ? title.trim()
+        : p.basenameWithoutExtension(entryName);
+    return LibraryBookSection(
+      entryName: entryName,
+      title: displayTitle,
+      paragraphs: List<String>.unmodifiable(paragraphs),
+      blocks: List<LibraryBookBlock>.unmodifiable(blocks),
+      spineIndex: spineIndex,
+    );
+  }
+}
+
+@visibleForTesting
+List<String?> generateLibraryTextBlockReferenceCodes({
+  required List<String> plainTexts,
+  required String? itemAbbreviation,
+}) {
+  final abbreviation = itemAbbreviation?.trim();
+  if (abbreviation == null || abbreviation.isEmpty || plainTexts.isEmpty) {
+    return List<String?>.filled(plainTexts.length, null, growable: false);
+  }
+
+  int? bookInitialPageNumber;
+  for (final text in plainTexts) {
+    final markers = _textBlockPageNumbers(text);
+    if (markers.isEmpty) continue;
+    final firstMarker = markers.first;
+    bookInitialPageNumber = firstMarker > 1 ? firstMarker - 1 : 1;
+    break;
+  }
+
+  final referenceCodes = List<String?>.filled(
+    plainTexts.length,
+    null,
+    growable: false,
+  );
+  int? currentPageNumber;
+  var paragraphNumberOnPage = 0;
+
+  for (var index = 0; index < plainTexts.length; index++) {
+    final markers = _textBlockPageNumbers(plainTexts[index]);
+    currentPageNumber ??= markers.isNotEmpty
+        ? (markers.first > 1 ? markers.first - 1 : 1)
+        : bookInitialPageNumber;
+
+    paragraphNumberOnPage += 1;
+    if (currentPageNumber != null) {
+      referenceCodes[index] =
+          '$abbreviation $currentPageNumber.$paragraphNumberOnPage';
+    }
+
+    if (markers.isNotEmpty) {
+      currentPageNumber = markers.last;
+      paragraphNumberOnPage = 0;
+    }
+  }
+
+  return referenceCodes;
+}
+
+List<int> _textBlockPageNumbers(String text) {
+  final markers = <int>[];
+  for (final match in RegExp(r'\[(\d{1,4})\]').allMatches(text)) {
+    final pageNumber = int.tryParse(match.group(1) ?? '');
+    if (pageNumber == null) continue;
+    markers.add(pageNumber);
+  }
+  return markers;
 }

@@ -7,8 +7,9 @@ const String kPioneerSourceCatalogAssetPath =
     'assets/elibrary_sources/pioneer_sources.json';
 
 enum PioneerSourceAvailability {
-  verifiedSource,
+  available,
   sourceNeeded,
+  imported,
   unavailable,
   unknown;
 
@@ -18,7 +19,9 @@ enum PioneerSourceAvailability {
       case 'verified_source':
       case 'available':
       case 'available_source':
-        return PioneerSourceAvailability.verifiedSource;
+        return PioneerSourceAvailability.available;
+      case 'imported':
+        return PioneerSourceAvailability.imported;
       case 'unavailable':
       case 'blocked':
         return PioneerSourceAvailability.unavailable;
@@ -31,13 +34,14 @@ enum PioneerSourceAvailability {
   }
 
   String get friendlyLabel => switch (this) {
-    PioneerSourceAvailability.verifiedSource => 'Verified source available',
+    PioneerSourceAvailability.available => 'Available',
     PioneerSourceAvailability.sourceNeeded => 'Source needed',
+    PioneerSourceAvailability.imported => 'Imported',
     PioneerSourceAvailability.unavailable => 'Unavailable',
     PioneerSourceAvailability.unknown => 'Status unknown',
   };
 
-  bool get isImportable => this == PioneerSourceAvailability.verifiedSource;
+  bool get isImportable => this == PioneerSourceAvailability.available;
 }
 
 @immutable
@@ -51,6 +55,9 @@ class PioneerSourceWork {
     required this.group,
     required this.subgroup,
     required this.availability,
+    required this.verified,
+    required this.catalogImportable,
+    required this.sourceType,
     required this.sourceUrl,
     required this.sourceLabel,
     required this.notes,
@@ -64,6 +71,9 @@ class PioneerSourceWork {
   final String group;
   final String subgroup;
   final PioneerSourceAvailability availability;
+  final bool verified;
+  final bool catalogImportable;
+  final String? sourceType;
   final String? sourceUrl;
   final String? sourceLabel;
   final String? notes;
@@ -77,11 +87,20 @@ class PioneerSourceWork {
     final workId = _stableId(
       _optionalString(json, const ['work_id', 'id']) ?? title,
     );
+    final availability = PioneerSourceAvailability.fromStoredValue(
+      _optionalString(json, const ['availability_status', 'availability']),
+    );
+    final verified = _optionalBool(json, const ['verified']) ?? false;
+    final sourceType = _optionalString(json, const ['source_type', 'sourceType'])
+        ?.trim()
+        .toLowerCase();
     final sourceUrl = _optionalString(json, const ['source_url', 'sourceUrl']);
     final sourceLabel = _optionalString(json, const [
       'source_label',
       'sourceLabel',
     ]);
+    final catalogImportable =
+        _optionalBool(json, const ['importable']) ?? availability.isImportable;
     final normalizedSourceUrl = sourceUrl?.trim();
     final normalizedSourceLabel = sourceLabel?.trim();
     return PioneerSourceWork(
@@ -92,9 +111,10 @@ class PioneerSourceWork {
       abbreviation: _optionalString(json, const ['abbreviation', 'abbr']) ?? '',
       group: _optionalString(json, const ['group']) ?? '',
       subgroup: _optionalString(json, const ['subgroup']) ?? '',
-      availability: PioneerSourceAvailability.fromStoredValue(
-        _optionalString(json, const ['availability_status', 'availability']),
-      ),
+      availability: availability,
+      verified: verified,
+      catalogImportable: catalogImportable,
+      sourceType: sourceType?.isNotEmpty == true ? sourceType : null,
       sourceUrl: normalizedSourceUrl?.isNotEmpty == true
           ? normalizedSourceUrl
           : null,
@@ -114,15 +134,34 @@ class PioneerSourceWork {
       }
       return 'No verified source';
     }
+    if (!verified) {
+      return 'Source URL present but not verified';
+    }
+    final typeLabel = sourceType?.trim().isNotEmpty == true
+        ? sourceType!.trim().toUpperCase()
+        : 'source';
     return sourceLabel?.trim().isNotEmpty == true
         ? sourceLabel!.trim()
-        : 'Verified source available';
+        : 'Verified $typeLabel source available';
   }
 
+  bool get hasVerifiedSource =>
+      verified && sourceUrl != null && sourceUrl!.trim().isNotEmpty;
+
+  bool get hasSupportedImportSource =>
+      sourceType == 'epub' || sourceType == 'html';
+
   bool get isImportable =>
+      hasVerifiedSource &&
+      hasSupportedImportSource &&
       availability.isImportable &&
-      sourceUrl != null &&
-      sourceUrl!.trim().isNotEmpty;
+      catalogImportable;
+
+  String get sourceTypeLabel {
+    final normalized = sourceType?.trim() ?? '';
+    if (normalized.isEmpty) return 'Unknown';
+    return normalized.toUpperCase();
+  }
 
   String get stableLibraryItemId =>
       'library_item_research_pioneer_${authorId}_$id';
@@ -328,6 +367,23 @@ String? _optionalString(Map<String, Object?> json, List<String> keys) {
     final text = value.toString().trim();
     if (text.isNotEmpty) {
       return text;
+    }
+  }
+  return null;
+}
+
+bool? _optionalBool(Map<String, Object?> json, List<String> keys) {
+  for (final key in keys) {
+    final value = json[key];
+    if (value == null) continue;
+    if (value is bool) return value;
+    final text = value.toString().trim().toLowerCase();
+    if (text.isEmpty) continue;
+    if (text == 'true' || text == '1' || text == 'yes' || text == 'y') {
+      return true;
+    }
+    if (text == 'false' || text == '0' || text == 'no' || text == 'n') {
+      return false;
     }
   }
   return null;

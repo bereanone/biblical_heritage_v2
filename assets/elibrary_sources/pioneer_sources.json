@@ -12,7 +12,11 @@
           "abbreviation": "DAR",
           "group": "Pioneer Authors",
           "subgroup": "Prophecy",
-          "availability_status": "source_needed"
+          "availability_status": "available",
+          "source_type": "epub",
+          "source_url": "https://archive.org/download/UriahSmithDanielAndTheRevelation.TheResponseOfHistoryToTheVoiceOf/1897_smith_danielAndTheRevelation.epub",
+          "verified": true,
+          "importable": true
         },
         {
           "work_id": "the_united_states_in_the_light_of_prophecy",
@@ -20,7 +24,11 @@
           "abbreviation": "USLP",
           "group": "Pioneer Authors",
           "subgroup": "Prophecy",
-          "availability_status": "source_needed"
+          "availability_status": "available",
+          "source_type": "html",
+          "source_url": "https://www.gutenberg.org/files/12364/12364-h/12364-h.htm",
+          "verified": true,
+          "importable": true
         }
       ]
     },

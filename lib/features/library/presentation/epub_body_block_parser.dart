@@ -28,6 +28,7 @@ class _SectionBlockView extends StatelessWidget {
     required this.isNightMode,
     required this.showRefCodes,
     required this.referenceCode,
+    required this.hasUserMarkup,
     required this.selectionHighlightSpec,
     required this.rangeSelection,
     required this.persistedHighlights,
@@ -58,6 +59,7 @@ class _SectionBlockView extends StatelessWidget {
   final bool isNightMode;
   final bool showRefCodes;
   final String? referenceCode;
+  final bool hasUserMarkup;
   final HighlightRenderSpec selectionHighlightSpec;
   final LibraryRangeSelection rangeSelection;
   final List<ElibraryMarkupRecord> persistedHighlights;
@@ -159,7 +161,7 @@ class _SectionBlockView extends StatelessWidget {
             style: resolvedStyle.copyWith(
               color: subduedColor,
               fontSize: (resolvedStyle.fontSize ?? bodyFontSize) * 0.86,
-              fontWeight: FontWeight.w600,
+              fontWeight: hasUserMarkup ? FontWeight.w700 : FontWeight.w600,
             ),
           ),
         ],

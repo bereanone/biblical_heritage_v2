@@ -51,12 +51,12 @@ class ElibraryMarkupRepository {
   static const String defaultHighlightColor = '#F7D87D';
 
   Future<Map<String, List<ElibraryMarkupRecord>>>
-  loadHighlightsBySectionForItem(String libraryItemId) async {
+  loadMarkupsBySectionForItem(String libraryItemId) async {
     final db = await UserDatabase.instance.database;
     final rows = await db.query(
       'elibrary_markups',
-      where: 'library_item_id = ? AND deleted_at IS NULL AND markup_type = ?',
-      whereArgs: [libraryItemId, highlightType],
+      where: 'library_item_id = ? AND deleted_at IS NULL',
+      whereArgs: [libraryItemId],
       orderBy: 'created_at ASC, id ASC',
     );
     final result = <String, List<ElibraryMarkupRecord>>{};
@@ -68,6 +68,18 @@ class ElibraryMarkupRepository {
           .add(record);
     }
     return result;
+  }
+
+  Future<Map<String, List<ElibraryMarkupRecord>>>
+  loadHighlightsBySectionForItem(String libraryItemId) async {
+    final bySection = await loadMarkupsBySectionForItem(libraryItemId);
+    return {
+      for (final entry in bySection.entries)
+        if (entry.value.any((record) => record.isHighlight))
+          entry.key: entry.value
+              .where((record) => record.isHighlight)
+              .toList(growable: false),
+    };
   }
 
   Future<ElibraryMarkupRecord?> saveHighlight({

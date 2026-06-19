@@ -36,6 +36,7 @@ class StudyBibleStorageIndexReport {
     required this.eLibrarySchemaStatus,
     required this.storagePolicyLabel,
     required this.sourceCleanupStatus,
+    required this.eLibraryWriteTarget,
     required this.epubCount,
     required this.pdfCount,
     required this.commentaryItemCount,
@@ -78,6 +79,7 @@ class StudyBibleStorageIndexReport {
   final String eLibrarySchemaStatus;
   final String storagePolicyLabel;
   final String sourceCleanupStatus;
+  final String eLibraryWriteTarget;
   final int epubCount;
   final int pdfCount;
   final int commentaryItemCount;
@@ -121,6 +123,7 @@ class StudyBibleStorageIndexReport {
       'elibrary_schema_status': eLibrarySchemaStatus,
       'storage_policy_label': storagePolicyLabel,
       'source_cleanup_status': sourceCleanupStatus,
+      'elibrary_write_target': eLibraryWriteTarget,
       'epub_count': epubCount,
       'pdf_count': pdfCount,
       'commentary_item_count': commentaryItemCount,
@@ -188,6 +191,7 @@ class StudyBibleStorageIndexReport {
     line('Backup status', backupStatus);
     line('eLibrary storage policy', storagePolicyLabel);
     line('eLibrary source cleanup', sourceCleanupStatus);
+    line('eLibrary write target', eLibraryWriteTarget);
     line('EPUB count', epubCount);
     line('PDF count', pdfCount);
     line(
@@ -337,6 +341,7 @@ class StudyBibleStorageIndexReportService {
       eLibrarySchemaStatus: eLibraryDatabaseSummary.schemaStatus,
       storagePolicyLabel: storagePolicy.label,
       sourceCleanupStatus: 'Deferred until verified import-to-db is wired.',
+      eLibraryWriteTarget: 'eLibrary.db',
       epubCount: storageSummary.epubCount,
       pdfCount: storageSummary.pdfCount,
       commentaryItemCount: commentaryItemStats.itemCount,

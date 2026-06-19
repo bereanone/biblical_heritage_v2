@@ -8,8 +8,8 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
+import '../../../core/database/elibrary_database.dart';
 import '../../../core/database/elibrary_read_resolver.dart';
-import '../../../core/database/user_database.dart';
 import 'library_citation_display_helper.dart';
 import '../../search/search_highlight_helper.dart';
 import 'library_author_resolver.dart';
@@ -100,15 +100,16 @@ class LibraryCatalogService {
         li.file_name COLLATE NOCASE ASC
     ''', args),
           hasData: (rows) => rows.isNotEmpty,
-        );
+    );
     final rows = rowResult.value;
     if (rows.isEmpty) {
       return const [];
     }
 
-    final normalizedRows = rowResult.usedELibraryDatabase
-        ? rows
-        : await _hydrateCatalogRows(rows);
+    final normalizedRows = await _hydrateCatalogRows(
+      rows,
+      database: rowResult.database,
+    );
 
     final items = normalizedRows
         .map(LibraryCatalogItem.fromRow)
@@ -120,12 +121,25 @@ class LibraryCatalogService {
   }
 
   Future<List<Map<String, Object?>>> _hydrateCatalogRows(
-    List<Map<String, Object?>> rows,
-  ) async {
-    final warmedAuthorValues = await _warmMissingAuthorValues(rows);
-    final warmedCoverPaths = await _warmMissingCoverPaths(rows);
-    final warmedTitleValues = await _warmMissingTitleValues(rows);
-    final repairedManagedPaths = await _repairMissingManagedPaths(rows);
+    List<Map<String, Object?>> rows, {
+    required Database database,
+  }) async {
+    final warmedAuthorValues = await _warmMissingAuthorValues(
+      rows,
+      database: database,
+    );
+    final warmedCoverPaths = await _warmMissingCoverPaths(
+      rows,
+      database: database,
+    );
+    final warmedTitleValues = await _warmMissingTitleValues(
+      rows,
+      database: database,
+    );
+    final repairedManagedPaths = await _repairMissingManagedPaths(
+      rows,
+      database: database,
+    );
     final hydratedRows = rows
         .map((row) {
           final id = row['id']?.toString() ?? '';
@@ -153,7 +167,10 @@ class LibraryCatalogService {
           };
         })
         .toList(growable: false);
-    final repairedManagedIds = await _repairManagedItemIds(hydratedRows);
+    final repairedManagedIds = await _repairManagedItemIds(
+      hydratedRows,
+      database: database,
+    );
     return hydratedRows
         .map((row) {
           final id = row['id']?.toString() ?? '';
@@ -177,7 +194,7 @@ class LibraryCatalogService {
     }
 
     await LibraryRootService.instance.ensureStructure(rootPath);
-    final db = await UserDatabase.instance.database;
+    final db = await ELibraryDatabase.instance.database;
     final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
     var touched = 0;
 
@@ -826,8 +843,9 @@ class LibraryCatalogService {
   }
 
   Future<Map<String, String>> _warmMissingCoverPaths(
-    List<Map<String, Object?>> rows,
-  ) async {
+    List<Map<String, Object?>> rows, {
+    required Database database,
+  }) async {
     final results = <String, String>{};
     final candidates = <Map<String, Object?>>[];
 
@@ -852,7 +870,12 @@ class LibraryCatalogService {
       return results;
     }
 
-    final warmResults = await Future.wait(candidates.map(_ensureEpubCoverPath));
+    final warmResults = await Future.wait(
+      candidates.map((row) => _ensureEpubCoverPath(
+        database: database,
+        row: row,
+      )),
+    );
     for (var index = 0; index < candidates.length; index++) {
       final coverPath = warmResults[index];
       if (coverPath == null || coverPath.trim().isEmpty) {
@@ -867,8 +890,9 @@ class LibraryCatalogService {
   }
 
   Future<Map<String, String>> _warmMissingAuthorValues(
-    List<Map<String, Object?>> rows,
-  ) async {
+    List<Map<String, Object?>> rows, {
+    required Database database,
+  }) async {
     final results = <String, String>{};
     final candidates = <Map<String, Object?>>[];
 
@@ -902,7 +926,12 @@ class LibraryCatalogService {
       return results;
     }
 
-    final warmResults = await Future.wait(candidates.map(_ensureEpubAuthor));
+    final warmResults = await Future.wait(
+      candidates.map((row) => _ensureEpubAuthor(
+        database: database,
+        row: row,
+      )),
+    );
     for (var index = 0; index < candidates.length; index++) {
       final author = warmResults[index];
       if (author == null || author.trim().isEmpty) {
@@ -917,8 +946,9 @@ class LibraryCatalogService {
   }
 
   Future<Map<String, String>> _warmMissingTitleValues(
-    List<Map<String, Object?>> rows,
-  ) async {
+    List<Map<String, Object?>> rows, {
+    required Database database,
+  }) async {
     final results = <String, String>{};
     final candidates = <Map<String, Object?>>[];
 
@@ -940,7 +970,12 @@ class LibraryCatalogService {
       return results;
     }
 
-    final warmResults = await Future.wait(candidates.map(_ensureEpubTitle));
+    final warmResults = await Future.wait(
+      candidates.map((row) => _ensureEpubTitle(
+        database: database,
+        row: row,
+      )),
+    );
     for (var index = 0; index < candidates.length; index++) {
       final title = warmResults[index];
       if (title == null || title.trim().isEmpty) {
@@ -1051,7 +1086,10 @@ class LibraryCatalogService {
     return rows.map(LibraryCatalogItem.fromRow).toList(growable: false);
   }
 
-  Future<String?> _ensureEpubAuthor(Map<String, Object?> row) async {
+  Future<String?> _ensureEpubAuthor({
+    required Database database,
+    required Map<String, Object?> row,
+  }) async {
     final id = row['id']?.toString().trim() ?? '';
     final relativePath = row['relative_path']?.toString().trim() ?? '';
     if (id.isEmpty || relativePath.isEmpty) {
@@ -1072,9 +1110,8 @@ class LibraryCatalogService {
         relativePath: relativePath,
       );
       if (egwFallback != null) {
-        final db = await UserDatabase.instance.database;
         final now = DateTime.now().toUtc().toIso8601String();
-        await db.update(
+        await database.update(
           'library_items',
           {'author': egwFallback, 'updated_at': now},
           where: 'id = ?',
@@ -1113,9 +1150,8 @@ class LibraryCatalogService {
         return null;
       }
 
-      final db = await UserDatabase.instance.database;
       final now = DateTime.now().toUtc().toIso8601String();
-      await db.update(
+      await database.update(
         'library_items',
         {'author': author, 'updated_at': now},
         where: 'id = ?',
@@ -1125,7 +1161,10 @@ class LibraryCatalogService {
     });
   }
 
-  Future<String?> _ensureEpubTitle(Map<String, Object?> row) {
+  Future<String?> _ensureEpubTitle({
+    required Database database,
+    required Map<String, Object?> row,
+  }) {
     final id = row['id']?.toString().trim() ?? '';
     final relativePath = row['relative_path']?.toString().trim() ?? '';
     if (id.isEmpty || relativePath.isEmpty) {
@@ -1165,9 +1204,8 @@ class LibraryCatalogService {
         return null;
       }
 
-      final db = await UserDatabase.instance.database;
       final now = DateTime.now().toUtc().toIso8601String();
-      await db.update(
+      await database.update(
         'library_items',
         {'title': title, 'updated_at': now},
         where: 'id = ?',
@@ -1178,8 +1216,9 @@ class LibraryCatalogService {
   }
 
   Future<Map<String, Map<String, Object?>>> _repairMissingManagedPaths(
-    List<Map<String, Object?>> rows,
-  ) async {
+    List<Map<String, Object?>> rows, {
+    required Database database,
+  }) async {
     final results = <String, Map<String, Object?>>{};
     final candidates = <Map<String, Object?>>[];
 
@@ -1280,8 +1319,7 @@ class LibraryCatalogService {
           'updated_at': now,
         };
 
-        final db = await UserDatabase.instance.database;
-        await db.update(
+        await database.update(
           'library_items',
           results[id]!,
           where: 'id = ?',
@@ -1289,7 +1327,7 @@ class LibraryCatalogService {
         );
         if (canonicalId != id) {
           await migrateManagedLibraryItemId(
-            db: db,
+            db: database,
             oldId: id,
             newId: canonicalId,
           );
@@ -1302,8 +1340,9 @@ class LibraryCatalogService {
   }
 
   Future<Map<String, Map<String, Object?>>> _repairManagedItemIds(
-    List<Map<String, Object?>> rows,
-  ) async {
+    List<Map<String, Object?>> rows, {
+    required Database database,
+  }) async {
     final results = <String, Map<String, Object?>>{};
     if (rows.isEmpty) return results;
 
@@ -1318,7 +1357,6 @@ class LibraryCatalogService {
       return results;
     }
 
-    final db = await UserDatabase.instance.database;
     for (final row in rows) {
       final id = row['id']?.toString().trim() ?? '';
       final relativePath = row['relative_path']?.toString().trim() ?? '';
@@ -1341,7 +1379,11 @@ class LibraryCatalogService {
       );
       if (canonicalId == id) continue;
 
-      await migrateManagedLibraryItemId(db: db, oldId: id, newId: canonicalId);
+      await migrateManagedLibraryItemId(
+        db: database,
+        oldId: id,
+        newId: canonicalId,
+      );
       results[id] = <String, Object?>{
         'id': canonicalId,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
@@ -1351,7 +1393,10 @@ class LibraryCatalogService {
     return results;
   }
 
-  Future<String?> _ensureEpubCoverPath(Map<String, Object?> row) {
+  Future<String?> _ensureEpubCoverPath({
+    required Database database,
+    required Map<String, Object?> row,
+  }) {
     final id = row['id']?.toString().trim() ?? '';
     final relativePath = row['relative_path']?.toString().trim() ?? '';
     if (id.isEmpty || relativePath.isEmpty) {
@@ -1383,9 +1428,8 @@ class LibraryCatalogService {
         existingCoverPath: existingCoverPath,
       );
       if (mirroredCoverPath != null) {
-        final db = await UserDatabase.instance.database;
         final now = DateTime.now().toUtc().toIso8601String();
-        await db.update(
+        await database.update(
           'library_items',
           {'cover_path': mirroredCoverPath, 'updated_at': now},
           where: 'id = ?',
@@ -1412,9 +1456,8 @@ class LibraryCatalogService {
         return null;
       }
 
-      final db = await UserDatabase.instance.database;
       final now = DateTime.now().toUtc().toIso8601String();
-      await db.update(
+      await database.update(
         'library_items',
         {'cover_path': coverPath, 'updated_at': now},
         where: 'id = ?',

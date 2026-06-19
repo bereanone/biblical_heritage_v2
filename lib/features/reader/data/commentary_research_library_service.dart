@@ -10,6 +10,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/elibrary_read_resolver.dart';
+import '../../../core/database/elibrary_database.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../../core/database/user_database.dart';
 import '../../library/data/library_author_resolver.dart';
@@ -251,7 +252,7 @@ class CommentaryResearchLibraryService
 
     await LibraryRootService.instance.ensureStructure(rootPath);
 
-    final db = await UserDatabase.instance.database;
+    final db = await ELibraryDatabase.instance.database;
     final books = await StudyBibleDatabase.instance.loadBooks();
     final bookLookup = BibleReferenceParser.buildBookLookup(books);
     final bookAliases = BibleReferenceParser.buildBookAliases(books);
@@ -397,7 +398,7 @@ class CommentaryResearchLibraryService
 
     await LibraryRootService.instance.ensureStructure(rootPath);
 
-    final db = await UserDatabase.instance.database;
+    final db = await ELibraryDatabase.instance.database;
     final books = await StudyBibleDatabase.instance.loadBooks();
     final bookLookup = BibleReferenceParser.buildBookLookup(books);
     final bookAliases = BibleReferenceParser.buildBookAliases(books);
@@ -443,7 +444,7 @@ class CommentaryResearchLibraryService
       return (indexed: 0, skipped: 0, failed: 0);
     }
 
-    final db = await UserDatabase.instance.database;
+    final db = await ELibraryDatabase.instance.database;
     // Include books that are either not yet indexed OR indexed before
     // library_text_blocks was introduced (status = indexed but no text rows).
     final rows = await db.rawQuery('''

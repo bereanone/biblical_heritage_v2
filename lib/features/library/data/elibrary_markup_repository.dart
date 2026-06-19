@@ -1,4 +1,5 @@
-import '../../../core/database/user_database.dart';
+import '../../../core/database/elibrary_database.dart';
+import '../../../core/database/elibrary_read_resolver.dart';
 
 class ElibraryMarkupRecord {
   const ElibraryMarkupRecord({
@@ -52,13 +53,18 @@ class ElibraryMarkupRepository {
 
   Future<Map<String, List<ElibraryMarkupRecord>>>
   loadMarkupsBySectionForItem(String libraryItemId) async {
-    final db = await UserDatabase.instance.database;
-    final rows = await db.query(
-      'elibrary_markups',
-      where: 'library_item_id = ? AND deleted_at IS NULL',
-      whereArgs: [libraryItemId],
-      orderBy: 'created_at ASC, id ASC',
+    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
+      List<Map<String, Object?>>
+    >(
+      read: (db) => db.query(
+        'elibrary_markups',
+        where: 'library_item_id = ? AND deleted_at IS NULL',
+        whereArgs: [libraryItemId],
+        orderBy: 'created_at ASC, id ASC',
+      ),
+      hasData: (rows) => rows.isNotEmpty,
     );
+    final rows = rowResult.value;
     final result = <String, List<ElibraryMarkupRecord>>{};
     for (final row in rows) {
       final record = _recordFromRow(row);
@@ -97,7 +103,7 @@ class ElibraryMarkupRepository {
     required String selectedTextSnapshot,
     String color = defaultHighlightColor,
   }) async {
-    final db = await UserDatabase.instance.database;
+    final db = await ELibraryDatabase.instance.database;
     final now = _utcNow();
     await db.delete(
       'elibrary_markups',
@@ -164,7 +170,7 @@ class ElibraryMarkupRepository {
     required int endBlockIndex,
     required int endCharOffset,
   }) async {
-    final db = await UserDatabase.instance.database;
+    final db = await ELibraryDatabase.instance.database;
     final now = _utcNow();
     return db.update(
       'elibrary_markups',

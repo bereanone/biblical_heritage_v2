@@ -1,6 +1,7 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import '../../../core/database/user_database.dart';
+import '../../../core/database/elibrary_database.dart';
+import '../../../core/database/elibrary_read_resolver.dart';
 
 class ELibraryInstallEstimateRecord {
   const ELibraryInstallEstimateRecord({
@@ -58,11 +59,16 @@ class ELibraryInstallEstimateRepository {
 
   Future<Map<String, Map<String, ELibraryInstallEstimateRecord>>>
   loadByCollectionAndFormat() async {
-    final db = await UserDatabase.instance.database;
-    final rows = await db.query(
-      tableName,
-      orderBy: 'collection_key ASC, format ASC',
+    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
+      List<Map<String, Object?>>
+    >(
+      read: (db) => db.query(
+        tableName,
+        orderBy: 'collection_key ASC, format ASC',
+      ),
+      hasData: (rows) => rows.isNotEmpty,
     );
+    final rows = rowResult.value;
     final result = <String, Map<String, ELibraryInstallEstimateRecord>>{};
     for (final row in rows) {
       final record = ELibraryInstallEstimateRecord.fromRow(row);
@@ -81,7 +87,7 @@ class ELibraryInstallEstimateRepository {
     String? source,
     DateTime? lastCheckedUtc,
   }) async {
-    final db = await UserDatabase.instance.database;
+    final db = await ELibraryDatabase.instance.database;
     await db.insert(
       tableName,
       ELibraryInstallEstimateRecord(
@@ -106,7 +112,7 @@ class ELibraryInstallEstimateRepository {
     DateTime? lastCheckedUtc,
   }) async {
     final checkedAt = lastCheckedUtc ?? DateTime.now().toUtc();
-    final db = await UserDatabase.instance.database;
+    final db = await ELibraryDatabase.instance.database;
     final batch = db.batch();
     for (final format in const ['epub', 'pdf']) {
       batch.insert(

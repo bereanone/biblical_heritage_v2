@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/library_root_service.dart';
-import '../../../core/database/user_database.dart';
+import '../../../core/database/elibrary_read_resolver.dart';
 import '../../library/data/library_catalog_service.dart';
 import '../../reader/data/commentary_research_library_service.dart';
 import 'elibrary_folder_policy.dart';
@@ -287,21 +287,26 @@ class ELibraryFileManagementService {
   Future<void> _markLibraryItemsDeleted({
     required List<String> removedRelativePaths,
   }) async {
-    final db = await UserDatabase.instance.database;
     final now = DateTime.now().toUtc().toIso8601String();
-    final batch = db.batch();
     for (final relativePath in removedRelativePaths) {
-      final rows = await db.query(
-        'library_items',
-        columns: const ['id'],
-        where: 'LOWER(relative_path) = ?',
-        whereArgs: [relativePath.toLowerCase()],
-        limit: 1,
+      final rowResult = await ELibraryReadResolver.instance.readWithFallback<
+        List<Map<String, Object?>>
+      >(
+        read: (db) => db.query(
+          'library_items',
+          columns: const ['id'],
+          where: 'LOWER(relative_path) = ?',
+          whereArgs: [relativePath.toLowerCase()],
+          limit: 1,
+        ),
+        hasData: (rows) => rows.isNotEmpty,
       );
+      final rows = rowResult.value;
       if (rows.isEmpty) continue;
+      final db = rowResult.database;
       final itemId = rows.first['id']?.toString().trim() ?? '';
       if (itemId.isEmpty) continue;
-      batch.update(
+      await db.update(
         'library_items',
         {
           'deleted_at': now,
@@ -313,7 +318,6 @@ class ELibraryFileManagementService {
         whereArgs: [itemId],
       );
     }
-    await batch.commit(noResult: true);
   }
 
   bool _isPathWithinRoot(String rootPath, String absolutePath) {

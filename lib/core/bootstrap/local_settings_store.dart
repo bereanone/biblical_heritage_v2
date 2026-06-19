@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../features/utilities/data/elibrary_storage_policy.dart';
+
 class LocalSettingsStore {
   LocalSettingsStore._();
 
@@ -142,6 +144,19 @@ class LocalSettingsStore {
   Future<void> saveLibraryReaderShowRefCodes(bool value) async {
     final settings = await load();
     settings['library_reader_show_ref_codes'] = value;
+    await save(settings);
+  }
+
+  Future<ELibraryStoragePolicy> loadELibraryStoragePolicy() async {
+    final settings = await load();
+    return ELibraryStoragePolicyX.fromStoredValue(
+      settings['elibrary_storage_policy']?.toString(),
+    );
+  }
+
+  Future<void> saveELibraryStoragePolicy(ELibraryStoragePolicy policy) async {
+    final settings = await load();
+    settings['elibrary_storage_policy'] = policy.storedValue;
     await save(settings);
   }
 }

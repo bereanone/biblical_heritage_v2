@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/library_root_service.dart';
+import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/user_database.dart';
 import '../../library/data/library_catalog_service.dart';
 import '../../reader/data/commentary_research_library_service.dart';
@@ -14,7 +15,17 @@ import '../data/elibrary_duplicate_cleanup_service.dart';
 import '../data/elibrary_install_estimate_repository.dart';
 import '../data/elibrary_migration_service.dart';
 import '../data/elibrary_download_service.dart';
+import '../data/elibrary_storage_policy.dart';
 import 'library_root_setup_screen.dart';
+
+const _sourceCleanupDeferredMessage =
+    'Deferred until verified import-to-db is wired.';
+
+enum _ELibraryRunCompletionStatus {
+  cleanSuccess,
+  completedWithWarnings,
+  failedOrIncomplete,
+}
 
 class ELibrarySetupScreen extends StatefulWidget {
   const ELibrarySetupScreen({super.key});
@@ -41,6 +52,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   bool _installEpub = false;
   bool _installPdf = false;
   bool _refreshingEstimateCache = false;
+  ELibraryStoragePolicy _storagePolicy = ELibraryStoragePolicy.saveSpace;
   Map<String, Map<String, ELibraryInstallEstimateRecord>>
   _estimateCacheByCollection =
       <String, Map<String, ELibraryInstallEstimateRecord>>{};
@@ -78,9 +90,12 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
 
   Future<void> _load() async {
     final selection = await LibraryRootService.instance.loadSelection();
+    final storagePolicy = await LocalSettingsStore.instance
+        .loadELibraryStoragePolicy();
     if (!mounted) return;
     setState(() {
       _selection = selection;
+      _storagePolicy = storagePolicy;
       _loading = false;
     });
     await _loadStorageSummary();
@@ -437,7 +452,113 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     if (report == null || report.filesUnavailable.isEmpty) {
       return null;
     }
-    return 'Some books did not have a verified EPUB download URL.';
+    return 'Some books did not have a verified EPUB/PDF file in the selected format.';
+  }
+
+  _ELibraryRunCompletionStatus _completionStatus({
+    required ELibraryDownloadReport? downloadReport,
+    required int indexingErrors,
+    required int indexedCount,
+    required bool isRunning,
+  }) {
+    if (isRunning) {
+      return _ELibraryRunCompletionStatus.failedOrIncomplete;
+    }
+    final failed = downloadReport?.failures.length ?? 0;
+    final unavailable = downloadReport?.filesUnavailable.length ?? 0;
+    if (failed > 0 || indexingErrors > 0 || indexedCount == 0) {
+      return _ELibraryRunCompletionStatus.failedOrIncomplete;
+    }
+    if (unavailable > 0) {
+      return _ELibraryRunCompletionStatus.completedWithWarnings;
+    }
+    return _ELibraryRunCompletionStatus.cleanSuccess;
+  }
+
+  String _completionHeading({
+    required ELibraryDownloadReport? downloadReport,
+    required int indexingErrors,
+    required int indexedCount,
+  }) {
+    final status = _completionStatus(
+      downloadReport: downloadReport,
+      indexingErrors: indexingErrors,
+      indexedCount: indexedCount,
+      isRunning: false,
+    );
+    return switch (status) {
+      _ELibraryRunCompletionStatus.cleanSuccess => 'eLibrary setup complete',
+      _ELibraryRunCompletionStatus.completedWithWarnings =>
+        'eLibrary setup completed with warnings',
+      _ELibraryRunCompletionStatus.failedOrIncomplete =>
+        'eLibrary setup incomplete',
+    };
+  }
+
+  String _completionSummary({
+    required ELibraryDownloadReport? downloadReport,
+    required int indexingErrors,
+    required int indexedCount,
+  }) {
+    final unavailable = downloadReport?.filesUnavailable.length ?? 0;
+    final failed = downloadReport?.failures.length ?? 0;
+    return 'Indexed: $indexedCount\n'
+        'Unavailable in selected format: $unavailable\n'
+        'Failed: $failed\n'
+        'Indexing errors: $indexingErrors';
+  }
+
+  Future<void> _showUnavailableItemsDialog() async {
+    final report = _downloadReport;
+    if (report == null || report.filesUnavailable.isEmpty) return;
+    final items = report.filesUnavailable;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Unavailable in selected format'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: items.length,
+              separatorBuilder: (context, index) => const Divider(height: 20),
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      item.title,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    if (item.collection.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text('Collection: ${item.collection}'),
+                    ],
+                    const SizedBox(height: 4),
+                    Text('Format: ${item.format.toUpperCase()}'),
+                    const SizedBox(height: 4),
+                    SelectableText(item.sourceUrl),
+                    if ((item.error ?? '').trim().isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      SelectableText(item.error!),
+                    ],
+                  ],
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<bool?> _confirmLegacyMigration() {
@@ -502,8 +623,8 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       return;
     }
 
-    final needsLegacyMigration =
-        await LegacyELibraryMigrationService.instance.hasMigrationCandidates();
+    final needsLegacyMigration = await LegacyELibraryMigrationService.instance
+        .hasMigrationCandidates();
     if (!mounted) return;
     if (needsLegacyMigration) {
       final confirmed = await _confirmLegacyMigration();
@@ -682,6 +803,19 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
           'failed': indexResult.failed,
         },
         'migration_report_path': _migrationReport?.reportFilePath,
+        'source_cleanup_policy': _storagePolicy.name,
+        'source_cleanup_policy_label': _storagePolicy.label,
+        'source_cleanup_status': _sourceCleanupDeferredMessage,
+        'source_files_downloaded': downloadReport.filesDownloaded.length,
+        'source_files_retained':
+            downloadReport.filesDownloaded.length +
+            downloadReport.filesSkipped.length,
+        'source_files_removed_after_import': 0,
+        'source_files_not_removed_because_import_not_verified':
+            downloadReport.filesDownloaded.length +
+            downloadReport.filesSkipped.length,
+        // TODO: Enable source cleanup once downloaded files are imported into
+        // eLibrary.db and the app can verify the indexed result.
         'files_downloaded': downloadReport.filesDownloaded
             .map((item) => item.toJson())
             .toList(growable: false),
@@ -717,13 +851,19 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         _indexReportPath = passageData.indexReportPath;
         _indexedCount = indexedCount;
         _indexingErrors = indexingErrors;
-        _setupStatusMessage =
-            downloadReport.failures.isEmpty &&
-                downloadReport.filesUnavailable.isEmpty
-            ? 'Done'
-            : downloadReport.failures.isNotEmpty
-            ? 'Done with download issues.'
-            : 'Done with unavailable books.';
+        _setupStatusMessage = switch (_completionStatus(
+          downloadReport: downloadReport,
+          indexingErrors: indexingErrors,
+          indexedCount: indexedCount,
+          isRunning: false,
+        )) {
+          _ELibraryRunCompletionStatus.cleanSuccess =>
+            'eLibrary setup complete',
+          _ELibraryRunCompletionStatus.completedWithWarnings =>
+            'eLibrary setup completed with warnings',
+          _ELibraryRunCompletionStatus.failedOrIncomplete =>
+            'eLibrary setup incomplete',
+        };
         _indexing = false;
       });
       await _loadStorageSummary();
@@ -732,7 +872,8 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'eLibrary setup finished in ${downloadReport.elapsedSeconds.toStringAsFixed(1)}s',
+            '${_setupStatusMessage ?? 'eLibrary setup complete'} in '
+            '${downloadReport.elapsedSeconds.toStringAsFixed(1)}s',
           ),
         ),
       );
@@ -991,6 +1132,17 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                           const SizedBox(height: 8),
                           _pathLine('Root path', selection?.path),
                           _pathLine('Root source', selection?.sourceLabel),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Storage after successful import: ${_storagePolicy.label}',
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                          Text(
+                            'Cleanup deferred: source files are retained until verified import-to-db cleanup is wired.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
                           const SizedBox(height: 12),
                           Wrap(
                             spacing: 12,
@@ -1441,7 +1593,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                             Text(
                               'Downloaded: ${_progress?.downloadedCount ?? 0}  '
                               'Skipped: ${_progress?.skippedCount ?? 0}  '
-                              'Unavailable: ${_progress?.unavailableCount ?? 0}  '
+                              'Unavailable in selected format: ${_progress?.unavailableCount ?? 0}  '
                               'Failed: ${_progress?.failedCount ?? 0}',
                             ),
                             const SizedBox(height: 4),
@@ -1466,8 +1618,20 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Setup complete',
+                              _completionHeading(
+                                downloadReport: _downloadReport,
+                                indexingErrors: _indexingErrors,
+                                indexedCount: _indexedCount,
+                              ),
                               style: theme.textTheme.titleLarge,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _completionSummary(
+                                downloadReport: _downloadReport,
+                                indexingErrors: _indexingErrors,
+                                indexedCount: _indexedCount,
+                              ),
                             ),
                             const SizedBox(height: 8),
                             Text(
@@ -1477,7 +1641,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                               'Skipped existing: ${_downloadReport!.filesSkipped.length}',
                             ),
                             Text(
-                              'Unavailable: ${_downloadReport!.filesUnavailable.length}',
+                              'Unavailable in selected format: ${_downloadReport!.filesUnavailable.length}',
                             ),
                             Text('Failed: ${_downloadReport!.failures.length}'),
                             Text('Indexed: $_indexedCount'),
@@ -1485,16 +1649,41 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                             Text(
                               'Elapsed: ${_downloadReport!.elapsedSeconds.toStringAsFixed(1)}s',
                             ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Source cleanup policy: ${_storagePolicy.label}',
+                            ),
+                            Text(
+                              'Source files downloaded: ${_downloadReport!.filesDownloaded.length}',
+                            ),
+                            Text(
+                              'Source files retained: ${_downloadReport!.filesDownloaded.length + _downloadReport!.filesSkipped.length}',
+                            ),
+                            Text('Source files removed after import: 0'),
+                            Text(
+                              'Source files not removed because import was not verified: ${_downloadReport!.filesDownloaded.length + _downloadReport!.filesSkipped.length}',
+                            ),
+                            Text(
+                              'Cleanup status: $_sourceCleanupDeferredMessage',
+                            ),
                             if (_downloadReport!
                                 .filesUnavailable
                                 .isNotEmpty) ...[
                               const SizedBox(height: 12),
                               Text(
                                 _downloadUnavailableSummary(_downloadReport) ??
-                                    'Some books did not have a verified EPUB download URL.',
+                                    'Some books did not have a verified EPUB/PDF file in the selected format.',
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: scheme.tertiary,
                                   fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: OutlinedButton(
+                                  onPressed: _showUnavailableItemsDialog,
+                                  child: const Text('View unavailable items'),
                                 ),
                               ),
                               const SizedBox(height: 8),
@@ -1506,6 +1695,13 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                                           '${item.title} (${item.format.toUpperCase()}): ${item.sourceUrl}\n${item.error ?? "No diagnostic details available."}',
                                     )
                                     .join('\n\n'),
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'These are candidates for a later fallback import path. Some may be available as PDF or online text/HTML, but fallback import is not implemented in this screen yet.',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: scheme.onSurfaceVariant,
                                 ),

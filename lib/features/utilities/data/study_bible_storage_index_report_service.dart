@@ -9,6 +9,7 @@ import '../../../core/bootstrap/sandbox_bootstrap.dart';
 import '../../../core/database/elibrary_read_resolver.dart';
 import '../../../core/database/elibrary_schema.dart';
 import '../../../core/database/user_database.dart';
+import 'elibrary_database_migration_service.dart';
 import 'elibrary_storage_policy.dart';
 import 'elibrary_file_management_service.dart';
 
@@ -37,6 +38,11 @@ class StudyBibleStorageIndexReport {
     required this.storagePolicyLabel,
     required this.sourceCleanupStatus,
     required this.eLibraryWriteTarget,
+    required this.eLibraryMigrationNeeded,
+    required this.eLibraryMigrationCompletenessLabel,
+    required this.eLibraryMigrationStatus,
+    required this.eLibraryMigrationReportPath,
+    required this.eLibraryMigrationTableSummaries,
     required this.epubCount,
     required this.pdfCount,
     required this.commentaryItemCount,
@@ -80,6 +86,11 @@ class StudyBibleStorageIndexReport {
   final String storagePolicyLabel;
   final String sourceCleanupStatus;
   final String eLibraryWriteTarget;
+  final bool eLibraryMigrationNeeded;
+  final String eLibraryMigrationCompletenessLabel;
+  final String eLibraryMigrationStatus;
+  final String? eLibraryMigrationReportPath;
+  final List<String> eLibraryMigrationTableSummaries;
   final int epubCount;
   final int pdfCount;
   final int commentaryItemCount;
@@ -124,6 +135,11 @@ class StudyBibleStorageIndexReport {
       'storage_policy_label': storagePolicyLabel,
       'source_cleanup_status': sourceCleanupStatus,
       'elibrary_write_target': eLibraryWriteTarget,
+      'elibrary_migration_needed': eLibraryMigrationNeeded,
+      'elibrary_migration_completeness_label': eLibraryMigrationCompletenessLabel,
+      'elibrary_migration_status': eLibraryMigrationStatus,
+      'elibrary_migration_report_path': eLibraryMigrationReportPath,
+      'elibrary_migration_table_summaries': eLibraryMigrationTableSummaries,
       'epub_count': epubCount,
       'pdf_count': pdfCount,
       'commentary_item_count': commentaryItemCount,
@@ -192,6 +208,19 @@ class StudyBibleStorageIndexReport {
     line('eLibrary storage policy', storagePolicyLabel);
     line('eLibrary source cleanup', sourceCleanupStatus);
     line('eLibrary write target', eLibraryWriteTarget);
+    line('eLibrary migration needed', eLibraryMigrationNeeded ? 'yes' : 'no');
+    line('eLibrary migration status', eLibraryMigrationStatus);
+    line(
+      'eLibrary migration completeness',
+      eLibraryMigrationCompletenessLabel,
+    );
+    line('eLibrary migration report', eLibraryMigrationReportPath);
+    line(
+      'eLibrary migration tables',
+      eLibraryMigrationTableSummaries.isEmpty
+          ? null
+          : eLibraryMigrationTableSummaries.join('\n  '),
+    );
     line('EPUB count', epubCount);
     line('PDF count', pdfCount);
     line(
@@ -236,6 +265,8 @@ class StudyBibleStorageIndexReportService {
         );
     final storagePolicy = await LocalSettingsStore.instance
         .loadELibraryStoragePolicy();
+    final migrationReport = await ELibraryDatabaseMigrationService.instance
+        .buildDryRunReport();
     final db = await UserDatabase.instance.database;
     final counts = await _loadTableCounts(db);
     final userELibraryTableCounts = await _loadELibraryTableCounts(db);
@@ -342,6 +373,17 @@ class StudyBibleStorageIndexReportService {
       storagePolicyLabel: storagePolicy.label,
       sourceCleanupStatus: 'Deferred until verified import-to-db is wired.',
       eLibraryWriteTarget: 'eLibrary.db',
+      eLibraryMigrationNeeded: migrationReport.migrationNeeded,
+      eLibraryMigrationCompletenessLabel: migrationReport.completenessLabel,
+      eLibraryMigrationStatus: migrationReport.schemaCompatible
+          ? (migrationReport.migrationNeeded
+              ? 'Legacy eLibrary rows pending copy.'
+              : 'Legacy eLibrary rows already copied.')
+          : 'Schema mismatch blocks copy.',
+      eLibraryMigrationReportPath: migrationReport.reportFilePath,
+      eLibraryMigrationTableSummaries: migrationReport.tableReports
+          .map((report) => report.toDiagnosticText())
+          .toList(growable: false),
       epubCount: storageSummary.epubCount,
       pdfCount: storageSummary.pdfCount,
       commentaryItemCount: commentaryItemStats.itemCount,

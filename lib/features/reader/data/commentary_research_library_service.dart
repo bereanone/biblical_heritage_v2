@@ -9,6 +9,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
+import '../../../core/database/elibrary_read_resolver.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../../core/database/user_database.dart';
 import '../../library/data/library_author_resolver.dart';
@@ -97,35 +98,48 @@ class CommentaryResearchLibraryService
   Future<List<LibraryBookSection>> _loadBookSectionsFromTextBlocks({
     required String libraryItemId,
   }) async {
-    final db = await UserDatabase.instance.database;
-    final rows = await db.query(
-      'library_text_blocks',
-      columns: const [
-        'id',
-        'epub_href',
-        'spine_index',
-        'paragraph_index',
-        'paragraph_on_section',
-        'section_title',
-        'plain_text',
-      ],
-      where: 'library_item_id = ?',
-      whereArgs: [libraryItemId],
-      orderBy:
-          'COALESCE(spine_index, 1073741824), epub_href COLLATE NOCASE ASC, paragraph_index ASC',
+    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
+      List<Map<String, Object?>>
+    >(
+      read: (db) => db.query(
+        'library_text_blocks',
+        columns: const [
+          'id',
+          'epub_href',
+          'spine_index',
+          'paragraph_index',
+          'paragraph_on_section',
+          'section_title',
+          'plain_text',
+        ],
+        where: 'library_item_id = ?',
+        whereArgs: [libraryItemId],
+        orderBy:
+            'COALESCE(spine_index, 1073741824), epub_href COLLATE NOCASE ASC, paragraph_index ASC',
+      ),
+      hasData: (rows) => rows.isNotEmpty,
+      fallbackDatabase: UserDatabase.instance.database,
     );
+    final rows = rowResult.value;
 
     if (rows.isEmpty) {
       return const [];
     }
 
-    final itemRows = await db.query(
-      'library_items',
-      columns: const ['title', 'file_name', 'relative_path'],
-      where: 'id = ?',
-      whereArgs: [libraryItemId],
-      limit: 1,
+    final itemResult = await ELibraryReadResolver.instance.readWithFallback<
+      List<Map<String, Object?>>
+    >(
+      read: (db) => db.query(
+        'library_items',
+        columns: const ['title', 'file_name', 'relative_path'],
+        where: 'id = ?',
+        whereArgs: [libraryItemId],
+        limit: 1,
+      ),
+      hasData: (rows) => rows.isNotEmpty,
+      fallbackDatabase: UserDatabase.instance.database,
     );
+    final itemRows = itemResult.value;
     final itemRow = itemRows.isEmpty
         ? const <String, Object?>{}
         : itemRows.first;
@@ -514,13 +528,19 @@ class CommentaryResearchLibraryService
   Future<List<CommentaryResearchNavigationItem>> loadNavigationItems({
     required String libraryItemId,
   }) async {
-    final db = await UserDatabase.instance.database;
-    final rows = await db.query(
-      'library_navigation_items',
-      where: 'library_item_id = ? AND deleted_at IS NULL',
-      whereArgs: [libraryItemId],
-      orderBy: 'sort_order ASC, depth ASC, label COLLATE NOCASE ASC',
+    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
+      List<Map<String, Object?>>
+    >(
+      read: (db) => db.query(
+        'library_navigation_items',
+        where: 'library_item_id = ? AND deleted_at IS NULL',
+        whereArgs: [libraryItemId],
+        orderBy: 'sort_order ASC, depth ASC, label COLLATE NOCASE ASC',
+      ),
+      hasData: (rows) => rows.isNotEmpty,
+      fallbackDatabase: UserDatabase.instance.database,
     );
+    final rows = rowResult.value;
     return rows
         .map(
           (row) => CommentaryResearchNavigationItem(

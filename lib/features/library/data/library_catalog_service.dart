@@ -8,6 +8,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
+import '../../../core/database/elibrary_read_resolver.dart';
 import '../../../core/database/user_database.dart';
 import 'library_citation_display_helper.dart';
 import '../../search/search_highlight_helper.dart';
@@ -28,12 +29,13 @@ class LibraryCatalogService {
   static final Map<String, Future<String?>> _coverWarmJobs = {};
   static final Map<String, Future<String?>> _authorWarmJobs = {};
   static final Map<String, Future<String?>> _titleWarmJobs = {};
+  static final ELibraryReadResolver _readResolver =
+      ELibraryReadResolver.instance;
 
   Future<List<LibraryCatalogItem>> loadItems({
     String folderRoot = 'all',
   }) async {
     await LibraryRootService.instance.accessibleLibraryRootPath();
-    final db = await UserDatabase.instance.database;
     final normalized = folderRoot.trim().toLowerCase();
     final where = <String>['deleted_at IS NULL'];
     final args = <Object?>[];
@@ -57,7 +59,9 @@ class LibraryCatalogService {
         break;
     }
 
-    final rows = await db.rawQuery('''
+    final rowResult = await _readResolver
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (db) => db.rawQuery('''
       SELECT
         li.id,
         li.title,
@@ -94,8 +98,30 @@ class LibraryCatalogService {
         COALESCE(li.last_opened, li.date_added, li.created_at) DESC,
         li.title COLLATE NOCASE ASC,
         li.file_name COLLATE NOCASE ASC
-    ''', args);
+    ''', args),
+          hasData: (rows) => rows.isNotEmpty,
+        );
+    final rows = rowResult.value;
+    if (rows.isEmpty) {
+      return const [];
+    }
 
+    final normalizedRows = rowResult.usedELibraryDatabase
+        ? rows
+        : await _hydrateCatalogRows(rows);
+
+    final items = normalizedRows
+        .map(LibraryCatalogItem.fromRow)
+        .toList(growable: false);
+    final result = _dedupeLibraryItems(
+      items,
+    ).where(_isVisibleLibraryItem).toList(growable: false);
+    return result;
+  }
+
+  Future<List<Map<String, Object?>>> _hydrateCatalogRows(
+    List<Map<String, Object?>> rows,
+  ) async {
     final warmedAuthorValues = await _warmMissingAuthorValues(rows);
     final warmedCoverPaths = await _warmMissingCoverPaths(rows);
     final warmedTitleValues = await _warmMissingTitleValues(rows);
@@ -127,9 +153,8 @@ class LibraryCatalogService {
           };
         })
         .toList(growable: false);
-
     final repairedManagedIds = await _repairManagedItemIds(hydratedRows);
-    final normalizedRows = hydratedRows
+    return hydratedRows
         .map((row) {
           final id = row['id']?.toString() ?? '';
           final repairedIdValues = repairedManagedIds[id];
@@ -137,14 +162,6 @@ class LibraryCatalogService {
           return <String, Object?>{...row, ...repairedIdValues};
         })
         .toList(growable: false);
-
-    final items = normalizedRows
-        .map(LibraryCatalogItem.fromRow)
-        .toList(growable: false);
-    final result = _dedupeLibraryItems(
-      items,
-    ).where(_isVisibleLibraryItem).toList(growable: false);
-    return result;
   }
 
   Future<int> refreshManagedItemsFromDisk() async {
@@ -286,8 +303,9 @@ class LibraryCatalogService {
   /// text is absent from the search index until the Commentary/Research panel
   /// runs an indexing pass.
   Future<int> countUnindexedManagedItems() async {
-    final db = await UserDatabase.instance.database;
-    final result = await db.rawQuery('''
+    final result = await _readResolver.readWithFallback<int>(
+      read: (db) async {
+        final rows = await db.rawQuery('''
       SELECT COUNT(*) AS cnt
       FROM library_items
       WHERE deleted_at IS NULL
@@ -300,7 +318,11 @@ class LibraryCatalogService {
           )
         )
     ''');
-    return (result.first['cnt'] as num?)?.toInt() ?? 0;
+        return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+      },
+      hasData: (count) => count > 0,
+    );
+    return result.value;
   }
 
   Future<List<LibraryCatalogItem>> listUnindexedManagedItems({
@@ -327,7 +349,6 @@ class LibraryCatalogService {
     final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
       collectionFilter ?? '',
     );
-    final db = await UserDatabase.instance.database;
     final where = <String>['li.deleted_at IS NULL'];
     final args = <Object?>[];
     if (normalizedCollectionFilter.isNotEmpty &&
@@ -336,20 +357,25 @@ class LibraryCatalogService {
       args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
     }
 
-    final rows = await db.rawQuery('''
+    final result = await _readResolver.readWithFallback<int>(
+      read: (db) async {
+        final rows = await db.rawQuery('''
       SELECT COUNT(DISTINCT li.id) AS cnt
       FROM library_items li
       INNER JOIN library_text_blocks ltb ON ltb.library_item_id = li.id
       WHERE ${where.join(' AND ')}
       ''', args);
-    return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+        return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+      },
+      hasData: (count) => count > 0,
+    );
+    return result.value;
   }
 
   Future<int> countCatalogItemsInScope({String? collectionFilter}) async {
     final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
       collectionFilter ?? '',
     );
-    final db = await UserDatabase.instance.database;
     final where = <String>['li.deleted_at IS NULL'];
     final args = <Object?>[];
     if (normalizedCollectionFilter.isNotEmpty &&
@@ -358,12 +384,18 @@ class LibraryCatalogService {
       args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
     }
 
-    final rows = await db.rawQuery('''
+    final result = await _readResolver.readWithFallback<int>(
+      read: (db) async {
+        final rows = await db.rawQuery('''
       SELECT COUNT(DISTINCT li.id) AS cnt
       FROM library_items li
       WHERE ${where.join(' AND ')}
       ''', args);
-    return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+        return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+      },
+      hasData: (count) => count > 0,
+    );
+    return result.value;
   }
 
   Future<int> countSearchContentResults({
@@ -375,7 +407,6 @@ class LibraryCatalogService {
       return 0;
     }
 
-    final db = await UserDatabase.instance.database;
     final where = <String>['li.deleted_at IS NULL'];
     final args = <Object?>[];
     final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
@@ -403,13 +434,19 @@ class LibraryCatalogService {
       return 0;
     }
 
-    final rows = await db.rawQuery('''
+    final result = await _readResolver.readWithFallback<int>(
+      read: (db) async {
+        final rows = await db.rawQuery('''
       SELECT COUNT(DISTINCT ltb.library_item_id) AS cnt
       FROM library_text_blocks ltb
       INNER JOIN library_items li ON li.id = ltb.library_item_id
       WHERE ${where.join(' AND ')}
       ''', args);
-    return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+        return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+      },
+      hasData: (count) => count > 0,
+    );
+    return result.value;
   }
 
   String _libraryCollectionSearchClause() {
@@ -445,7 +482,6 @@ class LibraryCatalogService {
       return const [];
     }
 
-    final db = await UserDatabase.instance.database;
     final where = <String>['li.deleted_at IS NULL'];
     final args = <Object?>[];
     final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
@@ -484,8 +520,9 @@ class LibraryCatalogService {
             ? 8
             : 4);
 
-    final rows = await db.rawQuery(
-      '''
+    final rowResult = await _readResolver.readWithFallback<List<Map<String, Object?>>>(
+      read: (db) => db.rawQuery(
+        '''
       WITH best_hits AS (
         SELECT ltb.library_item_id, MIN(ltb.rowid) AS best_rowid
         FROM library_text_blocks ltb
@@ -534,8 +571,14 @@ class LibraryCatalogService {
         AND eri.paragraph_index = ltb.paragraph_index
       ORDER BY li.title COLLATE NOCASE ASC
       ''',
-      [...args, fetchLimit],
+        [...args, fetchLimit],
+      ),
+      hasData: (rows) => rows.isNotEmpty,
     );
+    final rows = rowResult.value;
+    if (rows.isEmpty) {
+      return const [];
+    }
 
     final mappedResults = rows
         .map((row) {
@@ -652,7 +695,6 @@ class LibraryCatalogService {
       return result.fullParagraph!.trim();
     }
 
-    final db = await UserDatabase.instance.database;
     final item = result.item;
     final libraryItemId = item.id.trim();
     if (libraryItemId.isEmpty) return existing;
@@ -669,13 +711,17 @@ class LibraryCatalogService {
       where.add('paragraph_index = ?');
       args.add(paragraphIndex);
     }
-    final rows = await db.rawQuery('''
+    final rowResult = await _readResolver.readWithFallback<List<Map<String, Object?>>>(
+      read: (db) => db.rawQuery('''
       SELECT full_paragraph, anchor
       FROM library_links
       WHERE ${where.join(' AND ')}
       ORDER BY paragraph_index ASC
       LIMIT 1
-      ''', args);
+      ''', args),
+      hasData: (rows) => rows.isNotEmpty,
+    );
+    final rows = rowResult.value;
     if (rows.isEmpty) return existing;
     return _firstNonEmpty([
       rows.first['full_paragraph']?.toString(),
@@ -687,28 +733,31 @@ class LibraryCatalogService {
   Future<List<LibraryCatalogNavigationItem>> loadNavigationItems(
     String libraryItemId,
   ) async {
-    final db = await UserDatabase.instance.database;
-    final rows = await db.query(
-      'library_navigation_items',
-      columns: const [
-        'id',
-        'parent_id',
-        'label',
-        'href',
-        'anchor_id',
-        'spine_index',
-        'sort_order',
-        'depth',
-        'nav_type',
-        'content_kind',
-        'is_front_matter',
-        'is_body_start',
-        'body_order',
-      ],
-      where: 'library_item_id = ? AND deleted_at IS NULL',
-      whereArgs: [libraryItemId],
-      orderBy: 'sort_order ASC, depth ASC, label COLLATE NOCASE ASC',
+    final rowResult = await _readResolver.readWithFallback<List<Map<String, Object?>>>(
+      read: (db) => db.query(
+        'library_navigation_items',
+        columns: const [
+          'id',
+          'parent_id',
+          'label',
+          'href',
+          'anchor_id',
+          'spine_index',
+          'sort_order',
+          'depth',
+          'nav_type',
+          'content_kind',
+          'is_front_matter',
+          'is_body_start',
+          'body_order',
+        ],
+        where: 'library_item_id = ? AND deleted_at IS NULL',
+        whereArgs: [libraryItemId],
+        orderBy: 'sort_order ASC, depth ASC, label COLLATE NOCASE ASC',
+      ),
+      hasData: (rows) => rows.isNotEmpty,
     );
+    final rows = rowResult.value;
     final items = rows
         .map(
           (row) => LibraryCatalogNavigationItem(
@@ -952,9 +1001,9 @@ class LibraryCatalogService {
     required List<Object?> args,
     required int limit,
   }) async {
-    final db = await UserDatabase.instance.database;
-    final rows = await db.rawQuery(
-      '''
+    final rowResult = await _readResolver.readWithFallback<List<Map<String, Object?>>>(
+      read: (db) => db.rawQuery(
+        '''
       SELECT
         li.id,
         li.title,
@@ -994,8 +1043,11 @@ class LibraryCatalogService {
         li.file_name COLLATE NOCASE ASC
       LIMIT ?
       ''',
-      [...args, limit],
+        [...args, limit],
+      ),
+      hasData: (rows) => rows.isNotEmpty,
     );
+    final rows = rowResult.value;
     return rows.map(LibraryCatalogItem.fromRow).toList(growable: false);
   }
 

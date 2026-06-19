@@ -65,9 +65,12 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
     required String? preferredVolumeCode,
     required bool chapterWideMatches,
   }) async {
-    final rows = await db.rawQuery(
-      chapterWideMatches
-          ? '''
+    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
+      List<Map<String, Object?>>
+    >(
+      read: (readDb) => readDb.rawQuery(
+        chapterWideMatches
+            ? '''
       SELECT
         ll.library_item_id,
         li.title,
@@ -95,7 +98,7 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
         AND ll.chapter = ?
       ORDER BY li.title COLLATE NOCASE ASC, ll.verse_start ASC, ll.verse_end ASC
       '''
-          : '''
+            : '''
       SELECT
         li.title,
         li.file_name,
@@ -124,10 +127,14 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
         AND ll.verse_end >= ?
       ORDER BY li.title COLLATE NOCASE ASC, ll.verse_start ASC, ll.verse_end ASC
       ''',
-      chapterWideMatches
-          ? [folderType, bookId, chapter]
-          : [folderType, bookId, chapter, verse, verse],
+        chapterWideMatches
+            ? [folderType, bookId, chapter]
+            : [folderType, bookId, chapter, verse, verse],
+      ),
+      hasData: (rows) => rows.isNotEmpty,
+      fallbackDatabase: Future.value(db),
     );
+    final rows = rowResult.value;
 
     final visibleRows =
         filterRowsByPreferredCommentaryVolume(rows, preferredVolumeCode);
@@ -219,15 +226,24 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
   }
 
   Future<int> _countLinks(Database db, String itemId, String folderType) async {
-    final rows = await db.rawQuery(
-      '''
+    final countResult = await ELibraryReadResolver.instance.readWithFallback<
+      int
+    >(
+      read: (readDb) async {
+        final rows = await readDb.rawQuery(
+          '''
       SELECT COUNT(*) AS count
       FROM library_links
       WHERE library_item_id = ? AND link_type = ?
       ''',
-      [itemId, folderType],
+          [itemId, folderType],
+        );
+        return (rows.first['count'] as num?)?.toInt() ?? 0;
+      },
+      hasData: (count) => count > 0,
+      fallbackDatabase: Future.value(db),
     );
-    return (rows.first['count'] as num?)?.toInt() ?? 0;
+    return countResult.value;
   }
 
   Future<String?> _readTitle(File file) async {
@@ -415,22 +431,29 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
     required int chapter,
     required int verse,
   }) async {
-    final rows = await db.query(
-      'library_items',
-      columns: const [
-        'id',
-        'title',
-        'file_name',
-        'relative_path',
-        'file_size',
-        'file_format',
-        'index_status',
-        'index_error',
-      ],
-      where: 'folder_type = ? AND deleted_at IS NULL',
-      whereArgs: [folderType],
-      orderBy: 'title COLLATE NOCASE ASC, file_name COLLATE NOCASE ASC',
+    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
+      List<Map<String, Object?>>
+    >(
+      read: (readDb) => readDb.query(
+        'library_items',
+        columns: const [
+          'id',
+          'title',
+          'file_name',
+          'relative_path',
+          'file_size',
+          'file_format',
+          'index_status',
+          'index_error',
+        ],
+        where: 'folder_type = ? AND deleted_at IS NULL',
+        whereArgs: [folderType],
+        orderBy: 'title COLLATE NOCASE ASC, file_name COLLATE NOCASE ASC',
+      ),
+      hasData: (rows) => rows.isNotEmpty,
+      fallbackDatabase: Future.value(db),
     );
+    final rows = rowResult.value;
     if (rows.isEmpty) return null;
     final hasEpubFiles = rows.any((row) {
       final format =
@@ -533,15 +556,22 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
     required Database db,
     required String folderType,
   }) async {
-    final rows = await db.rawQuery(
-      '''
+    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
+      List<Map<String, Object?>>
+    >(
+      read: (readDb) => readDb.rawQuery(
+        '''
       SELECT library_item_id, COUNT(*) AS count
       FROM library_links
       WHERE link_type = ?
       GROUP BY library_item_id
       ''',
-      [folderType],
+        [folderType],
+      ),
+      hasData: (rows) => rows.isNotEmpty,
+      fallbackDatabase: Future.value(db),
     );
+    final rows = rowResult.value;
     final counts = <String, int>{};
     for (final row in rows) {
       final itemId = row['library_item_id']?.toString().trim() ?? '';

@@ -135,15 +135,22 @@ mixin _CommentaryResearchLibraryServiceElibraryRefIndexSupport {
     required Database db,
     required String libraryItemId,
   }) async {
-    final rows = await db.rawQuery(
-      '''
+    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
+      List<Map<String, Object?>>
+    >(
+      read: (readDb) => readDb.rawQuery(
+        '''
       SELECT href, paragraph_index, ref_code
       FROM elibrary_ref_index
       WHERE library_item_id = ?
       ORDER BY href ASC, paragraph_index ASC
       ''',
-      [libraryItemId],
+        [libraryItemId],
+      ),
+      hasData: (rows) => rows.isNotEmpty,
+      fallbackDatabase: Future.value(db),
     );
+    final rows = rowResult.value;
     final result = <String, String>{};
     for (final row in rows) {
       final href = row['href']?.toString().trim() ?? '';
@@ -167,8 +174,11 @@ mixin _CommentaryResearchLibraryServiceElibraryRefIndexSupport {
     required String libraryItemId,
     required String href,
   }) async {
-    final rows = await db.rawQuery(
-      '''
+    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
+      List<Map<String, Object?>>
+    >(
+      read: (readDb) => readDb.rawQuery(
+        '''
       SELECT paragraph_index, ref_code, stable_ref, page_number,
              paragraph_on_page, ref_source, anchor_id, plain_text
       FROM elibrary_ref_index
@@ -176,8 +186,12 @@ mixin _CommentaryResearchLibraryServiceElibraryRefIndexSupport {
         AND LOWER(REPLACE(REPLACE(COALESCE(href, ''), '\\', '/'), './', '')) = ?
       ORDER BY paragraph_index ASC
       ''',
-      [libraryItemId, _sectionKey(href)],
+        [libraryItemId, _sectionKey(href)],
+      ),
+      hasData: (rows) => rows.isNotEmpty,
+      fallbackDatabase: Future.value(db),
     );
+    final rows = rowResult.value;
 
     final result = <int, String>{};
     for (final row in rows) {

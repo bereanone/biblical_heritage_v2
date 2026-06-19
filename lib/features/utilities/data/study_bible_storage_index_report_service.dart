@@ -6,6 +6,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/bootstrap/sandbox_bootstrap.dart';
+import '../../../core/database/elibrary_read_resolver.dart';
 import '../../../core/database/elibrary_schema.dart';
 import '../../../core/database/user_database.dart';
 import 'elibrary_storage_policy.dart';
@@ -50,6 +51,9 @@ class StudyBibleStorageIndexReport {
     required this.storageSummaryStatus,
     required this.commentaryIndexReportExists,
     required this.tableCounts,
+    required this.userELibraryTableCounts,
+    required this.eLibraryTableCounts,
+    required this.activeELibraryReadSource,
   });
 
   final String? rootPath;
@@ -89,6 +93,9 @@ class StudyBibleStorageIndexReport {
   final String storageSummaryStatus;
   final bool commentaryIndexReportExists;
   final Map<String, int> tableCounts;
+  final Map<String, int> userELibraryTableCounts;
+  final Map<String, int> eLibraryTableCounts;
+  final String activeELibraryReadSource;
 
   Map<String, Object?> toJson() {
     return <String, Object?>{
@@ -129,6 +136,9 @@ class StudyBibleStorageIndexReport {
       'storage_summary_status': storageSummaryStatus,
       'commentary_index_report_exists': commentaryIndexReportExists,
       'table_counts': tableCounts,
+      'user_elibrary_table_counts': userELibraryTableCounts,
+      'elibrary_table_counts': eLibraryTableCounts,
+      'active_elibrary_read_source': activeELibraryReadSource,
     };
   }
 
@@ -172,6 +182,9 @@ class StudyBibleStorageIndexReport {
     line('eLibrary.db size', eLibraryDatabaseSizeBytes);
     line('eLibrary schema version', eLibrarySchemaVersion);
     line('eLibrary schema status', eLibrarySchemaStatus);
+    line('eLibrary active source', activeELibraryReadSource);
+    line('user.db eLibrary row counts', _formatTableCounts(userELibraryTableCounts));
+    line('eLibrary.db row counts', _formatTableCounts(eLibraryTableCounts));
     line('Backup status', backupStatus);
     line('eLibrary storage policy', storagePolicyLabel);
     line('eLibrary source cleanup', sourceCleanupStatus);
@@ -195,6 +208,12 @@ class StudyBibleStorageIndexReport {
     line('Storage summary status', storageSummaryStatus);
     return buffer.toString().trimRight();
   }
+
+  String _formatTableCounts(Map<String, int> tableCounts) {
+    return tableCounts.entries
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join(', ');
+  }
 }
 
 class StudyBibleStorageIndexReportService {
@@ -215,6 +234,7 @@ class StudyBibleStorageIndexReportService {
         .loadELibraryStoragePolicy();
     final db = await UserDatabase.instance.database;
     final counts = await _loadTableCounts(db);
+    final userELibraryTableCounts = await _loadELibraryTableCounts(db);
     final commentaryItemStats = await _countLibraryItems(
       db: db,
       folderType: 'commentary',
@@ -260,6 +280,11 @@ class StudyBibleStorageIndexReportService {
     final backupPath = await LibraryRootService.instance.backupRootPath();
     final userDatabasePath = await SandboxBootstrap.userDatabasePath();
     final eLibraryDatabaseSummary = await _loadELibraryDatabaseSummary();
+    final eLibraryTableCounts = await _loadELibraryDatabaseTableCounts();
+    final activeELibraryReadSource = _activeELibraryReadSource(
+      userELibraryTableCounts: userELibraryTableCounts,
+      eLibraryTableCounts: eLibraryTableCounts,
+    );
     final legacyFoldersDetected = await _detectLegacyFolders(rootPath);
     final commentaryIndexReportExists =
         commentaryIndexPath != null && await File(commentaryIndexPath).exists();
@@ -327,6 +352,9 @@ class StudyBibleStorageIndexReportService {
       storageSummaryStatus: storageSummaryStatus,
       commentaryIndexReportExists: commentaryIndexReportExists,
       tableCounts: counts,
+      userELibraryTableCounts: userELibraryTableCounts,
+      eLibraryTableCounts: eLibraryTableCounts,
+      activeELibraryReadSource: activeELibraryReadSource,
     );
   }
 
@@ -350,6 +378,96 @@ class StudyBibleStorageIndexReportService {
           : (countRows.first['cnt'] as num?)?.toInt() ?? 0;
     }
     return counts;
+  }
+
+  Future<Map<String, int>> _loadELibraryTableCounts(Database db) async {
+    return <String, int>{
+      'library_items': await ELibraryReadResolver.instance.tableRowCount(
+        db,
+        'library_items',
+      ),
+      'library_links': await ELibraryReadResolver.instance.tableRowCount(
+        db,
+        'library_links',
+      ),
+      'library_navigation_items':
+          await ELibraryReadResolver.instance.tableRowCount(
+            db,
+            'library_navigation_items',
+          ),
+      'library_text_blocks': await ELibraryReadResolver.instance.tableRowCount(
+        db,
+        'library_text_blocks',
+      ),
+      'elibrary_ref_index': await ELibraryReadResolver.instance.tableRowCount(
+        db,
+        'elibrary_ref_index',
+      ),
+      'elibrary_markups': await ELibraryReadResolver.instance.tableRowCount(
+        db,
+        'elibrary_markups',
+      ),
+      'elibrary_install_estimates':
+          await ELibraryReadResolver.instance.tableRowCount(
+            db,
+            'elibrary_install_estimates',
+          ),
+    };
+  }
+
+  Future<Map<String, int>> _loadELibraryDatabaseTableCounts() async {
+    final path = await SandboxBootstrap.eLibraryDatabasePath();
+    final file = File(path);
+    if (!await file.exists() || await file.length() == 0) {
+      return _emptyELibraryTableCounts();
+    }
+
+    try {
+      final db = await openDatabase(path, singleInstance: false);
+      try {
+        return await _loadELibraryTableCounts(db);
+      } finally {
+        await db.close();
+      }
+    } catch (_) {
+      return _emptyELibraryTableCounts();
+    }
+  }
+
+  Map<String, int> _emptyELibraryTableCounts() {
+    return <String, int>{
+      'library_items': 0,
+      'library_links': 0,
+      'library_navigation_items': 0,
+      'library_text_blocks': 0,
+      'elibrary_ref_index': 0,
+      'elibrary_markups': 0,
+      'elibrary_install_estimates': 0,
+    };
+  }
+
+  String _activeELibraryReadSource({
+    required Map<String, int> userELibraryTableCounts,
+    required Map<String, int> eLibraryTableCounts,
+  }) {
+    final userTotal = userELibraryTableCounts.values.fold<int>(
+      0,
+      (sum, value) => sum + value,
+    );
+    final eLibraryTotal = eLibraryTableCounts.values.fold<int>(
+      0,
+      (sum, value) => sum + value,
+    );
+    if (userTotal == 0 && eLibraryTotal == 0) {
+      return 'empty';
+    }
+    if (userTotal > 0 && eLibraryTotal > 0) {
+      return 'mixed';
+    }
+    if (eLibraryTotal > 0) {
+      return 'eLibrary.db';
+    }
+    return 'user.db fallback';
   }
 
   Future<_ELibraryDatabaseSummary> _loadELibraryDatabaseSummary() async {

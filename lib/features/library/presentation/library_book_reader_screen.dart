@@ -8,10 +8,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/bootstrap/library_root_service.dart';
+import '../../../core/database/elibrary_read_resolver.dart';
 import '../../../core/database/user_database.dart';
 import '../../../core/theme/app_theme_mode.dart';
 import '../../../core/theme/app_settings_service.dart';
@@ -2264,16 +2264,14 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
       );
     }
 
-    final db = await UserDatabase.instance.database;
     final result = <String, Map<int, String>>{};
     for (final section in sections) {
       final sectionKey = _sectionKey(section.entryName);
       final sectionCodes = await _loadSectionReferenceCodes(
-        db: db,
         libraryItemId: libraryItemId,
         section: section,
         itemAbbreviation: itemAbbreviation,
-        sectionTitle: section.title,
+        isDevotional: widget.item.isDevotional,
       );
       if (sectionCodes.isNotEmpty) {
         result[sectionKey] = sectionCodes;
@@ -2316,57 +2314,17 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   }
 
   Future<Map<int, String>> _loadSectionReferenceCodes({
-    required Database db,
     required String libraryItemId,
     required LibraryBookSection section,
     required String? itemAbbreviation,
-    required String sectionTitle,
+    required bool isDevotional,
   }) async {
-    final rows = await db.rawQuery(
-      '''
-      SELECT paragraph_index, anchor, full_paragraph, epub_href, anchor_id,
-             spine_index, original_reference_text
-      FROM library_links
-      WHERE library_item_id = ?
-        AND deleted_at IS NULL
-        AND LOWER(REPLACE(REPLACE(COALESCE(epub_href, ''), '\\', '/'), './', '')) = ?
-      ORDER BY paragraph_index ASC
-      ''',
-      [libraryItemId, _sectionKey(section.entryName)],
+    return loadReaderSectionReferenceCodes(
+      libraryItemId: libraryItemId,
+      section: section,
+      itemAbbreviation: itemAbbreviation,
+      isDevotional: isDevotional,
     );
-
-    final resolved = <int, String>{};
-    if (widget.item.isDevotional) {
-      return const <int, String>{};
-    }
-
-    int? currentPageNumber;
-    int? pageParagraphIndex;
-
-    for (final row in rows) {
-      final paragraphIndex = (row['paragraph_index'] as num?)?.toInt();
-      if (paragraphIndex == null || paragraphIndex <= 0) continue;
-
-      final marker =
-          _pageMarkerFromText(row['anchor']?.toString()) ??
-          _pageMarkerFromText(row['full_paragraph']?.toString());
-      if (marker != null) {
-        currentPageNumber = marker.pageNumber;
-        pageParagraphIndex = paragraphIndex;
-      }
-
-      final referenceCode = _displayReferenceCodeForParagraph(
-        itemAbbreviation: itemAbbreviation,
-        pageNumber: currentPageNumber,
-        pageParagraphIndex: pageParagraphIndex,
-        paragraphIndex: paragraphIndex,
-      );
-      if (referenceCode != null) {
-        resolved[paragraphIndex] = referenceCode;
-      }
-    }
-
-    return resolved;
   }
 
   String? _displayReferenceCodeForParagraph({

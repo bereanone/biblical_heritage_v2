@@ -1,4 +1,13 @@
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:studybible2/core/bootstrap/library_root_service.dart';
+import 'package:studybible2/core/bootstrap/local_settings_store.dart';
+import 'package:studybible2/core/database/elibrary_database.dart';
+import 'package:studybible2/core/database/user_database.dart';
 import 'package:studybible2/features/library/data/library_catalog_service.dart';
 import 'package:studybible2/features/library/presentation/library_book_reader_screen.dart';
 import 'package:studybible2/features/reader/data/commentary_research_library_service.dart';
@@ -37,7 +46,92 @@ LibraryCatalogItem _catalogItem({
   );
 }
 
+Future<void> _installPathProviderMocks({
+  required Directory supportDir,
+  required Directory documentsDir,
+}) async {
+  const channel = MethodChannel('plugins.flutter.io/path_provider');
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(channel, (call) async {
+        switch (call.method) {
+          case 'getApplicationSupportDirectory':
+            return supportDir.path;
+          case 'getApplicationDocumentsDirectory':
+            return documentsDir.path;
+          case 'getTemporaryDirectory':
+            return supportDir.path;
+          case 'getLibraryDirectory':
+            return supportDir.path;
+        }
+        return supportDir.path;
+      });
+}
+
+Future<void> _seedLibraryLink(
+  Database db,
+  String itemId,
+  {
+  required int paragraphIndex,
+  required String anchor,
+  required String fullParagraph,
+}) async {
+  final now = DateTime.now().toUtc().toIso8601String();
+  await db.insert(
+    'library_links',
+    <String, Object?>{
+      'id': 'link-$itemId-$paragraphIndex',
+      'library_item_id': itemId,
+      'book_id': 1,
+      'chapter': 1,
+      'verse_start': paragraphIndex,
+      'verse_end': paragraphIndex,
+      'link_type': 'research',
+      'anchor': anchor,
+      'original_reference_text': 'Acts 9:$paragraphIndex',
+      'confidence': 1.0,
+      'parser_warning': null,
+      'epub_href': 'OEBPS/content01.xhtml',
+      'epub_cfi': null,
+      'anchor_id': 'anchor-$paragraphIndex',
+      'spine_index': 1,
+      'paragraph_index': paragraphIndex,
+      'full_paragraph': fullParagraph,
+      'created_by': 'test',
+      'created_at': now,
+      'updated_at': now,
+      'deleted_at': null,
+      'device_id': 'device-test',
+      'revision': 1,
+      'sync_status': 'pending',
+      'last_synced_at': null,
+      'change_id': null,
+    },
+    conflictAlgorithm: ConflictAlgorithm.replace,
+  );
+}
+
+Future<Directory> _prepareIsolatedLibraryRoot() async {
+  final sourceDbDir = Directory(
+    '/Users/deanbowen/Development/StudyBible2/test/Databases',
+  );
+  final libraryRootDir = await Directory.systemTemp
+      .createTemp('library_reader_refcodes_root_');
+  final dbDir = Directory(p.join(libraryRootDir.path, 'Databases'));
+  await dbDir.create(recursive: true);
+  for (final fileName in const ['user.db', 'eLibrary.db']) {
+    final sourceFile = File(p.join(sourceDbDir.path, fileName));
+    if (await sourceFile.exists()) {
+      await sourceFile.copy(p.join(dbDir.path, fileName));
+    }
+  }
+  return libraryRootDir;
+}
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
+
   test('maps Christ Triumphant to the expected ref abbreviation', () {
     final item = _catalogItem(
       id: 'ct',
@@ -288,5 +382,136 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  group('section reference codes', () {
+    late Directory supportDir;
+    late Directory documentsDir;
+    late Directory libraryRootDir;
+
+    setUp(() async {
+      supportDir = await Directory.systemTemp
+          .createTemp('library_reader_refcodes_support_');
+      documentsDir = await Directory.systemTemp
+          .createTemp('library_reader_refcodes_documents_');
+      libraryRootDir = await _prepareIsolatedLibraryRoot();
+      await _installPathProviderMocks(
+        supportDir: supportDir,
+        documentsDir: documentsDir,
+      );
+      LibraryRootService.instance.invalidateCachedSelection();
+      await LocalSettingsStore.instance.saveLibraryRoot(
+        path: libraryRootDir.path,
+        source: 'userSelected',
+      );
+    });
+
+    tearDown(() async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/path_provider'),
+            null,
+          );
+      LibraryRootService.instance.invalidateCachedSelection();
+      await UserDatabase.instance.close();
+      await ELibraryDatabase.instance.close();
+      if (supportDir.existsSync()) {
+        await supportDir.delete(recursive: true);
+      }
+      if (documentsDir.existsSync()) {
+        await documentsDir.delete(recursive: true);
+      }
+      if (libraryRootDir.existsSync()) {
+        await libraryRootDir.delete(recursive: true);
+      }
+    });
+
+    test('loads section reference codes from eLibrary.db first', () async {
+      final userDb = await UserDatabase.instance.database;
+      final eLibraryDb = await ELibraryDatabase.instance.database;
+
+      await _seedLibraryLink(
+        userDb,
+        'acts-item',
+        paragraphIndex: 1,
+        anchor: '[8]',
+        fullParagraph: 'Fallback page marker [8] for user.db',
+      );
+      await _seedLibraryLink(
+        userDb,
+        'acts-item',
+        paragraphIndex: 2,
+        anchor: '',
+        fullParagraph: 'Fallback second paragraph for user.db',
+      );
+
+      await _seedLibraryLink(
+        eLibraryDb,
+        'acts-item',
+        paragraphIndex: 1,
+        anchor: '[9]',
+        fullParagraph: 'Primary page marker [9] for eLibrary.db',
+      );
+      await _seedLibraryLink(
+        eLibraryDb,
+        'acts-item',
+        paragraphIndex: 2,
+        anchor: '',
+        fullParagraph: 'Primary second paragraph for eLibrary.db',
+      );
+
+      final section = LibraryBookSection(
+        entryName: 'OEBPS/content01.xhtml',
+        title: 'Acts 9',
+        paragraphs: const <String>[],
+        blocks: const <LibraryBookBlock>[],
+        spineIndex: 1,
+      );
+
+      final codes = await loadReaderSectionReferenceCodes(
+        libraryItemId: 'acts-item',
+        section: section,
+        itemAbbreviation: 'AA',
+        isDevotional: false,
+      );
+
+      expect(codes, const <int, String>{1: 'AA 9.1', 2: 'AA 9.2'});
+    });
+
+    test('falls back to user.db when eLibrary.db lacks section codes', () async {
+      final userDb = await UserDatabase.instance.database;
+
+      await _seedLibraryLink(
+        userDb,
+        'acts-item-fallback',
+        paragraphIndex: 1,
+        anchor: '[7]',
+        fullParagraph: 'Fallback page marker [7] for user.db',
+      );
+      await _seedLibraryLink(
+        userDb,
+        'acts-item-fallback',
+        paragraphIndex: 2,
+        anchor: '',
+        fullParagraph: 'Fallback second paragraph for user.db',
+      );
+
+      final section = LibraryBookSection(
+        entryName: 'OEBPS/content01.xhtml',
+        title: 'Acts 9',
+        paragraphs: const <String>[],
+        blocks: const <LibraryBookBlock>[],
+        spineIndex: 1,
+      );
+
+      final codes = await loadReaderSectionReferenceCodes(
+        libraryItemId: 'acts-item-fallback',
+        section: section,
+        itemAbbreviation: 'AA',
+        isDevotional: false,
+      );
+
+      expect(codes, const <int, String>{1: 'AA 7.1', 2: 'AA 7.2'});
+    });
   });
 }

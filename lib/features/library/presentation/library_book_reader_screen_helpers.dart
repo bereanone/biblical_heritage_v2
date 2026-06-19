@@ -180,6 +180,101 @@ bool _hrefMatchesSection(String sectionEntryName, String normalizedHref) {
   return p.basename(normalizedSectionHref) == p.basename(normalizedHref);
 }
 
+_PageMarker? _readerPageMarkerFromText(String? text) {
+  final clean = text?.trim() ?? '';
+  if (clean.isEmpty) return null;
+  final match = RegExp(r'\[(\d{1,4})\]').firstMatch(clean);
+  if (match == null) return null;
+  final pageNumber = int.tryParse(match.group(1)!);
+  if (pageNumber == null) return null;
+  return _PageMarker(pageNumber);
+}
+
+String? _readerDisplayReferenceCodeForParagraph({
+  required String? itemAbbreviation,
+  required int? pageNumber,
+  required int? pageParagraphIndex,
+  required int paragraphIndex,
+}) {
+  final abbreviation = cleanDisplayRefCode(itemAbbreviation);
+  if (abbreviation == null || abbreviation.isEmpty) {
+    return null;
+  }
+  if (abbreviation == 'GC' || abbreviation == 'GC88') {
+    return null;
+  }
+
+  if (pageNumber != null &&
+      pageParagraphIndex != null &&
+      pageNumber > 0 &&
+      pageParagraphIndex > 0) {
+    final paragraphNumber = paragraphIndex - pageParagraphIndex + 1;
+    if (paragraphNumber <= 0) return null;
+    return cleanDisplayRefCode('$abbreviation $pageNumber.$paragraphNumber');
+  }
+  return null;
+}
+
+Future<Map<int, String>> loadReaderSectionReferenceCodes({
+  required String libraryItemId,
+  required LibraryBookSection section,
+  required String? itemAbbreviation,
+  required bool isDevotional,
+}) async {
+  if (isDevotional) {
+    return const <int, String>{};
+  }
+
+  final rowResult = await ELibraryReadResolver.instance.readWithFallback<
+    List<Map<String, Object?>>
+  >(
+    read: (db) => db.rawQuery(
+      '''
+      SELECT paragraph_index, anchor, full_paragraph, epub_href, anchor_id,
+             spine_index, original_reference_text
+      FROM library_links
+      WHERE library_item_id = ?
+        AND deleted_at IS NULL
+        AND LOWER(REPLACE(REPLACE(COALESCE(epub_href, ''), '\\', '/'), './', '')) = ?
+      ORDER BY paragraph_index ASC
+      ''',
+      [libraryItemId, p.normalize(section.entryName).toLowerCase()],
+    ),
+    hasData: (rows) => rows.isNotEmpty,
+    fallbackDatabase: UserDatabase.instance.database,
+  );
+  final rows = rowResult.value;
+
+  final resolved = <int, String>{};
+  int? currentPageNumber;
+  int? pageParagraphIndex;
+
+  for (final row in rows) {
+    final paragraphIndex = (row['paragraph_index'] as num?)?.toInt();
+    if (paragraphIndex == null || paragraphIndex <= 0) continue;
+
+    final marker =
+        _readerPageMarkerFromText(row['anchor']?.toString()) ??
+        _readerPageMarkerFromText(row['full_paragraph']?.toString());
+    if (marker != null) {
+      currentPageNumber = marker.pageNumber;
+      pageParagraphIndex = paragraphIndex;
+    }
+
+    final referenceCode = _readerDisplayReferenceCodeForParagraph(
+      itemAbbreviation: itemAbbreviation,
+      pageNumber: currentPageNumber,
+      pageParagraphIndex: pageParagraphIndex,
+      paragraphIndex: paragraphIndex,
+    );
+    if (referenceCode != null) {
+      resolved[paragraphIndex] = referenceCode;
+    }
+  }
+
+  return resolved;
+}
+
 bool _isReaderFrontMatterLabel(String value) {
   final normalized = _normalizeReaderLabel(value);
   if (normalized.isEmpty) return false;

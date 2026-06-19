@@ -1,0 +1,97 @@
+{
+  "catalog_version": 1,
+  "authors": [
+    {
+      "author_id": "uriah_smith",
+      "author_name": "Uriah Smith",
+      "sort_key": "uriah smith",
+      "works": [
+        {
+          "work_id": "daniel_and_the_revelation",
+          "title": "Daniel and the Revelation",
+          "abbreviation": "DAR",
+          "group": "Pioneer Authors",
+          "subgroup": "Prophecy",
+          "availability_status": "source_needed"
+        },
+        {
+          "work_id": "the_united_states_in_the_light_of_prophecy",
+          "title": "The United States in the Light of Prophecy",
+          "abbreviation": "USLP",
+          "group": "Pioneer Authors",
+          "subgroup": "Prophecy",
+          "availability_status": "source_needed"
+        }
+      ]
+    },
+    {
+      "author_id": "jn_andrews",
+      "author_name": "J. N. Andrews",
+      "sort_key": "jn andrews",
+      "works": [
+        {
+          "work_id": "history_of_the_sabbath",
+          "title": "History of the Sabbath",
+          "abbreviation": "HST",
+          "group": "Pioneer Authors",
+          "subgroup": "Sabbath",
+          "availability_status": "source_needed"
+        },
+        {
+          "work_id": "the_sanctuary_and_twenty_three_hundred_days",
+          "title": "The Sanctuary and Twenty-Three Hundred Days",
+          "abbreviation": "SCTD",
+          "group": "Pioneer Authors",
+          "subgroup": "Sabbath",
+          "availability_status": "source_needed"
+        }
+      ]
+    },
+    {
+      "author_id": "at_jones",
+      "author_name": "A. T. Jones",
+      "sort_key": "a t jones",
+      "works": [
+        {
+          "work_id": "the_consecrated_way_to_christian_perfection",
+          "title": "The Consecrated Way to Christian Perfection",
+          "abbreviation": "CWCP",
+          "group": "Pioneer Authors",
+          "subgroup": "Righteousness by Faith",
+          "availability_status": "source_needed"
+        },
+        {
+          "work_id": "lessons_on_faith",
+          "title": "Lessons on Faith",
+          "abbreviation": "LOF",
+          "group": "Pioneer Authors",
+          "subgroup": "Righteousness by Faith",
+          "availability_status": "source_needed"
+        }
+      ]
+    },
+    {
+      "author_id": "ej_waggoner",
+      "author_name": "E. J. Waggoner",
+      "sort_key": "e j waggoner",
+      "works": [
+        {
+          "work_id": "christ_and_his_righteousness",
+          "title": "Christ and His Righteousness",
+          "abbreviation": "CHR",
+          "group": "Pioneer Authors",
+          "subgroup": "Righteousness by Faith",
+          "availability_status": "source_needed"
+        },
+        {
+          "work_id": "the_gospel_in_galatians",
+          "title": "The Gospel in Galatians",
+          "abbreviation": "GIG",
+          "group": "Pioneer Authors",
+          "subgroup": "Righteousness by Faith",
+          "availability_status": "source_needed"
+        }
+      ]
+    }
+  ]
+}

@@ -73,6 +73,7 @@ flutter:
   assets:
     - assets/databases/bible_base.db
     - assets/databases/user.db
+    - assets/elibrary_sources/pioneer_sources.json
     - assets/icons/GoldLogo.png
     - assets/icons/Logo2.png
     - tool/elibrary_download_manifest.json

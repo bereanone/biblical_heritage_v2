@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../../../core/theme/app_theme_mode.dart';
 import '../data/study_bible_backup_service.dart';
 import '../data/study_bible_storage_index_report_service.dart';
+import 'pioneer_text_import_screen.dart';
 import 'library_root_setup_screen.dart';
 import '../../reader/presentation/bible_explorer_screen.dart';
 import 'elibrary_download_screen.dart';
@@ -569,6 +570,19 @@ class UtilitiesScreen extends StatelessWidget {
                       Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (_) => const ELibrarySetupScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _UtilityActionButton(
+                    label: 'Pioneer Text Import',
+                    icon: Icons.menu_book_outlined,
+                    filled: false,
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const PioneerTextImportScreen(),
                         ),
                       );
                     },

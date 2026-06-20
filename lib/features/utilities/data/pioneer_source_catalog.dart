@@ -145,6 +145,15 @@ class PioneerSourceWork {
         : 'Verified $typeLabel source available';
   }
 
+  String get sourceSiteLabel {
+    final explicit = sourceLabel?.trim();
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit;
+    }
+    final host = _friendlySourceHost(sourceUrl);
+    return host ?? 'Unknown source';
+  }
+
   bool get hasVerifiedSource =>
       verified && sourceUrl != null && sourceUrl!.trim().isNotEmpty;
 
@@ -247,6 +256,18 @@ class PioneerSourceCatalog {
   Iterable<PioneerSourceWork> get works sync* {
     for (final author in authors) {
       yield* author.works;
+    }
+  }
+
+  Iterable<PioneerSourceWork> get importableWorks sync* {
+    for (final work in works) {
+      if (work.isImportable) yield work;
+    }
+  }
+
+  Iterable<PioneerSourceWork> get sourceNeededWorks sync* {
+    for (final work in works) {
+      if (!work.isImportable) yield work;
     }
   }
 
@@ -404,4 +425,20 @@ String _stableId(String value) {
       .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
       .replaceAll(RegExp(r'_+'), '_')
       .replaceAll(RegExp(r'^_+|_+$'), '');
+}
+
+String? _friendlySourceHost(String? sourceUrl) {
+  final normalized = sourceUrl?.trim() ?? '';
+  if (normalized.isEmpty) return null;
+  final uri = Uri.tryParse(normalized);
+  final host = uri?.host.trim().toLowerCase() ?? '';
+  if (host.isEmpty) return null;
+  final cleaned = host.startsWith('www.') ? host.substring(4) : host;
+  switch (cleaned) {
+    case 'archive.org':
+      return 'Archive.org';
+    case 'gutenberg.org':
+      return 'Project Gutenberg';
+  }
+  return cleaned;
 }

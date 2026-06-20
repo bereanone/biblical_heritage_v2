@@ -15,6 +15,7 @@
           "availability_status": "available",
           "source_type": "epub",
           "source_url": "https://archive.org/download/UriahSmithDanielAndTheRevelation.TheResponseOfHistoryToTheVoiceOf/1897_smith_danielAndTheRevelation.epub",
+          "source_label": "Archive.org",
           "verified": true,
           "importable": true
         },
@@ -27,6 +28,7 @@
           "availability_status": "available",
           "source_type": "html",
           "source_url": "https://www.gutenberg.org/files/12364/12364-h/12364-h.htm",
+          "source_label": "Project Gutenberg",
           "verified": true,
           "importable": true
         }

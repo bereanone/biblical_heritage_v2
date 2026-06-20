@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -11,7 +12,8 @@ import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/elibrary_database.dart';
 import 'pioneer_source_catalog.dart';
 
-typedef PioneerSourceBytesFetcher = Future<Uint8List> Function(Uri uri);
+typedef PioneerSourceBytesFetcher =
+    Future<PioneerSourceDownloadResult> Function(Uri uri);
 typedef PioneerImportDocumentParser = Future<PioneerImportDocument> Function(
   PioneerSourceWork work,
   Uint8List bytes,
@@ -20,6 +22,41 @@ typedef PioneerImportDocumentParser = Future<PioneerImportDocument> Function(
 typedef PioneerImportProgressCallback = void Function(
   PioneerImportProgress progress,
 );
+
+typedef PioneerImportShouldContinue = bool Function();
+
+enum PioneerImportSourceMethod {
+  directUrl,
+  userVerifiedAutomatedCapture,
+  clipboard,
+  savedExport;
+
+  String get label => switch (this) {
+    PioneerImportSourceMethod.directUrl => 'direct URL',
+    PioneerImportSourceMethod.userVerifiedAutomatedCapture =>
+      'user-verified automated capture',
+    PioneerImportSourceMethod.clipboard => 'clipboard',
+    PioneerImportSourceMethod.savedExport => 'saved export',
+  };
+}
+
+class PioneerCapturedTextSource {
+  const PioneerCapturedTextSource({
+    required this.work,
+    required this.sourceMethod,
+    required this.text,
+    this.sourceUrl,
+    this.sourceLabel,
+    this.refCodeHandlingSummary,
+  });
+
+  final PioneerSourceWork work;
+  final PioneerImportSourceMethod sourceMethod;
+  final String text;
+  final String? sourceUrl;
+  final String? sourceLabel;
+  final String? refCodeHandlingSummary;
+}
 
 class PioneerImportSection {
   const PioneerImportSection({
@@ -45,6 +82,72 @@ class PioneerImportDocument {
   final List<PioneerImportSection> sections;
 }
 
+class PioneerImportDocumentTooSparseException implements Exception {
+  const PioneerImportDocumentTooSparseException({
+    required this.sourceType,
+    required this.message,
+    required this.sectionsFound,
+    required this.paragraphCount,
+  });
+
+  final String sourceType;
+  final String message;
+  final int sectionsFound;
+  final int paragraphCount;
+
+  @override
+  String toString() {
+    return 'PioneerImportDocumentTooSparseException: $message '
+        '(sourceType=$sourceType, sectionsFound=$sectionsFound, paragraphs=$paragraphCount)';
+  }
+}
+
+class PioneerSourceDownloadResult {
+  const PioneerSourceDownloadResult({
+    required this.bytes,
+    this.httpStatusCode,
+    this.contentType,
+    this.resolvedUri,
+  });
+
+  final Uint8List bytes;
+  final int? httpStatusCode;
+  final String? contentType;
+  final Uri? resolvedUri;
+
+  int get byteCount => bytes.length;
+}
+
+class PioneerSourceDownloadException implements Exception {
+  const PioneerSourceDownloadException({
+    required this.uri,
+    required this.message,
+    this.httpStatusCode,
+    this.contentType,
+    this.byteCount,
+    this.responseBodySnippet,
+  });
+
+  final Uri uri;
+  final String message;
+  final int? httpStatusCode;
+  final String? contentType;
+  final int? byteCount;
+  final String? responseBodySnippet;
+
+  @override
+  String toString() {
+    final details = <String>[
+      if (httpStatusCode != null) 'HTTP $httpStatusCode',
+      if (contentType != null && contentType!.trim().isNotEmpty)
+        'content-type=$contentType',
+      if (byteCount != null) 'bytes=$byteCount',
+      uri.toString(),
+    ];
+    return 'PioneerSourceDownloadException: $message (${details.join(', ')})';
+  }
+}
+
 enum PioneerImportWorkStatus {
   imported,
   skippedExisting,
@@ -57,6 +160,8 @@ class PioneerImportWorkResult {
   const PioneerImportWorkResult({
     required this.work,
     required this.status,
+    required this.stage,
+    required this.sourceMethod,
     required this.reason,
     required this.libraryItemId,
     required this.sourceType,
@@ -64,10 +169,22 @@ class PioneerImportWorkResult {
     required this.insertedNavigationItems,
     required this.insertedTextBlocks,
     required this.skippedExisting,
+    required this.refCodeHandlingSummary,
+    required this.detail,
+    required this.exceptionType,
+    required this.httpStatusCode,
+    required this.contentType,
+    required this.downloadedByteCount,
+    required this.parsedSectionCount,
+    required this.parsedParagraphCount,
+    required this.requiresManualVerification,
+    required this.manualVerificationHint,
   });
 
   final PioneerSourceWork work;
   final PioneerImportWorkStatus status;
+  final String stage;
+  final PioneerImportSourceMethod sourceMethod;
   final String reason;
   final String libraryItemId;
   final String? sourceType;
@@ -75,7 +192,21 @@ class PioneerImportWorkResult {
   final int insertedNavigationItems;
   final int insertedTextBlocks;
   final bool skippedExisting;
+  final String refCodeHandlingSummary;
+  final String? detail;
+  final String? exceptionType;
+  final int? httpStatusCode;
+  final String? contentType;
+  final int? downloadedByteCount;
+  final int? parsedSectionCount;
+  final int? parsedParagraphCount;
+  final bool requiresManualVerification;
+  final String? manualVerificationHint;
 
+  String get title => work.title;
+  String get sourceMethodLabel => sourceMethod.label;
+  int get textBlockCount => insertedTextBlocks;
+  int get navigationCount => insertedNavigationItems;
   bool get isImported => status == PioneerImportWorkStatus.imported;
   bool get isSkipped => status != PioneerImportWorkStatus.imported;
 }
@@ -83,9 +214,11 @@ class PioneerImportWorkResult {
 class PioneerImportBatchResult {
   const PioneerImportBatchResult({
     required this.workResults,
+    this.wasCancelled = false,
   });
 
   final List<PioneerImportWorkResult> workResults;
+  final bool wasCancelled;
 
   int get importedCount =>
       workResults.where((result) => result.isImported).length;
@@ -138,6 +271,7 @@ class PioneerTextImportService {
   Future<PioneerImportBatchResult> importSelectedWorks(
     Iterable<PioneerSourceWork> selectedWorks, {
     PioneerImportProgressCallback? onProgress,
+    PioneerImportShouldContinue? shouldContinue,
   }) async {
     final uniqueWorks = <String, PioneerSourceWork>{};
     for (final work in selectedWorks) {
@@ -152,6 +286,13 @@ class PioneerTextImportService {
     var completed = 0;
 
     for (final work in uniqueWorks.values) {
+      if (shouldContinue != null && !shouldContinue()) {
+        return PioneerImportBatchResult(
+          workResults: results,
+          wasCancelled: true,
+        );
+      }
+      final itemId = work.stableLibraryItemId;
       final progressPrefix = '${completed + 1}/$total';
       onProgress?.call(
         PioneerImportProgress(
@@ -167,16 +308,10 @@ class PioneerTextImportService {
           !work.catalogImportable ||
           !work.availability.isImportable) {
         results.add(
-          PioneerImportWorkResult(
+          _buildSkippedNotImportableResult(
             work: work,
-            status: PioneerImportWorkStatus.skippedNotImportable,
-            reason: 'Source needed or unsupported source type.',
-            libraryItemId: work.stableLibraryItemId,
-            sourceType: work.sourceType,
-            insertedLibraryItems: 0,
-            insertedNavigationItems: 0,
-            insertedTextBlocks: 0,
-            skippedExisting: false,
+            libraryItemId: itemId,
+            sourceMethod: PioneerImportSourceMethod.directUrl,
           ),
         );
         completed += 1;
@@ -185,55 +320,40 @@ class PioneerTextImportService {
 
       if (!work.hasSupportedImportSource) {
         results.add(
-          PioneerImportWorkResult(
+          _buildSkippedUnsupportedSourceResult(
             work: work,
-            status: PioneerImportWorkStatus.skippedUnsupportedSource,
-            reason: 'Unsupported Pioneer source type: ${work.sourceType ?? 'unknown'}.',
-            libraryItemId: work.stableLibraryItemId,
-            sourceType: work.sourceType,
-            insertedLibraryItems: 0,
-            insertedNavigationItems: 0,
-            insertedTextBlocks: 0,
-            skippedExisting: false,
+            libraryItemId: itemId,
+            sourceMethod: PioneerImportSourceMethod.directUrl,
           ),
         );
         completed += 1;
         continue;
       }
 
-      final existing = await _existingImportSummary(db, work.stableLibraryItemId);
+      final existing = await _existingImportSummary(db, itemId);
       if (existing.isComplete) {
         results.add(
-          PioneerImportWorkResult(
+          _buildSkippedExistingResult(
             work: work,
-            status: PioneerImportWorkStatus.skippedExisting,
-            reason: 'Already imported in eLibrary.db.',
-            libraryItemId: work.stableLibraryItemId,
-            sourceType: work.sourceType,
-            insertedLibraryItems: 0,
-            insertedNavigationItems: 0,
-            insertedTextBlocks: 0,
-            skippedExisting: true,
+            libraryItemId: itemId,
+            sourceMethod: PioneerImportSourceMethod.directUrl,
+            refCodeHandlingSummary: _defaultRefCodeHandlingSummary,
           ),
         );
         completed += 1;
         continue;
       }
 
+      PioneerSourceDownloadResult? downloadResult;
       try {
         final sourceUrl = work.sourceUrl?.trim();
         if (sourceUrl == null || sourceUrl.isEmpty) {
           results.add(
-            PioneerImportWorkResult(
+            _buildSkippedNotImportableResult(
               work: work,
-              status: PioneerImportWorkStatus.skippedNotImportable,
+              libraryItemId: itemId,
+              sourceMethod: PioneerImportSourceMethod.directUrl,
               reason: 'No verified source URL is available.',
-              libraryItemId: work.stableLibraryItemId,
-              sourceType: work.sourceType,
-              insertedLibraryItems: 0,
-              insertedNavigationItems: 0,
-              insertedTextBlocks: 0,
-              skippedExisting: false,
             ),
           );
           completed += 1;
@@ -249,7 +369,7 @@ class PioneerTextImportService {
             message: '$progressPrefix Downloading ${work.title}',
           ),
         );
-        final sourceBytes = await _fetchBytes(Uri.parse(sourceUrl));
+        downloadResult = await _fetchBytes(Uri.parse(sourceUrl));
 
         onProgress?.call(
           PioneerImportProgress(
@@ -260,9 +380,14 @@ class PioneerTextImportService {
             message: '$progressPrefix Parsing ${work.title}',
           ),
         );
-        final document = await _parseDocument(work, sourceBytes);
+        final document = await _parseDocument(work, downloadResult.bytes);
         if (document.sections.isEmpty) {
-          throw StateError('No readable sections were found.');
+          throw PioneerImportDocumentTooSparseException(
+            sourceType: work.sourceType ?? 'unknown',
+            message: 'No readable sections were found.',
+            sectionsFound: 0,
+            paragraphCount: 0,
+          );
         }
 
         onProgress?.call(
@@ -279,25 +404,40 @@ class PioneerTextImportService {
           deviceId: deviceId,
           work: work,
           document: document,
-          sourceBytes: sourceBytes,
+          sourceBytes: downloadResult.bytes,
+          downloadResult: downloadResult,
+          sourceMethod: PioneerImportSourceMethod.directUrl,
+          refCodeHandlingSummary: _defaultRefCodeHandlingSummary,
         );
         results.add(result);
       } catch (error, stackTrace) {
+        final stage = _failureStageFor(error);
         debugPrint(
-          '[PioneerImport] Failed to import ${work.title}: $error',
+          '[PioneerImport] Failed to import ${work.title} at $stage: $error',
         );
         debugPrintStack(stackTrace: stackTrace);
         results.add(
-          PioneerImportWorkResult(
+          _buildFailedResult(
             work: work,
-            status: PioneerImportWorkStatus.failed,
-            reason: error.toString(),
-            libraryItemId: work.stableLibraryItemId,
-            sourceType: work.sourceType,
-            insertedLibraryItems: 0,
-            insertedNavigationItems: 0,
-            insertedTextBlocks: 0,
-            skippedExisting: false,
+            libraryItemId: itemId,
+            error: error,
+            stage: stage,
+            sourceMethod: PioneerImportSourceMethod.directUrl,
+            downloadResult: downloadResult,
+            downloadedByteCount: downloadResult?.byteCount ??
+                (error is PioneerSourceDownloadException ? error.byteCount : null),
+            httpStatusCode: downloadResult?.httpStatusCode ??
+                (error is PioneerSourceDownloadException ? error.httpStatusCode : null),
+            contentType: downloadResult?.contentType ??
+                (error is PioneerSourceDownloadException ? error.contentType : null),
+            parsedSectionCount: error is PioneerImportDocumentTooSparseException
+                ? error.sectionsFound
+                : null,
+            parsedParagraphCount:
+                error is PioneerImportDocumentTooSparseException
+                    ? error.paragraphCount
+                    : null,
+            refCodeHandlingSummary: _defaultRefCodeHandlingSummary,
           ),
         );
       }
@@ -308,12 +448,247 @@ class PioneerTextImportService {
     return PioneerImportBatchResult(workResults: results);
   }
 
+  Future<PioneerImportBatchResult> importFromCapturedText(
+    Iterable<PioneerCapturedTextSource> capturedSources, {
+    PioneerImportProgressCallback? onProgress,
+    PioneerImportShouldContinue? shouldContinue,
+  }) async {
+    final uniqueSources = <String, PioneerCapturedTextSource>{};
+    for (final source in capturedSources) {
+      if (source.work.id.trim().isEmpty) continue;
+      uniqueSources[source.work.id] = source;
+    }
+
+    final db = await ELibraryDatabase.instance.database;
+    final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+    final results = <PioneerImportWorkResult>[];
+    final total = uniqueSources.length;
+    var completed = 0;
+
+    for (final source in uniqueSources.values) {
+      if (shouldContinue != null && !shouldContinue()) {
+        return PioneerImportBatchResult(
+          workResults: results,
+          wasCancelled: true,
+        );
+      }
+
+      final work = source.work;
+      final itemId = work.stableLibraryItemId;
+      final progressPrefix = '${completed + 1}/$total';
+      onProgress?.call(
+        PioneerImportProgress(
+          completedCount: completed,
+          totalCount: total,
+          workTitle: work.title,
+          stage: 'checking',
+          message: '$progressPrefix Checking ${work.title}',
+        ),
+      );
+
+      final existing = await _existingImportSummary(db, itemId);
+      if (existing.isComplete) {
+        results.add(
+          _buildSkippedExistingResult(
+            work: work,
+            libraryItemId: itemId,
+            sourceMethod: source.sourceMethod,
+            refCodeHandlingSummary:
+                source.refCodeHandlingSummary ?? _defaultRefCodeHandlingSummary,
+          ),
+        );
+        completed += 1;
+        continue;
+      }
+
+      try {
+        final text = source.text.trim();
+        if (text.isEmpty) {
+          results.add(
+            _buildSkippedNotImportableResult(
+              work: work,
+              libraryItemId: itemId,
+              sourceMethod: source.sourceMethod,
+              reason: 'No captured text was supplied.',
+            ),
+          );
+          completed += 1;
+          continue;
+        }
+
+        onProgress?.call(
+          PioneerImportProgress(
+            completedCount: completed,
+            totalCount: total,
+            workTitle: work.title,
+            stage: 'parsing',
+            message: '$progressPrefix Parsing ${work.title}',
+          ),
+        );
+        final document = await _parseCapturedTextDocument(
+          work,
+          text,
+          sourceLabel: source.sourceLabel,
+        );
+        final downloadResult = PioneerSourceDownloadResult(
+          bytes: Uint8List.fromList(utf8.encode(text)),
+          httpStatusCode: null,
+          contentType: _looksLikeHtmlMarkup(text)
+              ? 'text/html'
+              : 'text/plain',
+          resolvedUri: source.sourceUrl == null
+              ? null
+              : Uri.tryParse(source.sourceUrl!),
+        );
+
+        onProgress?.call(
+          PioneerImportProgress(
+            completedCount: completed,
+            totalCount: total,
+            workTitle: work.title,
+            stage: 'writing',
+            message: '$progressPrefix Writing ${work.title}',
+          ),
+        );
+        final result = await _writeImportedWork(
+          db: db,
+          deviceId: deviceId,
+          work: work,
+          document: document,
+          sourceBytes: downloadResult.bytes,
+          downloadResult: downloadResult,
+          sourceMethod: source.sourceMethod,
+          refCodeHandlingSummary:
+              source.refCodeHandlingSummary ?? _refCodeHandlingSummary(text),
+        );
+        results.add(result);
+      } catch (error, stackTrace) {
+        final stage = _failureStageFor(error);
+        debugPrint(
+          '[PioneerImport] Failed to import ${work.title} at $stage: $error',
+        );
+        debugPrintStack(stackTrace: stackTrace);
+        results.add(
+          _buildFailedResult(
+            work: work,
+            libraryItemId: itemId,
+            error: error,
+            stage: stage,
+            sourceMethod: source.sourceMethod,
+            refCodeHandlingSummary:
+                source.refCodeHandlingSummary ?? _defaultRefCodeHandlingSummary,
+            downloadedByteCount: error is PioneerSourceDownloadException
+                ? error.byteCount
+                : null,
+            httpStatusCode: error is PioneerSourceDownloadException
+                ? error.httpStatusCode
+                : null,
+            contentType: error is PioneerSourceDownloadException
+                ? error.contentType
+                : null,
+            parsedSectionCount: error is PioneerImportDocumentTooSparseException
+                ? error.sectionsFound
+                : null,
+            parsedParagraphCount:
+                error is PioneerImportDocumentTooSparseException
+                    ? error.paragraphCount
+                    : null,
+          ),
+        );
+      }
+
+      completed += 1;
+    }
+
+    return PioneerImportBatchResult(workResults: results);
+  }
+
+  Future<PioneerImportBatchResult> importFromClipboard({
+    required PioneerSourceWork work,
+    String? sourceUrl,
+    String? sourceLabel,
+    PioneerImportProgressCallback? onProgress,
+    PioneerImportShouldContinue? shouldContinue,
+  }) async {
+    final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
+    final clipboardText = clipboard?.text?.trim() ?? '';
+    if (clipboardText.isEmpty) {
+      return PioneerImportBatchResult(
+        workResults: [
+          _buildSkippedNotImportableResult(
+            work: work,
+            libraryItemId: work.stableLibraryItemId,
+            sourceMethod: PioneerImportSourceMethod.clipboard,
+            reason: 'Clipboard is empty.',
+          ),
+        ],
+      );
+    }
+
+    return importFromCapturedText(
+      [
+        PioneerCapturedTextSource(
+          work: work,
+          sourceMethod: PioneerImportSourceMethod.clipboard,
+          text: clipboardText,
+          sourceUrl: sourceUrl,
+          sourceLabel: sourceLabel,
+          refCodeHandlingSummary: _refCodeHandlingSummary(clipboardText),
+        ),
+      ],
+      onProgress: onProgress,
+      shouldContinue: shouldContinue,
+    );
+  }
+
+  Future<PioneerImportBatchResult> importFromSavedExport({
+    required PioneerSourceWork work,
+    required String filePath,
+    String? sourceUrl,
+    String? sourceLabel,
+    PioneerImportProgressCallback? onProgress,
+    PioneerImportShouldContinue? shouldContinue,
+  }) async {
+    final file = File(filePath);
+    if (!await file.exists()) {
+      return PioneerImportBatchResult(
+        workResults: [
+          _buildSkippedNotImportableResult(
+            work: work,
+            libraryItemId: work.stableLibraryItemId,
+            sourceMethod: PioneerImportSourceMethod.savedExport,
+            reason: 'Saved export file not found.',
+          ),
+        ],
+      );
+    }
+
+    final text = await file.readAsString(encoding: utf8);
+    return importFromCapturedText(
+      [
+        PioneerCapturedTextSource(
+          work: work,
+          sourceMethod: PioneerImportSourceMethod.savedExport,
+          text: text,
+          sourceUrl: sourceUrl,
+          sourceLabel: sourceLabel,
+          refCodeHandlingSummary: _refCodeHandlingSummary(text),
+        ),
+      ],
+      onProgress: onProgress,
+      shouldContinue: shouldContinue,
+    );
+  }
+
   Future<PioneerImportWorkResult> _writeImportedWork({
     required Database db,
     required String deviceId,
     required PioneerSourceWork work,
     required PioneerImportDocument document,
     required Uint8List sourceBytes,
+    required PioneerSourceDownloadResult downloadResult,
+    required PioneerImportSourceMethod sourceMethod,
+    required String refCodeHandlingSummary,
   }) async {
     final itemId = work.stableLibraryItemId;
     final now = _utcNow();
@@ -446,6 +821,8 @@ class PioneerTextImportService {
     return PioneerImportWorkResult(
       work: work,
       status: PioneerImportWorkStatus.imported,
+      stage: 'completed',
+      sourceMethod: sourceMethod,
       reason: 'Imported into eLibrary.db.',
       libraryItemId: itemId,
       sourceType: work.sourceType,
@@ -453,6 +830,17 @@ class PioneerTextImportService {
       insertedNavigationItems: navigationCount,
       insertedTextBlocks: textBlockCount,
       skippedExisting: false,
+      refCodeHandlingSummary: refCodeHandlingSummary,
+      detail:
+          'Wrote ${document.sections.length} section${document.sections.length == 1 ? '' : 's'} and $textBlockCount text block${textBlockCount == 1 ? '' : 's'}.',
+      exceptionType: null,
+      httpStatusCode: downloadResult.httpStatusCode,
+      contentType: downloadResult.contentType,
+      downloadedByteCount: downloadResult.byteCount,
+      parsedSectionCount: document.sections.length,
+      parsedParagraphCount: textBlockCount,
+      requiresManualVerification: false,
+      manualVerificationHint: null,
     );
   }
 
@@ -543,7 +931,167 @@ int _firstCount(List<Map<String, Object?>> rows) {
   return (rows.first['cnt'] as num?)?.toInt() ?? 0;
 }
 
-Future<Uint8List> _downloadSourceBytes(Uri uri) async {
+String _failureStageFor(Object error) {
+  if (error is PioneerSourceDownloadException) {
+    return 'downloading';
+  }
+  if (error is PioneerImportDocumentTooSparseException) {
+    return 'parsing';
+  }
+  return 'writing';
+}
+
+PioneerImportWorkResult _buildSkippedNotImportableResult({
+  required PioneerSourceWork work,
+  required String libraryItemId,
+  required PioneerImportSourceMethod sourceMethod,
+  String? reason,
+}) {
+  return PioneerImportWorkResult(
+    work: work,
+    status: PioneerImportWorkStatus.skippedNotImportable,
+    stage: 'blocked',
+    sourceMethod: sourceMethod,
+    reason: reason ?? 'Source needed or unsupported source type.',
+    libraryItemId: libraryItemId,
+    sourceType: work.sourceType,
+    insertedLibraryItems: 0,
+    insertedNavigationItems: 0,
+    insertedTextBlocks: 0,
+    skippedExisting: false,
+    refCodeHandlingSummary: _defaultRefCodeHandlingSummary,
+    detail: 'The selected work cannot be imported yet.',
+    exceptionType: null,
+    httpStatusCode: null,
+    contentType: null,
+    downloadedByteCount: null,
+    parsedSectionCount: null,
+    parsedParagraphCount: null,
+    requiresManualVerification: false,
+    manualVerificationHint: null,
+  );
+}
+
+PioneerImportWorkResult _buildSkippedUnsupportedSourceResult({
+  required PioneerSourceWork work,
+  required String libraryItemId,
+  required PioneerImportSourceMethod sourceMethod,
+}) {
+  return PioneerImportWorkResult(
+    work: work,
+    status: PioneerImportWorkStatus.skippedUnsupportedSource,
+    stage: 'blocked',
+    sourceMethod: sourceMethod,
+    reason: 'Unsupported Pioneer source type: ${work.sourceType ?? 'unknown'}.',
+    libraryItemId: libraryItemId,
+    sourceType: work.sourceType,
+    insertedLibraryItems: 0,
+    insertedNavigationItems: 0,
+    insertedTextBlocks: 0,
+    skippedExisting: false,
+    refCodeHandlingSummary: _defaultRefCodeHandlingSummary,
+    detail: 'Only EPUB and HTML Pioneer sources can be imported right now.',
+    exceptionType: null,
+    httpStatusCode: null,
+    contentType: null,
+    downloadedByteCount: null,
+    parsedSectionCount: null,
+    parsedParagraphCount: null,
+    requiresManualVerification: false,
+    manualVerificationHint: null,
+  );
+}
+
+PioneerImportWorkResult _buildSkippedExistingResult({
+  required PioneerSourceWork work,
+  required String libraryItemId,
+  required PioneerImportSourceMethod sourceMethod,
+  required String refCodeHandlingSummary,
+}) {
+  return PioneerImportWorkResult(
+    work: work,
+    status: PioneerImportWorkStatus.skippedExisting,
+    stage: 'existing',
+    sourceMethod: sourceMethod,
+    reason: 'Already imported in eLibrary.db.',
+    libraryItemId: libraryItemId,
+    sourceType: work.sourceType,
+    insertedLibraryItems: 0,
+    insertedNavigationItems: 0,
+    insertedTextBlocks: 0,
+    skippedExisting: true,
+    refCodeHandlingSummary: refCodeHandlingSummary,
+    detail: 'A complete copy already exists in eLibrary.db.',
+    exceptionType: null,
+    httpStatusCode: null,
+    contentType: null,
+    downloadedByteCount: null,
+    parsedSectionCount: null,
+    parsedParagraphCount: null,
+    requiresManualVerification: false,
+    manualVerificationHint: null,
+  );
+}
+
+PioneerImportWorkResult _buildFailedResult({
+  required PioneerSourceWork work,
+  required String libraryItemId,
+  required Object error,
+  required String stage,
+  required PioneerImportSourceMethod sourceMethod,
+  required String refCodeHandlingSummary,
+  PioneerSourceDownloadResult? downloadResult,
+  int? downloadedByteCount,
+  int? httpStatusCode,
+  String? contentType,
+  int? parsedSectionCount,
+  int? parsedParagraphCount,
+}) {
+  String reason;
+  if (error is PioneerSourceDownloadException) {
+    reason = 'Download failed: ${error.message}'
+        '${error.httpStatusCode == null ? '' : ' (HTTP ${error.httpStatusCode})'}';
+  } else if (error is PioneerImportDocumentTooSparseException) {
+    reason = 'Parse failed: ${error.message}';
+  } else {
+    reason = '$stage failed: ${error.toString()}';
+  }
+  final requiresManualVerification = _requiresManualVerification(
+    error: error,
+    downloadResult: downloadResult,
+  );
+
+  return PioneerImportWorkResult(
+    work: work,
+    status: PioneerImportWorkStatus.failed,
+    stage: stage,
+    sourceMethod: sourceMethod,
+    reason: reason,
+    libraryItemId: libraryItemId,
+    sourceType: work.sourceType,
+    insertedLibraryItems: 0,
+    insertedNavigationItems: 0,
+    insertedTextBlocks: 0,
+    skippedExisting: false,
+    refCodeHandlingSummary: refCodeHandlingSummary,
+    detail: error.toString(),
+    exceptionType: error.runtimeType.toString(),
+    httpStatusCode: httpStatusCode ??
+        (error is PioneerSourceDownloadException ? error.httpStatusCode : null),
+    contentType: contentType ??
+        (error is PioneerSourceDownloadException ? error.contentType : null),
+    downloadedByteCount: downloadedByteCount ??
+        (error is PioneerSourceDownloadException ? error.byteCount : null),
+    parsedSectionCount: parsedSectionCount,
+    parsedParagraphCount: parsedParagraphCount,
+    requiresManualVerification: requiresManualVerification,
+    manualVerificationHint: requiresManualVerification
+        ? 'This source looks like it needs manual verification or a browser challenge. Open the source URL in a browser, complete any prompt, and retry the import.'
+        : null,
+  );
+}
+
+Future<PioneerSourceDownloadResult> _downloadSourceBytes(Uri uri) async {
   final client = HttpClient();
   try {
     final request = await client.getUrl(uri);
@@ -552,11 +1100,27 @@ Future<Uint8List> _downloadSourceBytes(Uri uri) async {
       'StudyBible2 Pioneer Import',
     );
     final response = await request.close();
+    final contentType = response.headers.contentType?.mimeType;
     if (response.statusCode != HttpStatus.ok) {
-      throw StateError('HTTP ${response.statusCode} while downloading ${uri.toString()}');
+      final bytes = await consolidateHttpClientResponseBytes(response);
+      throw PioneerSourceDownloadException(
+        uri: uri,
+        message: 'Unexpected HTTP response while downloading source.',
+        httpStatusCode: response.statusCode,
+        contentType: contentType,
+        byteCount: bytes.length,
+        responseBodySnippet: _responseBodySnippet(bytes),
+      );
     }
     final bytes = await consolidateHttpClientResponseBytes(response);
-    return Uint8List.fromList(bytes);
+    return PioneerSourceDownloadResult(
+      bytes: Uint8List.fromList(bytes),
+      httpStatusCode: response.statusCode,
+      contentType: contentType,
+      resolvedUri: response.redirects.isNotEmpty
+          ? response.redirects.last.location
+          : uri,
+    );
   } finally {
     client.close(force: true);
   }
@@ -581,7 +1145,23 @@ Future<PioneerImportDocument> _parseEpubDocument(
   PioneerSourceWork work,
   Uint8List bytes,
 ) async {
-  final archive = ZipDecoder().decodeBytes(bytes, verify: false);
+  Archive archive;
+  try {
+    archive = ZipDecoder().decodeBytes(bytes, verify: false);
+  } catch (_) {
+    if (_looksLikeManualVerificationText(
+      utf8.decode(bytes, allowMalformed: true),
+    )) {
+      throw const PioneerImportDocumentTooSparseException(
+        sourceType: 'epub',
+        message:
+            'The source appears to require manual verification before readable EPUB content is available.',
+        sectionsFound: 0,
+        paragraphCount: 0,
+      );
+    }
+    rethrow;
+  }
   final packageInfo = _readEpubPackageInfo(archive);
   final sourcePaths = packageInfo.spineOrderedPaths.isNotEmpty
       ? packageInfo.spineOrderedPaths
@@ -622,7 +1202,12 @@ Future<PioneerImportDocument> _parseEpubDocument(
   }
 
   if (sections.isEmpty) {
-    throw StateError('No readable sections were found in the EPUB source.');
+    throw PioneerImportDocumentTooSparseException(
+      sourceType: 'epub',
+      message: 'No readable sections were found in the EPUB source.',
+      sectionsFound: 0,
+      paragraphCount: 0,
+    );
   }
 
   return PioneerImportDocument(title: work.title, sections: sections);
@@ -633,6 +1218,15 @@ Future<PioneerImportDocument> _parseHtmlDocument(
   Uint8List bytes,
 ) async {
   final raw = utf8.decode(bytes, allowMalformed: true);
+  if (_looksLikeManualVerificationText(raw)) {
+    throw const PioneerImportDocumentTooSparseException(
+      sourceType: 'html',
+      message:
+          'The source appears to require manual verification before readable HTML content is available.',
+      sectionsFound: 0,
+      paragraphCount: 0,
+    );
+  }
   final body = _extractHtmlBody(raw);
   final sections = <PioneerImportSection>[];
   final blocks = _extractHtmlBlocks(body ?? raw);
@@ -686,7 +1280,12 @@ Future<PioneerImportDocument> _parseHtmlDocument(
   if (sections.isEmpty) {
     final paragraphs = _extractParagraphTexts(body ?? raw);
     if (paragraphs.isEmpty) {
-      throw StateError('No readable sections were found in the HTML source.');
+      throw PioneerImportDocumentTooSparseException(
+        sourceType: 'html',
+        message: 'No readable sections were found in the HTML source.',
+        sectionsFound: 0,
+        paragraphCount: 0,
+      );
     }
     sections.add(
       PioneerImportSection(
@@ -925,6 +1524,13 @@ String? _attributeValue(String tag, String name) {
   return match?.group(1);
 }
 
+String? _responseBodySnippet(List<int> bytes) {
+  if (bytes.isEmpty) return null;
+  final text = utf8.decode(bytes, allowMalformed: true).trim();
+  if (text.isEmpty) return null;
+  return text.length <= 1600 ? text : text.substring(0, 1600);
+}
+
 String _stripHtml(String value) {
   return value
       .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
@@ -939,12 +1545,238 @@ String _stripHtml(String value) {
       .trim();
 }
 
+String normalizeWhitespace(String value) {
+  return value.replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
 String _normalizeText(String value) {
   return value
       .toLowerCase()
       .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
+}
+
+bool _looksLikeManualVerificationText(String? text) {
+  final normalized = _normalizeText(text ?? '');
+  if (normalized.isEmpty) return false;
+  const markers = <String>[
+    'cloudflare',
+    'just a moment',
+    'manual verification',
+    'verify you are human',
+    'checking your browser',
+    'security check',
+    'attention required',
+    'captcha',
+    'challenge verification',
+  ];
+  for (final marker in markers) {
+    if (normalized.contains(_normalizeText(marker))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const String _defaultRefCodeHandlingSummary =
+    'Display-only: source ref codes are preserved in the imported text and are not separately indexed yet.';
+
+String _refCodeHandlingSummary(String text) {
+  final matches = RegExp(
+    r'\b[A-Z0-9]{2,12}\s+\d+(?:[.:]\d+)+\b',
+  ).allMatches(text).length;
+  if (matches == 0) {
+    return 'Display-only: no source ref codes were detected.';
+  }
+  return 'Display-only: $matches source ref code${matches == 1 ? '' : 's'} preserved in the imported text.';
+}
+
+bool _looksLikeHtmlMarkup(String text) {
+  final normalized = text.trimLeft().toLowerCase();
+  return normalized.startsWith('<!doctype') ||
+      normalized.startsWith('<html') ||
+      normalized.contains('<body') ||
+      normalized.contains('<p') ||
+      normalized.contains('<div') ||
+      normalized.contains('<section');
+}
+
+Future<PioneerImportDocument> _parseCapturedTextDocument(
+  PioneerSourceWork work,
+  String rawText, {
+  String? sourceLabel,
+}) async {
+  final normalized = rawText.trim();
+  if (normalized.isEmpty) {
+    throw const PioneerImportDocumentTooSparseException(
+      sourceType: 'captured-text',
+      message: 'No captured text was supplied.',
+      sectionsFound: 0,
+      paragraphCount: 0,
+    );
+  }
+
+  if (_looksLikeManualVerificationText(normalized)) {
+    throw const PioneerImportDocumentTooSparseException(
+      sourceType: 'captured-text',
+      message:
+          'The captured text still looks like a human-verification or challenge page.',
+      sectionsFound: 0,
+      paragraphCount: 0,
+    );
+  }
+
+  if (_looksLikeHtmlMarkup(normalized)) {
+    return _parseHtmlDocument(work, Uint8List.fromList(utf8.encode(rawText)));
+  }
+
+  final lines = rawText.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n');
+  final sections = <PioneerImportSection>[];
+  final sectionParagraphs = <String>[];
+  var currentTitle = work.title;
+  var sectionIndex = 1;
+  final paragraphBuffer = <String>[];
+
+  void flushParagraph() {
+    final paragraph = normalizeWhitespace(paragraphBuffer.join(' '));
+    paragraphBuffer.clear();
+    if (paragraph.isNotEmpty) {
+      sectionParagraphs.add(paragraph);
+    }
+  }
+
+  void flushSection() {
+    flushParagraph();
+    if (sectionParagraphs.isEmpty) {
+      return;
+    }
+    sections.add(
+      PioneerImportSection(
+        href: p.normalize('captured/section_${sectionIndex.toString().padLeft(2, '0')}.txt'),
+        title: currentTitle,
+        paragraphs: List<String>.unmodifiable(sectionParagraphs),
+        spineIndex: sectionIndex,
+      ),
+    );
+    sectionIndex += 1;
+    sectionParagraphs.clear();
+  }
+
+  for (final rawLine in lines) {
+    final line = normalizeWhitespace(rawLine);
+    if (line.isEmpty) {
+      flushParagraph();
+      continue;
+    }
+
+    if (_looksLikeCapturedHeading(line)) {
+      if (sectionParagraphs.isNotEmpty || paragraphBuffer.isNotEmpty) {
+        flushSection();
+      }
+      currentTitle = line;
+      continue;
+    }
+
+    paragraphBuffer.add(line);
+    if (_looksLikeParagraphBoundary(rawLine)) {
+      flushParagraph();
+    }
+  }
+
+  flushSection();
+
+  if (sections.isEmpty) {
+    final fallbackParagraphs = _splitCapturedParagraphs(rawText);
+    if (fallbackParagraphs.isEmpty) {
+      throw const PioneerImportDocumentTooSparseException(
+        sourceType: 'captured-text',
+        message: 'No readable text blocks were found in the captured text.',
+        sectionsFound: 0,
+        paragraphCount: 0,
+      );
+    }
+    sections.add(
+      PioneerImportSection(
+        href: p.normalize('captured/section_01.txt'),
+        title: sourceLabel?.trim().isNotEmpty == true
+            ? sourceLabel!.trim()
+            : work.title,
+        paragraphs: fallbackParagraphs,
+        spineIndex: 1,
+      ),
+    );
+  }
+
+  return PioneerImportDocument(title: work.title, sections: sections);
+}
+
+List<String> _splitCapturedParagraphs(String rawText) {
+  final paragraphs = <String>[];
+  for (final chunk in rawText.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split(RegExp(r'\n\s*\n'))) {
+    final paragraph = normalizeWhitespace(chunk);
+    if (paragraph.isNotEmpty) {
+      paragraphs.add(paragraph);
+    }
+  }
+  return paragraphs;
+}
+
+bool _looksLikeParagraphBoundary(String line) {
+  return line.trim().endsWith('.') ||
+      line.trim().endsWith('!') ||
+      line.trim().endsWith('?') ||
+      line.trim().endsWith(':');
+}
+
+bool _looksLikeCapturedHeading(String line) {
+  final normalized = normalizeWhitespace(line);
+  if (normalized.isEmpty || normalized.length > 120) {
+    return false;
+  }
+  final lower = normalized.toLowerCase();
+  if (RegExp(r'^(chapter|section|part|book)\b', caseSensitive: false)
+      .hasMatch(normalized)) {
+    return true;
+  }
+  if (const {'introduction', 'preface', 'contents', 'appendix', 'index'}
+      .contains(lower)) {
+    return true;
+  }
+  if (RegExp(r'^\d+([.)-]|\s)').hasMatch(normalized)) {
+    return true;
+  }
+  final words = normalized.split(RegExp(r'\s+'));
+  if (words.length <= 12 && normalized == normalized.toUpperCase()) {
+    return true;
+  }
+  if (words.length <= 8 && normalized.endsWith(':')) {
+    return true;
+  }
+  return false;
+}
+
+bool _requiresManualVerification({
+  required Object error,
+  PioneerSourceDownloadResult? downloadResult,
+}) {
+  final statusCode = downloadResult?.httpStatusCode ??
+      (error is PioneerSourceDownloadException ? error.httpStatusCode : null);
+  if (statusCode == HttpStatus.forbidden ||
+      statusCode == HttpStatus.unauthorized ||
+      statusCode == HttpStatus.tooManyRequests ||
+      statusCode == HttpStatus.serviceUnavailable) {
+    return true;
+  }
+
+  final errorSnippet = error is PioneerSourceDownloadException
+      ? error.responseBodySnippet
+      : null;
+  final message = error is PioneerImportDocumentTooSparseException
+      ? error.message
+      : error.toString();
+  return _looksLikeManualVerificationText(errorSnippet) ||
+      _looksLikeManualVerificationText(message);
 }
 
 String _slug(String value) {

@@ -25,9 +25,11 @@ void main() {
     expect(danielAndTheRevelation!.abbreviation, 'DAR');
     expect(danielAndTheRevelation.verified, isTrue);
     expect(danielAndTheRevelation.sourceType, 'epub');
+    expect(danielAndTheRevelation.sourceTypeLabel, 'EPUB');
     expect(danielAndTheRevelation.sourceUrl, isNotNull);
+    expect(danielAndTheRevelation.sourceSiteLabel, 'Archive.org');
     expect(danielAndTheRevelation.friendlyAvailabilityLabel, 'Available');
-    expect(danielAndTheRevelation.friendlySourceStatusLabel, contains('EPUB'));
+    expect(danielAndTheRevelation.friendlySourceStatusLabel, 'Archive.org');
     expect(danielAndTheRevelation.isImportable, isTrue);
     expect(
       danielAndTheRevelation.stableLibraryItemId,
@@ -39,11 +41,15 @@ void main() {
     expect(uslp!.verified, isTrue);
     expect(uslp.sourceType, 'html');
     expect(uslp.sourceUrl, isNotNull);
+    expect(uslp.sourceSiteLabel, 'Project Gutenberg');
     expect(uslp.isImportable, isTrue);
     expect(uslp.friendlyAvailabilityLabel, 'Available');
     expect(
-      catalog.works.where((work) => work.isImportable),
-      hasLength(greaterThanOrEqualTo(2)),
+      catalog.importableWorks.map((work) => work.title),
+      containsAll([
+        'Daniel and the Revelation',
+        'The United States in the Light of Prophecy',
+      ]),
     );
   });
 

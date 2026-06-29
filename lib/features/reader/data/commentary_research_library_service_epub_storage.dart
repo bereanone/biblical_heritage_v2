@@ -541,6 +541,17 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
                 p.join(rootPath, 'PDFs', 'Research'),
               ],
         discoveredCount: files.length,
+        candidateFoldersExist: await _allCandidatePathsExist(
+          candidatePaths: folderType == 'commentary'
+              ? [
+                  p.join(rootPath, 'ePubs', 'Commentaries'),
+                  p.join(rootPath, 'PDFs', 'Commentaries'),
+                ]
+              : [
+                  p.join(rootPath, 'ePubs', 'Research'),
+                  p.join(rootPath, 'PDFs', 'Research'),
+                ],
+        ),
         indexedCount: indexedCount,
         matchCount: displayMatches.length,
       ),

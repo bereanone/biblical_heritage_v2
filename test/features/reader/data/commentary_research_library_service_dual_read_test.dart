@@ -192,4 +192,38 @@ void main() {
     expect(sections.first.blocks.map((block) => block.text), eLibraryParagraphs);
     expect(sections.first.blocks.first.referenceCode, isNotNull);
   });
+
+  test(
+    'shows a clean empty-state message when baseline commentary folders exist but contain no files',
+    () async {
+      for (final relative in const [
+        'ePubs/EGW',
+        'PDFs/EGW',
+        'ePubs/Commentaries',
+        'PDFs/Commentaries',
+        'ePubs/Research',
+        'PDFs/Research',
+      ]) {
+        await Directory(p.join(libraryRootDir.path, relative)).create(
+          recursive: true,
+        );
+      }
+
+      final passage = await CommentaryResearchLibraryService.instance.loadPassage(
+        bookId: 1,
+        chapter: 1,
+        verse: 1,
+        bookName: 'Genesis',
+      );
+
+      expect(
+        passage.commentary.statusMessage,
+        'No commentary files have been imported yet.',
+      );
+      expect(
+        passage.research.statusMessage,
+        'No research files have been imported yet.',
+      );
+    },
+  );
 }

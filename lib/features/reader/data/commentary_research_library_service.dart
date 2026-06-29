@@ -696,6 +696,9 @@ class CommentaryResearchLibraryService
       final discoveredCount = await _countDiscoverableFiles(
         candidatePaths: candidatePaths,
       );
+      final candidateFoldersExist = await _allCandidatePathsExist(
+        candidatePaths: candidatePaths,
+      );
       return _SectionLoadResult(
         section: CommentaryResearchSectionData(
           folderType: folderType,
@@ -706,6 +709,7 @@ class CommentaryResearchLibraryService
             chapter: chapter,
             candidatePaths: candidatePaths,
             discoveredCount: discoveredCount,
+            candidateFoldersExist: candidateFoldersExist,
             indexedCount: 0,
             matchCount: 0,
           ),
@@ -816,6 +820,9 @@ class CommentaryResearchLibraryService
       chapter: chapter,
       candidatePaths: candidatePaths,
       discoveredCount: files.length,
+      candidateFoldersExist: await _allCandidatePathsExist(
+        candidatePaths: candidatePaths,
+      ),
       indexedCount: indexedCount,
       matchCount: dedupedMatches.length,
     );
@@ -901,10 +908,14 @@ String _statusMessage({
   required int chapter,
   required List<String> candidatePaths,
   required int discoveredCount,
+  required bool candidateFoldersExist,
   required int indexedCount,
   required int matchCount,
 }) {
   if (discoveredCount == 0) {
+    if (candidateFoldersExist) {
+      return 'No ${folderLabel.toLowerCase()} files have been imported yet.';
+    }
     final searchedPaths = candidatePaths.join(', ');
     return '$folderLabel files not found in $searchedPaths (0 found).';
   }
@@ -921,6 +932,18 @@ String _statusMessage({
     return 'Commentary files found but not indexed.';
   }
   return '$folderLabel files found but not indexed.';
+}
+
+Future<bool> _allCandidatePathsExist({
+  required List<String> candidatePaths,
+}) async {
+  for (final candidate in candidatePaths) {
+    final directory = Directory(candidate);
+    if (!await directory.exists()) {
+      return false;
+    }
+  }
+  return true;
 }
 
 class LibraryBookSection {

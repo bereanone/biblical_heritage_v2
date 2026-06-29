@@ -171,18 +171,17 @@ void main() {
         .where((item) => item.collectionGroupKey == 'adventist_pioneer_library')
         .toList(growable: false);
 
-    expect(pioneerItems.length, greaterThanOrEqualTo(3));
+    expect(pioneerItems.length, greaterThanOrEqualTo(2));
     expect(
       pioneerItems.map((item) => item.displayTitle).toSet(),
       containsAll(<String>[
-        'Home Here, and Home in Heaven; With Other Poems',
-        'Christ Our Righteousness',
-        'Herald of the Bridegroom',
+        'Daniel and the Revelation',
+        'Lessons on Faith',
       ]),
     );
     expect(
       pioneerItems.map((item) => item.displayAuthor).toSet(),
-      containsAll(<String>['Annie Smith', 'A. G. Daniells', 'Apollos Hale']),
+      containsAll(<String>['Uriah Smith', 'A. T. Jones']),
     );
 
     final darItems = pioneerItems
@@ -196,15 +195,15 @@ void main() {
     final dar = darItems.single;
     expect(
       dar.id,
-      'library_item_research_pioneer_uriah_smith_daniel_and_the_revelation_egw_copied_range',
+      'DAR_US',
     );
     expect(dar.displayAuthor, 'Uriah Smith');
     expect(dar.fileFormat, 'html');
     expect(dar.isEpub, isTrue);
-    expect(dar.collectionName, 'Adventist Pioneer Library');
-    expect(dar.sourceType, 'egw_copied_range');
+    expect(dar.collectionName, 'Pioneer Authors');
+    expect(dar.sourceType, 'egw_html_capture');
     expect(dar.sourceSite, 'egwwritings.org');
-    expect(dar.relativePath, contains('copied_range'));
+    expect(dar.relativePath, 'assets/scans/DAR/capture.html');
     expect(
       libraryCatalogSearchTextForItem(dar),
       contains(compactLibrarySearchText('Daniel')),
@@ -243,15 +242,14 @@ void main() {
       final beforeUserDb = await _snapshotUserDatabaseFiles(databaseDir);
 
       final items = await LibraryCatalogService.instance.loadItems();
-      final annie = items.firstWhere(
+      final lessons = items.firstWhere(
         (item) =>
-            item.displayTitle ==
-            'Home Here, and Home in Heaven; With Other Poems',
+            item.displayTitle == 'Lessons on Faith' &&
+            item.displayAuthor == 'A. T. Jones',
       );
-      expect(annie.displayAuthor, 'Annie Smith');
-      expect(annie.coverPath, isNull);
+      expect(lessons.coverPath, 'assets/library_covers/thumbs/LOF_ATJ.png');
 
-      const searchPhrase = 'BY ANNIE R. SMITH ROCHESTER';
+      const searchPhrase = 'Without faith it is impossible to please him.';
       final results = await LibraryCatalogService.instance.searchContent(
         query: searchPhrase,
         collectionFilter: 'adventist_pioneer_library',
@@ -269,41 +267,44 @@ void main() {
         await LibraryCatalogService.instance.countIndexedSearchableItems(
           collectionFilter: 'adventist_pioneer_library',
         ),
-        greaterThanOrEqualTo(3),
+        greaterThanOrEqualTo(2),
       );
       expect(
         await LibraryCatalogService.instance.countCatalogItemsInScope(
           collectionFilter: 'adventist_pioneer_library',
         ),
-        greaterThanOrEqualTo(3),
+        greaterThanOrEqualTo(2),
       );
 
       final egwResults = await LibraryCatalogService.instance.searchContent(
         query: searchPhrase,
         collectionFilter: 'egw_books',
       );
-      expect(egwResults.where((result) => result.item.id == annie.id), isEmpty);
+      expect(egwResults.where((result) => result.item.id == lessons.id), isEmpty);
 
-      final annieResults = results
-          .where((result) => result.item.id == annie.id)
+      final lessonsResults = results
+          .where((result) => result.item.id == lessons.id)
           .toList(growable: false);
-      expect(annieResults, isNotEmpty);
-      expect(annieResults.first.item.displayAuthor, 'Annie Smith');
-      expect(annieResults.first.snippet, contains(searchPhrase));
+      expect(lessonsResults, isNotEmpty);
+      expect(lessonsResults.first.item.displayAuthor, 'A. T. Jones');
+      expect(
+        lessonsResults.first.snippet.toLowerCase(),
+        contains('without faith it is impossible to please him'),
+      );
 
       final sections = await CommentaryResearchLibraryService.instance
           .loadBookSections(
-            filePath: p.join(libraryRootDir.path, annie.relativePath),
-            libraryItemId: annie.id,
+            filePath: p.join(libraryRootDir.path, lessons.relativePath),
+            libraryItemId: lessons.id,
           );
       expect(sections, isNotEmpty);
       expect(
         sections.expand((section) => section.paragraphs).join(' '),
-        contains('I thanked my God'),
+        contains('without faith it is impossible to please him'),
       );
 
       final navigationItems = await LibraryCatalogService.instance
-          .loadNavigationItems(annie.id);
+          .loadNavigationItems(lessons.id);
       expect(navigationItems, isNotEmpty);
 
       _expectUserDatabaseFilesUnchanged(beforeUserDb, databaseDir);

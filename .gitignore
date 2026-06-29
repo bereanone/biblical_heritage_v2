@@ -54,6 +54,20 @@ assets/library_covers/*
 assets/library_covers/thumbs/*
 !assets/library_covers/thumbs/.gitkeep
 
+# Generated EPUB/PDF payloads; keep baseline placeholders tracked.
+assets/databases/ePubs/EGW/**
+!assets/databases/ePubs/EGW/.gitkeep
+assets/databases/ePubs/Commentaries/**
+!assets/databases/ePubs/Commentaries/.gitkeep
+assets/databases/ePubs/Research/**
+!assets/databases/ePubs/Research/.gitkeep
+assets/databases/PDFs/EGW/**
+!assets/databases/PDFs/EGW/.gitkeep
+assets/databases/PDFs/Commentaries/**
+!assets/databases/PDFs/Commentaries/.gitkeep
+assets/databases/PDFs/Research/**
+!assets/databases/PDFs/Research/.gitkeep
+
 # Local backup artifacts for the baseline eLibrary database.
 assets/databases/eLibrary.db.bak
 assets/databases/*before-scans-import*

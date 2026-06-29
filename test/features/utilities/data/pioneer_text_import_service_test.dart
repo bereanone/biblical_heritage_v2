@@ -1,19 +1,19 @@
-import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:studybible2/core/bootstrap/library_root_service.dart';
 import 'package:studybible2/core/bootstrap/local_settings_store.dart';
 import 'package:studybible2/core/database/elibrary_database.dart';
 import 'package:studybible2/core/database/user_database.dart';
-import 'package:studybible2/features/library/data/library_catalog_service.dart';
-import 'package:studybible2/features/reader/data/commentary_research_library_service.dart';
+import 'package:studybible2/features/utilities/data/pioneer_capture_folder_metadata.dart';
 import 'package:studybible2/features/utilities/data/pioneer_source_catalog.dart';
+import 'package:studybible2/features/utilities/data/pioneer_html_capture_folder_scanner.dart';
 import 'package:studybible2/features/utilities/data/pioneer_text_import_service.dart';
+import 'package:studybible2/features/utilities/presentation/pioneer_verified_capture_screen.dart';
 
 Future<void> _installPathProviderMocks({
   required Directory supportDir,
@@ -36,6 +36,124 @@ Future<void> _installPathProviderMocks({
       });
 }
 
+Uint8List _zipWithSingleEpubEntry({
+  required String fileName,
+  required List<int> epubBytes,
+}) {
+  final archive = Archive()
+    ..addFile(ArchiveFile(fileName, epubBytes.length, epubBytes));
+  return Uint8List.fromList(ZipEncoder().encode(archive));
+}
+
+Uint8List _zipWithEpubEntries(Map<String, List<int>> entries) {
+  final archive = Archive();
+  for (final entry in entries.entries) {
+    archive.addFile(ArchiveFile(entry.key, entry.value.length, entry.value));
+  }
+  return Uint8List.fromList(ZipEncoder().encode(archive));
+}
+
+Uint8List _epubBytes() {
+  final containerXml = '''<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml" />
+  </rootfiles>
+</container>
+''';
+  final opfXml = '''<?xml version="1.0" encoding="UTF-8"?>
+<package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Daniel and the Revelation</dc:title>
+    <dc:creator>Uriah Smith</dc:creator>
+    <dc:publisher>Adventist Pioneer Library</dc:publisher>
+    <meta name="cover" content="cover-image" />
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav" />
+    <item id="cover-image" href="images/cover.jpg" media-type="image/jpeg" />
+    <item id="cover" href="cover.xhtml" media-type="application/xhtml+xml" properties="cover-image" />
+    <item id="main" href="The_Daniel_and_Revelation_01t_%28ebook%29.xhtml" media-type="application/xhtml+xml" />
+  </manifest>
+  <spine>
+    <itemref idref="main" />
+  </spine>
+</package>
+''';
+  final navXhtml = '''<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Contents</title></head>
+  <body>
+    <nav epub:type="toc">
+      <ol>
+        <li><a href="The_Daniel_and_Revelation_01t_%28ebook%29.xhtml#preface">Preface</a></li>
+        <li><a href="The_Daniel_and_Revelation_01t_%28ebook%29.xhtml#chapter-1">Chapter 1 - Daniel in Captivity</a></li>
+      </ol>
+    </nav>
+  </body>
+</html>
+''';
+  final coverXhtml = '''<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Cover</title></head>
+  <body>
+    <div><img src="images/cover.jpg" alt="Daniel and the Revelation cover" /></div>
+  </body>
+</html>
+''';
+  final mainXhtml = '''<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Contents</title></head>
+  <body>
+    <p class="Normal">© 2016 Adventist Pioneer Library</p>
+    <p class="Normal">37457 Jasper Lowell Rd</p>
+    <p class="Normal">Jasper, OR, 97438, USA</p>
+    <p class="Normal">+1 (877) 585-1111</p>
+    <p class="Normal">www.APLib.org</p>
+    <p class="Normal">Originally published in 1897 by the Review and Herald Publishing Company.</p>
+    <p class="Normal">The original Table of Contents contained brief descriptions for the chapters.</p>
+    <p class="Normal">Published in the USA</p>
+    <p class="Normal">July, 2016</p>
+    <p class="Normal">ISBN: 978-1-61455-045-7</p>
+    <div class="Header-Main" id="contents">Contents</div>
+    <p class="TOC-text-level-0-Section">Contents</p>
+    <div class="Header-Main" id="preface">Preface</div>
+    <p class="Normal">A brief preface frames the book. [4]</p>
+    <div class="Header-Main" id="chapter-1">Chapter 1 - Daniel in Captivity</div>
+    <p class="Normal">Daniel and the Revelation opens in the days of Babylon. [5]</p>
+    <p class="Normal-Noindent">The prophecy of Daniel begins with captivity and hope.</p>
+    <div class="Heading-2">Chapter 2 - The Great Image</div>
+    <p class="Normal">The great image is the next major subject in the book. [6]</p>
+    <p class="Normal">Its metals and kingdoms are discussed in careful sequence.</p>
+  </body>
+</html>
+''';
+
+  final archive = Archive()
+    ..addFile(
+      ArchiveFile(
+        'META-INF/container.xml',
+        containerXml.length,
+        containerXml.codeUnits,
+      ),
+    )
+    ..addFile(ArchiveFile('OEBPS/content.opf', opfXml.length, opfXml.codeUnits))
+    ..addFile(
+      ArchiveFile('OEBPS/nav.xhtml', navXhtml.length, navXhtml.codeUnits),
+    )
+    ..addFile(
+      ArchiveFile('OEBPS/cover.xhtml', coverXhtml.length, coverXhtml.codeUnits),
+    )
+    ..addFile(
+      ArchiveFile(
+        'OEBPS/The_Daniel_and_Revelation_01t_(ebook).xhtml',
+        mainXhtml.length,
+        mainXhtml.codeUnits,
+      ),
+    );
+  return Uint8List.fromList(ZipEncoder().encode(archive));
+}
+
 PioneerSourceWork _work({
   required String id,
   required String authorId,
@@ -44,22 +162,37 @@ PioneerSourceWork _work({
   required String abbreviation,
   required String sourceType,
   required String sourceUrl,
+  String? sourceLabel,
+  PioneerSourceAvailability availability = PioneerSourceAvailability.available,
+  bool verified = true,
+  bool catalogImportable = true,
+  String? collectionUrl,
+  String? directFileUrl,
+  String? directFileType,
+  List<PioneerSourceCandidate> sourceCandidates = const [],
 }) {
   return PioneerSourceWork(
     id: id,
     authorId: authorId,
     authorName: authorName,
+    sourceFamily: 'Pioneer',
     title: title,
     abbreviation: abbreviation,
     group: 'Pioneer Authors',
     subgroup: 'Prophecy',
-    availability: PioneerSourceAvailability.available,
-    verified: true,
-    catalogImportable: true,
+    availability: availability,
+    verified: verified,
+    catalogImportable: catalogImportable,
     sourceType: sourceType,
     sourceUrl: sourceUrl,
-    sourceLabel: null,
+    collectionUrl: collectionUrl,
+    captureUrl: sourceUrl,
+    readerUrl: sourceUrl,
+    directFileUrl: directFileUrl,
+    directFileType: directFileType,
+    sourceLabel: sourceLabel,
     notes: null,
+    sourceCandidates: sourceCandidates,
   );
 }
 
@@ -69,13 +202,12 @@ PioneerSourceWork _sourceNeededWork({
   required String authorName,
   required String title,
   required String abbreviation,
-  required String sourceType,
-  required String sourceUrl,
 }) {
   return PioneerSourceWork(
     id: id,
     authorId: authorId,
     authorName: authorName,
+    sourceFamily: 'Pioneer',
     title: title,
     abbreviation: abbreviation,
     group: 'Pioneer Authors',
@@ -83,44 +215,26 @@ PioneerSourceWork _sourceNeededWork({
     availability: PioneerSourceAvailability.sourceNeeded,
     verified: false,
     catalogImportable: false,
-    sourceType: sourceType,
-    sourceUrl: sourceUrl,
-    sourceLabel: 'Archive.org',
+    sourceType: 'html',
+    sourceUrl: null,
+    collectionUrl: null,
+    captureUrl: null,
+    readerUrl: null,
+    directFileUrl: null,
+    directFileType: null,
+    sourceLabel: 'Pioneer',
     notes: 'Requires manual verification before import.',
   );
 }
 
 PioneerImportDocument _fakeDocumentFor(PioneerSourceWork work) {
   switch (work.id) {
-    case 'daniel_and_the_revelation':
-      return PioneerImportDocument(
-        title: work.title,
-        sections: [
-          PioneerImportSection(
-            href: 'OEBPS/content01.xhtml',
-            title: 'Chapter 1',
-            paragraphs: const <String>[
-              'Daniel and the Revelation opens with the revelation.',
-              'The prophecy of Revelation is plain.',
-            ],
-            spineIndex: 1,
-          ),
-          PioneerImportSection(
-            href: 'OEBPS/content02.xhtml',
-            title: 'Chapter 2',
-            paragraphs: const <String>[
-              'Another Daniel and the Revelation paragraph.',
-            ],
-            spineIndex: 2,
-          ),
-        ],
-      );
     case 'the_united_states_in_the_light_of_prophecy':
       return PioneerImportDocument(
         title: work.title,
         sections: [
           PioneerImportSection(
-            href: 'OEBPS/content01.xhtml',
+            href: 'https://example.com/uslp/ch1',
             title: 'Chapter 1',
             paragraphs: const <String>[
               'The United States in the Light of Prophecy explains history.',
@@ -130,18 +244,24 @@ PioneerImportDocument _fakeDocumentFor(PioneerSourceWork work) {
           ),
         ],
       );
+    case 'daniel_and_the_revelation':
+      return PioneerImportDocument(
+        title: work.title,
+        sections: [
+          PioneerImportSection(
+            href: 'https://egwwritings.org/read?panels=p1297.2&index=1',
+            title: 'Chapter 1 - Daniel in Captivity',
+            paragraphs: const <String>[
+              'Daniel and the Revelation opens with Daniel in captivity.',
+              'The narrative introduces the prophetic sequence at the start.',
+            ],
+            spineIndex: 1,
+          ),
+        ],
+      );
     default:
       throw StateError('Unexpected work requested in fake parser: ${work.id}');
   }
-}
-
-PioneerSourceDownloadResult _downloadResultFor(Uri uri) {
-  return PioneerSourceDownloadResult(
-    bytes: Uint8List.fromList(uri.toString().codeUnits),
-    httpStatusCode: 200,
-    contentType: 'application/octet-stream',
-    resolvedUri: uri,
-  );
 }
 
 Future<int> _countRows(
@@ -158,6 +278,10 @@ Future<int> _countRows(
   return rows.isEmpty ? 0 : (rows.first['cnt'] as num?)?.toInt() ?? 0;
 }
 
+void legacyEpubTest(String description, dynamic Function() body) {
+  test(description, body, skip: 'Legacy EPUB import path is disabled.');
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
@@ -168,9 +292,15 @@ void main() {
   late Directory libraryRootDir;
 
   setUp(() async {
-    supportDir = await Directory.systemTemp.createTemp('pioneer_import_support_');
-    documentsDir = await Directory.systemTemp.createTemp('pioneer_import_documents_');
-    libraryRootDir = await Directory.systemTemp.createTemp('pioneer_import_root_');
+    supportDir = await Directory.systemTemp.createTemp(
+      'pioneer_import_support_',
+    );
+    documentsDir = await Directory.systemTemp.createTemp(
+      'pioneer_import_documents_',
+    );
+    libraryRootDir = await Directory.systemTemp.createTemp(
+      'pioneer_import_root_',
+    );
     LibraryRootService.instance.invalidateCachedSelection();
     await _installPathProviderMocks(
       supportDir: supportDir,
@@ -200,394 +330,1455 @@ void main() {
     }
   });
 
-  test('imports two verified Pioneer works into eLibrary.db and makes them searchable', () async {
-    final dar = _work(
-      id: 'daniel_and_the_revelation',
-      authorId: 'uriah_smith',
-      authorName: 'Uriah Smith',
-      title: 'Daniel and the Revelation',
-      abbreviation: 'DAR',
-      sourceType: 'epub',
-      sourceUrl:
-          'https://archive.org/download/UriahSmithDanielAndTheRevelation.TheResponseOfHistoryToTheVoiceOf/1897_smith_danielAndTheRevelation.epub',
-    );
-    final uslp = _work(
-      id: 'the_united_states_in_the_light_of_prophecy',
-      authorId: 'uriah_smith',
-      authorName: 'Uriah Smith',
-      title: 'The United States in the Light of Prophecy',
-      abbreviation: 'USLP',
-      sourceType: 'html',
-      sourceUrl: 'https://www.gutenberg.org/files/12364/12364-h/12364-h.htm',
-    );
-    final blocked = PioneerSourceWork(
+  legacyEpubTest(
+    'imports an APLIB EPUB Pioneer work, prefers EPUB over EGW capture, and skips capture-needed works',
+    () async {
+      final dar = _work(
+        id: 'daniel_and_the_revelation',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'Daniel and the Revelation',
+        abbreviation: 'DAR',
+        sourceType: 'epub',
+        sourceUrl: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+        sourceLabel: 'APLIB',
+        collectionUrl: 'https://www.aplib.org/resources/pioneers-ebooks/',
+        sourceCandidates: [
+          const PioneerSourceCandidate(
+            provider: 'aplib',
+            sourceType: 'epub',
+            url: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+            priority: 10,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+          const PioneerSourceCandidate(
+            provider: 'egwWritings',
+            sourceType: 'readerPage',
+            url: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+            priority: 50,
+            qualityTier: 'reader',
+            availability: PioneerSourceAvailability.available,
+          ),
+        ],
+      );
+      final uslp = _work(
+        id: 'the_united_states_in_the_light_of_prophecy',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'The United States in the Light of Prophecy',
+        abbreviation: 'USLP',
+        sourceType: 'epub',
+        sourceUrl: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+        sourceLabel: 'APLIB',
+        collectionUrl: 'https://www.aplib.org/resources/pioneers-ebooks/',
+        sourceCandidates: const [
+          PioneerSourceCandidate(
+            provider: 'aplib',
+            sourceType: 'epub',
+            url: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+            priority: 10,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+        ],
+      );
+      final blocked = _sourceNeededWork(
+        id: 'history_of_the_sabbath',
+        authorId: 'jn_andrews',
+        authorName: 'J. N. Andrews',
+        title: 'History of the Sabbath',
+        abbreviation: 'HST',
+      );
+
+      final zipBytes = _zipWithSingleEpubEntry(
+        fileName: 'Daniel and the Revelation.epub',
+        epubBytes: const [80, 75, 3, 4, 10, 11, 12, 13],
+      );
+
+      final service = PioneerTextImportService(
+        fetchBytes: (uri) async => PioneerSourceDownloadResult(
+          bytes: zipBytes,
+          httpStatusCode: 200,
+          contentType: 'application/zip',
+          resolvedUri: uri,
+        ),
+        parseDocument: (work, bytes) async => _fakeDocumentFor(work),
+      );
+
+      final result = await service.importSelectedWorks([dar, uslp, blocked]);
+
+      expect(result.importedCount, 2);
+      expect(result.skippedCount, 1);
+      expect(result.failedCount, 0);
+      expect(
+        result.workResults.map((item) => item.status),
+        containsAll([
+          PioneerImportWorkStatus.skippedNotImportable,
+          PioneerImportWorkStatus.imported,
+          PioneerImportWorkStatus.imported,
+        ]),
+      );
+
+      final userDb = await UserDatabase.instance.database;
+      final eLibraryDb = await ELibraryDatabase.instance.database;
+
+      expect(
+        await _countRows(
+          eLibraryDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [uslp.stableLibraryItemId],
+        ),
+        1,
+      );
+      expect(
+        await _countRows(
+          userDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [uslp.stableLibraryItemId],
+        ),
+        0,
+      );
+      expect(
+        await _countRows(
+          eLibraryDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [dar.stableLibraryItemId],
+        ),
+        1,
+      );
+      expect(
+        await _countRows(
+          userDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [dar.stableLibraryItemId],
+        ),
+        0,
+      );
+    },
+  );
+
+  test(
+    'skips a missing DAR ZIP candidate without attempting a download',
+    () async {
+      var fetchCount = 0;
+      final dar = _work(
+        id: 'daniel_and_the_revelation',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'Daniel and the Revelation',
+        abbreviation: 'DAR',
+        sourceType: 'epubZipEntry',
+        sourceUrl: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+        sourceLabel: 'APLIB',
+        collectionUrl: 'https://www.aplib.org/resources/pioneers-ebooks/',
+        availability: PioneerSourceAvailability.sourceNeeded,
+        catalogImportable: false,
+        sourceCandidates: const [
+          PioneerSourceCandidate(
+            provider: 'adventaudio',
+            sourceType: 'epub',
+            editionLabel: '1897',
+            editionYear: 1897,
+            priority: 5,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.sourceNeeded,
+            notes: 'EGW Audio / AdventAudio DAR 1897 EPUB URL needed.',
+          ),
+          PioneerSourceCandidate(
+            provider: 'aplib',
+            sourceType: 'epubZipEntry',
+            url: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+            zipEntry: 'Epub/Smith/Daniel and the Revelation.epub',
+            priority: 10,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.sourceNeeded,
+          ),
+        ],
+      );
+
+      final service = PioneerTextImportService(
+        fetchBytes: (uri) async {
+          fetchCount += 1;
+          return PioneerSourceDownloadResult(
+            bytes: Uint8List(0),
+            httpStatusCode: 200,
+            contentType: 'application/zip',
+            resolvedUri: uri,
+          );
+        },
+        parseDocument: (work, bytes) async => _fakeDocumentFor(work),
+      );
+
+      final result = await service.importSelectedWorks([dar]);
+
+      expect(fetchCount, 0);
+      expect(result.importedCount, 0);
+      expect(result.skippedCount, 1);
+      expect(
+        result.workResults.single.status,
+        PioneerImportWorkStatus.skippedNotImportable,
+      );
+      expect(result.workResults.single.work.title, 'Daniel and the Revelation');
+    },
+  );
+
+  legacyEpubTest(
+    'imports Daniel and the Revelation through the EllenWhiteAudio direct EPUB URL',
+    () async {
+      var fetchCount = 0;
+      final epubBytes = _epubBytes();
+      final dar = _work(
+        id: 'daniel_and_the_revelation',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'Daniel and the Revelation',
+        abbreviation: 'DAR',
+        sourceType: 'directEpub',
+        sourceUrl:
+            'https://ellenwhiteaudio.org/ebooks/en/smith/Daniel%20and%20the%20Revelation.epub',
+        sourceLabel: 'EllenWhiteAudio / EGW Audio',
+        collectionUrl: 'https://ellenwhiteaudio.org/ebooks-of-the-pioneers/',
+        sourceCandidates: const [
+          PioneerSourceCandidate(
+            provider: 'ellenwhiteaudio',
+            sourceType: 'directEpub',
+            url:
+                'https://ellenwhiteaudio.org/ebooks/en/smith/Daniel%20and%20the%20Revelation.epub',
+            editionLabel: '1897',
+            editionYear: 1897,
+            priority: 1,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+          PioneerSourceCandidate(
+            provider: 'aplib',
+            sourceType: 'epubZipEntry',
+            url: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+            zipEntry: 'Epub/Smith/Daniel and the Revelation.epub',
+            editionLabel: '1897',
+            editionYear: 1897,
+            priority: 10,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.sourceNeeded,
+            notes: 'APLIB ZIP entry missing from the archive.',
+          ),
+        ],
+      );
+
+      final service = PioneerTextImportService(
+        fetchBytes: (uri) async {
+          fetchCount += 1;
+          expect(
+            uri.toString(),
+            'https://ellenwhiteaudio.org/ebooks/en/smith/Daniel%20and%20the%20Revelation.epub',
+          );
+          return PioneerSourceDownloadResult(
+            bytes: epubBytes,
+            httpStatusCode: 200,
+            contentType: 'application/epub+zip',
+            resolvedUri: uri,
+          );
+        },
+      );
+
+      final result = await service.importSelectedWorks([dar]);
+
+      expect(fetchCount, 1);
+      expect(result.importedCount, 1);
+      expect(result.failedCount, 0);
+      expect(result.skippedCount, 0);
+      expect(
+        result.workResults.single.status,
+        PioneerImportWorkStatus.imported,
+      );
+      expect(result.workResults.single.parsedSectionCount, 3);
+      expect(result.workResults.single.parsedParagraphCount, greaterThan(0));
+
+      final inspection = await inspectPioneerEpubBytes(epubBytes, work: dar);
+      expect(inspection.profileName, 'pioneerPublicDomain');
+      expect(inspection.sectionCount, 3);
+      expect(inspection.paragraphCountAfterFiltering, greaterThan(0));
+
+      final userDb = await UserDatabase.instance.database;
+      final eLibraryDb = await ELibraryDatabase.instance.database;
+      expect(
+        await _countRows(
+          eLibraryDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [dar.stableLibraryItemId],
+        ),
+        1,
+      );
+      expect(
+        await _countRows(
+          userDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [dar.stableLibraryItemId],
+        ),
+        0,
+      );
+      final navRows = await eLibraryDb.query(
+        'library_navigation_items',
+        columns: const <String>[
+          'label',
+          'is_front_matter',
+          'is_body_start',
+          'sort_order',
+        ],
+        where: 'library_item_id = ? AND deleted_at IS NULL',
+        whereArgs: [dar.stableLibraryItemId],
+        orderBy: 'sort_order ASC',
+      );
+      expect(navRows, hasLength(3));
+      expect(navRows[0]['label'], 'Preface');
+      expect(navRows[0]['is_front_matter'], 1);
+      expect(navRows[1]['label'], 'Chapter 1 - Daniel in Captivity');
+      expect(navRows[1]['is_body_start'], 1);
+      expect(navRows[2]['label'], 'Chapter 2 - The Great Image');
+    },
+  );
+
+  legacyEpubTest(
+    'rejects front-matter-only EPUBs during quality validation and falls back to text capture',
+    () async {
+      final work = _work(
+        id: 'daniel_and_the_revelation',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'Daniel and the Revelation',
+        abbreviation: 'DAR',
+        sourceType: 'directEpub',
+        sourceUrl: 'https://ellenwhiteaudio.org/ebooks/en/smith/Daniel.epub',
+        sourceLabel: 'EllenWhiteAudio / EGW Audio',
+        collectionUrl: 'https://www.aplib.org/resources/pioneers-ebooks/',
+        sourceCandidates: const [
+          PioneerSourceCandidate(
+            provider: 'ellenwhiteaudio',
+            sourceType: 'directEpub',
+            url: 'https://ellenwhiteaudio.org/ebooks/en/smith/Daniel.epub',
+            priority: 1,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+          PioneerSourceCandidate(
+            provider: 'egwWritings',
+            sourceType: 'readerPage',
+            url: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+            priority: 50,
+            qualityTier: 'reader',
+            availability: PioneerSourceAvailability.available,
+          ),
+        ],
+      );
+
+      final service = PioneerTextImportService(
+        fetchBytes: (uri) async => PioneerSourceDownloadResult(
+          bytes: Uint8List.fromList([80, 75, 3, 4, 10, 11, 12, 13]),
+          httpStatusCode: 200,
+          contentType: 'application/epub+zip',
+          resolvedUri: uri,
+        ),
+        parseDocument: (work, bytes) async => PioneerImportDocument(
+          title: work.title,
+          sections: [
+            PioneerImportSection(
+              href: 'https://example.com/dar/front-matter',
+              title: 'Copyright',
+              paragraphs: const <String>[
+                '© 2016 Adventist Pioneer Library',
+                '37457 Jasper Lowell Rd',
+              ],
+              spineIndex: 1,
+            ),
+            PioneerImportSection(
+              href: 'https://example.com/dar/front-matter-2',
+              title: 'Contents',
+              paragraphs: const <String>['Published in the USA', 'July, 2016'],
+              spineIndex: 2,
+            ),
+          ],
+        ),
+      );
+
+      final result = await service.importSelectedWorks([work]);
+      final workResult = result.workResults.single;
+
+      expect(result.importedCount, 0);
+      expect(result.failedCount, 1);
+      expect(workResult.status, PioneerImportWorkStatus.failed);
+      expect(workResult.stage, 'validating');
+      expect(
+        workResult.reason,
+        contains('no body text attached to navigation'),
+      );
+      expect(workResult.epubAvailable, isTrue);
+      expect(workResult.epubValidated, isFalse);
+      expect(workResult.epubRejectedReason, contains('no body text attached'));
+      expect(workResult.preferredImportPreferenceLabel, 'Text/read capture');
+
+      final eLibraryDb = await ELibraryDatabase.instance.database;
+      final userDb = await UserDatabase.instance.database;
+      expect(
+        await _countRows(
+          eLibraryDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [work.stableLibraryItemId],
+        ),
+        0,
+      );
+      expect(
+        await _countRows(
+          userDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [work.stableLibraryItemId],
+        ),
+        0,
+      );
+    },
+  );
+
+  legacyEpubTest(
+    'rejects EPUBs whose navigation has no attached body text',
+    () async {
+      final work = _work(
+        id: 'daniel_and_the_revelation',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'Daniel and the Revelation',
+        abbreviation: 'DAR',
+        sourceType: 'directEpub',
+        sourceUrl: 'https://ellenwhiteaudio.org/ebooks/en/smith/Daniel.epub',
+        sourceLabel: 'EllenWhiteAudio / EGW Audio',
+        collectionUrl: 'https://www.aplib.org/resources/pioneers-ebooks/',
+        sourceCandidates: const [
+          PioneerSourceCandidate(
+            provider: 'ellenwhiteaudio',
+            sourceType: 'directEpub',
+            url: 'https://ellenwhiteaudio.org/ebooks/en/smith/Daniel.epub',
+            priority: 1,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+          PioneerSourceCandidate(
+            provider: 'egwWritings',
+            sourceType: 'readerPage',
+            url: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+            priority: 50,
+            qualityTier: 'reader',
+            availability: PioneerSourceAvailability.available,
+          ),
+        ],
+      );
+
+      final service = PioneerTextImportService(
+        fetchBytes: (uri) async => PioneerSourceDownloadResult(
+          bytes: Uint8List.fromList([80, 75, 3, 4, 10, 11, 12, 13]),
+          httpStatusCode: 200,
+          contentType: 'application/epub+zip',
+          resolvedUri: uri,
+        ),
+        parseDocument: (work, bytes) async => PioneerImportDocument(
+          title: work.title,
+          sections: [
+            PioneerImportSection(
+              href: 'https://example.com/dar/front-matter',
+              title: 'Contents',
+              paragraphs: const <String>[
+                '© 2016 Adventist Pioneer Library',
+                '37457 Jasper Lowell Rd',
+              ],
+              spineIndex: 1,
+            ),
+            PioneerImportSection(
+              href: 'https://example.com/dar/chapter-1',
+              title: 'Chapter 1 - Daniel in Captivity',
+              paragraphs: const <String>['', '   '],
+              spineIndex: 2,
+            ),
+          ],
+        ),
+      );
+
+      final result = await service.importSelectedWorks([work]);
+      final workResult = result.workResults.single;
+
+      expect(result.importedCount, 0);
+      expect(result.failedCount, 1);
+      expect(workResult.status, PioneerImportWorkStatus.failed);
+      expect(workResult.stage, 'validating');
+      expect(
+        workResult.reason,
+        contains('no body text attached to navigation'),
+      );
+      expect(workResult.epubAvailable, isTrue);
+      expect(workResult.epubValidated, isFalse);
+      expect(workResult.preferredImportPreferenceLabel, 'Text/read capture');
+    },
+  );
+
+  legacyEpubTest(
+    'accepts EPUBs with meaningful body text and marks validation passed',
+    () async {
+      final work = _work(
+        id: 'daniel_and_the_revelation',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'Daniel and the Revelation',
+        abbreviation: 'DAR',
+        sourceType: 'directEpub',
+        sourceUrl: 'https://ellenwhiteaudio.org/ebooks/en/smith/Daniel.epub',
+        sourceLabel: 'EllenWhiteAudio / EGW Audio',
+        collectionUrl: 'https://www.aplib.org/resources/pioneers-ebooks/',
+        sourceCandidates: const [
+          PioneerSourceCandidate(
+            provider: 'ellenwhiteaudio',
+            sourceType: 'directEpub',
+            url: 'https://ellenwhiteaudio.org/ebooks/en/smith/Daniel.epub',
+            priority: 1,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+          PioneerSourceCandidate(
+            provider: 'egwWritings',
+            sourceType: 'readerPage',
+            url: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+            priority: 50,
+            qualityTier: 'reader',
+            availability: PioneerSourceAvailability.available,
+          ),
+        ],
+      );
+
+      final service = PioneerTextImportService(
+        fetchBytes: (uri) async => PioneerSourceDownloadResult(
+          bytes: Uint8List.fromList([80, 75, 3, 4, 10, 11, 12, 13]),
+          httpStatusCode: 200,
+          contentType: 'application/epub+zip',
+          resolvedUri: uri,
+        ),
+        parseDocument: (work, bytes) async => PioneerImportDocument(
+          title: work.title,
+          sections: [
+            PioneerImportSection(
+              href: 'https://example.com/dar/front-matter',
+              title: 'Contents',
+              paragraphs: const <String>[
+                '© 2016 Adventist Pioneer Library',
+                '37457 Jasper Lowell Rd',
+              ],
+              spineIndex: 1,
+            ),
+            PioneerImportSection(
+              href: 'https://example.com/dar/chapter-1',
+              title: 'Chapter 1 - Daniel in Captivity',
+              paragraphs: const <String>[
+                'Daniel and the Revelation opens with Daniel in captivity.',
+                'The prophecy of Daniel begins with captivity and hope.',
+              ],
+              spineIndex: 2,
+            ),
+            PioneerImportSection(
+              href: 'https://example.com/dar/chapter-2',
+              title: 'Chapter 2 - The Great Image',
+              paragraphs: const <String>[
+                'The great image is the next major subject in the book.',
+                'Its metals and kingdoms are discussed in careful sequence.',
+              ],
+              spineIndex: 3,
+            ),
+          ],
+        ),
+      );
+
+      final result = await service.importSelectedWorks([work]);
+      final workResult = result.workResults.single;
+
+      expect(result.importedCount, 1);
+      expect(result.failedCount, 0);
+      expect(workResult.status, PioneerImportWorkStatus.imported);
+      expect(workResult.epubValidated, isTrue);
+      expect(workResult.epubRejectedReason, isNull);
+      expect(workResult.preferredImportPreferenceLabel, 'Legacy EPUB fallback');
+      expect(workResult.qualityValidationSummary, contains('EPUB passed'));
+
+      final eLibraryDb = await ELibraryDatabase.instance.database;
+      final userDb = await UserDatabase.instance.database;
+      expect(
+        await _countRows(
+          eLibraryDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [work.stableLibraryItemId],
+        ),
+        1,
+      );
+      expect(
+        await _countRows(
+          userDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [work.stableLibraryItemId],
+        ),
+        0,
+      );
+    },
+  );
+
+  legacyEpubTest(
+    'imports the selected EPUB entry from a ZIP archive when multiple EPUBs are present',
+    () async {
+      final dar = _work(
+        id: 'daniel_and_the_revelation',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'Daniel and the Revelation',
+        abbreviation: 'DAR',
+        sourceType: 'epubZipEntry',
+        sourceUrl: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+        sourceLabel: 'APLIB',
+        collectionUrl: 'https://www.aplib.org/resources/pioneers-ebooks/',
+        sourceCandidates: [
+          const PioneerSourceCandidate(
+            provider: 'aplib',
+            sourceType: 'epubZipEntry',
+            url: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+            zipEntry: 'Smith - Daniel and the Revelation.epub',
+            priority: 10,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+        ],
+      );
+      final uslp = _work(
+        id: 'the_united_states_in_the_light_of_prophecy',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'The United States in the Light of Prophecy',
+        abbreviation: 'USLP',
+        sourceType: 'epubZipEntry',
+        sourceUrl: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+        sourceLabel: 'APLIB',
+        collectionUrl: 'https://www.aplib.org/resources/pioneers-ebooks/',
+        sourceCandidates: [
+          const PioneerSourceCandidate(
+            provider: 'aplib',
+            sourceType: 'epubZipEntry',
+            url: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+            zipEntry: 'Smith - The United States in the Light of Prophecy.epub',
+            priority: 10,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+        ],
+      );
+
+      final zipBytes = _zipWithEpubEntries({
+        'Smith - Daniel and the Revelation.epub': [1, 1, 1, 1],
+        'Smith - The United States in the Light of Prophecy.epub': [2, 2, 2, 2],
+      });
+
+      final parsedBytes = <String, int>{};
+      final service = PioneerTextImportService(
+        fetchBytes: (uri) async => PioneerSourceDownloadResult(
+          bytes: zipBytes,
+          httpStatusCode: 200,
+          contentType: 'application/zip',
+          resolvedUri: uri,
+        ),
+        parseDocument: (work, bytes) async {
+          parsedBytes[work.id] = bytes.first;
+          return _fakeDocumentFor(work);
+        },
+      );
+
+      final result = await service.importSelectedWorks([dar, uslp]);
+
+      expect(result.importedCount, 2);
+      expect(parsedBytes[dar.id], 1);
+      expect(parsedBytes[uslp.id], 2);
+    },
+  );
+
+  legacyEpubTest(
+    'fails instead of falling back to a different EPUB when an explicit ZIP entry is missing',
+    () async {
+      final containerXml = '''<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:schemas:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+''';
+      final opfXml = '''<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="uid" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Poems, by Uriah Smith</dc:title>
+    <dc:identifier id="uid">urn:test-poems</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="Text/chapter1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>
+''';
+      final chapterXhtml = '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Poems, by Uriah Smith</title></head>
+  <body>
+    <h1>POEMS, BY URIAH SMITH.</h1>
+    <p>Poetry content that should never be written under Daniel's id.</p>
+  </body>
+</html>
+''';
+
+      final epubArchive = Archive()
+        ..addFile(
+          ArchiveFile(
+            'META-INF/container.xml',
+            containerXml.length,
+            containerXml.codeUnits,
+          ),
+        )
+        ..addFile(ArchiveFile('content.opf', opfXml.length, opfXml.codeUnits))
+        ..addFile(
+          ArchiveFile(
+            'Text/chapter1.xhtml',
+            chapterXhtml.length,
+            chapterXhtml.codeUnits,
+          ),
+        );
+      final wrongEpubBytes = Uint8List.fromList(
+        ZipEncoder().encode(epubArchive),
+      );
+
+      final collectionArchive = Archive()
+        ..addFile(
+          ArchiveFile(
+            'Epub/Smith/Poems, by Uriah Smith.epub',
+            wrongEpubBytes.length,
+            wrongEpubBytes,
+          ),
+        );
+      final collectionZipBytes = Uint8List.fromList(
+        ZipEncoder().encode(collectionArchive),
+      );
+
+      final dar = _work(
+        id: 'daniel_and_the_revelation',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'Daniel and the Revelation',
+        abbreviation: 'DAR',
+        sourceType: 'epubZipEntry',
+        sourceUrl: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+        sourceLabel: 'APLIB',
+        collectionUrl: 'https://www.aplib.org/resources/pioneers-ebooks/',
+        sourceCandidates: const [
+          PioneerSourceCandidate(
+            provider: 'aplib',
+            sourceType: 'epubZipEntry',
+            url: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+            zipEntry: 'Epub/Smith/Daniel and the Revelation.epub',
+            priority: 10,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+        ],
+      );
+
+      final service = PioneerTextImportService(
+        fetchBytes: (uri) async => PioneerSourceDownloadResult(
+          bytes: collectionZipBytes,
+          httpStatusCode: 200,
+          contentType: 'application/zip',
+          resolvedUri: uri,
+        ),
+      );
+
+      final result = await service.importSelectedWorks([dar]);
+
+      expect(result.importedCount, 0);
+      expect(result.failedCount, 1);
+      expect(result.workResults.single.status, PioneerImportWorkStatus.failed);
+      expect(result.workResults.single.reason, contains('ZIP entry not found'));
+    },
+  );
+
+  legacyEpubTest(
+    'prefers AdventAudio EPUB over APLIB ZIP entry when both are available',
+    () async {
+      final work = _work(
+        id: 'sample_work',
+        authorId: 'sample_author',
+        authorName: 'Sample Author',
+        title: 'Sample Work',
+        abbreviation: 'SW',
+        sourceType: 'epub',
+        sourceUrl: 'https://example.com/high-quality.epub',
+        sourceLabel: 'EGW Audio / AdventAudio',
+        collectionUrl: 'https://www.aplib.org/resources/pioneers-ebooks/',
+        sourceCandidates: [
+          const PioneerSourceCandidate(
+            provider: 'adventaudio',
+            sourceType: 'epub',
+            url: 'https://example.com/high-quality.epub',
+            priority: 5,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+          const PioneerSourceCandidate(
+            provider: 'aplib',
+            sourceType: 'epubZipEntry',
+            url: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+            zipEntry: 'Epub/Smith/Sample Work.epub',
+            priority: 10,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+        ],
+      );
+
+      final fetchedUrls = <String>[];
+      final service = PioneerTextImportService(
+        fetchBytes: (uri) async {
+          fetchedUrls.add(uri.toString());
+          return PioneerSourceDownloadResult(
+            bytes: Uint8List.fromList([80, 75, 3, 4, 10, 11, 12, 13]),
+            httpStatusCode: 200,
+            contentType: 'application/epub+zip',
+            resolvedUri: uri,
+          );
+        },
+        parseDocument: (work, bytes) async => PioneerImportDocument(
+          title: work.title,
+          sections: [
+            PioneerImportSection(
+              href: work.sourceUrl ?? 'https://example.com/high-quality.epub',
+              title: 'Chapter 1',
+              paragraphs: const ['AdventAudio is preferred.'],
+              spineIndex: 1,
+            ),
+          ],
+        ),
+      );
+
+      final result = await service.importSelectedWorks([work]);
+
+      expect(result.importedCount, 1);
+      expect(fetchedUrls, hasLength(1));
+      expect(fetchedUrls.single, 'https://example.com/high-quality.epub');
+    },
+  );
+
+  legacyEpubTest(
+    'does not overwrite existing installs without explicit repair',
+    () async {
+      final work = _work(
+        id: 'daniel_and_the_revelation',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'Daniel and the Revelation',
+        abbreviation: 'DAR',
+        sourceType: 'epub',
+        sourceUrl: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+        sourceLabel: 'APLIB',
+        collectionUrl: 'https://www.aplib.org/resources/pioneers-ebooks/',
+        sourceCandidates: const [
+          PioneerSourceCandidate(
+            provider: 'aplib',
+            sourceType: 'epub',
+            url: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+            priority: 10,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+        ],
+      );
+
+      final zipBytes = _zipWithSingleEpubEntry(
+        fileName: 'Daniel and the Revelation.epub',
+        epubBytes: const [80, 75, 3, 4, 10, 11, 12, 13],
+      );
+
+      final service = PioneerTextImportService(
+        fetchBytes: (uri) async => PioneerSourceDownloadResult(
+          bytes: zipBytes,
+          httpStatusCode: 200,
+          contentType: 'application/zip',
+          resolvedUri: uri,
+        ),
+        parseDocument: (work, bytes) async => _fakeDocumentFor(work),
+      );
+
+      final first = await service.importSelectedWorks([work]);
+      expect(first.importedCount, 1);
+
+      final skipped = await service.importSelectedWorks([work]);
+      expect(skipped.importedCount, 0);
+      expect(skipped.skippedCount, 1);
+      expect(skipped.workResults.single.reason, 'Already installed.');
+
+      final repaired = await service.importSelectedWorks([
+        work,
+      ], allowRepair: true);
+      expect(repaired.importedCount, 1);
+      expect(repaired.skippedCount, 0);
+    },
+  );
+
+  test(
+    'imports captured HTML through the user-verified automated capture path and preserves ref codes',
+    () async {
+      final work = _sourceNeededWork(
+        id: 'history_of_the_sabbath',
+        authorId: 'jn_andrews',
+        authorName: 'J. N. Andrews',
+        title: 'History of the Sabbath',
+        abbreviation: 'HST',
+      );
+
+      final service = PioneerTextImportService();
+      final result = await service.importFromCapturedHtml(
+        work: work,
+        html: '''
+<!doctype html>
+<html>
+  <head>
+    <title>History of the Sabbath</title>
+  </head>
+  <body>
+    <h1>CHAPTER 1</h1>
+    <p>HST 7.3 appears in the first paragraph.</p>
+    <p>Another paragraph preserves USLP 12.1 for display.</p>
+  </body>
+</html>
+''',
+        sourceUrl: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+        sourceLabel: 'EGW Writings',
+      );
+
+      expect(result.wasCancelled, isFalse);
+      expect(result.importedCount, 1);
+      expect(result.failedCount, 0);
+
+      final workResult = result.workResults.single;
+      expect(workResult.status, PioneerImportWorkStatus.imported);
+      expect(
+        workResult.sourceMethod,
+        PioneerImportSourceMethod.userVerifiedAutomatedCapture,
+      );
+      expect(workResult.parsedSectionCount, 1);
+      expect(workResult.parsedParagraphCount, 2);
+      expect(workResult.navigationCount, 1);
+      expect(workResult.textBlockCount, 2);
+      expect(workResult.refCodeHandlingSummary, contains('2 source ref codes'));
+      expect(workResult.refCodeHandlingSummary, contains('preserved'));
+
+      final userDb = await UserDatabase.instance.database;
+      final eLibraryDb = await ELibraryDatabase.instance.database;
+      expect(
+        await _countRows(
+          eLibraryDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [work.stableLibraryItemId],
+        ),
+        1,
+      );
+      expect(
+        await _countRows(
+          eLibraryDb,
+          'library_text_blocks',
+          where: 'library_item_id = ?',
+          whereArgs: [work.stableLibraryItemId],
+        ),
+        2,
+      );
+      expect(
+        await _countRows(
+          userDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [work.stableLibraryItemId],
+        ),
+        0,
+      );
+      expect(
+        await _countRows(
+          eLibraryDb,
+          'library_text_blocks',
+          where:
+              'library_item_id = ? AND (plain_text LIKE ? OR plain_text LIKE ? OR plain_text LIKE ? OR plain_text LIKE ?)',
+          whereArgs: [
+            work.stableLibraryItemId,
+            '%Adventist Pioneer Library%',
+            '%www.APLib.org%',
+            '%ISBN:%',
+            '%Published in the USA%',
+          ],
+        ),
+        0,
+      );
+    },
+  );
+
+  test(
+    'marks title-page boilerplate as front matter and starts at the first meaningful section',
+    () async {
+      final work = _sourceNeededWork(
+        id: 'the_story_of_the_seer_of_patmos',
+        authorId: 's_n_haskell',
+        authorName: 'S. N. Haskell',
+        title: 'The Story of the Seer of Patmos',
+        abbreviation: 'TSOT',
+      );
+
+      final service = PioneerTextImportService();
+      final result = await service.importFromCapturedHtml(
+        work: work,
+        html: '''
+<!doctype html>
+<html>
+  <head>
+    <title>The Story of the Seer of Patmos</title>
+  </head>
+  <body>
+    <h1>The Story of the Seer of Patmos</h1>
+    <p>BY STEPHEN N. HASKELL.</p>
+    <p>SOUTHERN PUBLISHING ASSOCIATION, NASHVILLE, TENNESSEE.</p>
+    <h2>FOREWORD</h2>
+    <p>This foreword is short and should stay in front matter.</p>
+    <h2>CHAPTER I. THE SEER OF PATMOS</h2>
+    <p>The men whom God has chosen as a means of communication between heaven and earth, form a galaxy of noted characters.</p>
+    <p>The gift of prophecy is called the "best gift," and the church is exhorted to covet that "best gift."</p>
+  </body>
+</html>
+''',
+        sourceUrl: null,
+        sourceLabel: 'Pioneer',
+      );
+
+      expect(result.importedCount, 1);
+      expect(result.failedCount, 0);
+      expect(
+        result.workResults.single.refCodeHandlingSummary,
+        contains('no source ref codes'),
+      );
+
+      final eLibraryDb = await ELibraryDatabase.instance.database;
+      final itemId = work.stableLibraryItemId;
+      final navRows = await eLibraryDb.query(
+        'library_navigation_items',
+        columns: const <String>[
+          'label',
+          'is_front_matter',
+          'is_body_start',
+          'sort_order',
+        ],
+        where: 'library_item_id = ? AND deleted_at IS NULL',
+        whereArgs: [itemId],
+        orderBy: 'sort_order ASC',
+      );
+
+      expect(navRows, hasLength(3));
+      expect(navRows[0]['is_front_matter'], 1);
+      expect(navRows[0]['is_body_start'], 0);
+      expect(navRows[1]['is_front_matter'], 1);
+      expect(navRows[1]['is_body_start'], 0);
+      expect(navRows[2]['is_front_matter'], 0);
+      expect(navRows[2]['is_body_start'], 1);
+      expect(navRows[2]['label'], 'CHAPTER I. THE SEER OF PATMOS');
+    },
+  );
+
+  test(
+    'imports a full-work browser capture session with multiple sections',
+    () async {
+      final work = _sourceNeededWork(
+        id: 'daniel_and_the_revelation',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'Daniel and the Revelation',
+        abbreviation: 'DAR',
+      );
+
+      final service = PioneerTextImportService();
+      final result = await service.importFromCapturedHtml(
+        work: work,
+        html: '''
+PREFACE
+
+A brief preface paragraph is captured before the numbered chapters. DAR 7.3
+
+01 - DANIEL IN CAPTIVITY
+
+VERSE 1. In the third year of Jehoiakim king of Judah came Nebuchadnezzar. DAR 24.1
+
+02 - THE GREAT IMAGE
+
+The great image prophecy opens a new chapter of the captured work. DAR 32.1
+''',
+        sourceUrl: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+        sourceLabel: 'EGW Writings',
+      );
+
+      expect(result.importedCount, 1);
+      final workResult = result.workResults.single;
+      expect(workResult.sourceType, 'egw_browser_capture');
+      expect(workResult.navigationCount, 3);
+      expect(workResult.textBlockCount, 3);
+
+      final db = await ELibraryDatabase.instance.database;
+      expect(
+        await _countRows(
+          db,
+          'library_items',
+          where:
+              'id = ? AND source_type = ? AND relative_path NOT LIKE ? AND relative_path LIKE ?',
+          whereArgs: [
+            work.stableLibraryItemId,
+            'egw_browser_capture',
+            '%ePubs/%',
+            'TextCaptures/%',
+          ],
+        ),
+        1,
+      );
+      expect(
+        await _countRows(
+          db,
+          'library_text_blocks',
+          where: 'library_item_id = ? AND plain_text LIKE ?',
+          whereArgs: [work.stableLibraryItemId, '%DAR 32.1%'],
+        ),
+        1,
+      );
+    },
+  );
+
+  test('rejects challenge HTML and asks for manual verification', () async {
+    final work = _sourceNeededWork(
       id: 'history_of_the_sabbath',
       authorId: 'jn_andrews',
       authorName: 'J. N. Andrews',
       title: 'History of the Sabbath',
       abbreviation: 'HST',
-      group: 'Pioneer Authors',
-      subgroup: 'Sabbath',
-      availability: PioneerSourceAvailability.sourceNeeded,
-      verified: false,
-      catalogImportable: false,
-      sourceType: null,
-      sourceUrl: null,
-      sourceLabel: null,
-      notes: null,
     );
 
-    final service = PioneerTextImportService(
-      fetchBytes: (uri) async => _downloadResultFor(uri),
-      parseDocument: (work, bytes) async => _fakeDocumentFor(work),
+    final service = PioneerTextImportService();
+    final result = await service.importFromCapturedHtml(
+      work: work,
+      html: '''
+<!doctype html>
+<html>
+  <head><title>Just a moment...</title></head>
+  <body><div>Cloudflare security check</div></body>
+</html>
+''',
+      sourceUrl: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+      sourceLabel: 'EGW Writings',
     );
 
-    final result = await service.importSelectedWorks([dar, uslp, blocked]);
-
-    expect(result.importedCount, 2);
-    expect(result.skippedCount, 1);
-    expect(result.failedCount, 0);
-    expect(
-      result.workResults.map((item) => item.status),
-      containsAll([
-        PioneerImportWorkStatus.imported,
-        PioneerImportWorkStatus.imported,
-        PioneerImportWorkStatus.skippedNotImportable,
-      ]),
-    );
-
-    final userDb = await UserDatabase.instance.database;
-    final eLibraryDb = await ELibraryDatabase.instance.database;
-
-    expect(
-      await _countRows(
-        eLibraryDb,
-        'library_items',
-        where: 'id = ?',
-        whereArgs: [dar.stableLibraryItemId],
-      ),
-      1,
-    );
-    expect(
-      await _countRows(
-        eLibraryDb,
-        'library_items',
-        where: 'id = ?',
-        whereArgs: [uslp.stableLibraryItemId],
-      ),
-      1,
-    );
-    expect(
-      await _countRows(
-        eLibraryDb,
-        'library_text_blocks',
-        where: 'library_item_id = ?',
-        whereArgs: [dar.stableLibraryItemId],
-      ),
-      3,
-    );
-    expect(
-      await _countRows(
-        eLibraryDb,
-        'library_navigation_items',
-        where: 'library_item_id = ?',
-        whereArgs: [dar.stableLibraryItemId],
-      ),
-      2,
-    );
-
-    expect(
-      await _countRows(
-        userDb,
-        'library_items',
-        where: 'id = ?',
-        whereArgs: [dar.stableLibraryItemId],
-      ),
-      0,
-    );
-    expect(
-      await _countRows(
-        userDb,
-        'library_items',
-        where: 'id = ?',
-        whereArgs: [uslp.stableLibraryItemId],
-      ),
-      0,
-    );
-
-    final darSearch = await LibraryCatalogService.instance.searchContent(
-      query: 'revelation',
-    );
-    expect(darSearch, isNotEmpty);
-    expect(darSearch.first.item.id, dar.stableLibraryItemId);
-
-    final uslpSearch = await LibraryCatalogService.instance.searchContent(
-      query: 'United States',
-    );
-    expect(uslpSearch, isNotEmpty);
-    expect(uslpSearch.first.item.id, uslp.stableLibraryItemId);
-
-    final sections = await CommentaryResearchLibraryService.instance.loadBookSections(
-      filePath: p.join(
-        libraryRootDir.path,
-        'ePubs',
-        'Research',
-        'Pioneer Authors',
-        'uriah_smith',
-        'DAR.epub',
-      ),
-      libraryItemId: dar.stableLibraryItemId,
-    );
-    expect(sections, hasLength(2));
-    expect(sections.first.title, 'Chapter 1');
-  });
-
-  test('repeated import skips existing Pioneer rows without duplicating them', () async {
-    final dar = _work(
-      id: 'daniel_and_the_revelation',
-      authorId: 'uriah_smith',
-      authorName: 'Uriah Smith',
-      title: 'Daniel and the Revelation',
-      abbreviation: 'DAR',
-      sourceType: 'epub',
-      sourceUrl:
-          'https://archive.org/download/UriahSmithDanielAndTheRevelation.TheResponseOfHistoryToTheVoiceOf/1897_smith_danielAndTheRevelation.epub',
-    );
-    final uslp = _work(
-      id: 'the_united_states_in_the_light_of_prophecy',
-      authorId: 'uriah_smith',
-      authorName: 'Uriah Smith',
-      title: 'The United States in the Light of Prophecy',
-      abbreviation: 'USLP',
-      sourceType: 'html',
-      sourceUrl: 'https://www.gutenberg.org/files/12364/12364-h/12364-h.htm',
-    );
-
-    final service = PioneerTextImportService(
-      fetchBytes: (uri) async => _downloadResultFor(uri),
-      parseDocument: (work, bytes) async => _fakeDocumentFor(work),
-    );
-
-    final first = await service.importSelectedWorks([dar, uslp]);
-    expect(first.importedCount, 2);
-
-    final eLibraryDb = await ELibraryDatabase.instance.database;
-    expect(
-      await _countRows(
-        eLibraryDb,
-        'library_items',
-        where: 'id = ?',
-        whereArgs: [dar.stableLibraryItemId],
-      ),
-      1,
-    );
-    expect(
-      await _countRows(
-        eLibraryDb,
-        'library_items',
-        where: 'id = ?',
-        whereArgs: [uslp.stableLibraryItemId],
-      ),
-      1,
-    );
-
-    final second = await service.importSelectedWorks([dar, uslp]);
-    expect(second.importedCount, 0);
-    expect(second.skippedCount, 2);
-    expect(
-      second.workResults.map((item) => item.status),
-      everyElement(PioneerImportWorkStatus.skippedExisting),
-    );
-    expect(
-      await _countRows(
-        eLibraryDb,
-        'library_items',
-        where: 'id = ?',
-        whereArgs: [dar.stableLibraryItemId],
-      ),
-      1,
-    );
-    expect(
-      await _countRows(
-        eLibraryDb,
-        'library_items',
-        where: 'id = ?',
-        whereArgs: [uslp.stableLibraryItemId],
-      ),
-      1,
-    );
-  });
-
-  test('returns detailed failure results when a download fails', () async {
-    final dar = _work(
-      id: 'daniel_and_the_revelation',
-      authorId: 'uriah_smith',
-      authorName: 'Uriah Smith',
-      title: 'Daniel and the Revelation',
-      abbreviation: 'DAR',
-      sourceType: 'epub',
-      sourceUrl:
-          'https://archive.org/download/UriahSmithDanielAndTheRevelation.TheResponseOfHistoryToTheVoiceOf/1897_smith_danielAndTheRevelation.epub',
-    );
-
-    final service = PioneerTextImportService(
-      fetchBytes: (uri) async {
-        throw PioneerSourceDownloadException(
-          uri: uri,
-          message: 'Unexpected HTTP response while downloading source.',
-          httpStatusCode: 403,
-          contentType: 'text/html',
-          byteCount: 0,
-        );
-      },
-      parseDocument: (work, bytes) async => _fakeDocumentFor(work),
-    );
-
-    final result = await service.importSelectedWorks([dar]);
     expect(result.importedCount, 0);
     expect(result.failedCount, 1);
 
     final workResult = result.workResults.single;
     expect(workResult.status, PioneerImportWorkStatus.failed);
-    expect(workResult.stage, 'downloading');
-    expect(workResult.reason, contains('HTTP 403'));
-    expect(workResult.exceptionType, contains('PioneerSourceDownloadException'));
-    expect(workResult.httpStatusCode, 403);
-    expect(workResult.contentType, 'text/html');
-    expect(workResult.downloadedByteCount, 0);
-    expect(workResult.libraryItemId, dar.stableLibraryItemId);
-  });
-
-  test('returns detailed failure results when parsing fails after a successful download', () async {
-    final dar = _work(
-      id: 'daniel_and_the_revelation',
-      authorId: 'uriah_smith',
-      authorName: 'Uriah Smith',
-      title: 'Daniel and the Revelation',
-      abbreviation: 'DAR',
-      sourceType: 'epub',
-      sourceUrl:
-          'https://archive.org/download/UriahSmithDanielAndTheRevelation.TheResponseOfHistoryToTheVoiceOf/1897_smith_danielAndTheRevelation.epub',
-    );
-
-    final service = PioneerTextImportService(
-      fetchBytes: (uri) async => _downloadResultFor(uri),
-      parseDocument: (work, bytes) async {
-        throw const PioneerImportDocumentTooSparseException(
-          sourceType: 'epub',
-          message: 'No readable sections were found in the EPUB source.',
-          sectionsFound: 0,
-          paragraphCount: 0,
-        );
-      },
-    );
-
-    final result = await service.importSelectedWorks([dar]);
-    expect(result.importedCount, 0);
-    expect(result.failedCount, 1);
-
-    final workResult = result.workResults.single;
-    expect(workResult.status, PioneerImportWorkStatus.failed);
-    expect(workResult.stage, 'parsing');
-    expect(workResult.reason, contains('Parse failed'));
-    expect(workResult.exceptionType, contains('PioneerImportDocumentTooSparseException'));
-    expect(workResult.httpStatusCode, 200);
-    expect(workResult.contentType, 'application/octet-stream');
-    expect(workResult.downloadedByteCount, greaterThan(0));
-  });
-
-  test('flags challenge-like HTML responses as manual verification required', () async {
-    final dar = _work(
-      id: 'daniel_and_the_revelation',
-      authorId: 'uriah_smith',
-      authorName: 'Uriah Smith',
-      title: 'Daniel and the Revelation',
-      abbreviation: 'DAR',
-      sourceType: 'html',
-      sourceUrl: 'https://example.com/manual-verification.html',
-    );
-
-    final service = PioneerTextImportService(
-      fetchBytes: (uri) async => PioneerSourceDownloadResult(
-        bytes: Uint8List.fromList(
-          utf8.encode('''
-            <!doctype html>
-            <html>
-              <head><title>Just a moment...</title></head>
-              <body>
-                <div>Cloudflare security check</div>
-              </body>
-            </html>
-          '''),
-        ),
-        httpStatusCode: 200,
-        contentType: 'text/html',
-        resolvedUri: uri,
-      ),
-    );
-
-    final result = await service.importSelectedWorks([dar]);
-    expect(result.importedCount, 0);
-    expect(result.failedCount, 1);
-
-    final workResult = result.workResults.single;
-    expect(workResult.status, PioneerImportWorkStatus.failed);
-    expect(workResult.stage, 'parsing');
     expect(workResult.requiresManualVerification, isTrue);
     expect(workResult.manualVerificationHint, isNotNull);
-    expect(workResult.manualVerificationHint, contains('manual verification'));
-    expect(workResult.reason, contains('manual verification'));
+    expect(workResult.reason, contains('Parse failed'));
+    expect(workResult.detail, contains('human-verification or challenge page'));
   });
 
-  test('imports captured text through the user-verified automated capture path and preserves ref codes', () async {
+  test(
+    'detects reader structure, TOC links, and next-page links from EGW HTML',
+    () {
+      final inspection = inspectPioneerPage(
+        currentUrl: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+        title: 'Daniel and the Revelation',
+        bodyText: 'DAR 7.3 appears here.',
+        outerHtml: '''
+<html>
+  <head><title>Daniel and the Revelation</title></head>
+  <body>
+    <a href="https://egwwritings.org/allCollection/en/160">Contents</a>
+    <a rel="next" href="https://egwwritings.org/read?panels=p1297.2&index=1">Next</a>
+    <a rel="prev" href="https://egwwritings.org/read?panels=p1297.2&index=0">Previous</a>
+  </body>
+</html>
+''',
+      );
+
+      expect(inspection.isReady, isFalse);
+      expect(inspection.manualVerificationRequired, isFalse);
+      expect(inspection.structure.currentPanelId, 'p1297.2');
+      expect(inspection.structure.currentIndex, 0);
+      expect(inspection.structure.tocLinks, isNotEmpty);
+      expect(inspection.structure.readPageLinks, isNotEmpty);
+      expect(inspection.structure.nextUrl, contains('index=1'));
+      expect(inspection.structure.previousUrl, contains('index=0'));
+      expect(inspection.structure.paragraphMarkers, contains('DAR 7.3'));
+    },
+  );
+
+  legacyEpubTest(
+    'imports an epubZipEntry work using the real EPUB parser with no fake parseDocument override',
+    () async {
+      // Build a minimal valid EPUB archive in memory.
+      final containerXml = '''<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:schemas:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+''';
+      final opfXml = '''<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="uid" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Daniel and the Revelation</dc:title>
+    <dc:identifier id="uid">urn:test-dar</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="Text/chapter1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>
+''';
+      final chapterXhtml = '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Chapter 1</title></head>
+  <body>
+    <h1>Chapter 1</h1>
+    <p>Daniel in captivity opens the book with a vision of the Son of man.</p>
+    <p>The prophecy establishes a chronological sequence of world empires.</p>
+  </body>
+</html>
+''';
+
+      // Inner ZIP = the EPUB file itself.
+      final epubArchive = Archive()
+        ..addFile(
+          ArchiveFile(
+            'META-INF/container.xml',
+            containerXml.length,
+            containerXml.codeUnits,
+          ),
+        )
+        ..addFile(ArchiveFile('content.opf', opfXml.length, opfXml.codeUnits))
+        ..addFile(
+          ArchiveFile(
+            'Text/chapter1.xhtml',
+            chapterXhtml.length,
+            chapterXhtml.codeUnits,
+          ),
+        );
+      final epubBytes = Uint8List.fromList(ZipEncoder().encode(epubArchive));
+
+      // Outer ZIP = the collection ZIP that the importer downloads.
+      const zipEntryPath = 'Epub/Smith/Daniel and the Revelation.epub';
+      final collectionArchive = Archive()
+        ..addFile(ArchiveFile(zipEntryPath, epubBytes.length, epubBytes));
+      final collectionZipBytes = Uint8List.fromList(
+        ZipEncoder().encode(collectionArchive),
+      );
+
+      final dar = _work(
+        id: 'daniel_and_the_revelation',
+        authorId: 'uriah_smith',
+        authorName: 'Uriah Smith',
+        title: 'Daniel and the Revelation',
+        abbreviation: 'DAR',
+        sourceType: 'epubZipEntry',
+        sourceUrl: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+        sourceLabel: 'APLIB',
+        collectionUrl: 'https://www.aplib.org/resources/pioneers-ebooks/',
+        sourceCandidates: const [
+          PioneerSourceCandidate(
+            provider: 'aplib',
+            sourceType: 'epubZipEntry',
+            url: 'https://adventaudio.org/files/ebooks/zip/Epub.zip',
+            zipEntry: zipEntryPath,
+            priority: 10,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+          ),
+        ],
+      );
+
+      // No parseDocument override → real _parseSourceDocument is used.
+      final service = PioneerTextImportService(
+        fetchBytes: (uri) async => PioneerSourceDownloadResult(
+          bytes: collectionZipBytes,
+          httpStatusCode: 200,
+          contentType: 'application/zip',
+          resolvedUri: uri,
+        ),
+      );
+
+      final result = await service.importSelectedWorks([dar]);
+
+      expect(
+        result.importedCount,
+        1,
+        reason:
+            'Expected one successful import; got: '
+            '${result.workResults.map((r) => "${r.work.title}: ${r.status} [${r.stage}] ${r.reason}").join(", ")}',
+      );
+      expect(result.failedCount, 0);
+      expect(result.workResults.single.parsedSectionCount, greaterThan(0));
+      expect(result.workResults.single.parsedParagraphCount, greaterThan(0));
+
+      final eLibraryDb = await ELibraryDatabase.instance.database;
+      final userDb = await UserDatabase.instance.database;
+
+      expect(
+        await _countRows(
+          eLibraryDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [dar.stableLibraryItemId],
+        ),
+        1,
+      );
+      expect(
+        await _countRows(
+          eLibraryDb,
+          'library_text_blocks',
+          where: 'library_item_id = ?',
+          whereArgs: [dar.stableLibraryItemId],
+        ),
+        greaterThan(0),
+      );
+      // Must write nothing to user.db.
+      expect(
+        await _countRows(
+          userDb,
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [dar.stableLibraryItemId],
+        ),
+        0,
+      );
+    },
+  );
+
+  test(
+    'repeated import skips existing Pioneer rows without duplicating them',
+    () async {
+      final work = _sourceNeededWork(
+        id: 'history_of_the_sabbath',
+        authorId: 'jn_andrews',
+        authorName: 'J. N. Andrews',
+        title: 'History of the Sabbath',
+        abbreviation: 'HST',
+      );
+
+      final service = PioneerTextImportService();
+
+      final first = await service.importFromCapturedHtml(
+        work: work,
+        html: '''
+<!doctype html>
+<html><body><h1>CHAPTER 1</h1><p>HST 7.3 one.</p></body></html>
+''',
+        sourceUrl: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+        sourceLabel: 'EGW Writings',
+      );
+      expect(first.importedCount, 1);
+
+      final second = await service.importFromCapturedHtml(
+        work: work,
+        html: '''
+<!doctype html>
+<html><body><h1>CHAPTER 1</h1><p>HST 7.3 one.</p></body></html>
+''',
+        sourceUrl: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+        sourceLabel: 'EGW Writings',
+      );
+      expect(second.importedCount, 0);
+      expect(second.skippedCount, 1);
+      expect(
+        second.workResults.map((item) => item.status),
+        everyElement(PioneerImportWorkStatus.skippedExisting),
+      );
+    },
+  );
+
+  test('captured import overwrite replaces child rows cleanly', () async {
     final work = _sourceNeededWork(
       id: 'history_of_the_sabbath',
       authorId: 'jn_andrews',
       authorName: 'J. N. Andrews',
       title: 'History of the Sabbath',
       abbreviation: 'HST',
-      sourceType: 'html',
-      sourceUrl: 'https://archive.org/details/history-of-the-sabbath',
     );
-
     final service = PioneerTextImportService();
-    final result = await service.importFromCapturedText([
-      PioneerCapturedTextSource(
-        work: work,
-        sourceMethod: PioneerImportSourceMethod.userVerifiedAutomatedCapture,
-        text: '''
-CHAPTER 1
 
-The source ref code is HST 7.3 in this first paragraph.
+    final first = await service.importFromCapturedHtml(
+      work: work,
+      html:
+          '<html><body><h1>CHAPTER 1</h1><p>Old partial HST 7.3 one.</p></body></html>',
+      sourceUrl: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+      sourceLabel: 'EGW Writings',
+    );
+    expect(first.importedCount, 1);
 
-Another ref code appears here: USLP 12.1 in the second paragraph.
+    final db = await ELibraryDatabase.instance.database;
+    await db.insert('elibrary_markups', <String, Object?>{
+      'id': 9001,
+      'library_item_id': work.stableLibraryItemId,
+      'epub_href': 'chapter_1.html',
+      'start_block_index': 0,
+      'start_char_offset': 0,
+      'end_block_index': 0,
+      'end_char_offset': 11,
+      'start_token_index': null,
+      'end_token_index': null,
+      'ref_start': 'HST 7.3',
+      'ref_end': 'HST 7.3',
+      'compact_ref': 'HST 7.3',
+      'selected_text_snapshot': 'Old partial',
+      'markup_type': 'highlight',
+      'color': '#ffcc00',
+      'note_text': 'user annotation should survive overwrite',
+      'created_at': '2026-06-25T00:00:00Z',
+      'updated_at': '2026-06-25T00:00:00Z',
+      'deleted_at': null,
+    });
 
+    final second = await service.importFromCapturedHtml(
+      work: work,
+      html: '''
+<html><body>
+  <h1>CHAPTER 1</h1>
+  <p>New complete HST 7.3 one.</p>
+  <p>New complete HST 7.4 two.</p>
+</body></html>
 ''',
-        sourceUrl: 'https://archive.org/details/history-of-the-sabbath',
-        sourceLabel: 'Archive.org',
-      ),
-    ]);
+      sourceUrl: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+      sourceLabel: 'EGW Writings',
+      existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+    );
+    expect(second.importedCount, 1);
 
-    expect(result.wasCancelled, isFalse);
-    expect(result.importedCount, 1);
-    expect(result.failedCount, 0);
-
-    final workResult = result.workResults.single;
-    expect(workResult.status, PioneerImportWorkStatus.imported);
-    expect(workResult.sourceMethod, PioneerImportSourceMethod.userVerifiedAutomatedCapture);
-    expect(workResult.sourceMethodLabel, 'user-verified automated capture');
-    expect(workResult.parsedSectionCount, 1);
-    expect(workResult.parsedParagraphCount, 2);
-    expect(workResult.navigationCount, 1);
-    expect(workResult.textBlockCount, 2);
-    expect(workResult.refCodeHandlingSummary, contains('2 source ref codes'));
-    expect(workResult.refCodeHandlingSummary, contains('preserved'));
-
-    final userDb = await UserDatabase.instance.database;
-    final eLibraryDb = await ELibraryDatabase.instance.database;
     expect(
       await _countRows(
-        eLibraryDb,
+        db,
         'library_items',
         where: 'id = ?',
         whereArgs: [work.stableLibraryItemId],
@@ -596,7 +1787,7 @@ Another ref code appears here: USLP 12.1 in the second paragraph.
     );
     expect(
       await _countRows(
-        eLibraryDb,
+        db,
         'library_text_blocks',
         where: 'library_item_id = ?',
         whereArgs: [work.stableLibraryItemId],
@@ -605,53 +1796,758 @@ Another ref code appears here: USLP 12.1 in the second paragraph.
     );
     expect(
       await _countRows(
-        userDb,
-        'library_items',
-        where: 'id = ?',
-        whereArgs: [work.stableLibraryItemId],
+        db,
+        'library_text_blocks',
+        where: 'library_item_id = ? AND plain_text LIKE ?',
+        whereArgs: [work.stableLibraryItemId, '%Old partial%'],
       ),
       0,
     );
+    expect(
+      await _countRows(
+        db,
+        'library_text_blocks',
+        where: 'library_item_id = ? AND plain_text LIKE ?',
+        whereArgs: [work.stableLibraryItemId, '%New complete%'],
+      ),
+      2,
+    );
+    expect(
+      await _countRows(
+        db,
+        'elibrary_markups',
+        where: 'library_item_id = ?',
+        whereArgs: [work.stableLibraryItemId],
+      ),
+      1,
+      reason:
+          'Overwrite should not drop user markup rows when replacing captured text.',
+    );
   });
 
-  test('imports a saved export file through the user-verified path', () async {
-    final work = _sourceNeededWork(
-      id: 'the_united_states_in_the_light_of_prophecy',
-      authorId: 'uriah_smith',
-      authorName: 'Uriah Smith',
-      title: 'The United States in the Light of Prophecy',
-      abbreviation: 'USLP',
-      sourceType: 'html',
-      sourceUrl: 'https://archive.org/details/the-united-states-in-the-light-of-prophecy',
+  test(
+    'imports staged LOF_ATJ HTML capture with refs and chapter navigation',
+    () async {
+      final catalog = PioneerSourceCatalog.fromJson({
+        'authors': [
+          {
+            'author_id': 'at_jones',
+            'author_name': 'A. T. Jones',
+            'source_family': 'Pioneer',
+            'sort_key': 'a t jones',
+            'works': [
+              {
+                'work_id': 'lessons_on_faith',
+                'title': 'Lessons on Faith',
+                'abbreviation': 'LOF',
+                'group': 'Pioneer Authors',
+                'subgroup': 'Righteousness by Faith',
+                'availability_status': 'available',
+                'source_type': 'capturedHtml',
+                'source_url': 'assets/scans/LOF_ATJ/capture.html',
+                'source_label': 'Local HTML Capture',
+                'verified': true,
+                'importable': true,
+              },
+            ],
+          },
+        ],
+      });
+      final previews = await const PioneerHtmlCaptureFolderScanner().scan(
+        catalog: catalog,
+      );
+      final lof = previews.singleWhere(
+        (preview) => preview.folderName == 'LOF_ATJ',
+      );
+      expect(lof.duplicateRefCount, 0);
+      expect(lof.detectedTitle, 'Lessons on Faith');
+      expect(lof.detectedAuthor, 'A. T. Jones');
+      expect(lof.detectedAbbreviation, 'LOF_ATJ');
+
+      final service = PioneerTextImportService();
+      final result = await service.importHtmlCaptureFolders([
+        lof,
+      ], existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting);
+      expect(result.importedCount, 1);
+      expect(result.failedCount, 0);
+
+      final db = await ELibraryDatabase.instance.database;
+      final work = lof.importWork;
+      final itemRows = await db.query(
+        'library_items',
+        where: 'id = ?',
+        whereArgs: [work.stableLibraryItemId],
+      );
+      expect(itemRows, hasLength(1));
+      expect(itemRows.single['title'], 'Lessons on Faith');
+      expect(
+        itemRows.single['author'],
+        'A. T. Jones; E. J. Waggoner',
+        reason: 'LOF is a joint work; denormalized author combines both names',
+      );
+      expect(itemRows.single['source_type'], 'egw_html_capture');
+      expect(itemRows.single['source_site'], 'egwwritings.org');
+      expect(
+        itemRows.single['relative_path'],
+        contains('LOF_ATJ/capture.html'),
+      );
+      expect(itemRows.single['relative_path'], isNot(contains('ePubs/')));
+      expect(itemRows.single['relative_path'], isNot(contains('PDFs/')));
+      expect(itemRows.single['source_url'], contains('LOF_ATJ/capture.html'));
+      expect(itemRows.single['source_url'], isNot(contains('.epub')));
+      expect(itemRows.single['source_url'], isNot(contains('.pdf')));
+      expect(
+        itemRows.single['source_site']?.toString().toLowerCase(),
+        isNot(contains('ellenwhiteaudio')),
+      );
+      expect(
+        itemRows.single['source_type']?.toString().toLowerCase(),
+        isNot(contains('ocr')),
+      );
+      expect(
+        itemRows.single['source_type']?.toString().toLowerCase(),
+        isNot(contains('epub')),
+      );
+
+      expect(
+        await _countRows(
+          db,
+          'library_navigation_items',
+          where: 'library_item_id = ? AND label LIKE ?',
+          whereArgs: [work.stableLibraryItemId, 'Chapter%'],
+        ),
+        greaterThan(20),
+      );
+      expect(
+        await _countRows(
+          db,
+          'library_text_blocks',
+          where: 'library_item_id = ?',
+          whereArgs: [work.stableLibraryItemId],
+        ),
+        490,
+      );
+      expect(
+        await _countRows(
+          db,
+          'elibrary_ref_index',
+          where: 'library_item_id = ?',
+          whereArgs: [work.stableLibraryItemId],
+        ),
+        490,
+      );
+      expect(
+        await _countRows(
+          db,
+          'elibrary_ref_index',
+          where: 'library_item_id = ? AND ref_code = ?',
+          whereArgs: [work.stableLibraryItemId, 'LOF_ATJ 113.2'],
+        ),
+        1,
+      );
+    },
+  );
+
+  test(
+    'imports staged DAR HTML capture using metadata work_id instead of the EPUB row',
+    () async {
+      final catalog = PioneerSourceCatalog.fromJson({
+        'authors': [
+          {
+            'author_id': 'uriah_smith',
+            'author_name': 'Uriah Smith',
+            'source_family': 'Pioneer',
+            'sort_key': 'uriah smith',
+            'works': [
+              {
+                'work_id': 'daniel_and_the_revelation',
+                'title': 'Daniel and the Revelation',
+                'abbreviation': 'DAR',
+                'group': 'Pioneer Authors',
+                'subgroup': 'Prophecy',
+                'availability_status': 'available',
+                'source_type': 'capturedHtml',
+                'source_url': 'assets/scans/DAR/capture.html',
+                'source_label': 'Local HTML Capture',
+                'verified': true,
+                'importable': true,
+              },
+            ],
+          },
+        ],
+      });
+      final previews = await const PioneerHtmlCaptureFolderScanner().scan(
+        catalog: catalog,
+      );
+      final dar = previews.singleWhere(
+        (preview) => preview.folderName == 'DAR',
+      );
+      expect(dar.metadata.workId, 'DAR_US');
+      expect(dar.isValid, isTrue);
+      expect(dar.importWork.id, 'DAR_US');
+      expect(dar.importWork.authorName, 'Uriah Smith');
+      expect(dar.importWork.cachedCoverPath, contains('image_0001.png'));
+      expect(dar.detectedTitle, 'Daniel and the Revelation');
+      expect(dar.firstRef, 'DAR 323.1');
+      expect(dar.lastRef, 'DAR 727.2');
+      expect(dar.refCount, 1103);
+      expect(dar.chapterHeadingCount, greaterThan(20));
+
+      final db = await ELibraryDatabase.instance.database;
+      await db.insert('library_items', <String, Object?>{
+        'id': 'library_item_research_pioneer_uriah_smith_daniel_and_the_revelation',
+        'title': 'Daniel and the Revelation',
+        'author': 'Uriah Smith',
+        'file_name': 'DAR.epub',
+        'relative_path': 'ePubs/Research/Pioneer Authors/uriah_smith/DAR.epub',
+        'file_hash': 'stale-dar-epub-hash',
+        'file_size': 3,
+        'mime_type': 'application/epub+zip',
+        'file_format': 'epub',
+        'folder_type': 'research',
+        'library_role': 'research',
+        'collection_name': 'Adventist Pioneer Library',
+        'source_site': 'ellenwhiteaudio.org',
+        'source_url': 'https://example.invalid/dar.epub',
+        'source_type': 'epub',
+        'date_added': '2026-06-25T00:00:00Z',
+        'created_at': '2026-06-25T00:00:00Z',
+        'updated_at': '2026-06-25T00:00:00Z',
+        'device_id': 'device-1',
+        'revision': 1,
+        'sync_status': 'pending',
+      });
+      final service = PioneerTextImportService();
+      final result = await service.importHtmlCaptureFolders([
+        dar,
+      ], existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting);
+      expect(result.importedCount, 1);
+      expect(result.failedCount, 0);
+
+      final importedWork = dar.importWork;
+      final itemRows = await db.query(
+        'library_items',
+        where: 'id = ?',
+        whereArgs: [importedWork.stableLibraryItemId],
+      );
+      expect(itemRows, hasLength(1));
+      expect(itemRows.single['title'], 'Daniel and the Revelation');
+      expect(itemRows.single['author'], 'Uriah Smith');
+      expect(itemRows.single['source_type'], 'egw_html_capture');
+      expect(itemRows.single['source_site'], 'egwwritings.org');
+      expect(itemRows.single['relative_path'], contains('DAR/capture.html'));
+      expect(itemRows.single['relative_path'], isNot(contains('ePubs/')));
+      expect(itemRows.single['relative_path'], isNot(contains('PDFs/')));
+      expect(
+        await _countRows(
+          db,
+          'library_navigation_items',
+          where: 'library_item_id = ? AND label LIKE ?',
+          whereArgs: [importedWork.stableLibraryItemId, 'Chapter%'],
+        ),
+        23,
+      );
+      expect(
+        await _countRows(
+          db,
+          'library_text_blocks',
+          where: 'library_item_id = ?',
+          whereArgs: [importedWork.stableLibraryItemId],
+        ),
+        1103,
+      );
+      expect(
+        await _countRows(
+          db,
+          'elibrary_ref_index',
+          where: 'library_item_id = ?',
+          whereArgs: [importedWork.stableLibraryItemId],
+        ),
+        1103,
+      );
+      expect(
+        await _countRows(
+          db,
+          'library_items',
+          where: 'id = ? AND source_type = ? AND relative_path LIKE ?',
+          whereArgs: [
+            'library_item_research_pioneer_uriah_smith_daniel_and_the_revelation',
+            'epub',
+            '%ePubs/%',
+          ],
+        ),
+        1,
+        reason:
+            'The existing EPUB-backed DAR row should remain untouched when importing the scan folder.',
+      );
+    },
+  );
+
+  test('HTML capture overwrite replaces stale legacy Pioneer row', () async {
+    final catalog = PioneerSourceCatalog.fromJson({
+      'authors': [
+        {
+          'author_id': 'at_jones',
+          'author_name': 'A. T. Jones',
+          'source_family': 'Pioneer',
+          'sort_key': 'a t jones',
+          'works': [
+            {
+              'work_id': 'lessons_on_faith',
+              'title': 'Lessons on Faith',
+              'abbreviation': 'LOF',
+              'group': 'Pioneer Authors',
+              'subgroup': 'Righteousness by Faith',
+              'availability_status': 'available',
+              'source_type': 'capturedHtml',
+              'source_url': 'assets/scans/LOF_ATJ/capture.html',
+              'source_label': 'Local HTML Capture',
+              'verified': true,
+              'importable': true,
+            },
+          ],
+        },
+      ],
+    });
+    final lof = (await const PioneerHtmlCaptureFolderScanner().scan(
+      catalog: catalog,
+    )).singleWhere((preview) => preview.folderName == 'LOF_ATJ');
+    final work = lof.importWork;
+    final db = await ELibraryDatabase.instance.database;
+    await PioneerTextImportService().hardResetWork(work);
+    await db.insert('library_items', <String, Object?>{
+      'id': work.stableLibraryItemId,
+      'title': work.title,
+      'author': work.authorName,
+      'file_name': 'LOF.epub',
+      'relative_path': 'ePubs/Research/Pioneer Authors/LOF.epub',
+      'file_hash': 'stale-epub-hash',
+      'file_size': 3,
+      'mime_type': 'application/epub+zip',
+      'file_format': 'epub',
+      'folder_type': 'research',
+      'library_role': 'research',
+      'collection_name': 'Adventist Pioneer Library',
+      'source_site': 'APLIB',
+      'source_url': 'https://example.invalid/pioneers.zip',
+      'source_type': 'epub',
+      'date_added': '2026-06-25T00:00:00Z',
+      'created_at': '2026-06-25T00:00:00Z',
+      'updated_at': '2026-06-25T00:00:00Z',
+      'device_id': 'device-1',
+      'index_status': 'failed',
+      'is_missing': 0,
+      'revision': 1,
+      'sync_status': 'pending',
+    });
+    await db.insert('library_text_blocks', <String, Object?>{
+      'library_item_id': work.stableLibraryItemId,
+      'epub_href': 'OEBPS/stale.xhtml',
+      'spine_index': 1,
+      'paragraph_index': 1,
+      'paragraph_on_section': 1,
+      'section_title': 'Stale EPUB',
+      'plain_text': 'Old low-quality EPUB text.',
+      'created_at': '2026-06-25T00:00:00Z',
+      'updated_at': '2026-06-25T00:00:00Z',
+    });
+
+    final result = await PioneerTextImportService().importHtmlCaptureFolders([
+      lof,
+    ], existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting);
+
+    expect(result.importedCount, 1);
+    final itemRows = await db.query(
+      'library_items',
+      where: 'id = ?',
+      whereArgs: [work.stableLibraryItemId],
     );
+    expect(itemRows, hasLength(1));
+    expect(itemRows.single['source_type'], 'egw_html_capture');
+    expect(itemRows.single['mime_type'], 'text/html');
+    expect(itemRows.single['file_format'], 'html');
+    expect(itemRows.single['source_site'], 'egwwritings.org');
+    expect(itemRows.single['relative_path'], contains('LOF_ATJ/capture.html'));
+    expect(itemRows.single['relative_path'], isNot(contains('ePubs/')));
+    expect(
+      await _countRows(
+        db,
+        'library_text_blocks',
+        where: 'library_item_id = ? AND plain_text LIKE ?',
+        whereArgs: [work.stableLibraryItemId, '%Old low-quality EPUB text%'],
+      ),
+      0,
+    );
+    expect(
+      await _countRows(
+        db,
+        'library_text_blocks',
+        where: 'library_item_id = ?',
+        whereArgs: [work.stableLibraryItemId],
+      ),
+      490,
+    );
+  });
 
-    final exportFile = File(p.join(documentsDir.path, 'uslp-saved-export.txt'));
-    await exportFile.writeAsString('''
-CHAPTER 1
-
-USLP 2.1
-Saved export content is imported from a file.
-''');
+  test('partial existing capture can be replaced', () async {
+    final work = _sourceNeededWork(
+      id: 'history_of_the_sabbath',
+      authorId: 'jn_andrews',
+      authorName: 'J. N. Andrews',
+      title: 'History of the Sabbath',
+      abbreviation: 'HST',
+    );
+    final db = await ELibraryDatabase.instance.database;
+    await db.insert('library_items', <String, Object?>{
+      'id': work.stableLibraryItemId,
+      'title': work.title,
+      'author': work.authorName,
+      'file_name': 'HST.html',
+      'relative_path':
+          'TextCaptures/Research/Pioneer Authors/jn_andrews/HST.html',
+      'file_hash': 'old',
+      'file_size': 3,
+      'mime_type': 'text/html',
+      'file_format': 'html',
+      'folder_type': 'research',
+      'library_role': 'research',
+      'collection_name': 'Adventist Pioneer Library',
+      'source_site': 'egwwritings.org',
+      'source_url': 'https://egwwritings.org/read?panels=p1297.2&index=0',
+      'source_type': 'egw_browser_capture',
+      'date_added': '2026-06-25T00:00:00Z',
+      'created_at': '2026-06-25T00:00:00Z',
+      'updated_at': '2026-06-25T00:00:00Z',
+      'device_id': 'device-1',
+      'index_status': 'partially_imported',
+      'is_missing': 0,
+      'revision': 1,
+      'sync_status': 'pending',
+    });
 
     final service = PioneerTextImportService();
-    final result = await service.importFromSavedExport(
+    final summary = await service.inspectExistingCapturedImport(work);
+    expect(summary.hasExistingImport, isTrue);
+    expect(summary.isPartialOrFailed, isTrue);
+
+    final result = await service.importFromCapturedHtml(
       work: work,
-      filePath: exportFile.path,
-      sourceUrl: work.sourceUrl,
-      sourceLabel: work.sourceLabel,
+      html:
+          '<html><body><h1>CHAPTER 1</h1><p>Replacement HST 7.3 one.</p></body></html>',
+      sourceUrl: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+      sourceLabel: 'EGW Writings',
+      existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
     );
 
-    expect(result.wasCancelled, isFalse);
     expect(result.importedCount, 1);
-    expect(result.failedCount, 0);
+    expect(
+      await _countRows(
+        db,
+        'library_text_blocks',
+        where: 'library_item_id = ?',
+        whereArgs: [work.stableLibraryItemId],
+      ),
+      1,
+    );
+  });
 
-    final workResult = result.workResults.single;
-    expect(workResult.status, PioneerImportWorkStatus.imported);
-    expect(workResult.sourceMethod, PioneerImportSourceMethod.savedExport);
-    expect(workResult.sourceMethodLabel, 'saved export');
-    expect(workResult.refCodeHandlingSummary, contains('source ref code'));
-    expect(workResult.refCodeHandlingSummary, contains('preserved'));
-    expect(workResult.parsedSectionCount, 1);
-    expect(workResult.parsedParagraphCount, 1);
+  test(
+    'imports 3-block clip-text HTML into all expected DB tables with no EPUB/PDF/OCR contamination',
+    () async {
+      // Build a synthetic PioneerHtmlCaptureFolderPreview manually so we can
+      // supply precisely 2 chapter headings + 3 paragraph refs and verify the
+      // exact DB row counts without depending on the real LOF_ATJ asset.
+      const syntheticHtml = '''
+<!doctype html>
+<html><head><title>Synthetic Test Work</title></head><body>
+  <div class="clip clip-text">
+    <p>Chapter 1 — Opening Chapter  SNTH 5  First paragraph text.  SNTH 5.1 Second paragraph text.  SNTH 5.2</p>
+  </div>
+  <div class="clip clip-text">
+    <p>Chapter 2 — Closing Chapter  SNTH 6  Third paragraph text.  SNTH 6.1</p>
+  </div>
+</body></html>
+''';
+
+      final extraction = const EgwHtmlCaptureExtractor().extract(syntheticHtml);
+      expect(extraction.detectedAbbreviation, 'SNTH');
+      expect(extraction.refCount, 3);
+      expect(extraction.chapterHeadingCount, 2);
+
+      final work = _work(
+        id: 'synthetic_test_work',
+        authorId: 'test_author',
+        authorName: 'Test Author',
+        title: 'Synthetic Test Work',
+        abbreviation: 'SNTH',
+        sourceType: 'capturedHtml',
+        sourceUrl: 'https://egwwritings.org/read?panels=psnth.2&index=0',
+        sourceLabel: 'EGW Writings',
+      );
+
+      final preview = PioneerHtmlCaptureFolderPreview(
+        folderPath: '/tmp/scans/SNTH',
+        folderName: 'SNTH',
+        metadata: PioneerCaptureFolderMetadata(
+          title: 'Synthetic Test Work',
+          abbreviation: 'SNTH',
+          displayAbbreviation: 'SNTH',
+          workId: work.id,
+          sourceType: 'capturedHtml',
+          sourceSite: 'egwwritings.org',
+        ),
+        htmlFiles: const ['/tmp/scans/SNTH/capture.html'],
+        imageFiles: const [],
+        preferredCoverImagePath: null,
+        detectedTitle: 'Synthetic Test Work',
+        detectedAuthor: 'Test Author',
+        detectedAbbreviation: extraction.detectedAbbreviation,
+        firstRef: extraction.firstRef,
+        lastRef: extraction.lastRef,
+        refCount: extraction.refCount,
+        duplicateRefCount: extraction.duplicateRefCount,
+        chapterHeadingCount: extraction.chapterHeadingCount,
+        isValid: true,
+        warnings: const [],
+        importStatus: PioneerHtmlCaptureImportStatus.newImport,
+        catalogWork: work,
+        extractedText: extraction.text,
+      );
+
+      final service = PioneerTextImportService();
+      final result = await service.importHtmlCaptureFolders([preview]);
+
+      expect(result.importedCount, 1);
+      expect(result.failedCount, 0);
+
+      final db = await ELibraryDatabase.instance.database;
+      final itemId = work.stableLibraryItemId;
+
+      // library_items: exactly 1 row, no EPUB/PDF/OCR contamination
+      final itemRows = await db.query(
+        'library_items',
+        where: 'id = ?',
+        whereArgs: [itemId],
+      );
+      expect(itemRows, hasLength(1));
+      expect(itemRows.single['source_type'], 'egw_html_capture');
+      expect(itemRows.single['cover_path'], isNull);
+      expect(
+        itemRows.single['source_type']?.toString().toLowerCase(),
+        isNot(contains('epub')),
+      );
+      expect(
+        itemRows.single['source_type']?.toString().toLowerCase(),
+        isNot(contains('pdf')),
+      );
+      expect(
+        itemRows.single['source_type']?.toString().toLowerCase(),
+        isNot(contains('ocr')),
+      );
+      expect(
+        itemRows.single['relative_path']?.toString(),
+        isNot(contains('ePubs/')),
+      );
+      expect(
+        itemRows.single['relative_path']?.toString(),
+        isNot(contains('PDFs/')),
+      );
+
+      // library_text_blocks: 3 rows (one per paragraph ref)
+      expect(
+        await _countRows(
+          db,
+          'library_text_blocks',
+          where: 'library_item_id = ?',
+          whereArgs: [itemId],
+        ),
+        3,
+      );
+
+      // library_navigation_items: 2 rows (one per chapter heading)
+      expect(
+        await _countRows(
+          db,
+          'library_navigation_items',
+          where: 'library_item_id = ? AND deleted_at IS NULL',
+          whereArgs: [itemId],
+        ),
+        2,
+      );
+
+      // elibrary_ref_index: 3 rows (one per paragraph ref)
+      expect(
+        await _countRows(
+          db,
+          'elibrary_ref_index',
+          where: 'library_item_id = ?',
+          whereArgs: [itemId],
+        ),
+        3,
+      );
+    },
+  );
+
+  test('HTML capture import stores generated thumbnail cover path', () async {
+    const syntheticHtml = '''
+<!doctype html><html><body>
+  <div class="clip clip-text">
+    <p>Chapter 1 — Opening  COVR 1  Covered paragraph. COVR 1.1</p>
+  </div>
+</body></html>
+''';
+    final extraction = const EgwHtmlCaptureExtractor().extract(syntheticHtml);
+    final work = _work(
+      id: 'covered_test_work',
+      authorId: 'test_author',
+      authorName: 'Test Author',
+      title: 'Covered Test Work',
+      abbreviation: 'COVR',
+      sourceType: 'capturedHtml',
+      sourceUrl: 'https://egwwritings.org/read?panels=pcovr.1',
+      sourceLabel: 'EGW Writings',
+    );
+    final preview = PioneerHtmlCaptureFolderPreview(
+      folderPath: '/tmp/scans/COVR',
+      folderName: 'COVR',
+      metadata: PioneerCaptureFolderMetadata(
+        title: 'Covered Test Work',
+        abbreviation: 'COVR',
+        displayAbbreviation: 'COVR',
+        workId: work.id,
+        sourceType: 'capturedHtml',
+        sourceSite: 'egwwritings.org',
+        coverImagePath: 'assets/library_covers/thumbs/COVR.png',
+      ),
+      htmlFiles: const ['/tmp/scans/COVR/capture.html'],
+      imageFiles: const ['/tmp/scans/COVR/cover.png'],
+      preferredCoverImagePath: 'assets/library_covers/thumbs/COVR.png',
+      detectedTitle: 'Covered Test Work',
+      detectedAuthor: 'Test Author',
+      detectedAbbreviation: extraction.detectedAbbreviation,
+      firstRef: extraction.firstRef,
+      lastRef: extraction.lastRef,
+      refCount: extraction.refCount,
+      duplicateRefCount: extraction.duplicateRefCount,
+      chapterHeadingCount: extraction.chapterHeadingCount,
+      isValid: true,
+      warnings: const [],
+      importStatus: PioneerHtmlCaptureImportStatus.newImport,
+      catalogWork: work,
+      extractedText: extraction.text,
+    );
+
+    final result = await PioneerTextImportService().importHtmlCaptureFolders([
+      preview,
+    ]);
+    expect(result.importedCount, 1);
+
+    final db = await ELibraryDatabase.instance.database;
+    final itemRows = await db.query(
+      'library_items',
+      columns: const ['cover_path'],
+      where: 'id = ?',
+      whereArgs: [work.stableLibraryItemId],
+    );
+    expect(
+      itemRows.single['cover_path'],
+      'assets/library_covers/thumbs/COVR.png',
+    );
+  });
+
+  test('browser overwrite removes copied-range sibling item', () async {
+    final work = _sourceNeededWork(
+      id: 'daniel_and_the_revelation',
+      authorId: 'uriah_smith',
+      authorName: 'Uriah Smith',
+      title: 'Daniel and the Revelation',
+      abbreviation: 'DAR',
+    );
+    final db = await ELibraryDatabase.instance.database;
+    await db.insert('library_items', <String, Object?>{
+      'id': work.copiedRangeLibraryItemId,
+      'title': work.title,
+      'author': work.authorName,
+      'file_name': 'DAR.copied-range.html',
+      'relative_path':
+          'TextCaptures/Research/Pioneer Authors/uriah_smith/copied_range/DAR.copied-range.html',
+      'file_hash': 'old',
+      'file_size': 3,
+      'mime_type': 'text/plain',
+      'file_format': 'html',
+      'folder_type': 'research',
+      'library_role': 'research',
+      'collection_name': 'Adventist Pioneer Library',
+      'source_site': 'egwwritings.org',
+      'source_url': 'EGW Writings copied range',
+      'source_type': 'egw_copied_range',
+      'date_added': '2026-06-25T00:00:00Z',
+      'created_at': '2026-06-25T00:00:00Z',
+      'updated_at': '2026-06-25T00:00:00Z',
+      'device_id': 'device-1',
+      'index_status': 'partially_imported',
+      'is_missing': 0,
+      'revision': 1,
+      'sync_status': 'pending',
+    });
+    await db.insert('library_text_blocks', <String, Object?>{
+      'library_item_id': work.copiedRangeLibraryItemId,
+      'epub_href': 'copied_range/chapter_1.html',
+      'spine_index': 1,
+      'paragraph_index': 1,
+      'paragraph_on_section': 1,
+      'section_title': 'Chapter 1',
+      'plain_text': 'Old copied range text.',
+      'created_at': '2026-06-25T00:00:00Z',
+      'updated_at': '2026-06-25T00:00:00Z',
+    });
+
+    final service = PioneerTextImportService();
+    final result = await service.importFromCapturedHtml(
+      work: work,
+      html:
+          '<html><body><h1>CHAPTER 1</h1><p>Fresh browser DAR 7.3 text.</p></body></html>',
+      sourceUrl: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+      sourceLabel: 'EGW Writings',
+      existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+    );
+
+    expect(result.importedCount, 1);
+    expect(
+      await _countRows(
+        db,
+        'library_items',
+        where: 'id = ? AND deleted_at IS NULL',
+        whereArgs: [work.copiedRangeLibraryItemId],
+      ),
+      0,
+    );
+    expect(
+      await _countRows(
+        db,
+        'library_items',
+        where: 'id = ? AND deleted_at IS NOT NULL',
+        whereArgs: [work.copiedRangeLibraryItemId],
+      ),
+      1,
+    );
+    expect(
+      await _countRows(
+        db,
+        'library_items',
+        where: 'id = ? AND deleted_at IS NULL',
+        whereArgs: [work.stableLibraryItemId],
+      ),
+      1,
+    );
+    expect(
+      await _countRows(
+        db,
+        'library_text_blocks',
+        where: 'library_item_id = ? AND plain_text LIKE ?',
+        whereArgs: [work.stableLibraryItemId, '%Fresh browser%'],
+      ),
+      1,
+    );
   });
 }

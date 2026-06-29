@@ -10,33 +10,69 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/elibrary_database.dart';
+import 'pioneer_capture_folder_metadata.dart';
+import 'egw_copied_range_parser.dart';
+import '../../library/data/library_contributor.dart';
+import '../../library/data/library_section_heuristics.dart';
+import 'pioneer_html_capture_folder_scanner.dart';
 import 'pioneer_source_catalog.dart';
 
 typedef PioneerSourceBytesFetcher =
     Future<PioneerSourceDownloadResult> Function(Uri uri);
-typedef PioneerImportDocumentParser = Future<PioneerImportDocument> Function(
-  PioneerSourceWork work,
-  Uint8List bytes,
-);
+typedef PioneerImportDocumentParser =
+    Future<PioneerImportDocument> Function(
+      PioneerSourceWork work,
+      Uint8List bytes,
+    );
 
-typedef PioneerImportProgressCallback = void Function(
-  PioneerImportProgress progress,
-);
+typedef PioneerImportProgressCallback =
+    void Function(PioneerImportProgress progress);
 
 typedef PioneerImportShouldContinue = bool Function();
 
 enum PioneerImportSourceMethod {
   directUrl,
   userVerifiedAutomatedCapture,
+  htmlCaptureFolder,
   clipboard,
-  savedExport;
+  savedExport,
+  copiedRange;
 
   String get label => switch (this) {
     PioneerImportSourceMethod.directUrl => 'direct URL',
     PioneerImportSourceMethod.userVerifiedAutomatedCapture =>
       'user-verified automated capture',
+    PioneerImportSourceMethod.htmlCaptureFolder => 'HTML capture folder',
     PioneerImportSourceMethod.clipboard => 'clipboard',
     PioneerImportSourceMethod.savedExport => 'saved export',
+    PioneerImportSourceMethod.copiedRange => 'copied range',
+  };
+}
+
+enum PioneerSourcePathPreference {
+  epub,
+  textCapture,
+  userSuppliedCleanedSource,
+  sourceNeeded;
+
+  String get label => switch (this) {
+    PioneerSourcePathPreference.epub => 'Capture needed',
+    PioneerSourcePathPreference.textCapture => 'Text/read capture',
+    PioneerSourcePathPreference.userSuppliedCleanedSource =>
+      'User-supplied cleaned source',
+    PioneerSourcePathPreference.sourceNeeded => 'Source needed',
+  };
+}
+
+enum PioneerExistingImportPolicy {
+  skipExisting,
+  overwriteExisting,
+  importAsNewCopy;
+
+  String get label => switch (this) {
+    PioneerExistingImportPolicy.skipExisting => 'Skip existing',
+    PioneerExistingImportPolicy.overwriteExisting => 'Overwrite existing',
+    PioneerExistingImportPolicy.importAsNewCopy => 'Import as new copy',
   };
 }
 
@@ -73,13 +109,265 @@ class PioneerImportSection {
 }
 
 class PioneerImportDocument {
-  const PioneerImportDocument({
-    required this.title,
-    required this.sections,
-  });
+  const PioneerImportDocument({required this.title, required this.sections});
 
   final String title;
   final List<PioneerImportSection> sections;
+}
+
+class PioneerEpubInspectionReport {
+  const PioneerEpubInspectionReport({
+    required this.byteCount,
+    required this.isValidZip,
+    required this.hasMimeType,
+    required this.hasContainerXml,
+    required this.opfPath,
+    required this.manifestCount,
+    required this.spineCount,
+    required this.spineHrefs,
+    required this.xhtmlHtmlEntries,
+    required this.selectedContentFiles,
+    required this.bodyFoundByFile,
+    required this.rawTextPreviewLength,
+    required this.rawTextPreview,
+    required this.paragraphCandidateCount,
+    required this.paragraphCountAfterFiltering,
+    required this.sectionCount,
+    required this.profileName,
+  });
+
+  final int byteCount;
+  final bool isValidZip;
+  final bool hasMimeType;
+  final bool hasContainerXml;
+  final String? opfPath;
+  final int manifestCount;
+  final int spineCount;
+  final List<String> spineHrefs;
+  final List<String> xhtmlHtmlEntries;
+  final List<String> selectedContentFiles;
+  final Map<String, bool> bodyFoundByFile;
+  final int rawTextPreviewLength;
+  final String rawTextPreview;
+  final int paragraphCandidateCount;
+  final int paragraphCountAfterFiltering;
+  final int sectionCount;
+  final String profileName;
+
+  String get summaryText => [
+    'byteCount=$byteCount',
+    'isValidZip=$isValidZip',
+    'hasMimeType=$hasMimeType',
+    'hasContainerXml=$hasContainerXml',
+    'opfPath=${opfPath ?? 'null'}',
+    'manifestCount=$manifestCount',
+    'spineCount=$spineCount',
+    'sectionCount=$sectionCount',
+    'paragraphCandidates=$paragraphCandidateCount',
+    'paragraphs=$paragraphCountAfterFiltering',
+  ].join(', ');
+}
+
+Future<PioneerEpubInspectionReport> inspectPioneerEpubBytes(
+  Uint8List bytes, {
+  PioneerSourceWork? work,
+}) async {
+  Archive archive;
+  var isValidZip = true;
+  try {
+    archive = ZipDecoder().decodeBytes(bytes, verify: false);
+  } catch (_) {
+    isValidZip = false;
+    return PioneerEpubInspectionReport(
+      byteCount: bytes.length,
+      isValidZip: false,
+      hasMimeType: false,
+      hasContainerXml: false,
+      opfPath: null,
+      manifestCount: 0,
+      spineCount: 0,
+      spineHrefs: const <String>[],
+      xhtmlHtmlEntries: const <String>[],
+      selectedContentFiles: const <String>[],
+      bodyFoundByFile: const <String, bool>{},
+      rawTextPreviewLength: 0,
+      rawTextPreview: '',
+      paragraphCandidateCount: 0,
+      paragraphCountAfterFiltering: 0,
+      sectionCount: 0,
+      profileName:
+          (work == null
+                  ? PioneerEpubParserProfile.generic
+                  : PioneerEpubParserProfile.infer(work))
+              .name,
+    );
+  }
+
+  final profile = work == null
+      ? PioneerEpubParserProfile.generic
+      : PioneerEpubParserProfile.infer(work);
+  final hasMimeType = archive.findFile('mimetype') != null;
+  final containerEntry = archive.findFile('META-INF/container.xml');
+  final hasContainerXml = containerEntry != null;
+  String? opfPath;
+  var manifestCount = 0;
+  var spineCount = 0;
+  if (containerEntry != null) {
+    final containerXml = utf8.decode(
+      containerEntry.content as List<int>,
+      allowMalformed: true,
+    );
+    final opfPathMatch = RegExp(
+      r'full-path="([^"]+)"',
+      caseSensitive: false,
+    ).firstMatch(containerXml);
+    final rawOpfPath = opfPathMatch?.group(1);
+    if (rawOpfPath != null && rawOpfPath.trim().isNotEmpty) {
+      opfPath = _normalizeEpubPath(rawOpfPath);
+      final opfEntry = archive.findFile(opfPath);
+      if (opfEntry != null && opfEntry.isFile) {
+        final opfXml = utf8.decode(
+          opfEntry.content as List<int>,
+          allowMalformed: true,
+        );
+        manifestCount = RegExp(
+          r'<item\b[^>]*>',
+          caseSensitive: false,
+        ).allMatches(opfXml).length;
+        spineCount = RegExp(
+          r'<itemref\b[^>]*>',
+          caseSensitive: false,
+        ).allMatches(opfXml).length;
+      }
+    }
+  }
+  final packageInfo = _readEpubPackageInfo(archive);
+  final selectedContentFiles = <String>[
+    if (packageInfo.spineOrderedPaths.isNotEmpty)
+      ...packageInfo.spineOrderedPaths,
+  ];
+  if (selectedContentFiles.isEmpty) {
+    selectedContentFiles.addAll(
+      archive.files
+          .where((entry) {
+            final name = p.normalize(entry.name).toLowerCase();
+            return entry.isFile &&
+                (name.endsWith('.xhtml') || name.endsWith('.html'));
+          })
+          .map((entry) => p.normalize(entry.name))
+          .toList()
+        ..sort(),
+    );
+  }
+
+  final xhtmlHtmlEntries =
+      archive.files
+          .where((entry) {
+            final name = p.normalize(entry.name).toLowerCase();
+            return entry.isFile &&
+                (name.endsWith('.xhtml') || name.endsWith('.html'));
+          })
+          .map((entry) => p.normalize(entry.name))
+          .toList(growable: false)
+        ..sort();
+
+  final bodyFoundByFile = <String, bool>{};
+  var paragraphCandidateCount = 0;
+  var paragraphCountAfterFiltering = 0;
+  var sectionCount = 0;
+  var rawTextPreview = '';
+  var rawTextPreviewLength = 0;
+
+  for (final path in selectedContentFiles) {
+    final entry = _findArchiveFileByNormalizedName(archive, path);
+    if (entry == null || !entry.isFile) {
+      bodyFoundByFile[path] = false;
+      continue;
+    }
+    final raw = utf8.decode(entry.content as List<int>, allowMalformed: true);
+    final body = _extractHtmlBody(raw);
+    bodyFoundByFile[path] = body != null;
+    final source = body ?? raw;
+    final stripped = _stripHtml(source).replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (rawTextPreview.isEmpty && stripped.isNotEmpty) {
+      rawTextPreview = stripped.length <= 500
+          ? stripped
+          : stripped.substring(0, 500);
+      rawTextPreviewLength = rawTextPreview.length;
+    }
+    final blocks = _extractHtmlBlocks(source, profile: profile);
+    paragraphCandidateCount += blocks.length;
+    final paragraphs = _parseHtmlSections(
+      work ??
+          PioneerSourceWork(
+            id: 'debug',
+            authorId: 'debug',
+            authorName: 'debug',
+            sourceFamily: 'debug',
+            title: 'debug',
+            abbreviation: 'DBG',
+            group: 'debug',
+            subgroup: 'debug',
+            availability: PioneerSourceAvailability.available,
+            verified: true,
+            catalogImportable: true,
+            sourceType: 'epub',
+            sourceUrl: null,
+            collectionUrl: null,
+            captureUrl: null,
+            readerUrl: null,
+            directFileUrl: null,
+            directFileType: null,
+            sourceLabel: null,
+            notes: null,
+            sourceCandidates: const [],
+          ),
+      raw,
+      baseHref: path,
+      startingSpineIndex: 1,
+      profile: profile,
+    );
+    sectionCount += paragraphs.length;
+    paragraphCountAfterFiltering += paragraphs.fold<int>(
+      0,
+      (sum, section) => sum + section.paragraphs.length,
+    );
+  }
+
+  return PioneerEpubInspectionReport(
+    byteCount: bytes.length,
+    isValidZip: isValidZip,
+    hasMimeType: hasMimeType,
+    hasContainerXml: hasContainerXml,
+    opfPath: opfPath,
+    manifestCount: manifestCount,
+    spineCount: spineCount == 0 ? selectedContentFiles.length : spineCount,
+    spineHrefs: List<String>.unmodifiable(selectedContentFiles),
+    xhtmlHtmlEntries: List<String>.unmodifiable(xhtmlHtmlEntries),
+    selectedContentFiles: List<String>.unmodifiable(selectedContentFiles),
+    bodyFoundByFile: Map<String, bool>.unmodifiable(bodyFoundByFile),
+    rawTextPreviewLength: rawTextPreviewLength,
+    rawTextPreview: rawTextPreview,
+    paragraphCandidateCount: paragraphCandidateCount,
+    paragraphCountAfterFiltering: paragraphCountAfterFiltering,
+    sectionCount: sectionCount,
+    profileName: profile.name,
+  );
+}
+
+class PioneerZipExtractionException implements Exception {
+  const PioneerZipExtractionException({required this.message, this.zipEntry});
+
+  final String message;
+  final String? zipEntry;
+
+  @override
+  String toString() {
+    if (zipEntry?.isNotEmpty == true) {
+      return 'PioneerZipExtractionException: $message (zipEntry=$zipEntry)';
+    }
+    return 'PioneerZipExtractionException: $message';
+  }
 }
 
 class PioneerImportDocumentTooSparseException implements Exception {
@@ -100,6 +388,389 @@ class PioneerImportDocumentTooSparseException implements Exception {
     return 'PioneerImportDocumentTooSparseException: $message '
         '(sourceType=$sourceType, sectionsFound=$sectionsFound, paragraphs=$paragraphCount)';
   }
+}
+
+class PioneerImportQualityException implements Exception {
+  const PioneerImportQualityException({required this.result});
+
+  final PioneerEpubQualityValidationResult result;
+
+  @override
+  String toString() {
+    return 'PioneerImportQualityException: ${result.reason}';
+  }
+}
+
+class PioneerEpubQualityValidationResult {
+  const PioneerEpubQualityValidationResult({
+    required this.isValid,
+    required this.reason,
+    required this.detail,
+    required this.textBlockCount,
+    required this.meaningfulTextBlockCount,
+    required this.navigationCount,
+    required this.meaningfulNavigationCount,
+    required this.firstBodySectionTitle,
+    required this.epubAvailable,
+    required this.textCaptureAvailable,
+    required this.preferredImportPreference,
+    this.expectedBodyPhrase,
+  });
+
+  final bool isValid;
+  final String reason;
+  final String detail;
+  final int textBlockCount;
+  final int meaningfulTextBlockCount;
+  final int navigationCount;
+  final int meaningfulNavigationCount;
+  final String? firstBodySectionTitle;
+  final bool epubAvailable;
+  final bool textCaptureAvailable;
+  final PioneerSourcePathPreference preferredImportPreference;
+  final String? expectedBodyPhrase;
+
+  String get summaryText => [
+    reason,
+    'text blocks=$textBlockCount',
+    'meaningful body blocks=$meaningfulTextBlockCount',
+    'navigation=$navigationCount',
+    'meaningful navigation=$meaningfulNavigationCount',
+    if (firstBodySectionTitle != null)
+      'first body section=${firstBodySectionTitle!}',
+  ].join(' • ');
+}
+
+enum PioneerEpubParserProfileKind {
+  generic,
+  aplibZip,
+  ellenWhiteAudio,
+  egwOfficial,
+  pioneerPublicDomain,
+}
+
+class PioneerEpubParserProfile {
+  const PioneerEpubParserProfile._({
+    required this.kind,
+    required this.name,
+    required this.headingClassNeedles,
+  });
+
+  static const generic = PioneerEpubParserProfile._(
+    kind: PioneerEpubParserProfileKind.generic,
+    name: 'generic',
+    headingClassNeedles: <String>[
+      'heading',
+      'chapter',
+      'section',
+      'title',
+      'subtitle',
+      'subhead',
+      'headline',
+      'chapterhead',
+      'chapter-title',
+      'section-title',
+      'sub-title',
+      'subheading',
+    ],
+  );
+
+  static const aplibZip = PioneerEpubParserProfile._(
+    kind: PioneerEpubParserProfileKind.aplibZip,
+    name: 'aplibZip',
+    headingClassNeedles: <String>[
+      'heading',
+      'chapter',
+      'section',
+      'title',
+      'subtitle',
+      'subhead',
+      'headline',
+      'chapterhead',
+      'chapter-title',
+      'section-title',
+      'sub-title',
+      'subheading',
+    ],
+  );
+
+  static const ellenWhiteAudio = PioneerEpubParserProfile._(
+    kind: PioneerEpubParserProfileKind.ellenWhiteAudio,
+    name: 'ellenWhiteAudio',
+    headingClassNeedles: <String>[
+      'heading',
+      'chapter',
+      'section',
+      'title',
+      'subtitle',
+      'subhead',
+      'headline',
+      'chapterhead',
+      'chapter-title',
+      'section-title',
+      'sub-title',
+      'subheading',
+      'header-main',
+    ],
+  );
+
+  static const egwOfficial = PioneerEpubParserProfile._(
+    kind: PioneerEpubParserProfileKind.egwOfficial,
+    name: 'egwOfficial',
+    headingClassNeedles: <String>[
+      'heading',
+      'chapter',
+      'section',
+      'title',
+      'subtitle',
+      'subhead',
+      'headline',
+      'chapterhead',
+      'chapter-title',
+      'section-title',
+      'sub-title',
+      'subheading',
+      'header-main',
+    ],
+  );
+
+  static const pioneerPublicDomain = PioneerEpubParserProfile._(
+    kind: PioneerEpubParserProfileKind.pioneerPublicDomain,
+    name: 'pioneerPublicDomain',
+    headingClassNeedles: <String>[
+      'heading',
+      'chapter',
+      'section',
+      'title',
+      'subtitle',
+      'subhead',
+      'headline',
+      'chapterhead',
+      'chapter-title',
+      'section-title',
+      'sub-title',
+      'subheading',
+      'header-main',
+    ],
+  );
+
+  final PioneerEpubParserProfileKind kind;
+  final String name;
+  final List<String> headingClassNeedles;
+
+  bool get appliesPublicDomainCleanup =>
+      kind == PioneerEpubParserProfileKind.pioneerPublicDomain;
+
+  static PioneerEpubParserProfile infer(PioneerSourceWork work) {
+    final sourceLabel = _normalizeText(work.sourceLabel ?? '');
+    final sourceUrl = _normalizeText(work.sourceUrl ?? '');
+    final sourceType = work.sourceType?.trim().toLowerCase() ?? '';
+    if (_isPublicDomainPioneerEpub(work, sourceType: sourceType)) {
+      return pioneerPublicDomain;
+    }
+    if (sourceLabel.contains('ellenwhiteaudio') ||
+        sourceLabel.contains('egw audio') ||
+        sourceUrl.contains('ellenwhiteaudio.org')) {
+      return ellenWhiteAudio;
+    }
+    if (sourceLabel.contains('egw writings') ||
+        sourceLabel.contains('egw official') ||
+        sourceUrl.contains('egwwritings.org')) {
+      return egwOfficial;
+    }
+    if (sourceType == 'epubzipentry' ||
+        sourceLabel.contains('aplib') ||
+        sourceUrl.contains('adventaudio.org')) {
+      return aplibZip;
+    }
+    return generic;
+  }
+}
+
+class PioneerPublicDomainExtractionProfile {
+  const PioneerPublicDomainExtractionProfile._();
+
+  static const Set<String> _frontMatterTitles = <String>{
+    'cover',
+    'contents',
+    'table of contents',
+    'toc',
+    'copyright',
+    'title page',
+    'titlepage',
+    'illustrations',
+    'publication information',
+    'source credits',
+    'publisher note',
+    'editor note',
+    'editorial note',
+    'publisher',
+    'preface to the edition',
+  };
+
+  static const Set<String> _bodyStartTitles = <String>{
+    'preface',
+    'introduction',
+    'chapter 1',
+    'chapter i',
+    'chapter one',
+    'part 1',
+    'part i',
+  };
+
+  static bool isSectionFrontMatter({
+    required String title,
+    required String rawText,
+  }) {
+    final normalizedTitle = _normalizeText(title);
+    if (normalizedTitle.isEmpty) return true;
+    if (_frontMatterTitles.contains(normalizedTitle)) return true;
+
+    final normalizedText = normalizeWhitespace(rawText);
+    if (normalizedText.isEmpty) return true;
+
+    final lowerText = normalizedText.toLowerCase();
+    if (lowerText.contains('adventist pioneer library')) return true;
+    if (lowerText.contains('www.aplib.org')) return true;
+    if (lowerText.contains('isbn:')) return true;
+    if (lowerText.contains('published in the usa')) return true;
+    if (lowerText.contains('originally published in')) return true;
+    if (lowerText.contains('the original table of contents contained')) {
+      return true;
+    }
+    if (lowerText.contains('support the ministry') ||
+        lowerText.contains('donate') ||
+        lowerText.contains('donation')) {
+      return true;
+    }
+    if (RegExp(
+      r'^©\s*\d{4}\s+adventist pioneer library$',
+      caseSensitive: false,
+    ).hasMatch(normalizedText)) {
+      return true;
+    }
+    if (RegExp(
+      r'^\+?\d[\d\s().-]{7,}$',
+      caseSensitive: false,
+    ).hasMatch(normalizedText)) {
+      return true;
+    }
+    if (RegExp(
+          r'^\d{1,5}\s+[A-Za-z][A-Za-z0-9 .,\-#/&()]*$',
+          caseSensitive: false,
+        ).hasMatch(normalizedText) &&
+        (lowerText.contains('road') ||
+            lowerText.contains('street') ||
+            lowerText.contains('avenue') ||
+            lowerText.contains('lane') ||
+            lowerText.contains('drive') ||
+            lowerText.contains('highway') ||
+            lowerText.contains('oregon') ||
+            lowerText.contains('usa') ||
+            lowerText.contains('aplib'))) {
+      return true;
+    }
+    if (RegExp(
+      r'^(january|february|march|april|may|june|july|august|september|october|november|december),\s*\d{4}$',
+      caseSensitive: false,
+    ).hasMatch(normalizedText)) {
+      return true;
+    }
+    return false;
+  }
+
+  static bool isBodyStartTitle(String title) {
+    final normalizedTitle = _normalizeText(title);
+    return _bodyStartTitles.contains(normalizedTitle);
+  }
+
+  static List<String> filterLeadingFrontMatterParagraphs(
+    List<String> paragraphs,
+  ) {
+    var firstBodyParagraphIndex = 0;
+    var foundBodyParagraph = false;
+    for (var i = 0; i < paragraphs.length; i++) {
+      final paragraph = paragraphs[i].trim();
+      if (paragraph.isEmpty) continue;
+      if (_looksLikeFrontMatterParagraph(paragraph)) {
+        continue;
+      }
+      firstBodyParagraphIndex = i;
+      foundBodyParagraph = true;
+      break;
+    }
+    if (!foundBodyParagraph) {
+      return const <String>[];
+    }
+    if (firstBodyParagraphIndex <= 0) {
+      return List<String>.unmodifiable(paragraphs);
+    }
+    return List<String>.unmodifiable(
+      paragraphs.sublist(firstBodyParagraphIndex),
+    );
+  }
+
+  static bool _looksLikeFrontMatterParagraph(String text) {
+    final normalizedText = normalizeWhitespace(text);
+    if (normalizedText.isEmpty) return true;
+    final lowerText = normalizedText.toLowerCase();
+    if (lowerText.contains('adventist pioneer library')) return true;
+    if (lowerText.contains('www.aplib.org')) return true;
+    if (lowerText.contains('isbn:')) return true;
+    if (lowerText.contains('published in the usa')) return true;
+    if (lowerText.contains('originally published in')) return true;
+    if (lowerText.contains('the original table of contents contained')) {
+      return true;
+    }
+    if (RegExp(
+      r'^©\s*\d{4}\s+adventist pioneer library$',
+      caseSensitive: false,
+    ).hasMatch(normalizedText)) {
+      return true;
+    }
+    if (RegExp(
+      r'^\+?\d[\d\s().-]{7,}$',
+      caseSensitive: false,
+    ).hasMatch(normalizedText)) {
+      return true;
+    }
+    if (RegExp(
+          r'^\d{1,5}\s+[A-Za-z][A-Za-z0-9 .,\-#/&()]*$',
+          caseSensitive: false,
+        ).hasMatch(normalizedText) &&
+        (lowerText.contains('road') ||
+            lowerText.contains('street') ||
+            lowerText.contains('avenue') ||
+            lowerText.contains('lane') ||
+            lowerText.contains('drive') ||
+            lowerText.contains('highway') ||
+            lowerText.contains('oregon') ||
+            lowerText.contains('usa') ||
+            lowerText.contains('aplib'))) {
+      return true;
+    }
+    return false;
+  }
+}
+
+bool _isPublicDomainPioneerEpub(
+  PioneerSourceWork work, {
+  required String sourceType,
+}) {
+  const epubLikeSourceTypes = <String>{'epub', 'directepub', 'epubzipentry'};
+  if (!epubLikeSourceTypes.contains(sourceType)) {
+    return false;
+  }
+
+  final sourceFamily = _normalizeText(work.sourceFamily ?? '');
+  final sourceLabel = _normalizeText(work.sourceLabel ?? '');
+  final sourceUrl = _normalizeText(work.sourceUrl ?? '');
+  return sourceFamily.contains('pioneer') ||
+      sourceLabel.contains('adventist pioneer library') ||
+      sourceLabel.contains('ellenwhiteaudio') ||
+      sourceLabel.contains('adventaudio') ||
+      sourceUrl.contains('adventaudio.org') ||
+      sourceUrl.contains('ellenwhiteaudio.org');
 }
 
 class PioneerSourceDownloadResult {
@@ -179,6 +850,12 @@ class PioneerImportWorkResult {
     required this.parsedParagraphCount,
     required this.requiresManualVerification,
     required this.manualVerificationHint,
+    this.epubAvailable = false,
+    this.epubValidated = false,
+    this.epubRejectedReason,
+    this.textCaptureAvailable = false,
+    this.preferredImportPreference = PioneerSourcePathPreference.sourceNeeded,
+    this.qualityValidationSummary,
   });
 
   final PioneerSourceWork work;
@@ -202,13 +879,63 @@ class PioneerImportWorkResult {
   final int? parsedParagraphCount;
   final bool requiresManualVerification;
   final String? manualVerificationHint;
+  final bool epubAvailable;
+  final bool epubValidated;
+  final String? epubRejectedReason;
+  final bool textCaptureAvailable;
+  final PioneerSourcePathPreference preferredImportPreference;
+  final String? qualityValidationSummary;
 
   String get title => work.title;
   String get sourceMethodLabel => sourceMethod.label;
+  String get preferredImportPreferenceLabel => preferredImportPreference.label;
   int get textBlockCount => insertedTextBlocks;
   int get navigationCount => insertedNavigationItems;
   bool get isImported => status == PioneerImportWorkStatus.imported;
   bool get isSkipped => status != PioneerImportWorkStatus.imported;
+}
+
+class PioneerExistingCapturedImportSummary {
+  const PioneerExistingCapturedImportSummary({
+    required this.itemIds,
+    required this.textBlockCount,
+    required this.navigationItemCount,
+    required this.refIndexCount,
+    required this.sourceTypes,
+    required this.indexStatuses,
+    required this.hasExistingImport,
+  });
+
+  final List<String> itemIds;
+  final int textBlockCount;
+  final int navigationItemCount;
+  final int refIndexCount;
+  final List<String> sourceTypes;
+  final List<String> indexStatuses;
+  final bool hasExistingImport;
+
+  bool get hasTextBlocks => textBlockCount > 0;
+  bool get hasNavigationItems => navigationItemCount > 0;
+
+  bool get isPartialOrFailed {
+    if (!hasExistingImport) return false;
+    if (!hasTextBlocks || !hasNavigationItems) return true;
+    return indexStatuses.any((status) {
+      final normalized = status.trim().toLowerCase();
+      return normalized.contains('partial') ||
+          normalized.contains('failed') ||
+          normalized.contains('needs_review') ||
+          normalized.contains('error');
+    });
+  }
+
+  bool get isVerifiedLike => hasExistingImport && !isPartialOrFailed;
+
+  String get statusLabel {
+    if (!hasExistingImport) return 'Not installed';
+    if (isPartialOrFailed) return 'Existing partial import';
+    return 'Existing verified import';
+  }
 }
 
 class PioneerImportBatchResult {
@@ -224,12 +951,29 @@ class PioneerImportBatchResult {
       workResults.where((result) => result.isImported).length;
 
   int get skippedCount =>
-      workResults.where((result) => result.status == PioneerImportWorkStatus.skippedExisting).length +
-      workResults.where((result) => result.status == PioneerImportWorkStatus.skippedNotImportable).length +
-      workResults.where((result) => result.status == PioneerImportWorkStatus.skippedUnsupportedSource).length;
+      workResults
+          .where(
+            (result) =>
+                result.status == PioneerImportWorkStatus.skippedExisting,
+          )
+          .length +
+      workResults
+          .where(
+            (result) =>
+                result.status == PioneerImportWorkStatus.skippedNotImportable,
+          )
+          .length +
+      workResults
+          .where(
+            (result) =>
+                result.status ==
+                PioneerImportWorkStatus.skippedUnsupportedSource,
+          )
+          .length;
 
-  int get failedCount =>
-      workResults.where((result) => result.status == PioneerImportWorkStatus.failed).length;
+  int get failedCount => workResults
+      .where((result) => result.status == PioneerImportWorkStatus.failed)
+      .length;
 }
 
 class PioneerImportProgress {
@@ -255,23 +999,33 @@ class PioneerTextImportService {
   PioneerTextImportService({
     PioneerSourceBytesFetcher? fetchBytes,
     PioneerImportDocumentParser? parseDocument,
-  })  : _fetchBytes = fetchBytes ?? _downloadSourceBytes,
-        _parseDocument = parseDocument ?? _parseSourceDocument;
+  }) : _fetchBytes = fetchBytes ?? _downloadSourceBytes,
+       _parseDocument = parseDocument ?? _parseSourceDocument;
 
   static final PioneerTextImportService instance = PioneerTextImportService();
 
-  static const String _collectionName = 'Pioneer Authors';
+  static const String _collectionName = 'Adventist Pioneer Library';
   static const String _folderType = 'research';
   static const String _libraryRole = 'research';
-  static const String _virtualRoot = 'ePubs/Research/Pioneer Authors';
+  static const String _virtualRoot = 'TextCaptures/Research/Pioneer Authors';
 
   final PioneerSourceBytesFetcher _fetchBytes;
   final PioneerImportDocumentParser _parseDocument;
+
+  Future<PioneerExistingCapturedImportSummary> inspectExistingCapturedImport(
+    PioneerSourceWork work,
+  ) async {
+    final db = await ELibraryDatabase.instance.database;
+    return _existingCanonicalCapturedImportSummary(db, work);
+  }
 
   Future<PioneerImportBatchResult> importSelectedWorks(
     Iterable<PioneerSourceWork> selectedWorks, {
     PioneerImportProgressCallback? onProgress,
     PioneerImportShouldContinue? shouldContinue,
+    bool allowRepair = false,
+    PioneerExistingImportPolicy existingImportPolicy =
+        PioneerExistingImportPolicy.skipExisting,
   }) async {
     final uniqueWorks = <String, PioneerSourceWork>{};
     for (final work in selectedWorks) {
@@ -284,6 +1038,9 @@ class PioneerTextImportService {
     final results = <PioneerImportWorkResult>[];
     final total = uniqueWorks.length;
     var completed = 0;
+    // Cache downloaded bytes by URL so the same ZIP is fetched only once
+    // across the entire batch (all APLIB works share one ZIP URL).
+    final downloadCache = <String, PioneerSourceDownloadResult>{};
 
     for (final work in uniqueWorks.values) {
       if (shouldContinue != null && !shouldContinue()) {
@@ -331,7 +1088,7 @@ class PioneerTextImportService {
       }
 
       final existing = await _existingImportSummary(db, itemId);
-      if (existing.isComplete) {
+      if (existing.hasItem && !allowRepair) {
         results.add(
           _buildSkippedExistingResult(
             work: work,
@@ -346,14 +1103,27 @@ class PioneerTextImportService {
 
       PioneerSourceDownloadResult? downloadResult;
       try {
-        final sourceUrl = work.sourceUrl?.trim();
-        if (sourceUrl == null || sourceUrl.isEmpty) {
+        final sourceCandidate = work.preferredImportCandidate;
+        final sourceUrl = _candidateSourceUrl(work, sourceCandidate);
+        if (sourceCandidate == null || sourceUrl == null || sourceUrl.isEmpty) {
           results.add(
             _buildSkippedNotImportableResult(
               work: work,
               libraryItemId: itemId,
               sourceMethod: PioneerImportSourceMethod.directUrl,
-              reason: 'No verified source URL is available.',
+              reason: 'No verified importable source URL is available.',
+            ),
+          );
+          completed += 1;
+          continue;
+        }
+
+        if (sourceCandidate.sourceType == 'pdf') {
+          results.add(
+            _buildSkippedUnsupportedSourceResult(
+              work: work,
+              libraryItemId: itemId,
+              sourceMethod: PioneerImportSourceMethod.directUrl,
             ),
           );
           completed += 1;
@@ -369,7 +1139,14 @@ class PioneerTextImportService {
             message: '$progressPrefix Downloading ${work.title}',
           ),
         );
-        downloadResult = await _fetchBytes(Uri.parse(sourceUrl));
+        downloadResult =
+            downloadCache[sourceUrl] ?? await _fetchBytes(Uri.parse(sourceUrl));
+        downloadCache[sourceUrl] = downloadResult;
+        final importBytes = await _resolveImportedSourceBytes(
+          work: work,
+          sourceCandidate: sourceCandidate,
+          downloadResult: downloadResult,
+        );
 
         onProgress?.call(
           PioneerImportProgress(
@@ -380,14 +1157,24 @@ class PioneerTextImportService {
             message: '$progressPrefix Parsing ${work.title}',
           ),
         );
-        final document = await _parseDocument(work, downloadResult.bytes);
+        final document = await _parseDocument(work, importBytes);
         if (document.sections.isEmpty) {
           throw PioneerImportDocumentTooSparseException(
-            sourceType: work.sourceType ?? 'unknown',
+            sourceType: sourceCandidate.sourceType,
             message: 'No readable sections were found.',
             sectionsFound: 0,
             paragraphCount: 0,
           );
+        }
+        PioneerEpubQualityValidationResult? qualityValidation;
+        if (_isEpubLikeSourceType(sourceCandidate.sourceType)) {
+          qualityValidation = _validatePioneerEpubImportQuality(
+            work: work,
+            document: document,
+          );
+          if (!qualityValidation.isValid) {
+            throw PioneerImportQualityException(result: qualityValidation);
+          }
         }
 
         onProgress?.call(
@@ -404,10 +1191,12 @@ class PioneerTextImportService {
           deviceId: deviceId,
           work: work,
           document: document,
-          sourceBytes: downloadResult.bytes,
+          sourceBytes: importBytes,
           downloadResult: downloadResult,
           sourceMethod: PioneerImportSourceMethod.directUrl,
           refCodeHandlingSummary: _defaultRefCodeHandlingSummary,
+          sourceUrl: sourceUrl,
+          qualityValidation: qualityValidation,
         );
         results.add(result);
       } catch (error, stackTrace) {
@@ -424,19 +1213,28 @@ class PioneerTextImportService {
             stage: stage,
             sourceMethod: PioneerImportSourceMethod.directUrl,
             downloadResult: downloadResult,
-            downloadedByteCount: downloadResult?.byteCount ??
-                (error is PioneerSourceDownloadException ? error.byteCount : null),
-            httpStatusCode: downloadResult?.httpStatusCode ??
-                (error is PioneerSourceDownloadException ? error.httpStatusCode : null),
-            contentType: downloadResult?.contentType ??
-                (error is PioneerSourceDownloadException ? error.contentType : null),
+            downloadedByteCount:
+                downloadResult?.byteCount ??
+                (error is PioneerSourceDownloadException
+                    ? error.byteCount
+                    : null),
+            httpStatusCode:
+                downloadResult?.httpStatusCode ??
+                (error is PioneerSourceDownloadException
+                    ? error.httpStatusCode
+                    : null),
+            contentType:
+                downloadResult?.contentType ??
+                (error is PioneerSourceDownloadException
+                    ? error.contentType
+                    : null),
             parsedSectionCount: error is PioneerImportDocumentTooSparseException
                 ? error.sectionsFound
                 : null,
             parsedParagraphCount:
                 error is PioneerImportDocumentTooSparseException
-                    ? error.paragraphCount
-                    : null,
+                ? error.paragraphCount
+                : null,
             refCodeHandlingSummary: _defaultRefCodeHandlingSummary,
           ),
         );
@@ -452,7 +1250,13 @@ class PioneerTextImportService {
     Iterable<PioneerCapturedTextSource> capturedSources, {
     PioneerImportProgressCallback? onProgress,
     PioneerImportShouldContinue? shouldContinue,
+    bool allowRepair = false,
+    PioneerExistingImportPolicy existingImportPolicy =
+        PioneerExistingImportPolicy.skipExisting,
   }) async {
+    final effectiveExistingImportPolicy = allowRepair
+        ? PioneerExistingImportPolicy.overwriteExisting
+        : existingImportPolicy;
     final uniqueSources = <String, PioneerCapturedTextSource>{};
     for (final source in capturedSources) {
       if (source.work.id.trim().isEmpty) continue;
@@ -474,7 +1278,11 @@ class PioneerTextImportService {
       }
 
       final work = source.work;
-      final itemId = work.stableLibraryItemId;
+      final itemId =
+          effectiveExistingImportPolicy ==
+              PioneerExistingImportPolicy.importAsNewCopy
+          ? _newCopyLibraryItemId(work)
+          : work.stableLibraryItemId;
       final progressPrefix = '${completed + 1}/$total';
       onProgress?.call(
         PioneerImportProgress(
@@ -486,12 +1294,14 @@ class PioneerTextImportService {
         ),
       );
 
-      final existing = await _existingImportSummary(db, itemId);
-      if (existing.isComplete) {
+      final existing = await _existingCanonicalCapturedImportSummary(db, work);
+      if (existing.hasExistingImport &&
+          effectiveExistingImportPolicy ==
+              PioneerExistingImportPolicy.skipExisting) {
         results.add(
           _buildSkippedExistingResult(
             work: work,
-            libraryItemId: itemId,
+            libraryItemId: existing.itemIds.first,
             sourceMethod: source.sourceMethod,
             refCodeHandlingSummary:
                 source.refCodeHandlingSummary ?? _defaultRefCodeHandlingSummary,
@@ -528,14 +1338,13 @@ class PioneerTextImportService {
         final document = await _parseCapturedTextDocument(
           work,
           text,
+          sourceUrl: source.sourceUrl,
           sourceLabel: source.sourceLabel,
         );
         final downloadResult = PioneerSourceDownloadResult(
           bytes: Uint8List.fromList(utf8.encode(text)),
           httpStatusCode: null,
-          contentType: _looksLikeHtmlMarkup(text)
-              ? 'text/html'
-              : 'text/plain',
+          contentType: _looksLikeHtmlMarkup(text) ? 'text/html' : 'text/plain',
           resolvedUri: source.sourceUrl == null
               ? null
               : Uri.tryParse(source.sourceUrl!),
@@ -554,12 +1363,17 @@ class PioneerTextImportService {
           db: db,
           deviceId: deviceId,
           work: work,
+          libraryItemId: itemId,
+          replaceCanonicalSiblings:
+              effectiveExistingImportPolicy ==
+              PioneerExistingImportPolicy.overwriteExisting,
           document: document,
           sourceBytes: downloadResult.bytes,
           downloadResult: downloadResult,
           sourceMethod: source.sourceMethod,
           refCodeHandlingSummary:
               source.refCodeHandlingSummary ?? _refCodeHandlingSummary(text),
+          sourceUrl: source.sourceUrl,
         );
         results.add(result);
       } catch (error, stackTrace) {
@@ -591,8 +1405,8 @@ class PioneerTextImportService {
                 : null,
             parsedParagraphCount:
                 error is PioneerImportDocumentTooSparseException
-                    ? error.paragraphCount
-                    : null,
+                ? error.paragraphCount
+                : null,
           ),
         );
       }
@@ -609,6 +1423,9 @@ class PioneerTextImportService {
     String? sourceLabel,
     PioneerImportProgressCallback? onProgress,
     PioneerImportShouldContinue? shouldContinue,
+    bool allowRepair = false,
+    PioneerExistingImportPolicy existingImportPolicy =
+        PioneerExistingImportPolicy.skipExisting,
   }) async {
     final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
     final clipboardText = clipboard?.text?.trim() ?? '';
@@ -638,7 +1455,138 @@ class PioneerTextImportService {
       ],
       onProgress: onProgress,
       shouldContinue: shouldContinue,
+      allowRepair: allowRepair,
+      existingImportPolicy: existingImportPolicy,
     );
+  }
+
+  Future<PioneerImportBatchResult> importFromCapturedHtml({
+    required PioneerSourceWork work,
+    required String html,
+    String? sourceUrl,
+    String? sourceLabel,
+    PioneerImportProgressCallback? onProgress,
+    PioneerImportShouldContinue? shouldContinue,
+    bool allowRepair = false,
+    PioneerExistingImportPolicy existingImportPolicy =
+        PioneerExistingImportPolicy.skipExisting,
+  }) async {
+    return importFromCapturedText(
+      [
+        PioneerCapturedTextSource(
+          work: work,
+          sourceMethod: PioneerImportSourceMethod.userVerifiedAutomatedCapture,
+          text: html,
+          sourceUrl: sourceUrl,
+          sourceLabel: sourceLabel,
+          refCodeHandlingSummary: _refCodeHandlingSummary(html),
+        ),
+      ],
+      onProgress: onProgress,
+      shouldContinue: shouldContinue,
+      allowRepair: allowRepair,
+      existingImportPolicy: existingImportPolicy,
+    );
+  }
+
+  Future<PioneerImportBatchResult> importFromParsedCapturedHtml({
+    required PioneerSourceWork work,
+    required PioneerImportDocument document,
+    required Uint8List sourceBytes,
+    String? sourceUrl,
+    String? sourceLabel,
+    String? sourceType,
+    String? sourceSite,
+    String? relativePath,
+    String? coverPath,
+    List<ImportContributorSpec>? contributors,
+    PioneerImportProgressCallback? onProgress,
+    PioneerImportShouldContinue? shouldContinue,
+    bool allowRepair = false,
+    PioneerExistingImportPolicy existingImportPolicy =
+        PioneerExistingImportPolicy.skipExisting,
+    String? indexStatus,
+    String? indexError,
+  }) async {
+    final effectiveExistingImportPolicy = allowRepair
+        ? PioneerExistingImportPolicy.overwriteExisting
+        : existingImportPolicy;
+    final db = await ELibraryDatabase.instance.database;
+    final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+    final itemId =
+        effectiveExistingImportPolicy ==
+            PioneerExistingImportPolicy.importAsNewCopy
+        ? _newCopyLibraryItemId(work)
+        : work.stableLibraryItemId;
+
+    if (shouldContinue != null && !shouldContinue()) {
+      return PioneerImportBatchResult(
+        workResults: const [],
+        wasCancelled: true,
+      );
+    }
+
+    final existing = await _existingImportSummary(db, itemId);
+    if (existing.hasItem &&
+        effectiveExistingImportPolicy ==
+            PioneerExistingImportPolicy.skipExisting) {
+      return PioneerImportBatchResult(
+        workResults: [
+          _buildSkippedExistingResult(
+            work: work,
+            libraryItemId: itemId,
+            sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+            refCodeHandlingSummary:
+                'Captured HTML refs are generated from headings and paragraphs.',
+          ),
+        ],
+      );
+    }
+
+    onProgress?.call(
+      PioneerImportProgress(
+        completedCount: 0,
+        totalCount: 1,
+        workTitle: work.title,
+        stage: 'writing',
+        message: 'Writing ${work.title}',
+      ),
+    );
+
+    final downloadResult = PioneerSourceDownloadResult(
+      bytes: sourceBytes,
+      httpStatusCode: null,
+      contentType:
+          _looksLikeHtmlMarkup(utf8.decode(sourceBytes, allowMalformed: true))
+          ? 'text/html'
+          : 'text/plain',
+      resolvedUri: sourceUrl == null ? null : Uri.tryParse(sourceUrl),
+    );
+
+    final result = await _writeImportedWork(
+      db: db,
+      deviceId: deviceId,
+      work: work,
+      libraryItemId: itemId,
+      replaceCanonicalSiblings:
+          effectiveExistingImportPolicy ==
+          PioneerExistingImportPolicy.overwriteExisting,
+      document: document,
+      sourceBytes: sourceBytes,
+      downloadResult: downloadResult,
+      sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+      refCodeHandlingSummary:
+          'Captured HTML refs are generated from headings and paragraphs.',
+      sourceUrl: sourceUrl,
+      sourceType: sourceType,
+      sourceSite: sourceSite,
+      relativePath: relativePath,
+      coverPath: coverPath,
+      contributors: contributors,
+      indexStatus: indexStatus,
+      indexError: indexError,
+    );
+    return PioneerImportBatchResult(workResults: [result]);
   }
 
   Future<PioneerImportBatchResult> importFromSavedExport({
@@ -648,6 +1596,9 @@ class PioneerTextImportService {
     String? sourceLabel,
     PioneerImportProgressCallback? onProgress,
     PioneerImportShouldContinue? shouldContinue,
+    bool allowRepair = false,
+    PioneerExistingImportPolicy existingImportPolicy =
+        PioneerExistingImportPolicy.skipExisting,
   }) async {
     final file = File(filePath);
     if (!await file.exists()) {
@@ -677,6 +1628,673 @@ class PioneerTextImportService {
       ],
       onProgress: onProgress,
       shouldContinue: shouldContinue,
+      allowRepair: allowRepair,
+      existingImportPolicy: existingImportPolicy,
+    );
+  }
+
+  Future<PioneerImportBatchResult> importFromCopiedRange({
+    required PioneerSourceWork work,
+    required String text,
+    String? sourceUrl,
+    String? sourceLabel,
+    PioneerImportProgressCallback? onProgress,
+    PioneerImportShouldContinue? shouldContinue,
+  }) async {
+    final normalizedText = text.trim();
+    if (normalizedText.isEmpty) {
+      return PioneerImportBatchResult(
+        workResults: [
+          _buildSkippedNotImportableResult(
+            work: work,
+            libraryItemId: work.stableLibraryItemId,
+            sourceMethod: PioneerImportSourceMethod.copiedRange,
+            reason: 'No copied EGW text was supplied.',
+          ),
+        ],
+      );
+    }
+
+    onProgress?.call(
+      PioneerImportProgress(
+        completedCount: 0,
+        totalCount: 1,
+        workTitle: work.title,
+        stage: 'parsing',
+        message: 'Parsing copied range for ${work.title}',
+      ),
+    );
+
+    final parseResult = parseEgwCopiedRangeText(
+      normalizedText,
+      workAbbreviation: work.abbreviation.trim().isNotEmpty
+          ? work.abbreviation.trim()
+          : 'DAR',
+    );
+    final db = await ELibraryDatabase.instance.database;
+    final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+    final result = await _writeCopiedRangeImportedWork(
+      db: db,
+      deviceId: deviceId,
+      work: work,
+      parseResult: parseResult,
+      sourceText: normalizedText,
+      sourceMethod: PioneerImportSourceMethod.copiedRange,
+      sourceUrl: sourceUrl,
+      sourceLabel: sourceLabel,
+      shouldContinue: shouldContinue,
+    );
+    return PioneerImportBatchResult(workResults: [result]);
+  }
+
+  Future<PioneerImportBatchResult> importHtmlCaptureFolders(
+    Iterable<PioneerHtmlCaptureFolderPreview> previews, {
+    PioneerImportProgressCallback? onProgress,
+    PioneerImportShouldContinue? shouldContinue,
+    PioneerExistingImportPolicy existingImportPolicy =
+        PioneerExistingImportPolicy.skipExisting,
+  }) async {
+    final selectedPreviews = <String, PioneerHtmlCaptureFolderPreview>{};
+    for (final preview in previews) {
+      if (preview.folderPath.trim().isEmpty) continue;
+      selectedPreviews[preview.folderPath] = preview;
+    }
+
+    final db = await ELibraryDatabase.instance.database;
+    final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+    final results = <PioneerImportWorkResult>[];
+    final total = selectedPreviews.length;
+    var completed = 0;
+
+    for (final preview in selectedPreviews.values) {
+      final work = preview.isValid ? preview.importWork : null;
+      final itemId = work?.stableLibraryItemId ?? preview.folderName;
+      if (shouldContinue != null && !shouldContinue()) {
+        return PioneerImportBatchResult(
+          workResults: results,
+          wasCancelled: true,
+        );
+      }
+
+      if (!preview.isValid || work == null) {
+        results.add(
+          _buildSkippedNotImportableResult(
+            work:
+                work ??
+                PioneerSourceWork(
+                  id: _slug(preview.folderName),
+                  authorId: 'unknown',
+                  authorName: preview.detectedAuthor ?? 'Unknown',
+                  sourceFamily: 'Pioneer',
+                  title: preview.detectedTitle ?? preview.folderName,
+                  abbreviation: preview.detectedAbbreviation ?? '',
+                  group: 'Pioneer Authors',
+                  subgroup: 'Captured HTML',
+                  availability: PioneerSourceAvailability.sourceNeeded,
+                  verified: false,
+                  catalogImportable: false,
+                  sourceType: 'capturedHtml',
+                  sourceUrl: null,
+                  sourceLabel: 'Local HTML Capture',
+                  notes: preview.warnings.join(' '),
+                ),
+            libraryItemId: itemId,
+            sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+            reason: preview.warnings.isEmpty
+                ? 'Capture folder is not importable.'
+                : preview.warnings.join(' '),
+          ),
+        );
+        completed += 1;
+        continue;
+      }
+
+      final progressPrefix = '${completed + 1}/$total';
+      onProgress?.call(
+        PioneerImportProgress(
+          completedCount: completed,
+          totalCount: total,
+          workTitle: work.title,
+          stage: 'checking',
+          message: '$progressPrefix Checking ${work.title}',
+        ),
+      );
+
+      final existing = await _existingCanonicalCapturedImportSummary(db, work);
+      if (existing.hasExistingImport &&
+          existingImportPolicy == PioneerExistingImportPolicy.skipExisting) {
+        results.add(
+          _buildSkippedExistingResult(
+            work: work,
+            libraryItemId: existing.itemIds.first,
+            sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+            refCodeHandlingSummary:
+                'HTML capture refs preserved in source; import skipped.',
+          ),
+        );
+        completed += 1;
+        continue;
+      }
+
+      try {
+        final sourceText = preview.extractedText?.trim() ?? '';
+        if (sourceText.isEmpty) {
+          results.add(
+            _buildSkippedNotImportableResult(
+              work: work,
+              libraryItemId: itemId,
+              sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+              reason: 'No extracted capture text was available.',
+            ),
+          );
+          completed += 1;
+          continue;
+        }
+
+        onProgress?.call(
+          PioneerImportProgress(
+            completedCount: completed,
+            totalCount: total,
+            workTitle: work.title,
+            stage: 'parsing',
+            message: '$progressPrefix Parsing ${work.title}',
+          ),
+        );
+        final parseResult = parseEgwCopiedRangeText(
+          sourceText,
+          workAbbreviation:
+              preview.detectedAbbreviation?.trim().isNotEmpty == true
+              ? preview.detectedAbbreviation!.trim()
+              : work.abbreviation,
+        );
+
+        onProgress?.call(
+          PioneerImportProgress(
+            completedCount: completed,
+            totalCount: total,
+            workTitle: work.title,
+            stage: 'writing',
+            message: '$progressPrefix Writing ${work.title}',
+          ),
+        );
+        final metaContributors = _readCaptureMetadataContributors(
+          preview.folderPath,
+        );
+        final result = await _writeCopiedRangeImportedWork(
+          db: db,
+          deviceId: deviceId,
+          work: work,
+          libraryItemId: itemId,
+          replaceCanonicalSiblings:
+              existingImportPolicy ==
+              PioneerExistingImportPolicy.overwriteExisting,
+          parseResult: parseResult,
+          sourceText: sourceText,
+          sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+          sourceType: 'egw_html_capture',
+          sourceSite: preview.metadata.sourceSite ?? 'egwwritings.org',
+          sourceUrl: p.relative(preview.htmlFiles.first),
+          sourceLabel: preview.folderName,
+          coverPath: _normalizeCaptureCoverPath(
+            preview.preferredCoverImagePath,
+          ),
+          relativePath: _buildHtmlCaptureRelativePath(
+            work,
+            preview.htmlFiles.first,
+          ),
+          contentType: 'text/html',
+          shouldContinue: shouldContinue,
+          contributors: metaContributors ?? _metadataContributors(preview),
+        );
+        results.add(result);
+      } catch (error, stackTrace) {
+        final stage = _failureStageFor(error);
+        debugPrint(
+          '[PioneerImport] Failed to import ${work.title} at $stage: $error',
+        );
+        debugPrintStack(stackTrace: stackTrace);
+        results.add(
+          _buildFailedResult(
+            work: work,
+            libraryItemId: itemId,
+            error: error,
+            stage: stage,
+            sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+            refCodeHandlingSummary:
+                'HTML capture refs were parsed from staged files.',
+            parsedSectionCount: error is PioneerImportDocumentTooSparseException
+                ? error.sectionsFound
+                : null,
+            parsedParagraphCount:
+                error is PioneerImportDocumentTooSparseException
+                ? error.paragraphCount
+                : null,
+          ),
+        );
+      }
+
+      completed += 1;
+    }
+
+    return PioneerImportBatchResult(workResults: results);
+  }
+
+  Future<PioneerImportWorkResult> _writeCopiedRangeImportedWork({
+    required Database db,
+    required String deviceId,
+    required PioneerSourceWork work,
+    String? libraryItemId,
+    bool replaceCanonicalSiblings = true,
+    required EgwCopiedRangeParseResult parseResult,
+    required String sourceText,
+    required PioneerImportSourceMethod sourceMethod,
+    String sourceType = 'egw_copied_range',
+    String sourceSite = 'egwwritings.org',
+    String? relativePath,
+    String contentType = 'text/plain',
+    String? sourceUrl,
+    String? sourceLabel,
+    String? coverPath,
+    PioneerImportShouldContinue? shouldContinue,
+    List<ImportContributorSpec>? contributors,
+  }) async {
+    final itemId = libraryItemId ?? work.copiedRangeLibraryItemId;
+    final now = _utcNow();
+    final document = parseResult.document;
+    final report = parseResult.report;
+    final sourceBytes = Uint8List.fromList(utf8.encode(sourceText));
+    final fileHash = sha256.convert(sourceBytes).toString();
+    final resolvedRelativePath =
+        relativePath ?? _buildCopiedRangeRelativePath(work);
+    final fileName = p.basename(resolvedRelativePath);
+    final existingItemRows = await db.query(
+      'library_items',
+      where: 'id = ?',
+      whereArgs: [itemId],
+      limit: 1,
+    );
+    final existingItem = existingItemRows.isEmpty
+        ? null
+        : existingItemRows.first;
+    final existingSourceType =
+        existingItem?['source_type']?.toString().trim().toLowerCase() ?? '';
+    final shouldCompareAgainstExistingCopiedRange =
+        sourceType == 'egw_copied_range' &&
+        existingSourceType == 'egw_copied_range';
+    final existingParagraphRows = shouldCompareAgainstExistingCopiedRange
+        ? await db.rawQuery(
+            '''
+            SELECT epub_href, COALESCE(MAX(paragraph_index), 0) AS max_paragraph_index
+            FROM library_text_blocks
+            WHERE library_item_id = ?
+            GROUP BY epub_href
+          ''',
+            [itemId],
+          )
+        : const <Map<String, Object?>>[];
+    final nextParagraphIndexByHref = <String, int>{};
+    for (final row in existingParagraphRows) {
+      final href = row['epub_href']?.toString().trim() ?? '';
+      if (href.isEmpty) continue;
+      nextParagraphIndexByHref[href] = _intValue(row, 'max_paragraph_index');
+    }
+    final existingRefRows = shouldCompareAgainstExistingCopiedRange
+        ? await db.query(
+            'elibrary_ref_index',
+            where: 'library_item_id = ?',
+            whereArgs: [itemId],
+          )
+        : const <Map<String, Object?>>[];
+    final existingRefByCode = <String, Map<String, Object?>>{};
+    for (final row in existingRefRows) {
+      final refCode = row['ref_code']?.toString().trim() ?? '';
+      if (refCode.isEmpty) continue;
+      existingRefByCode[refCode] = row;
+    }
+
+    final sectionRows = <Map<String, Object?>>[];
+    final paragraphRows = <Map<String, Object?>>[];
+    final refRows = <Map<String, Object?>>[];
+    final skippedRefs = <String>[];
+    final conflictRefs = <String>[];
+    final importedRefs = <String>[];
+    final seenRefTextByCode = <String, String>{};
+    final warnings = <String>[...report.warnings];
+    final pageParagraphCounts = <int, int>{};
+    const insertedLibraryItems = 1;
+    final currentParagraphIndexByHref = Map<String, int>.from(
+      nextParagraphIndexByHref,
+    );
+
+    for (final section in document.sections) {
+      if (shouldContinue != null && !shouldContinue()) {
+        return _buildSkippedNotImportableResult(
+          work: work,
+          libraryItemId: itemId,
+          sourceMethod: sourceMethod,
+          reason: 'Copied range import was cancelled.',
+        );
+      }
+
+      final sectionInfo = _copiedRangeSectionInfo(
+        work: work,
+        section: section,
+        fallbackIndex: sectionRows.length + 1,
+      );
+      if (sectionInfo == null) {
+        continue;
+      }
+      final href = sectionInfo.href;
+      final chapterNumber = sectionInfo.chapterNumber;
+      final navId = _copiedRangeNavigationItemId(
+        itemId: itemId,
+        chapterNumber: chapterNumber,
+        sectionTitle: section.title,
+      );
+      sectionRows.add(<String, Object?>{
+        'id': navId,
+        'library_item_id': itemId,
+        'parent_id': null,
+        'label': section.title,
+        'href': href,
+        'anchor_id': null,
+        'spine_index': chapterNumber,
+        'sort_order': chapterNumber,
+        'depth': 0,
+        'nav_type': 'toc',
+        'content_kind': 'chapter',
+        'is_front_matter': 0,
+        'is_body_start': sectionRows.isEmpty ? 1 : 0,
+        'body_order': chapterNumber,
+        'created_at': now,
+        'updated_at': now,
+        'deleted_at': null,
+        'device_id': deviceId,
+        'revision': 1,
+        'sync_status': 'pending',
+        'last_synced_at': null,
+        'change_id': null,
+      });
+
+      for (final paragraph in section.paragraphs) {
+        final ref = paragraph.ref?.trim() ?? '';
+        final paragraphText = paragraph.text.trim();
+        if (paragraphText.isEmpty) {
+          if (ref.isNotEmpty) {
+            warnings.add('Empty paragraph text for ref $ref');
+          }
+          continue;
+        }
+        if (ref.isEmpty) {
+          warnings.add(
+            'Paragraph without ref: ${_copiedRangeSnippet(paragraphText)}',
+          );
+          continue;
+        }
+        final seenText = seenRefTextByCode[ref];
+        if (seenText != null) {
+          if (seenText == paragraphText) {
+            skippedRefs.add(ref);
+          } else {
+            conflictRefs.add(ref);
+          }
+          continue;
+        }
+        seenRefTextByCode[ref] = paragraphText;
+
+        final existingRefRow = existingRefByCode[ref];
+        if (existingRefRow != null) {
+          final existingText =
+              existingRefRow['plain_text']?.toString().trim() ?? '';
+          if (existingText == paragraphText) {
+            skippedRefs.add(ref);
+            continue;
+          }
+          conflictRefs.add(ref);
+          continue;
+        }
+
+        final pageNumber = paragraph.page ?? 0;
+        final nextOnPage = (pageParagraphCounts[pageNumber] ?? 0) + 1;
+        pageParagraphCounts[pageNumber] = nextOnPage;
+        final nextParagraphIndex = (currentParagraphIndexByHref[href] ?? 0) + 1;
+        currentParagraphIndexByHref[href] = nextParagraphIndex;
+
+        paragraphRows.add(<String, Object?>{
+          'library_item_id': itemId,
+          'epub_href': href,
+          'spine_index': chapterNumber,
+          'paragraph_index': nextParagraphIndex,
+          'paragraph_on_section': nextParagraphIndex,
+          'section_title': section.title,
+          'plain_text': paragraphText,
+          'created_at': now,
+          'updated_at': now,
+        });
+        refRows.add(<String, Object?>{
+          'library_item_id': itemId,
+          'work_key': itemId,
+          'edition_key': null,
+          'edition_year': null,
+          'book_title': work.title,
+          'book_abbrev': work.abbreviation.trim().isNotEmpty
+              ? work.abbreviation.trim().toUpperCase()
+              : 'DAR',
+          'href': href,
+          'anchor_id': null,
+          'paragraph_index': nextParagraphIndex,
+          'page_number': pageNumber,
+          'paragraph_on_page': nextOnPage,
+          'ref_code': ref,
+          'stable_ref': ref,
+          'plain_text': paragraphText,
+          'text_hash': sha256.convert(utf8.encode(paragraphText)).toString(),
+          'ref_source': sourceMethod.label,
+          'created_at': now,
+          'updated_at': now,
+        });
+        importedRefs.add(ref);
+      }
+    }
+
+    final insertedParagraphCount = paragraphRows.length;
+    final sectionCount = sectionRows.length;
+    if (insertedParagraphCount == 0 && conflictRefs.isEmpty) {
+      return _buildSkippedExistingResult(
+        work: work,
+        libraryItemId: itemId,
+        sourceMethod: sourceMethod,
+        refCodeHandlingSummary:
+            'Copied range refs were already imported for ${work.abbreviation}.',
+      );
+    }
+
+    final finalIndexStatus = conflictRefs.isNotEmpty
+        ? 'partially_imported_needs_review'
+        : 'partially_imported';
+    final nextRevision = _intValue(existingItem, 'revision') + 1;
+    final resolvedContributors = contributors ?? _resolveContributors(work);
+    final authorDisplayString = resolvedContributors.length > 1
+        ? resolvedContributors.map((c) => c.name).join('; ')
+        : work.authorName;
+    final itemRow = <String, Object?>{
+      'id': itemId,
+      'title': work.title,
+      'author': authorDisplayString,
+      'file_name': fileName,
+      'relative_path': resolvedRelativePath,
+      'file_hash': fileHash,
+      'file_size': sourceBytes.length,
+      'modified_at': null,
+      'mime_type': contentType,
+      'file_format': 'html',
+      'folder_type': _folderType,
+      'library_role': _libraryRole,
+      'collection_name': _collectionName,
+      'source_site': sourceSite,
+      'source_url': sourceUrl?.trim().isNotEmpty == true
+          ? sourceUrl!.trim()
+          : sourceLabel?.trim().isNotEmpty == true
+          ? sourceLabel!.trim()
+          : 'EGW Writings copied range',
+      'source_type': sourceType,
+      'cover_path': coverPath,
+      'date_added': existingItem?['date_added'] ?? now,
+      'last_opened': existingItem?['last_opened'],
+      'indexed_at': now,
+      'index_status': finalIndexStatus,
+      'index_error': conflictRefs.isNotEmpty
+          ? 'Conflicting refs need review: ${conflictRefs.join(', ')}'
+          : null,
+      'epub_href': null,
+      'epub_cfi': null,
+      'anchor_id': null,
+      'spine_index': null,
+      'paragraph_index': null,
+      'is_missing': 0,
+      'created_at': existingItem?['created_at'] ?? now,
+      'updated_at': now,
+      'deleted_at': null,
+      'device_id': deviceId,
+      'revision': nextRevision,
+      'sync_status': 'pending',
+      'last_synced_at': null,
+      'change_id': null,
+    };
+
+    await db.transaction((txn) async {
+      if (replaceCanonicalSiblings) {
+        await _deleteCanonicalCapturedImportSiblingRows(
+          txn,
+          work: work,
+          keepItemId: itemId,
+        );
+      }
+      if (!shouldCompareAgainstExistingCopiedRange) {
+        await txn.delete(
+          'library_navigation_items',
+          where: 'library_item_id = ?',
+          whereArgs: [itemId],
+        );
+        await txn.delete(
+          'library_text_blocks',
+          where: 'library_item_id = ?',
+          whereArgs: [itemId],
+        );
+        await txn.delete(
+          'library_links',
+          where: 'library_item_id = ?',
+          whereArgs: [itemId],
+        );
+        await txn.delete(
+          'elibrary_ref_index',
+          where: 'library_item_id = ?',
+          whereArgs: [itemId],
+        );
+      }
+      await _upsertLibraryItem(txn, itemRow);
+      await _writeContributorRows(txn, itemId, resolvedContributors, now);
+      for (final navRow in sectionRows) {
+        await txn.insert(
+          'library_navigation_items',
+          navRow,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      for (final paragraphRow in paragraphRows) {
+        await txn.insert(
+          'library_text_blocks',
+          paragraphRow,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      for (final refRow in refRows) {
+        await txn.insert(
+          'elibrary_ref_index',
+          refRow,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
+
+    final importedRefCount = importedRefs.length;
+    final validationWarnings = <String>[
+      ...warnings,
+      if (report.paragraphsWithoutRef.isNotEmpty)
+        'Paragraphs without refs were skipped: ${report.paragraphsWithoutRef.length}',
+      if (report.emptyParagraphRefs.isNotEmpty)
+        'Empty paragraph refs detected: ${report.emptyParagraphRefs.join(', ')}',
+      if (report.duplicateRefs.isNotEmpty)
+        'Duplicate refs detected in source: ${report.duplicateRefs.join(', ')}',
+      if (conflictRefs.isNotEmpty)
+        'Conflicting refs need review: ${conflictRefs.join(', ')}',
+      if (skippedRefs.isNotEmpty)
+        'Already imported refs skipped: ${(skippedRefs.toSet().toList()..sort()).join(', ')}',
+    ];
+    final requiresManualVerification =
+        conflictRefs.isNotEmpty ||
+        report.paragraphsWithoutRef.isNotEmpty ||
+        report.emptyParagraphRefs.isNotEmpty ||
+        report.duplicateRefs.isNotEmpty;
+    final manualVerificationHint = conflictRefs.isNotEmpty
+        ? 'One or more refs already exist with different text and were not overwritten.'
+        : report.paragraphsWithoutRef.isNotEmpty
+        ? 'Some paragraphs did not end with a DAR ref and were skipped.'
+        : report.duplicateRefs.isNotEmpty
+        ? 'The pasted range contained duplicate refs and only the first matching text was kept.'
+        : null;
+
+    final status = insertedParagraphCount == 0 && conflictRefs.isNotEmpty
+        ? PioneerImportWorkStatus.failed
+        : PioneerImportWorkStatus.imported;
+    final stage = conflictRefs.isNotEmpty
+        ? 'completed-with-review'
+        : 'completed';
+    final detail = [
+      'Captured ${report.paragraphCount} paragraph${report.paragraphCount == 1 ? '' : 's'} from ${report.headingCount} chapter heading${report.headingCount == 1 ? '' : 's'}.',
+      if (report.firstRef != null) 'First captured ref: ${report.firstRef}',
+      if (report.lastRef != null) 'Last captured ref: ${report.lastRef}',
+      'Imported $importedRefCount ref${importedRefCount == 1 ? '' : 's'}.',
+      if (validationWarnings.isNotEmpty)
+        'Warnings: ${validationWarnings.join(' | ')}',
+    ].join(' ');
+
+    return PioneerImportWorkResult(
+      work: work,
+      status: status,
+      stage: stage,
+      sourceMethod: sourceMethod,
+      reason: insertedParagraphCount == 0 && conflictRefs.isNotEmpty
+          ? 'Copied range import conflicts need review.'
+          : conflictRefs.isNotEmpty
+          ? 'Imported copied EGW text with ref conflicts that need review.'
+          : 'Imported copied EGW text into eLibrary.db.',
+      libraryItemId: itemId,
+      sourceType: sourceType,
+      insertedLibraryItems: insertedLibraryItems,
+      insertedNavigationItems: sectionCount,
+      insertedTextBlocks: insertedParagraphCount,
+      skippedExisting: skippedRefs.isNotEmpty && conflictRefs.isEmpty,
+      refCodeHandlingSummary:
+          'Copied range refs preserved: ${importedRefs.length}/${report.paragraphCount}.',
+      detail: detail,
+      exceptionType: null,
+      httpStatusCode: null,
+      contentType: contentType,
+      downloadedByteCount: sourceBytes.length,
+      parsedSectionCount: sectionCount,
+      parsedParagraphCount: report.paragraphCount,
+      requiresManualVerification: requiresManualVerification,
+      manualVerificationHint: manualVerificationHint,
+      epubAvailable: work.epubAvailable,
+      epubValidated: false,
+      epubRejectedReason: null,
+      textCaptureAvailable: work.textCaptureAvailable,
+      preferredImportPreference:
+          PioneerSourcePathPreference.userSuppliedCleanedSource,
+      qualityValidationSummary: validationWarnings.isEmpty
+          ? null
+          : validationWarnings.join(' • '),
     );
   }
 
@@ -684,25 +2302,68 @@ class PioneerTextImportService {
     required Database db,
     required String deviceId,
     required PioneerSourceWork work,
+    String? libraryItemId,
+    bool replaceCanonicalSiblings = false,
     required PioneerImportDocument document,
     required Uint8List sourceBytes,
     required PioneerSourceDownloadResult downloadResult,
     required PioneerImportSourceMethod sourceMethod,
     required String refCodeHandlingSummary,
+    PioneerEpubQualityValidationResult? qualityValidation,
+    String? sourceUrl,
+    String? sourceType,
+    String? sourceSite,
+    String? relativePath,
+    String? coverPath,
+    String? indexStatus,
+    String? indexError,
+    List<ImportContributorSpec>? contributors,
   }) async {
-    final itemId = work.stableLibraryItemId;
+    final itemId = libraryItemId ?? work.stableLibraryItemId;
     final now = _utcNow();
     final fileHash = sha256.convert(sourceBytes).toString();
-    final relativePath = _buildVirtualRelativePath(work);
-    final fileName = p.basename(relativePath);
-    final sourceHost = _sourceHostFromUrl(work.sourceUrl);
+    final resolvedRelativePath =
+        relativePath ?? _buildVirtualRelativePath(work);
+    final fileName = p.basename(resolvedRelativePath);
+    final resolvedSourceUrl = sourceUrl?.trim().isNotEmpty == true
+        ? sourceUrl!.trim()
+        : work.launchUrl;
+    final sourceHost = sourceSite?.trim().isNotEmpty == true
+        ? sourceSite!.trim()
+        : _sourceSiteForImportMethod(sourceMethod) ??
+              _sourceHostFromUrl(resolvedSourceUrl);
+    final resolvedSourceType = sourceType?.trim().isNotEmpty == true
+        ? sourceType!.trim()
+        : _sourceTypeForImportMethod(sourceMethod);
+    final resolvedIndexStatus =
+        indexStatus ??
+        (document.sections.isEmpty ? 'indexed_empty' : 'indexed');
     final textBlockCount = document.sections.fold<int>(
       0,
       (sum, section) => sum + section.paragraphs.length,
     );
     final navigationCount = document.sections.length;
+    final firstMeaningfulSectionIndex = _firstMeaningfulSectionIndex(
+      document.sections,
+      bookTitle: work.title,
+    );
+    final generatedRefIndexRows =
+        _shouldGeneratePublicDomainReferenceIndex(work, document)
+        ? _generatePublicDomainReferenceIndexRows(
+            libraryItemId: itemId,
+            work: work,
+            document: document,
+          )
+        : const <Map<String, Object?>>[];
 
     await db.transaction((txn) async {
+      if (replaceCanonicalSiblings) {
+        await _deleteCanonicalCapturedImportRows(
+          txn,
+          work: work,
+          keepItemId: itemId,
+        );
+      }
       await txn.delete(
         'library_navigation_items',
         where: 'library_item_id = ?',
@@ -718,37 +2379,82 @@ class PioneerTextImportService {
         where: 'library_item_id = ?',
         whereArgs: [itemId],
       );
-      await txn.insert(
-        'library_items',
-        <String, Object?>{
-          'id': itemId,
-          'title': work.title,
-          'author': work.authorName,
-          'file_name': fileName,
-          'relative_path': relativePath,
-          'file_hash': fileHash,
-          'file_size': sourceBytes.length,
-          'modified_at': null,
-          'mime_type': 'application/epub+zip',
-          'file_format': 'epub',
-          'folder_type': _folderType,
-          'library_role': _libraryRole,
-          'collection_name': _collectionName,
-          'source_site': sourceHost,
-          'source_url': work.sourceUrl,
-          'source_type': work.sourceType,
-          'cover_path': null,
-          'date_added': now,
-          'last_opened': null,
-          'indexed_at': now,
-          'index_status': 'indexed',
-          'index_error': null,
-          'epub_href': null,
-          'epub_cfi': null,
+      await txn.delete(
+        'elibrary_ref_index',
+        where: 'library_item_id = ?',
+        whereArgs: [itemId],
+      );
+      final resolvedContributors = contributors ?? _resolveContributors(work);
+      final authorDisplayString = resolvedContributors.length > 1
+          ? resolvedContributors.map((c) => c.name).join('; ')
+          : work.authorName;
+      final itemRow = <String, Object?>{
+        'id': itemId,
+        'title': work.title,
+        'author': authorDisplayString,
+        'file_name': fileName,
+        'relative_path': resolvedRelativePath,
+        'file_hash': fileHash,
+        'file_size': sourceBytes.length,
+        'modified_at': null,
+        'mime_type': 'text/html',
+        'file_format': 'html',
+        'folder_type': _folderType,
+        'library_role': _libraryRole,
+        'collection_name': _collectionName,
+        'source_site': sourceHost,
+        'source_url': resolvedSourceUrl,
+        'source_type': resolvedSourceType,
+        'cover_path': coverPath,
+        'date_added': now,
+        'last_opened': null,
+        'indexed_at': now,
+        'index_status': resolvedIndexStatus,
+        'index_error': indexError,
+        'epub_href': null,
+        'epub_cfi': null,
+        'anchor_id': null,
+        'spine_index': null,
+        'paragraph_index': null,
+        'is_missing': 0,
+        'created_at': now,
+        'updated_at': now,
+        'deleted_at': null,
+        'device_id': deviceId,
+        'revision': 1,
+        'sync_status': 'pending',
+        'last_synced_at': null,
+        'change_id': null,
+      };
+      await _upsertLibraryItem(txn, itemRow);
+      await _writeContributorRows(txn, itemId, resolvedContributors, now);
+
+      for (
+        var sectionIndex = 0;
+        sectionIndex < document.sections.length;
+        sectionIndex++
+      ) {
+        final section = document.sections[sectionIndex];
+        final sectionNumber = sectionIndex + 1;
+        final isBodyStart = sectionIndex == firstMeaningfulSectionIndex;
+        final isFrontMatter =
+            firstMeaningfulSectionIndex != null &&
+            sectionIndex < firstMeaningfulSectionIndex;
+        await txn.insert('library_navigation_items', <String, Object?>{
+          'id': _navigationItemId(itemId, sectionNumber),
+          'library_item_id': itemId,
+          'parent_id': null,
+          'label': section.title,
+          'href': section.href,
           'anchor_id': null,
-          'spine_index': null,
-          'paragraph_index': null,
-          'is_missing': 0,
+          'spine_index': section.spineIndex,
+          'sort_order': sectionNumber,
+          'depth': 0,
+          'nav_type': 'toc',
+          'content_kind': 'chapter',
+          'is_front_matter': isFrontMatter ? 1 : 0,
+          'is_body_start': isBodyStart ? 1 : 0,
+          'body_order': sectionNumber,
           'created_at': now,
           'updated_at': now,
           'deleted_at': null,
@@ -757,64 +2463,36 @@ class PioneerTextImportService {
           'sync_status': 'pending',
           'last_synced_at': null,
           'change_id': null,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
 
-      for (var sectionIndex = 0; sectionIndex < document.sections.length; sectionIndex++) {
-        final section = document.sections[sectionIndex];
-        final sectionNumber = sectionIndex + 1;
-        await txn.insert(
-          'library_navigation_items',
-          <String, Object?>{
-            'id': _navigationItemId(itemId, sectionNumber),
-            'library_item_id': itemId,
-            'parent_id': null,
-            'label': section.title,
-            'href': section.href,
-            'anchor_id': null,
-            'spine_index': section.spineIndex,
-            'sort_order': sectionNumber,
-            'depth': 0,
-            'nav_type': 'toc',
-            'content_kind': 'chapter',
-            'is_front_matter': 0,
-            'is_body_start': sectionNumber == 1 ? 1 : 0,
-            'body_order': sectionNumber,
-            'created_at': now,
-            'updated_at': now,
-            'deleted_at': null,
-            'device_id': deviceId,
-            'revision': 1,
-            'sync_status': 'pending',
-            'last_synced_at': null,
-            'change_id': null,
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
-
-        for (var paragraphIndex = 0;
-            paragraphIndex < section.paragraphs.length;
-            paragraphIndex++) {
+        for (
+          var paragraphIndex = 0;
+          paragraphIndex < section.paragraphs.length;
+          paragraphIndex++
+        ) {
           final paragraphText = section.paragraphs[paragraphIndex].trim();
           if (paragraphText.isEmpty) continue;
           final bodyOrder = paragraphIndex + 1;
-          await txn.insert(
-            'library_text_blocks',
-            <String, Object?>{
-              'library_item_id': itemId,
-              'epub_href': section.href,
-              'spine_index': section.spineIndex,
-              'paragraph_index': bodyOrder,
-              'paragraph_on_section': bodyOrder,
-              'section_title': section.title,
-              'plain_text': paragraphText,
-              'created_at': now,
-              'updated_at': now,
-            },
-            conflictAlgorithm: ConflictAlgorithm.replace,
-          );
+          await txn.insert('library_text_blocks', <String, Object?>{
+            'library_item_id': itemId,
+            'epub_href': section.href,
+            'spine_index': section.spineIndex,
+            'paragraph_index': bodyOrder,
+            'paragraph_on_section': bodyOrder,
+            'section_title': section.title,
+            'plain_text': paragraphText,
+            'created_at': now,
+            'updated_at': now,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
         }
+      }
+
+      for (final row in generatedRefIndexRows) {
+        await txn.insert('elibrary_ref_index', {
+          ...row,
+          'created_at': now,
+          'updated_at': now,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
     });
 
@@ -825,7 +2503,7 @@ class PioneerTextImportService {
       sourceMethod: sourceMethod,
       reason: 'Imported into eLibrary.db.',
       libraryItemId: itemId,
-      sourceType: work.sourceType,
+      sourceType: resolvedSourceType,
       insertedLibraryItems: 1,
       insertedNavigationItems: navigationCount,
       insertedTextBlocks: textBlockCount,
@@ -841,6 +2519,20 @@ class PioneerTextImportService {
       parsedParagraphCount: textBlockCount,
       requiresManualVerification: false,
       manualVerificationHint: null,
+      epubAvailable: qualityValidation?.epubAvailable ?? work.epubAvailable,
+      epubValidated:
+          sourceMethod == PioneerImportSourceMethod.userVerifiedAutomatedCapture
+          ? false
+          : qualityValidation?.isValid ?? false,
+      epubRejectedReason: qualityValidation?.isValid == false
+          ? qualityValidation?.reason
+          : null,
+      textCaptureAvailable:
+          qualityValidation?.textCaptureAvailable ?? work.textCaptureAvailable,
+      preferredImportPreference:
+          qualityValidation?.preferredImportPreference ??
+          _preferredImportPreferenceForSourceMethod(sourceMethod),
+      qualityValidationSummary: qualityValidation?.summaryText,
     );
   }
 
@@ -891,6 +2583,239 @@ class PioneerTextImportService {
     );
   }
 
+  Future<PioneerExistingCapturedImportSummary>
+  _existingCanonicalCapturedImportSummary(
+    Database db,
+    PioneerSourceWork work,
+  ) async {
+    final itemIds = _canonicalCapturedImportItemIds(work);
+    final placeholders = List<String>.filled(itemIds.length, '?').join(', ');
+    final itemRows = await db.rawQuery('''
+      SELECT id, source_type, index_status
+      FROM library_items
+      WHERE id IN ($placeholders) AND deleted_at IS NULL
+      ORDER BY id
+      ''', itemIds);
+    if (itemRows.isEmpty) {
+      return const PioneerExistingCapturedImportSummary(
+        itemIds: <String>[],
+        textBlockCount: 0,
+        navigationItemCount: 0,
+        refIndexCount: 0,
+        sourceTypes: <String>[],
+        indexStatuses: <String>[],
+        hasExistingImport: false,
+      );
+    }
+
+    final existingIds = itemRows
+        .map((row) => row['id']?.toString().trim() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toList(growable: false);
+    final existingPlaceholders = List<String>.filled(
+      existingIds.length,
+      '?',
+    ).join(', ');
+    final textBlockCount = _firstCount(
+      await db.rawQuery('''
+        SELECT COUNT(*) AS cnt
+        FROM library_text_blocks
+        WHERE library_item_id IN ($existingPlaceholders)
+        ''', existingIds),
+    );
+    final navCount = _firstCount(
+      await db.rawQuery('''
+        SELECT COUNT(*) AS cnt
+        FROM library_navigation_items
+        WHERE library_item_id IN ($existingPlaceholders) AND deleted_at IS NULL
+        ''', existingIds),
+    );
+    final refCount = _firstCount(
+      await db.rawQuery('''
+        SELECT COUNT(*) AS cnt
+        FROM elibrary_ref_index
+        WHERE library_item_id IN ($existingPlaceholders)
+        ''', existingIds),
+    );
+
+    return PioneerExistingCapturedImportSummary(
+      itemIds: List<String>.unmodifiable(existingIds),
+      textBlockCount: textBlockCount,
+      navigationItemCount: navCount,
+      refIndexCount: refCount,
+      sourceTypes: List<String>.unmodifiable(
+        itemRows
+            .map((row) => row['source_type']?.toString().trim() ?? '')
+            .where((value) => value.isNotEmpty),
+      ),
+      indexStatuses: List<String>.unmodifiable(
+        itemRows
+            .map((row) => row['index_status']?.toString().trim() ?? '')
+            .where((value) => value.isNotEmpty),
+      ),
+      hasExistingImport: true,
+    );
+  }
+
+  Future<void> _deleteCanonicalCapturedImportRows(
+    DatabaseExecutor txn, {
+    required PioneerSourceWork work,
+    required String keepItemId,
+  }) async {
+    for (final itemId in _canonicalCapturedImportItemIds(work)) {
+      await _deleteImportedWorkRows(txn, itemId);
+      if (itemId != keepItemId) {
+        await _softDeleteLibraryItem(txn, itemId);
+      }
+    }
+  }
+
+  Future<void> _deleteCanonicalCapturedImportSiblingRows(
+    DatabaseExecutor txn, {
+    required PioneerSourceWork work,
+    required String keepItemId,
+  }) async {
+    for (final itemId in _canonicalCapturedImportItemIds(work)) {
+      if (itemId == keepItemId) continue;
+      await _deleteImportedWorkRows(txn, itemId);
+      await _softDeleteLibraryItem(txn, itemId);
+    }
+  }
+
+  Future<void> _deleteImportedWorkRows(
+    DatabaseExecutor txn,
+    String libraryItemId,
+  ) async {
+    await txn.delete(
+      'library_navigation_items',
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+    );
+    await txn.delete(
+      'library_text_blocks',
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+    );
+    await txn.delete(
+      'library_links',
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+    );
+    await txn.delete(
+      'elibrary_ref_index',
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+    );
+  }
+
+  Future<void> _softDeleteLibraryItem(
+    DatabaseExecutor txn,
+    String libraryItemId,
+  ) async {
+    final deletedAt = _utcNow();
+    await txn.update(
+      'library_items',
+      <String, Object?>{
+        'deleted_at': deletedAt,
+        'updated_at': deletedAt,
+        'sync_status': 'pending',
+      },
+      where: 'id = ?',
+      whereArgs: [libraryItemId],
+    );
+  }
+
+  /// Deletes all imported data for [work] and hard-deletes the library_items
+  /// row so the catalog treats it as uninstalled. Temporary dev utility.
+  Future<void> hardResetWork(PioneerSourceWork work) async {
+    final db = await ELibraryDatabase.instance.database;
+    await db.transaction((txn) async {
+      for (final itemId in _canonicalCapturedImportItemIds(work)) {
+        await _deleteImportedWorkRows(txn, itemId);
+        await txn.delete('library_items', where: 'id = ?', whereArgs: [itemId]);
+      }
+      // Also nuke the stable item in case it was written directly.
+      await _deleteImportedWorkRows(txn, work.stableLibraryItemId);
+      await txn.delete(
+        'library_items',
+        where: 'id = ?',
+        whereArgs: [work.stableLibraryItemId],
+      );
+    });
+  }
+
+  Future<void> _upsertLibraryItem(
+    DatabaseExecutor txn,
+    Map<String, Object?> row,
+  ) async {
+    final id = row['id']?.toString();
+    if (id == null || id.trim().isEmpty) {
+      throw ArgumentError('library_items row requires a non-empty id');
+    }
+    final updated = await txn.update(
+      'library_items',
+      row,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (updated == 0) {
+      await txn.insert('library_items', row);
+    }
+  }
+
+  /// Returns known contributors for multi-author works, or a single-entry list
+  /// derived from [work.authorName] for all other works.
+  List<ImportContributorSpec> _resolveContributors(PioneerSourceWork work) {
+    // Lessons on Faith: joint work by A. T. Jones and E. J. Waggoner.
+    if (work.authorId == 'at_jones' && work.id == 'lessons_on_faith') {
+      return _kLofContributors;
+    }
+    return [
+      ImportContributorSpec(
+        name: work.authorName,
+        role: 'author',
+        sortOrder: 1,
+        isPrimary: true,
+      ),
+    ];
+  }
+
+  Future<void> _writeContributorRows(
+    DatabaseExecutor txn,
+    String itemId,
+    List<ImportContributorSpec> specs,
+    String now,
+  ) async {
+    if (specs.isEmpty) return;
+    // Delete and replace contributor links for this item.
+    await txn.delete(
+      'library_item_contributors',
+      where: 'library_item_id = ?',
+      whereArgs: [itemId],
+    );
+    for (final spec in specs) {
+      if (spec.name.trim().isEmpty) continue;
+      final contributor = spec.toContributor();
+      await txn.insert(
+        'library_contributors',
+        contributor.toRow(now),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      final link = LibraryItemContributor(
+        libraryItemId: itemId,
+        contributor: contributor,
+        role: spec.role,
+        sortOrder: spec.sortOrder,
+        isPrimary: spec.isPrimary,
+      );
+      await txn.insert(
+        'library_item_contributors',
+        link.toRow(now),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+  }
+
   String _buildVirtualRelativePath(PioneerSourceWork work) {
     final authorSegment = _slug(work.authorName);
     final fileStem = work.abbreviation.trim().isNotEmpty
@@ -899,8 +2824,51 @@ class PioneerTextImportService {
     return p.join(
       _virtualRoot,
       authorSegment.isEmpty ? 'unknown_author' : authorSegment,
-      '$fileStem.epub',
+      '$fileStem.html',
     );
+  }
+
+  String _buildCopiedRangeRelativePath(PioneerSourceWork work) {
+    final authorSegment = _slug(work.authorName);
+    final fileStem = work.abbreviation.trim().isNotEmpty
+        ? work.abbreviation.trim()
+        : _slug(work.title);
+    return p.join(
+      _virtualRoot,
+      authorSegment.isEmpty ? 'unknown_author' : authorSegment,
+      'copied_range',
+      '$fileStem.copied-range.html',
+    );
+  }
+
+  String _buildHtmlCaptureRelativePath(
+    PioneerSourceWork work,
+    String htmlFilePath,
+  ) {
+    final authorSegment = _slug(work.authorName);
+    final fileStem = work.abbreviation.trim().isNotEmpty
+        ? work.abbreviation.trim()
+        : _slug(work.title);
+    final fileName = p.basename(htmlFilePath).trim().isEmpty
+        ? 'capture.html'
+        : p.basename(htmlFilePath);
+    return p.join(
+      _virtualRoot,
+      authorSegment.isEmpty ? 'unknown_author' : authorSegment,
+      fileStem.isEmpty ? _slug(work.title) : fileStem,
+      fileName,
+    );
+  }
+
+  String? _normalizeCaptureCoverPath(String? coverPath) {
+    final value = coverPath?.trim() ?? '';
+    if (value.isEmpty) return null;
+    if (value.startsWith('assets/')) return value;
+    if (p.isAbsolute(value)) {
+      final relative = p.relative(value, from: Directory.current.path);
+      return relative.startsWith('..') ? value : relative;
+    }
+    return value;
   }
 
   String _navigationItemId(String libraryItemId, int sectionNumber) {
@@ -920,10 +2888,74 @@ class PioneerTextImportService {
   String _utcNow() {
     final now = DateTime.now().toUtc();
     final iso = now.toIso8601String();
-    return iso.contains('.')
-        ? iso.replaceFirst(RegExp(r'\.\d+Z$'), 'Z')
-        : iso;
+    return iso.contains('.') ? iso.replaceFirst(RegExp(r'\.\d+Z$'), 'Z') : iso;
   }
+}
+
+const List<ImportContributorSpec> _kLofContributors = [
+  ImportContributorSpec(
+    name: 'A. T. Jones',
+    fullName: 'Alonzo Trevier Jones',
+    role: 'author',
+    sortOrder: 1,
+    isPrimary: true,
+  ),
+  ImportContributorSpec(
+    name: 'E. J. Waggoner',
+    fullName: 'Ellet Joseph Waggoner',
+    role: 'author',
+    sortOrder: 2,
+    isPrimary: false,
+  ),
+];
+
+/// Reads an optional metadata.json file from a capture folder and returns
+/// the [ImportContributorSpec] list, or null if the file is absent or invalid.
+List<ImportContributorSpec>? _readCaptureMetadataContributors(
+  String folderPath,
+) {
+  try {
+    final metaFile = File(p.join(folderPath, 'metadata.json'));
+    if (!metaFile.existsSync()) return null;
+    final metadata = PioneerCaptureFolderMetadata.fromFile(
+      metaFile,
+      folderPath: folderPath,
+    );
+    final specs = metadata.contributors
+        .map(
+          (item) => ImportContributorSpec(
+            name: item.name,
+            fullName: item.fullName,
+            role: item.role,
+            sortOrder: item.sortOrder,
+            isPrimary: item.isPrimary,
+          ),
+        )
+        .where((spec) => spec.name.trim().isNotEmpty)
+        .toList(growable: false);
+    return specs.isEmpty ? null : specs;
+  } catch (_) {
+    return null;
+  }
+}
+
+List<ImportContributorSpec>? _metadataContributors(
+  PioneerHtmlCaptureFolderPreview preview,
+) {
+  if (preview.metadata.contributors.isEmpty) return null;
+  final specs = preview.metadata.contributors
+      .map(
+        (item) => ImportContributorSpec(
+          name: item.name,
+          fullName: item.fullName,
+          role: item.role,
+          sortOrder: item.sortOrder,
+          isPrimary: item.isPrimary,
+        ),
+      )
+      .where((spec) => spec.name.trim().isNotEmpty)
+      .toList(growable: false);
+  return specs.isEmpty ? null : specs;
 }
 
 int _firstCount(List<Map<String, Object?>> rows) {
@@ -931,11 +2963,35 @@ int _firstCount(List<Map<String, Object?>> rows) {
   return (rows.first['cnt'] as num?)?.toInt() ?? 0;
 }
 
+List<String> _canonicalCapturedImportItemIds(PioneerSourceWork work) {
+  return <String>{
+    work.stableLibraryItemId,
+    work.copiedRangeLibraryItemId,
+  }.where((id) => id.trim().isNotEmpty).toList(growable: false);
+}
+
+String _newCopyLibraryItemId(PioneerSourceWork work) {
+  final timestamp = DateTime.now().toUtc().toIso8601String().replaceAll(
+    RegExp(r'[^0-9]'),
+    '',
+  );
+  return '${work.stableLibraryItemId}_copy_$timestamp';
+}
+
 String _failureStageFor(Object error) {
   if (error is PioneerSourceDownloadException) {
     return 'downloading';
   }
+  if (error is PioneerZipExtractionException) {
+    return 'extracting';
+  }
   if (error is PioneerImportDocumentTooSparseException) {
+    return 'parsing';
+  }
+  if (error is PioneerImportQualityException) {
+    return 'validating';
+  }
+  if (error is UnsupportedError) {
     return 'parsing';
   }
   return 'writing';
@@ -954,7 +3010,7 @@ PioneerImportWorkResult _buildSkippedNotImportableResult({
     sourceMethod: sourceMethod,
     reason: reason ?? 'Source needed or unsupported source type.',
     libraryItemId: libraryItemId,
-    sourceType: work.sourceType,
+    sourceType: _sourceTypeForImportMethod(sourceMethod),
     insertedLibraryItems: 0,
     insertedNavigationItems: 0,
     insertedTextBlocks: 0,
@@ -984,13 +3040,14 @@ PioneerImportWorkResult _buildSkippedUnsupportedSourceResult({
     sourceMethod: sourceMethod,
     reason: 'Unsupported Pioneer source type: ${work.sourceType ?? 'unknown'}.',
     libraryItemId: libraryItemId,
-    sourceType: work.sourceType,
+    sourceType: _sourceTypeForImportMethod(sourceMethod),
     insertedLibraryItems: 0,
     insertedNavigationItems: 0,
     insertedTextBlocks: 0,
     skippedExisting: false,
     refCodeHandlingSummary: _defaultRefCodeHandlingSummary,
-    detail: 'Only EPUB and HTML Pioneer sources can be imported right now.',
+    detail:
+        'Only text/browser capture Pioneer sources can be imported right now.',
     exceptionType: null,
     httpStatusCode: null,
     contentType: null,
@@ -1013,15 +3070,15 @@ PioneerImportWorkResult _buildSkippedExistingResult({
     status: PioneerImportWorkStatus.skippedExisting,
     stage: 'existing',
     sourceMethod: sourceMethod,
-    reason: 'Already imported in eLibrary.db.',
+    reason: 'Already installed.',
     libraryItemId: libraryItemId,
-    sourceType: work.sourceType,
+    sourceType: _sourceTypeForImportMethod(sourceMethod),
     insertedLibraryItems: 0,
     insertedNavigationItems: 0,
     insertedTextBlocks: 0,
     skippedExisting: true,
     refCodeHandlingSummary: refCodeHandlingSummary,
-    detail: 'A complete copy already exists in eLibrary.db.',
+    detail: 'A matching work already exists in eLibrary.db.',
     exceptionType: null,
     httpStatusCode: null,
     contentType: null,
@@ -1049,10 +3106,19 @@ PioneerImportWorkResult _buildFailedResult({
 }) {
   String reason;
   if (error is PioneerSourceDownloadException) {
-    reason = 'Download failed: ${error.message}'
+    reason =
+        'Download failed: ${error.message}'
         '${error.httpStatusCode == null ? '' : ' (HTTP ${error.httpStatusCode})'}';
+  } else if (error is PioneerZipExtractionException) {
+    reason =
+        'ZIP extraction failed: ${error.message}'
+        '${error.zipEntry?.isNotEmpty == true ? ' (entry: ${error.zipEntry})' : ''}';
   } else if (error is PioneerImportDocumentTooSparseException) {
     reason = 'Parse failed: ${error.message}';
+  } else if (error is PioneerImportQualityException) {
+    reason = error.result.reason;
+  } else if (error is UnsupportedError) {
+    reason = 'Parse failed: ${error.message ?? error.toString()}';
   } else {
     reason = '$stage failed: ${error.toString()}';
   }
@@ -1068,7 +3134,7 @@ PioneerImportWorkResult _buildFailedResult({
     sourceMethod: sourceMethod,
     reason: reason,
     libraryItemId: libraryItemId,
-    sourceType: work.sourceType,
+    sourceType: _sourceTypeForImportMethod(sourceMethod),
     insertedLibraryItems: 0,
     insertedNavigationItems: 0,
     insertedTextBlocks: 0,
@@ -1076,17 +3142,36 @@ PioneerImportWorkResult _buildFailedResult({
     refCodeHandlingSummary: refCodeHandlingSummary,
     detail: error.toString(),
     exceptionType: error.runtimeType.toString(),
-    httpStatusCode: httpStatusCode ??
+    httpStatusCode:
+        httpStatusCode ??
         (error is PioneerSourceDownloadException ? error.httpStatusCode : null),
-    contentType: contentType ??
+    contentType:
+        contentType ??
         (error is PioneerSourceDownloadException ? error.contentType : null),
-    downloadedByteCount: downloadedByteCount ??
+    downloadedByteCount:
+        downloadedByteCount ??
         (error is PioneerSourceDownloadException ? error.byteCount : null),
     parsedSectionCount: parsedSectionCount,
     parsedParagraphCount: parsedParagraphCount,
     requiresManualVerification: requiresManualVerification,
     manualVerificationHint: requiresManualVerification
         ? 'This source looks like it needs manual verification or a browser challenge. Open the source URL in a browser, complete any prompt, and retry the import.'
+        : null,
+    epubAvailable: error is PioneerImportQualityException
+        ? error.result.epubAvailable
+        : false,
+    epubValidated: false,
+    epubRejectedReason: error is PioneerImportQualityException
+        ? error.result.reason
+        : null,
+    textCaptureAvailable: error is PioneerImportQualityException
+        ? error.result.textCaptureAvailable
+        : false,
+    preferredImportPreference: error is PioneerImportQualityException
+        ? error.result.preferredImportPreference
+        : PioneerSourcePathPreference.sourceNeeded,
+    qualityValidationSummary: error is PioneerImportQualityException
+        ? error.result.summaryText
         : null,
   );
 }
@@ -1126,18 +3211,683 @@ Future<PioneerSourceDownloadResult> _downloadSourceBytes(Uri uri) async {
   }
 }
 
+String? _candidateSourceUrl(
+  PioneerSourceWork work,
+  PioneerSourceCandidate? candidate,
+) {
+  final candidateUrl = candidate?.url?.trim();
+  if (candidateUrl?.isNotEmpty == true) {
+    return candidateUrl;
+  }
+  return work.sourceUrl?.trim().isNotEmpty == true
+      ? work.sourceUrl!.trim()
+      : null;
+}
+
+Future<Uint8List> _resolveImportedSourceBytes({
+  required PioneerSourceWork work,
+  required PioneerSourceCandidate sourceCandidate,
+  required PioneerSourceDownloadResult downloadResult,
+}) async {
+  if (!_shouldExtractEpubFromZip(sourceCandidate, downloadResult)) {
+    return downloadResult.bytes;
+  }
+
+  final extracted = _extractBestEpubFromZipCollection(
+    work: work,
+    zipBytes: downloadResult.bytes,
+    preferredZipEntry: sourceCandidate.zipEntry,
+  );
+  if (extracted != null) return extracted;
+  final entryHint = sourceCandidate.zipEntry?.trim();
+  throw PioneerZipExtractionException(
+    message: entryHint?.isNotEmpty == true
+        ? 'ZIP entry not found in the downloaded archive.'
+        : 'No matching EPUB entry found in the downloaded ZIP archive.',
+    zipEntry: entryHint,
+  );
+}
+
+bool _shouldExtractEpubFromZip(
+  PioneerSourceCandidate sourceCandidate,
+  PioneerSourceDownloadResult downloadResult,
+) {
+  final normalizedSourceType = sourceCandidate.sourceType.trim().toLowerCase();
+  // epubZipEntry always requires ZIP extraction.
+  if (normalizedSourceType == 'epubzipentry') return true;
+  if (normalizedSourceType != 'epub') return false;
+  // For a direct epub sourceType: extract only when the URL is a .zip collection.
+  final candidateUrl = sourceCandidate.url?.trim().toLowerCase() ?? '';
+  if (candidateUrl.endsWith('.zip')) return true;
+  // application/epub+zip is a direct EPUB file, not a collection ZIP — do not extract.
+  final contentType = downloadResult.contentType?.toLowerCase() ?? '';
+  return contentType == 'application/zip' ||
+      contentType.startsWith('application/zip;');
+}
+
+Uint8List? _extractBestEpubFromZipCollection({
+  required PioneerSourceWork work,
+  required Uint8List zipBytes,
+  String? preferredZipEntry,
+}) {
+  Archive archive;
+  try {
+    archive = ZipDecoder().decodeBytes(zipBytes, verify: false);
+  } catch (_) {
+    return null;
+  }
+
+  final explicitEntry = preferredZipEntry?.trim();
+  if (explicitEntry != null && explicitEntry.isNotEmpty) {
+    final directEntry = _findArchiveFileByNormalizedName(
+      archive,
+      explicitEntry,
+    );
+    if (directEntry != null && directEntry.isFile) {
+      return Uint8List.fromList(directEntry.content as List<int>);
+    }
+    return null;
+  }
+
+  final epubEntries = archive.files
+      .where((entry) {
+        final name = p.normalize(entry.name).toLowerCase();
+        return entry.isFile && name.endsWith('.epub');
+      })
+      .toList(growable: false);
+  if (epubEntries.isEmpty) return null;
+  if (epubEntries.length == 1) {
+    return Uint8List.fromList(epubEntries.single.content as List<int>);
+  }
+
+  final scoredEntries =
+      epubEntries
+          .map((entry) {
+            final name = p.normalize(entry.name);
+            return MapEntry(name, _scoreEpubEntryForWork(name, work));
+          })
+          .toList(growable: false)
+        ..sort((left, right) {
+          final scoreCompare = right.value.compareTo(left.value);
+          if (scoreCompare != 0) return scoreCompare;
+          return left.key.compareTo(right.key);
+        });
+
+  final bestName = scoredEntries.first.key;
+  final bestEntry = archive.findFile(bestName);
+  if (bestEntry == null || !bestEntry.isFile) return null;
+  return Uint8List.fromList(bestEntry.content as List<int>);
+}
+
+ArchiveFile? _findArchiveFileByNormalizedName(
+  Archive archive,
+  String normalizedName,
+) {
+  final target = _normalizeEpubPath(normalizedName).toLowerCase();
+  for (final entry in archive.files) {
+    final entryName = _normalizeEpubPath(entry.name).toLowerCase();
+    if (entryName == target) {
+      return entry;
+    }
+    if (p.basename(entryName) == p.basename(target)) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+int _scoreEpubEntryForWork(String entryName, PioneerSourceWork work) {
+  final normalizedEntry = _normalizeText(entryName);
+  final normalizedTitle = _normalizeText(work.title);
+  final normalizedAuthor = _normalizeText(work.authorName);
+  final normalizedAbbreviation = _normalizeText(work.abbreviation);
+  var score = 0;
+
+  if (normalizedTitle.isNotEmpty && normalizedEntry.contains(normalizedTitle)) {
+    score += 100;
+  }
+  if (normalizedAbbreviation.isNotEmpty &&
+      normalizedEntry.contains(normalizedAbbreviation)) {
+    score += 40;
+  }
+  if (normalizedAuthor.isNotEmpty &&
+      normalizedEntry.contains(normalizedAuthor)) {
+    score += 25;
+  }
+
+  final titleWords = normalizedTitle
+      .split(' ')
+      .where((word) => word.length > 3)
+      .take(8)
+      .toList(growable: false);
+  for (final word in titleWords) {
+    if (normalizedEntry.contains(word)) {
+      score += 8;
+    }
+  }
+
+  final authorWords = normalizedAuthor
+      .split(' ')
+      .where((word) => word.length > 3)
+      .take(6)
+      .toList(growable: false);
+  for (final word in authorWords) {
+    if (normalizedEntry.contains(word)) {
+      score += 5;
+    }
+  }
+
+  return score;
+}
+
+int? _firstMeaningfulSectionIndex(
+  List<PioneerImportSection> sections, {
+  required String bookTitle,
+}) {
+  for (var index = 0; index < sections.length; index++) {
+    final section = sections[index];
+    if (libraryIsMeaningfulReadingSection(
+      title: section.title,
+      href: section.href,
+      paragraphs: section.paragraphs,
+      bookTitle: bookTitle,
+    )) {
+      return index;
+    }
+  }
+  return sections.isEmpty ? null : 0;
+}
+
+PioneerEpubQualityValidationResult _validatePioneerEpubImportQuality({
+  required PioneerSourceWork work,
+  required PioneerImportDocument document,
+}) {
+  final textBlockCount = document.sections.fold<int>(
+    0,
+    (sum, section) => sum + section.paragraphs.length,
+  );
+  final meaningfulSections = document.sections
+      .where(
+        (section) =>
+            section.paragraphs.any((p) => p.trim().isNotEmpty) &&
+            !PioneerPublicDomainExtractionProfile.isSectionFrontMatter(
+              title: section.title,
+              rawText: section.paragraphs.join(' '),
+            ),
+      )
+      .toList(growable: false);
+  final meaningfulTextBlockCount = meaningfulSections.fold<int>(
+    0,
+    (sum, section) =>
+        sum + section.paragraphs.where((p) => p.trim().isNotEmpty).length,
+  );
+  final navigationCount = document.sections.length;
+  final meaningfulNavigationCount = meaningfulSections.length;
+  final firstBodySectionTitle = meaningfulSections.isEmpty
+      ? null
+      : meaningfulSections.first.title.trim();
+  final epubAvailable = work.epubAvailable;
+  final textCaptureAvailable = work.textCaptureAvailable;
+
+  if (textBlockCount <= 0) {
+    final preference = textCaptureAvailable
+        ? PioneerSourcePathPreference.textCapture
+        : PioneerSourcePathPreference.sourceNeeded;
+    return PioneerEpubQualityValidationResult(
+      isValid: false,
+      reason: 'EPUB parsed but failed quality validation: no body text found.',
+      detail:
+          'The parser did not produce any readable text blocks for ${work.title}.',
+      textBlockCount: textBlockCount,
+      meaningfulTextBlockCount: meaningfulTextBlockCount,
+      navigationCount: navigationCount,
+      meaningfulNavigationCount: meaningfulNavigationCount,
+      firstBodySectionTitle: firstBodySectionTitle,
+      epubAvailable: epubAvailable,
+      textCaptureAvailable: textCaptureAvailable,
+      preferredImportPreference: preference,
+    );
+  }
+
+  if (navigationCount <= 0) {
+    final preference = textCaptureAvailable
+        ? PioneerSourcePathPreference.textCapture
+        : PioneerSourcePathPreference.sourceNeeded;
+    return PioneerEpubQualityValidationResult(
+      isValid: false,
+      reason: 'EPUB parsed but failed quality validation: no navigation found.',
+      detail:
+          'The EPUB parser did not produce any navigation sections for ${work.title}.',
+      textBlockCount: textBlockCount,
+      meaningfulTextBlockCount: meaningfulTextBlockCount,
+      navigationCount: navigationCount,
+      meaningfulNavigationCount: meaningfulNavigationCount,
+      firstBodySectionTitle: firstBodySectionTitle,
+      epubAvailable: epubAvailable,
+      textCaptureAvailable: textCaptureAvailable,
+      preferredImportPreference: preference,
+    );
+  }
+
+  if (meaningfulNavigationCount <= 0) {
+    final preference = textCaptureAvailable
+        ? PioneerSourcePathPreference.textCapture
+        : PioneerSourcePathPreference.sourceNeeded;
+    return PioneerEpubQualityValidationResult(
+      isValid: false,
+      reason:
+          'EPUB parsed but failed quality validation: no body text attached to navigation.',
+      detail:
+          'Navigation entries exist, but none of them carry readable body text.',
+      textBlockCount: textBlockCount,
+      meaningfulTextBlockCount: meaningfulTextBlockCount,
+      navigationCount: navigationCount,
+      meaningfulNavigationCount: meaningfulNavigationCount,
+      firstBodySectionTitle: firstBodySectionTitle,
+      epubAvailable: epubAvailable,
+      textCaptureAvailable: textCaptureAvailable,
+      preferredImportPreference: preference,
+    );
+  }
+
+  if (meaningfulTextBlockCount < 1) {
+    final preference = textCaptureAvailable
+        ? PioneerSourcePathPreference.textCapture
+        : PioneerSourcePathPreference.sourceNeeded;
+    return PioneerEpubQualityValidationResult(
+      isValid: false,
+      reason:
+          'EPUB parsed but failed quality validation: not enough body text.',
+      detail:
+          'Only $meaningfulTextBlockCount readable body block${meaningfulTextBlockCount == 1 ? '' : 's'} were found.',
+      textBlockCount: textBlockCount,
+      meaningfulTextBlockCount: meaningfulTextBlockCount,
+      navigationCount: navigationCount,
+      meaningfulNavigationCount: meaningfulNavigationCount,
+      firstBodySectionTitle: firstBodySectionTitle,
+      epubAvailable: epubAvailable,
+      textCaptureAvailable: textCaptureAvailable,
+      preferredImportPreference: preference,
+    );
+  }
+
+  final badFirstSection = firstBodySectionTitle == null
+      ? false
+      : PioneerPublicDomainExtractionProfile.isSectionFrontMatter(
+          title: firstBodySectionTitle,
+          rawText: meaningfulSections.first.paragraphs.join(' '),
+        );
+  if (badFirstSection) {
+    final preference = textCaptureAvailable
+        ? PioneerSourcePathPreference.textCapture
+        : PioneerSourcePathPreference.sourceNeeded;
+    return PioneerEpubQualityValidationResult(
+      isValid: false,
+      reason:
+          'EPUB parsed but failed quality validation: first body section is front matter.',
+      detail:
+          'The first readable section still looks like copyright or source metadata.',
+      textBlockCount: textBlockCount,
+      meaningfulTextBlockCount: meaningfulTextBlockCount,
+      navigationCount: navigationCount,
+      meaningfulNavigationCount: meaningfulNavigationCount,
+      firstBodySectionTitle: firstBodySectionTitle,
+      epubAvailable: epubAvailable,
+      textCaptureAvailable: textCaptureAvailable,
+      preferredImportPreference: preference,
+    );
+  }
+
+  final expectedPhrase = _expectedBodyPhraseForWork(work);
+  if (expectedPhrase != null && expectedPhrase.trim().isNotEmpty) {
+    final bodyText = meaningfulSections
+        .map((section) => [section.title, ...section.paragraphs].join(' '))
+        .join(' ')
+        .toLowerCase();
+    if (!bodyText.contains(expectedPhrase.toLowerCase())) {
+      final preference = textCaptureAvailable
+          ? PioneerSourcePathPreference.textCapture
+          : PioneerSourcePathPreference.sourceNeeded;
+      return PioneerEpubQualityValidationResult(
+        isValid: false,
+        reason:
+            'EPUB parsed but failed quality validation: expected body phrase not found.',
+        detail:
+            'Expected to find "$expectedPhrase" in the readable body, but it was absent.',
+        textBlockCount: textBlockCount,
+        meaningfulTextBlockCount: meaningfulTextBlockCount,
+        navigationCount: navigationCount,
+        meaningfulNavigationCount: meaningfulNavigationCount,
+        firstBodySectionTitle: firstBodySectionTitle,
+        epubAvailable: epubAvailable,
+        textCaptureAvailable: textCaptureAvailable,
+        preferredImportPreference: preference,
+        expectedBodyPhrase: expectedPhrase,
+      );
+    }
+  }
+
+  return PioneerEpubQualityValidationResult(
+    isValid: true,
+    reason: 'EPUB passed quality validation.',
+    detail:
+        'Readable body sections and navigation were both present for ${work.title}.',
+    textBlockCount: textBlockCount,
+    meaningfulTextBlockCount: meaningfulTextBlockCount,
+    navigationCount: navigationCount,
+    meaningfulNavigationCount: meaningfulNavigationCount,
+    firstBodySectionTitle: firstBodySectionTitle,
+    epubAvailable: epubAvailable,
+    textCaptureAvailable: textCaptureAvailable,
+    preferredImportPreference: PioneerSourcePathPreference.epub,
+    expectedBodyPhrase: expectedPhrase,
+  );
+}
+
+String? _expectedBodyPhraseForWork(PioneerSourceWork work) {
+  final workId = work.id.trim().toLowerCase();
+  switch (workId) {
+    case 'daniel_and_the_revelation':
+      return 'daniel in captivity';
+    case 'the_cross_and_its_shadow':
+      return 'the sanctuary';
+    case 'home_here_and_home_in_heaven':
+      return 'home here';
+    case 'christ_our_righteousness':
+      return 'christ our righteousness';
+    case 'herald_of_the_bridegroom':
+      return 'bridegroom';
+  }
+  return null;
+}
+
+bool _isEpubLikeSourceType(String? sourceType) {
+  switch (sourceType?.trim().toLowerCase()) {
+    case 'epub':
+    case 'directepub':
+    case 'epubzipentry':
+      return true;
+  }
+  return false;
+}
+
+PioneerSourcePathPreference _preferredImportPreferenceForSourceMethod(
+  PioneerImportSourceMethod sourceMethod,
+) {
+  switch (sourceMethod) {
+    case PioneerImportSourceMethod.directUrl:
+      return PioneerSourcePathPreference.epub;
+    case PioneerImportSourceMethod.userVerifiedAutomatedCapture:
+      return PioneerSourcePathPreference.textCapture;
+    case PioneerImportSourceMethod.htmlCaptureFolder:
+      return PioneerSourcePathPreference.textCapture;
+    case PioneerImportSourceMethod.clipboard:
+    case PioneerImportSourceMethod.savedExport:
+    case PioneerImportSourceMethod.copiedRange:
+      return PioneerSourcePathPreference.userSuppliedCleanedSource;
+  }
+}
+
+String _sourceTypeForImportMethod(PioneerImportSourceMethod sourceMethod) {
+  switch (sourceMethod) {
+    case PioneerImportSourceMethod.userVerifiedAutomatedCapture:
+      return 'egw_browser_capture';
+    case PioneerImportSourceMethod.htmlCaptureFolder:
+      return 'egw_html_capture';
+    case PioneerImportSourceMethod.clipboard:
+    case PioneerImportSourceMethod.savedExport:
+      return 'egw_text_capture';
+    case PioneerImportSourceMethod.copiedRange:
+      return 'egw_copied_range';
+    case PioneerImportSourceMethod.directUrl:
+      return 'egw_text_capture';
+  }
+}
+
+String? _sourceSiteForImportMethod(PioneerImportSourceMethod sourceMethod) {
+  switch (sourceMethod) {
+    case PioneerImportSourceMethod.userVerifiedAutomatedCapture:
+    case PioneerImportSourceMethod.htmlCaptureFolder:
+    case PioneerImportSourceMethod.clipboard:
+    case PioneerImportSourceMethod.savedExport:
+    case PioneerImportSourceMethod.copiedRange:
+      return 'egwwritings.org';
+    case PioneerImportSourceMethod.directUrl:
+      return null;
+  }
+}
+
+_CopiedRangeSectionInfo? _copiedRangeSectionInfo({
+  required PioneerSourceWork work,
+  required EgwCopiedRangeSection section,
+  required int fallbackIndex,
+}) {
+  final extractedChapterNumber = _extractChapterNumber(section.title);
+  final chapterNumber = extractedChapterNumber > 0
+      ? extractedChapterNumber
+      : fallbackIndex;
+  final workSegment = _slug(
+    work.abbreviation.trim().isNotEmpty ? work.abbreviation : work.title,
+  );
+  final sectionSegment = _slug(section.title);
+  final href = p.join(
+    'captured',
+    workSegment.isEmpty ? 'dar' : workSegment,
+    'chapter_${chapterNumber.toString().padLeft(2, '0')}_${sectionSegment.isEmpty ? 'section_$fallbackIndex' : sectionSegment}.html',
+  );
+  return _CopiedRangeSectionInfo(href: href, chapterNumber: chapterNumber);
+}
+
+String _copiedRangeNavigationItemId({
+  required String itemId,
+  required int chapterNumber,
+  required String sectionTitle,
+}) {
+  return 'nav_${_slug(itemId)}_${chapterNumber}_${_slug(sectionTitle)}';
+}
+
+int _extractChapterNumber(String title) {
+  final match = RegExp(r'^Chapter\s+(\d+)\s+—\s+.+$').firstMatch(title.trim());
+  if (match == null) {
+    return 0;
+  }
+  return int.tryParse(match.group(1) ?? '') ?? 0;
+}
+
+int _intValue(Map<String, Object?>? row, String key) {
+  if (row == null) return 0;
+  final value = row[key];
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+String _copiedRangeSnippet(String text, {int limit = 120}) {
+  final normalized = normalizeWhitespace(text);
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+  return '${normalized.substring(0, limit - 1).trimRight()}…';
+}
+
+bool _shouldGeneratePublicDomainReferenceIndex(
+  PioneerSourceWork work,
+  PioneerImportDocument document,
+) {
+  final sourceType = work.sourceType?.trim().toLowerCase() ?? '';
+  return document.sections.isNotEmpty &&
+      (_isPublicDomainPioneerEpub(work, sourceType: sourceType) ||
+          sourceType == 'pioneer_captured_html' ||
+          sourceType == 'captured_html');
+}
+
+List<Map<String, Object?>> _generatePublicDomainReferenceIndexRows({
+  required String libraryItemId,
+  required PioneerSourceWork work,
+  required PioneerImportDocument document,
+}) {
+  final abbreviation = work.abbreviation.trim().toUpperCase();
+  if (abbreviation.isEmpty) {
+    return const <Map<String, Object?>>[];
+  }
+
+  final entries = <_PublicDomainParagraphEntry>[];
+  for (
+    var sectionIndex = 0;
+    sectionIndex < document.sections.length;
+    sectionIndex++
+  ) {
+    final section = document.sections[sectionIndex];
+    for (
+      var paragraphIndex = 0;
+      paragraphIndex < section.paragraphs.length;
+      paragraphIndex++
+    ) {
+      final paragraphText = section.paragraphs[paragraphIndex].trim();
+      if (paragraphText.isEmpty) continue;
+      entries.add(
+        _PublicDomainParagraphEntry(
+          href: section.href,
+          sectionIndex: sectionIndex + 1,
+          paragraphIndexInSection: paragraphIndex + 1,
+          paragraphText: paragraphText,
+        ),
+      );
+    }
+  }
+
+  if (entries.isEmpty) {
+    return const <Map<String, Object?>>[];
+  }
+
+  final markerLists = entries
+      .map((entry) => _publicDomainPageNumbers(entry.paragraphText))
+      .toList(growable: false);
+  final hasPageMarkers = markerLists.any((markers) => markers.isNotEmpty);
+  int? bookInitialPageNumber;
+  if (hasPageMarkers) {
+    for (final markers in markerLists) {
+      if (markers.isEmpty) continue;
+      final first = markers.first;
+      bookInitialPageNumber = first > 1 ? first - 1 : 1;
+      break;
+    }
+  }
+
+  final rows = <Map<String, Object?>>[];
+  int? currentPageNumber = hasPageMarkers ? bookInitialPageNumber : null;
+  var paragraphNumberOnPage = 0;
+
+  for (var i = 0; i < entries.length; i++) {
+    final entry = entries[i];
+    final markers = markerLists[i];
+
+    if (hasPageMarkers && currentPageNumber == null) {
+      currentPageNumber = markers.isNotEmpty
+          ? (markers.first > 1 ? markers.first - 1 : 1)
+          : bookInitialPageNumber;
+    }
+
+    final pageNumber = hasPageMarkers
+        ? (currentPageNumber ?? bookInitialPageNumber ?? 1)
+        : entry.sectionIndex;
+    final paragraphOnPage = hasPageMarkers
+        ? paragraphNumberOnPage + 1
+        : entry.paragraphIndexInSection;
+    final refCode = hasPageMarkers
+        ? '$abbreviation $pageNumber.$paragraphOnPage'
+        : '$abbreviation ${entry.sectionIndex}.${entry.paragraphIndexInSection}';
+    final normalizedHref = _normalizeEpubPath(entry.href);
+
+    rows.add({
+      'library_item_id': libraryItemId,
+      'work_key': work.id,
+      'edition_key': work.editionLabel?.trim().isNotEmpty == true
+          ? work.editionLabel!.trim()
+          : work.abbreviation.trim().isNotEmpty
+          ? work.abbreviation.trim()
+          : work.id,
+      'edition_year': work.editionYear,
+      'book_title': work.title,
+      'book_abbrev': abbreviation,
+      'href': normalizedHref,
+      'anchor_id': null,
+      'paragraph_index': entry.paragraphIndexInSection,
+      'page_number': pageNumber,
+      'paragraph_on_page': paragraphOnPage,
+      'ref_code': refCode,
+      'stable_ref': _refCodeLocationKey(
+        libraryItemId: libraryItemId,
+        href: normalizedHref,
+        paragraphIndex: entry.paragraphIndexInSection,
+      ),
+      'plain_text': entry.paragraphText,
+      'text_hash': sha256.convert(utf8.encode(entry.paragraphText)).toString(),
+      'ref_source': hasPageMarkers
+          ? 'generated_from_page_marker'
+          : 'generated_from_section_paragraph',
+    });
+
+    if (markers.isNotEmpty) {
+      currentPageNumber = markers.last;
+      paragraphNumberOnPage = 0;
+    } else if (hasPageMarkers) {
+      paragraphNumberOnPage += 1;
+    }
+  }
+
+  return rows;
+}
+
+List<int> _publicDomainPageNumbers(String text) {
+  final markers = <int>[];
+  for (final match in RegExp(r'\[(\d{1,4})\]').allMatches(text)) {
+    final pageNumber = int.tryParse(match.group(1) ?? '');
+    if (pageNumber != null) {
+      markers.add(pageNumber);
+    }
+  }
+  return markers;
+}
+
+String _refCodeLocationKey({
+  required String libraryItemId,
+  required String href,
+  required int paragraphIndex,
+}) {
+  return '$libraryItemId|${_normalizeEpubPath(href)}|$paragraphIndex';
+}
+
+@immutable
+class _PublicDomainParagraphEntry {
+  const _PublicDomainParagraphEntry({
+    required this.href,
+    required this.sectionIndex,
+    required this.paragraphIndexInSection,
+    required this.paragraphText,
+  });
+
+  final String href;
+  final int sectionIndex;
+  final int paragraphIndexInSection;
+  final String paragraphText;
+}
+
 Future<PioneerImportDocument> _parseSourceDocument(
   PioneerSourceWork work,
   Uint8List bytes,
 ) async {
   final sourceType = work.sourceType?.trim().toLowerCase() ?? '';
   switch (sourceType) {
+    case 'directepub':
     case 'epub':
+    case 'epubzipentry':
       return _parseEpubDocument(work, bytes);
     case 'html':
       return _parseHtmlDocument(work, bytes);
     default:
-      throw UnsupportedError('Unsupported Pioneer source type: ${work.sourceType}');
+      throw UnsupportedError(
+        'Unsupported Pioneer source type: ${work.sourceType}',
+      );
   }
 }
 
@@ -1163,40 +3913,35 @@ Future<PioneerImportDocument> _parseEpubDocument(
     rethrow;
   }
   final packageInfo = _readEpubPackageInfo(archive);
-  final sourcePaths = packageInfo.spineOrderedPaths.isNotEmpty
-      ? packageInfo.spineOrderedPaths
-      : archive.files
-          .where((entry) {
-            final name = p.normalize(entry.name).toLowerCase();
-            return entry.isFile &&
-                (name.endsWith('.xhtml') || name.endsWith('.html'));
-          })
-          .map((entry) => p.normalize(entry.name))
-          .toList(growable: false)
-        ..sort();
+  final profile = PioneerEpubParserProfile.infer(work);
+  final List<String> sourcePaths;
+  if (packageInfo.spineOrderedPaths.isNotEmpty) {
+    sourcePaths = packageInfo.spineOrderedPaths;
+  } else {
+    sourcePaths =
+        archive.files
+            .where((entry) {
+              final name = p.normalize(entry.name).toLowerCase();
+              return entry.isFile &&
+                  (name.endsWith('.xhtml') || name.endsWith('.html'));
+            })
+            .map((entry) => p.normalize(entry.name))
+            .toList()
+          ..sort();
+  }
 
   final sections = <PioneerImportSection>[];
-  for (var index = 0; index < sourcePaths.length; index++) {
-    final path = sourcePaths[index];
-    final entry = archive.findFile(path);
+  for (final path in sourcePaths) {
+    final entry = _findArchiveFileByNormalizedName(archive, path);
     if (entry == null || !entry.isFile) continue;
     final raw = utf8.decode(entry.content as List<int>, allowMalformed: true);
-    final title = _cleanSectionTitle(
-      _extractHtmlTitle(raw) ?? p.basenameWithoutExtension(path),
-      fallback: work.title,
-    );
-    if (_shouldSkipBoilerplateSection(title, path, raw)) {
-      continue;
-    }
-
-    final paragraphs = _extractParagraphTexts(raw);
-    if (paragraphs.isEmpty) continue;
-    sections.add(
-      PioneerImportSection(
-        href: p.normalize(path),
-        title: title,
-        paragraphs: paragraphs,
-        spineIndex: index + 1,
+    sections.addAll(
+      _parseHtmlSections(
+        work,
+        raw,
+        baseHref: _normalizeEpubPath(path),
+        startingSpineIndex: sections.length + 1,
+        profile: profile,
       ),
     );
   }
@@ -1215,8 +3960,9 @@ Future<PioneerImportDocument> _parseEpubDocument(
 
 Future<PioneerImportDocument> _parseHtmlDocument(
   PioneerSourceWork work,
-  Uint8List bytes,
-) async {
+  Uint8List bytes, {
+  String? sourceUrl,
+}) async {
   final raw = utf8.decode(bytes, allowMalformed: true);
   if (_looksLikeManualVerificationText(raw)) {
     throw const PioneerImportDocumentTooSparseException(
@@ -1227,81 +3973,143 @@ Future<PioneerImportDocument> _parseHtmlDocument(
       paragraphCount: 0,
     );
   }
-  final body = _extractHtmlBody(raw);
-  final sections = <PioneerImportSection>[];
-  final blocks = _extractHtmlBlocks(body ?? raw);
-  var current = _HtmlSectionDraft(
-    href: _virtualHtmlHref(1),
-    title: work.title,
+  final baseHref = sourceUrl?.trim().isNotEmpty == true
+      ? sourceUrl!.trim()
+      : _capturedTextHref(sourceUrl: sourceUrl, sectionIndex: 1);
+  final sections = _parseHtmlSections(
+    work,
+    raw,
+    baseHref: baseHref,
+    startingSpineIndex: 1,
+    profile: PioneerEpubParserProfile.generic,
   );
-  var sectionNumber = 1;
-
-  void flushCurrent() {
-    if (current.paragraphs.isEmpty) return;
-    final title = _cleanSectionTitle(current.title, fallback: work.title);
-    if (_shouldSkipBoilerplateSection(title, current.href, current.paragraphs.join(' '))) {
-      current = _HtmlSectionDraft(
-        href: _virtualHtmlHref(sectionNumber + 1),
-        title: work.title,
-      );
-      return;
-    }
-    sections.add(
-      PioneerImportSection(
-        href: current.href,
-        title: title,
-        paragraphs: List<String>.unmodifiable(current.paragraphs),
-        spineIndex: sectionNumber,
-      ),
-    );
-    sectionNumber += 1;
-    current = _HtmlSectionDraft(
-      href: _virtualHtmlHref(sectionNumber),
-      title: work.title,
-    );
-  }
-
-  for (final block in blocks) {
-    if (block.kind == 'heading') {
-      if (current.paragraphs.isNotEmpty) {
-        flushCurrent();
-      }
-      current.title = block.text;
-      continue;
-    }
-    if (block.text.trim().isEmpty) continue;
-    current.paragraphs.add(block.text.trim());
-  }
-
-  if (current.paragraphs.isNotEmpty) {
-    flushCurrent();
-  }
-
   if (sections.isEmpty) {
-    final paragraphs = _extractParagraphTexts(body ?? raw);
-    if (paragraphs.isEmpty) {
-      throw PioneerImportDocumentTooSparseException(
-        sourceType: 'html',
-        message: 'No readable sections were found in the HTML source.',
-        sectionsFound: 0,
-        paragraphCount: 0,
-      );
-    }
-    sections.add(
-      PioneerImportSection(
-        href: _virtualHtmlHref(1),
-        title: work.title,
-        paragraphs: paragraphs,
-        spineIndex: 1,
-      ),
+    throw PioneerImportDocumentTooSparseException(
+      sourceType: 'html',
+      message: 'No readable sections were found in the HTML source.',
+      sectionsFound: 0,
+      paragraphCount: 0,
     );
   }
 
   return PioneerImportDocument(title: work.title, sections: sections);
 }
 
-String _virtualHtmlHref(int sectionNumber) {
-  return p.normalize('OEBPS/content${sectionNumber.toString().padLeft(2, '0')}.xhtml');
+List<PioneerImportSection> _parseHtmlSections(
+  PioneerSourceWork work,
+  String raw, {
+  required String baseHref,
+  required int startingSpineIndex,
+  required PioneerEpubParserProfile profile,
+}) {
+  final body = _extractHtmlBody(raw);
+  final blocks = _extractHtmlBlocks(body ?? raw, profile: profile);
+  final sections = <PioneerImportSection>[];
+  var spineIndex = startingSpineIndex;
+  var sectionNumber = 1;
+  var sectionTitle = work.title;
+  var sectionHref = _sectionHref(baseHref, sectionNumber);
+  final sectionParagraphs = <String>[];
+  final usePublicDomainCleanup = profile.appliesPublicDomainCleanup;
+
+  void flushSection() {
+    if (sectionParagraphs.isEmpty) {
+      sectionTitle = work.title;
+      sectionHref = _sectionHref(baseHref, sectionNumber + 1);
+      return;
+    }
+
+    final title = _cleanSectionTitle(sectionTitle, fallback: work.title);
+    final rawText = sectionParagraphs.join(' ');
+    final shouldSkipSection = usePublicDomainCleanup
+        ? PioneerPublicDomainExtractionProfile.isSectionFrontMatter(
+            title: title,
+            rawText: rawText,
+          )
+        : _shouldSkipBoilerplateSection(title, sectionHref, rawText);
+    if (shouldSkipSection) {
+      sectionParagraphs.clear();
+      sectionTitle = work.title;
+      sectionHref = _sectionHref(baseHref, sectionNumber + 1);
+      return;
+    }
+
+    sections.add(
+      PioneerImportSection(
+        href: sectionHref,
+        title: title,
+        paragraphs: List<String>.unmodifiable(sectionParagraphs),
+        spineIndex: spineIndex,
+      ),
+    );
+    spineIndex += 1;
+    sectionNumber += 1;
+    sectionParagraphs.clear();
+    sectionTitle = work.title;
+    sectionHref = _sectionHref(baseHref, sectionNumber);
+  }
+
+  for (final block in blocks) {
+    if (block.kind == 'heading') {
+      if (sectionParagraphs.isNotEmpty) {
+        flushSection();
+      }
+      sectionTitle = block.text;
+      sectionHref = _sectionHref(baseHref, sectionNumber);
+      continue;
+    }
+
+    final text = block.text.trim();
+    if (text.isEmpty) continue;
+    sectionParagraphs.add(text);
+  }
+
+  if (sectionParagraphs.isNotEmpty) {
+    flushSection();
+  }
+
+  if (sections.isEmpty) {
+    final paragraphs = usePublicDomainCleanup
+        ? PioneerPublicDomainExtractionProfile.filterLeadingFrontMatterParagraphs(
+            _extractParagraphTexts(body ?? raw),
+          )
+        : _extractParagraphTexts(body ?? raw);
+    if (paragraphs.isNotEmpty) {
+      sections.add(
+        PioneerImportSection(
+          href: baseHref,
+          title: work.title,
+          paragraphs: paragraphs,
+          spineIndex: startingSpineIndex,
+        ),
+      );
+    }
+  }
+
+  return sections;
+}
+
+String _capturedTextHref({
+  required String? sourceUrl,
+  required int sectionIndex,
+}) {
+  final normalizedSourceUrl = sourceUrl?.trim() ?? '';
+  if (normalizedSourceUrl.isNotEmpty) {
+    return sectionIndex <= 1
+        ? normalizedSourceUrl
+        : '$normalizedSourceUrl#section-$sectionIndex';
+  }
+  return p.normalize(
+    'captured/section_${sectionIndex.toString().padLeft(2, '0')}.txt',
+  );
+}
+
+String _sectionHref(String baseHref, int sectionIndex) {
+  final normalized = baseHref.trim();
+  if (normalized.isEmpty) {
+    return _capturedTextHref(sourceUrl: null, sectionIndex: sectionIndex);
+  }
+  return sectionIndex <= 1 ? normalized : '$normalized#section-$sectionIndex';
 }
 
 String _cleanSectionTitle(String value, {required String fallback}) {
@@ -1318,24 +4126,11 @@ String? _extractHtmlBody(String raw) {
   return match?.group(1);
 }
 
-String? _extractHtmlTitle(String raw) {
-  final titleMatch = RegExp(
-    r'<title[^>]*>(.*?)</title>',
-    caseSensitive: false,
-    dotAll: true,
-  ).firstMatch(raw);
-  final headingMatch = RegExp(
-    r'<h[1-6][^>]*>(.*?)</h[1-6]>',
-    caseSensitive: false,
-    dotAll: true,
-  ).firstMatch(raw);
-  final candidate = _stripHtml(headingMatch?.group(1) ?? titleMatch?.group(1) ?? '');
-  final cleaned = candidate.replaceAll(RegExp(r'\s+'), ' ').trim();
-  return cleaned.isEmpty ? null : cleaned;
-}
-
 List<String> _extractParagraphTexts(String raw) {
-  final blocks = _extractHtmlBlocks(raw);
+  final blocks = _extractHtmlBlocks(
+    raw,
+    profile: PioneerEpubParserProfile.generic,
+  );
   return blocks
       .where((block) => block.kind == 'paragraph')
       .map((block) => block.text.trim())
@@ -1343,7 +4138,10 @@ List<String> _extractParagraphTexts(String raw) {
       .toList(growable: false);
 }
 
-List<_HtmlBlock> _extractHtmlBlocks(String raw) {
+List<_HtmlBlock> _extractHtmlBlocks(
+  String raw, {
+  required PioneerEpubParserProfile profile,
+}) {
   final source = _stripHtmlWrapperTags(raw);
   final blocks = <_HtmlBlock>[];
   final stack = <_HtmlFrame>[];
@@ -1382,14 +4180,22 @@ List<_HtmlBlock> _extractHtmlBlocks(String raw) {
     if (text.isEmpty) continue;
     if (_isHiddenHtmlBlock(frame.attrs, innerHtml)) continue;
 
-    if (tag.startsWith('h')) {
+    if (_looksLikeHeadingLikeBlock(
+      tag: tag,
+      attrs: frame.attrs,
+      innerHtml: innerHtml,
+      text: text,
+      profile: profile,
+    )) {
       blocks.add(_HtmlBlock(kind: 'heading', text: text));
       continue;
     }
 
     if (tag == 'div') {
-      if (RegExp(r'<(/?)(h[1-6]|p|blockquote|li)\b', caseSensitive: false)
-          .hasMatch(innerHtml)) {
+      if (RegExp(
+        r'<(/?)(h[1-6]|p|blockquote|li)\b',
+        caseSensitive: false,
+      ).hasMatch(innerHtml)) {
         continue;
       }
     }
@@ -1407,12 +4213,82 @@ List<_HtmlBlock> _extractHtmlBlocks(String raw) {
   return blocks;
 }
 
+bool _looksLikeHeadingLikeBlock({
+  required String tag,
+  required String attrs,
+  required String innerHtml,
+  required String text,
+  required PioneerEpubParserProfile profile,
+}) {
+  if (tag.startsWith('h')) {
+    return true;
+  }
+  if (tag != 'p' && tag != 'div' && tag != 'blockquote' && tag != 'li') {
+    return false;
+  }
+
+  final normalizedText = _normalizeText(text);
+  if (normalizedText.isEmpty) return false;
+
+  final className = _extractClassName(attrs);
+  if (className != null) {
+    final classValue = _normalizeText(className);
+    for (final needle in profile.headingClassNeedles) {
+      if (classValue.contains(_normalizeText(needle))) {
+        return true;
+      }
+    }
+    final classTokens = classValue.split(RegExp(r'\s+'));
+    if (classTokens.any(
+      (token) => token.startsWith('chapter') || token.startsWith('section'),
+    )) {
+      return true;
+    }
+  }
+
+  if (RegExp(
+    r'''style\s*=\s*["'][^"']*(font-weight\s*:\s*(bold|700|800)|text-align\s*:\s*center)[^"']*["']''',
+    caseSensitive: false,
+    dotAll: true,
+  ).hasMatch(attrs)) {
+    return normalizedText.split(RegExp(r'\s+')).length <= 16 &&
+        normalizedText.length <= 140;
+  }
+
+  if (RegExp(
+        r'<(strong|b)\b',
+        caseSensitive: false,
+        dotAll: true,
+      ).hasMatch(innerHtml) &&
+      normalizedText.split(RegExp(r'\s+')).length <= 16 &&
+      normalizedText.length <= 140) {
+    return true;
+  }
+
+  final words = normalizedText.split(RegExp(r'\s+'));
+  if (words.length <= 8 && normalizedText.endsWith(':')) {
+    return true;
+  }
+
+  return false;
+}
+
 String _stripHtmlWrapperTags(String raw) {
   final body = _extractHtmlBody(raw);
   if (body != null && body.trim().isNotEmpty) {
     return body;
   }
   return raw;
+}
+
+String? _extractClassName(String attrs) {
+  final match = RegExp(
+    r'''class\s*=\s*["']([^"']+)["']''',
+    caseSensitive: false,
+    dotAll: true,
+  ).firstMatch(attrs);
+  final value = match?.group(1)?.trim();
+  return value != null && value.isNotEmpty ? value : null;
 }
 
 bool _isHiddenHtmlBlock(String attrs, String innerHtml) {
@@ -1445,7 +4321,8 @@ bool _shouldSkipBoilerplateSection(String title, String href, String raw) {
     'copyright',
   };
   if (exactTitles.contains(normalizedTitle)) return true;
-  if (normalizedHref.contains('nav.xhtml') || normalizedHref.contains('toc.xhtml')) {
+  if (normalizedHref.contains('nav.xhtml') ||
+      normalizedHref.contains('toc.xhtml')) {
     return true;
   }
   if (combined.contains('project gutenberg') &&
@@ -1483,13 +4360,16 @@ _EpubPackageInfo _readEpubPackageInfo(Archive archive) {
   );
   final opfDir = p.dirname(opfPath);
   final manifest = <String, _EpubManifestItem>{};
-  for (final match in RegExp(r'<item\b[^>]*>', caseSensitive: false).allMatches(opfXml)) {
+  for (final match in RegExp(
+    r'<item\b[^>]*>',
+    caseSensitive: false,
+  ).allMatches(opfXml)) {
     final tag = match.group(0) ?? '';
     final id = _attributeValue(tag, 'id');
     final href = _attributeValue(tag, 'href');
     final properties = _attributeValue(tag, 'properties');
     if (id == null || href == null) continue;
-    final normalizedPath = p.normalize(p.join(opfDir, href));
+    final normalizedPath = _normalizeEpubPath(p.join(opfDir, href));
     manifest[id] = _EpubManifestItem(
       href: normalizedPath,
       properties: properties ?? '',
@@ -1497,7 +4377,10 @@ _EpubPackageInfo _readEpubPackageInfo(Archive archive) {
   }
 
   final spinePaths = <String>[];
-  for (final match in RegExp(r'<itemref\b[^>]*>', caseSensitive: false).allMatches(opfXml)) {
+  for (final match in RegExp(
+    r'<itemref\b[^>]*>',
+    caseSensitive: false,
+  ).allMatches(opfXml)) {
     final tag = match.group(0) ?? '';
     final idref = _attributeValue(tag, 'idref');
     final linear = _attributeValue(tag, 'linear');
@@ -1516,11 +4399,13 @@ _EpubPackageInfo _readEpubPackageInfo(Archive archive) {
   );
 }
 
+String _normalizeEpubPath(String path) {
+  final decoded = Uri.decodeFull(path);
+  return p.normalize(decoded);
+}
+
 String? _attributeValue(String tag, String name) {
-  final match = RegExp(
-    '$name="([^"]+)"',
-    caseSensitive: false,
-  ).firstMatch(tag);
+  final match = RegExp('$name="([^"]+)"', caseSensitive: false).firstMatch(tag);
   return match?.group(1);
 }
 
@@ -1564,12 +4449,17 @@ bool _looksLikeManualVerificationText(String? text) {
     'cloudflare',
     'just a moment',
     'manual verification',
+    'security verification',
+    'performing security verification',
     'verify you are human',
     'checking your browser',
     'security check',
     'attention required',
     'captcha',
     'challenge verification',
+    'challenge',
+    'cf chl',
+    'turnstile',
   ];
   for (final marker in markers) {
     if (normalized.contains(_normalizeText(marker))) {
@@ -1605,6 +4495,7 @@ bool _looksLikeHtmlMarkup(String text) {
 Future<PioneerImportDocument> _parseCapturedTextDocument(
   PioneerSourceWork work,
   String rawText, {
+  String? sourceUrl,
   String? sourceLabel,
 }) async {
   final normalized = rawText.trim();
@@ -1628,10 +4519,17 @@ Future<PioneerImportDocument> _parseCapturedTextDocument(
   }
 
   if (_looksLikeHtmlMarkup(normalized)) {
-    return _parseHtmlDocument(work, Uint8List.fromList(utf8.encode(rawText)));
+    return _parseHtmlDocument(
+      work,
+      Uint8List.fromList(utf8.encode(rawText)),
+      sourceUrl: sourceUrl,
+    );
   }
 
-  final lines = rawText.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n');
+  final lines = rawText
+      .replaceAll('\r\n', '\n')
+      .replaceAll('\r', '\n')
+      .split('\n');
   final sections = <PioneerImportSection>[];
   final sectionParagraphs = <String>[];
   var currentTitle = work.title;
@@ -1653,7 +4551,10 @@ Future<PioneerImportDocument> _parseCapturedTextDocument(
     }
     sections.add(
       PioneerImportSection(
-        href: p.normalize('captured/section_${sectionIndex.toString().padLeft(2, '0')}.txt'),
+        href: _capturedTextHref(
+          sourceUrl: sourceUrl,
+          sectionIndex: sectionIndex,
+        ),
         title: currentTitle,
         paragraphs: List<String>.unmodifiable(sectionParagraphs),
         spineIndex: sectionIndex,
@@ -1698,7 +4599,7 @@ Future<PioneerImportDocument> _parseCapturedTextDocument(
     }
     sections.add(
       PioneerImportSection(
-        href: p.normalize('captured/section_01.txt'),
+        href: _capturedTextHref(sourceUrl: sourceUrl, sectionIndex: 1),
         title: sourceLabel?.trim().isNotEmpty == true
             ? sourceLabel!.trim()
             : work.title,
@@ -1713,7 +4614,11 @@ Future<PioneerImportDocument> _parseCapturedTextDocument(
 
 List<String> _splitCapturedParagraphs(String rawText) {
   final paragraphs = <String>[];
-  for (final chunk in rawText.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split(RegExp(r'\n\s*\n'))) {
+  for (final chunk
+      in rawText
+          .replaceAll('\r\n', '\n')
+          .replaceAll('\r', '\n')
+          .split(RegExp(r'\n\s*\n'))) {
     final paragraph = normalizeWhitespace(chunk);
     if (paragraph.isNotEmpty) {
       paragraphs.add(paragraph);
@@ -1735,12 +4640,19 @@ bool _looksLikeCapturedHeading(String line) {
     return false;
   }
   final lower = normalized.toLowerCase();
-  if (RegExp(r'^(chapter|section|part|book)\b', caseSensitive: false)
-      .hasMatch(normalized)) {
+  if (RegExp(
+    r'^(chapter|section|part|book)\b',
+    caseSensitive: false,
+  ).hasMatch(normalized)) {
     return true;
   }
-  if (const {'introduction', 'preface', 'contents', 'appendix', 'index'}
-      .contains(lower)) {
+  if (const {
+    'introduction',
+    'preface',
+    'contents',
+    'appendix',
+    'index',
+  }.contains(lower)) {
     return true;
   }
   if (RegExp(r'^\d+([.)-]|\s)').hasMatch(normalized)) {
@@ -1760,7 +4672,8 @@ bool _requiresManualVerification({
   required Object error,
   PioneerSourceDownloadResult? downloadResult,
 }) {
-  final statusCode = downloadResult?.httpStatusCode ??
+  final statusCode =
+      downloadResult?.httpStatusCode ??
       (error is PioneerSourceDownloadException ? error.httpStatusCode : null);
   if (statusCode == HttpStatus.forbidden ||
       statusCode == HttpStatus.unauthorized ||
@@ -1787,22 +4700,21 @@ String _slug(String value) {
       .replaceAll(RegExp(r'^_|_$'), '');
 }
 
+class _CopiedRangeSectionInfo {
+  const _CopiedRangeSectionInfo({
+    required this.href,
+    required this.chapterNumber,
+  });
+
+  final String href;
+  final int chapterNumber;
+}
+
 class _HtmlBlock {
   const _HtmlBlock({required this.kind, required this.text});
 
   final String kind;
   final String text;
-}
-
-class _HtmlSectionDraft {
-  _HtmlSectionDraft({
-    required this.href,
-    required this.title,
-  });
-
-  final String href;
-  String title;
-  final List<String> paragraphs = <String>[];
 }
 
 class _HtmlFrame {
@@ -1834,18 +4746,13 @@ class _ExistingImportSummary {
 }
 
 class _EpubPackageInfo {
-  const _EpubPackageInfo({
-    this.spineOrderedPaths = const <String>[],
-  });
+  const _EpubPackageInfo({this.spineOrderedPaths = const <String>[]});
 
   final List<String> spineOrderedPaths;
 }
 
 class _EpubManifestItem {
-  const _EpubManifestItem({
-    required this.href,
-    required this.properties,
-  });
+  const _EpubManifestItem({required this.href, required this.properties});
 
   final String href;
   final String properties;

@@ -12,6 +12,10 @@ class LocalSettingsStore {
   static final LocalSettingsStore instance = LocalSettingsStore._();
 
   static const _fileName = 'app_local_state.json';
+  static const _pioneerCapturedHtmlFolderPathKey =
+      'pioneer_captured_html_folder_path';
+  static const _pioneerCapturedHtmlFolderBookmarkKey =
+      'pioneer_captured_html_folder_bookmark';
 
   Future<File> _settingsFile() async {
     final supportDir = await getApplicationSupportDirectory();
@@ -127,6 +131,39 @@ class LocalSettingsStore {
   Future<void> clearMigrationState() async {
     final settings = await load();
     settings.remove('migration_state');
+    await save(settings);
+  }
+
+  Future<String?> loadPioneerCapturedHtmlFolderPath() async {
+    final settings = await load();
+    final value =
+        settings[_pioneerCapturedHtmlFolderPathKey]?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
+  Future<String?> loadPioneerCapturedHtmlFolderBookmark() async {
+    final settings = await load();
+    final value =
+        settings[_pioneerCapturedHtmlFolderBookmarkKey]?.toString().trim() ??
+        '';
+    return value.isEmpty ? null : value;
+  }
+
+  Future<void> savePioneerCapturedHtmlFolder({
+    required String path,
+    String? bookmark,
+  }) async {
+    final settings = await load();
+    settings[_pioneerCapturedHtmlFolderPathKey] = path.trim();
+    settings[_pioneerCapturedHtmlFolderBookmarkKey] =
+        bookmark?.trim().isEmpty == true ? null : bookmark?.trim();
+    await save(settings);
+  }
+
+  Future<void> clearPioneerCapturedHtmlFolder() async {
+    final settings = await load();
+    settings.remove(_pioneerCapturedHtmlFolderPathKey);
+    settings.remove(_pioneerCapturedHtmlFolderBookmarkKey);
     await save(settings);
   }
 

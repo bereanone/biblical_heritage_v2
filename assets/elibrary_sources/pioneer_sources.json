@@ -4,20 +4,102 @@
     {
       "author_id": "uriah_smith",
       "author_name": "Uriah Smith",
+      "source_family": "Pioneer",
       "sort_key": "uriah smith",
       "works": [
         {
           "work_id": "daniel_and_the_revelation",
           "title": "Daniel and the Revelation",
           "abbreviation": "DAR",
+          "edition_label": "1897",
+          "edition_year": 1897,
           "group": "Pioneer Authors",
           "subgroup": "Prophecy",
           "availability_status": "available",
           "source_type": "epub",
-          "source_url": "https://archive.org/download/UriahSmithDanielAndTheRevelation.TheResponseOfHistoryToTheVoiceOf/1897_smith_danielAndTheRevelation.epub",
-          "source_label": "Archive.org",
+          "source_family": "Pioneer",
+          "collection_url": "https://www.aplib.org/resources/pioneers-ebooks/",
+          "source_url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+          "source_label": "APLIB",
           "verified": true,
-          "importable": true
+          "importable": true,
+          "source_candidates": [
+            {
+              "provider": "ellenwhiteaudio",
+              "source_type": "directEpub",
+              "url": "https://ellenwhiteaudio.org/ebooks/en/smith/Daniel%20and%20the%20Revelation.epub",
+              "edition_label": "1897",
+              "edition_year": 1897,
+              "priority": 1,
+              "quality_tier": "epub",
+              "availability": "available",
+              "requires_verification": false,
+              "destructive_replacement_allowed": false,
+              "is_repair_source": false,
+              "user_must_confirm_replacement": true,
+              "notes": "Direct EPUB from EllenWhiteAudio."
+            },
+            {
+              "provider": "adventaudio",
+              "source_type": "epub",
+              "edition_label": "1897",
+              "edition_year": 1897,
+              "priority": 5,
+              "quality_tier": "epub",
+              "availability": "source_needed",
+              "requires_verification": false,
+              "destructive_replacement_allowed": false,
+              "is_repair_source": false,
+              "user_must_confirm_replacement": true,
+              "notes": "EGW Audio / AdventAudio DAR 1897 EPUB URL needed."
+            },
+            {
+              "provider": "aplib",
+              "source_type": "epubZipEntry",
+              "url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+              "zip_entry": "Epub/Smith/Daniel and the Revelation.epub",
+              "edition_label": "1897",
+              "edition_year": 1897,
+              "priority": 10,
+              "quality_tier": "epub",
+              "availability": "source_needed",
+              "requires_verification": false,
+              "destructive_replacement_allowed": false,
+              "is_repair_source": false,
+              "user_must_confirm_replacement": true,
+              "notes": "APLIB ZIP entry missing from the archive."
+            },
+            {
+              "provider": "aplib",
+              "source_type": "pdf",
+              "url": "https://www.adventaudio.org/ebooks/files/pdf/Smith%20-%20Daniel%20and%20The%20Revelation.pdf",
+              "edition_label": "1897",
+              "edition_year": 1897,
+              "priority": 20,
+              "quality_tier": "pdf",
+              "availability": "available",
+              "requires_verification": false,
+              "destructive_replacement_allowed": false,
+              "is_repair_source": false,
+              "user_must_confirm_replacement": true,
+              "notes": "APLIB direct PDF fallback."
+            },
+            {
+              "provider": "egwWritings",
+              "source_type": "readerPage",
+              "url": "https://egwwritings.org/read?panels=p1297.2&index=0",
+              "edition_label": "1897",
+              "edition_year": 1897,
+              "priority": 50,
+              "quality_tier": "reader",
+              "availability": "available",
+              "requires_verification": false,
+              "destructive_replacement_allowed": false,
+              "is_repair_source": true,
+              "user_must_confirm_replacement": true,
+              "notes": "EGW reader capture fallback."
+            }
+          ]
         },
         {
           "work_id": "the_united_states_in_the_light_of_prophecy",
@@ -26,17 +108,35 @@
           "group": "Pioneer Authors",
           "subgroup": "Prophecy",
           "availability_status": "available",
-          "source_type": "html",
-          "source_url": "https://www.gutenberg.org/files/12364/12364-h/12364-h.htm",
-          "source_label": "Project Gutenberg",
+          "source_type": "epub",
+          "source_family": "APLIB",
+          "collection_url": "https://www.aplib.org/resources/pioneers-ebooks/",
+          "source_url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+          "source_label": "APLIB",
           "verified": true,
-          "importable": true
+          "importable": true,
+          "source_candidates": [
+            {
+              "provider": "aplib",
+              "source_type": "epub",
+              "url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+              "priority": 10,
+              "quality_tier": "epub",
+              "availability": "available",
+              "requires_verification": false,
+              "destructive_replacement_allowed": false,
+              "is_repair_source": false,
+              "user_must_confirm_replacement": true,
+              "notes": "APLIB complete Pioneer collection EPUB ZIP."
+            }
+          ]
         }
       ]
     },
     {
       "author_id": "jn_andrews",
       "author_name": "J. N. Andrews",
+      "source_family": "Pioneer",
       "sort_key": "jn andrews",
       "works": [
         {
@@ -45,7 +145,29 @@
           "abbreviation": "HST",
           "group": "Pioneer Authors",
           "subgroup": "Sabbath",
-          "availability_status": "source_needed"
+          "availability_status": "available",
+          "source_type": "epub",
+          "source_family": "APLIB",
+          "collection_url": "https://www.aplib.org/resources/pioneers-ebooks/",
+          "source_url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+          "source_label": "APLIB",
+          "verified": true,
+          "importable": true,
+          "source_candidates": [
+            {
+              "provider": "aplib",
+              "source_type": "epub",
+              "url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+              "priority": 10,
+              "quality_tier": "epub",
+              "availability": "available",
+              "requires_verification": false,
+              "destructive_replacement_allowed": false,
+              "is_repair_source": false,
+              "user_must_confirm_replacement": true,
+              "notes": "APLIB complete Pioneer collection EPUB ZIP."
+            }
+          ]
         },
         {
           "work_id": "the_sanctuary_and_twenty_three_hundred_days",
@@ -53,13 +175,36 @@
           "abbreviation": "SCTD",
           "group": "Pioneer Authors",
           "subgroup": "Sabbath",
-          "availability_status": "source_needed"
+          "availability_status": "available",
+          "source_type": "epub",
+          "source_family": "APLIB",
+          "collection_url": "https://www.aplib.org/resources/pioneers-ebooks/",
+          "source_url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+          "source_label": "APLIB",
+          "verified": true,
+          "importable": true,
+          "source_candidates": [
+            {
+              "provider": "aplib",
+              "source_type": "epub",
+              "url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+              "priority": 10,
+              "quality_tier": "epub",
+              "availability": "available",
+              "requires_verification": false,
+              "destructive_replacement_allowed": false,
+              "is_repair_source": false,
+              "user_must_confirm_replacement": true,
+              "notes": "APLIB complete Pioneer collection EPUB ZIP."
+            }
+          ]
         }
       ]
     },
     {
       "author_id": "at_jones",
       "author_name": "A. T. Jones",
+      "source_family": "Pioneer",
       "sort_key": "a t jones",
       "works": [
         {
@@ -68,7 +213,29 @@
           "abbreviation": "CWCP",
           "group": "Pioneer Authors",
           "subgroup": "Righteousness by Faith",
-          "availability_status": "source_needed"
+          "availability_status": "available",
+          "source_type": "epub",
+          "source_family": "APLIB",
+          "collection_url": "https://www.aplib.org/resources/pioneers-ebooks/",
+          "source_url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+          "source_label": "APLIB",
+          "verified": true,
+          "importable": true,
+          "source_candidates": [
+            {
+              "provider": "aplib",
+              "source_type": "epub",
+              "url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+              "priority": 10,
+              "quality_tier": "epub",
+              "availability": "available",
+              "requires_verification": false,
+              "destructive_replacement_allowed": false,
+              "is_repair_source": false,
+              "user_must_confirm_replacement": true,
+              "notes": "APLIB complete Pioneer collection EPUB ZIP."
+            }
+          ]
         },
         {
           "work_id": "lessons_on_faith",
@@ -76,13 +243,36 @@
           "abbreviation": "LOF",
           "group": "Pioneer Authors",
           "subgroup": "Righteousness by Faith",
-          "availability_status": "source_needed"
+          "availability_status": "available",
+          "source_type": "epub",
+          "source_family": "APLIB",
+          "collection_url": "https://www.aplib.org/resources/pioneers-ebooks/",
+          "source_url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+          "source_label": "APLIB",
+          "verified": true,
+          "importable": true,
+          "source_candidates": [
+            {
+              "provider": "aplib",
+              "source_type": "epub",
+              "url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+              "priority": 10,
+              "quality_tier": "epub",
+              "availability": "available",
+              "requires_verification": false,
+              "destructive_replacement_allowed": false,
+              "is_repair_source": false,
+              "user_must_confirm_replacement": true,
+              "notes": "APLIB complete Pioneer collection EPUB ZIP."
+            }
+          ]
         }
       ]
     },
     {
       "author_id": "ej_waggoner",
       "author_name": "E. J. Waggoner",
+      "source_family": "Pioneer",
       "sort_key": "e j waggoner",
       "works": [
         {
@@ -91,7 +281,29 @@
           "abbreviation": "CHR",
           "group": "Pioneer Authors",
           "subgroup": "Righteousness by Faith",
-          "availability_status": "source_needed"
+          "availability_status": "available",
+          "source_type": "epub",
+          "source_family": "APLIB",
+          "collection_url": "https://www.aplib.org/resources/pioneers-ebooks/",
+          "source_url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+          "source_label": "APLIB",
+          "verified": true,
+          "importable": true,
+          "source_candidates": [
+            {
+              "provider": "aplib",
+              "source_type": "epub",
+              "url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+              "priority": 10,
+              "quality_tier": "epub",
+              "availability": "available",
+              "requires_verification": false,
+              "destructive_replacement_allowed": false,
+              "is_repair_source": false,
+              "user_must_confirm_replacement": true,
+              "notes": "APLIB complete Pioneer collection EPUB ZIP."
+            }
+          ]
         },
         {
           "work_id": "the_gospel_in_galatians",
@@ -99,7 +311,29 @@
           "abbreviation": "GIG",
           "group": "Pioneer Authors",
           "subgroup": "Righteousness by Faith",
-          "availability_status": "source_needed"
+          "availability_status": "available",
+          "source_type": "epub",
+          "source_family": "APLIB",
+          "collection_url": "https://www.aplib.org/resources/pioneers-ebooks/",
+          "source_url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+          "source_label": "APLIB",
+          "verified": true,
+          "importable": true,
+          "source_candidates": [
+            {
+              "provider": "aplib",
+              "source_type": "epub",
+              "url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+              "priority": 10,
+              "quality_tier": "epub",
+              "availability": "available",
+              "requires_verification": false,
+              "destructive_replacement_allowed": false,
+              "is_repair_source": false,
+              "user_must_confirm_replacement": true,
+              "notes": "APLIB complete Pioneer collection EPUB ZIP."
+            }
+          ]
         }
       ]
     }

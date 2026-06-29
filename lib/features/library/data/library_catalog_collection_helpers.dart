@@ -12,6 +12,10 @@ class LibraryCollectionFilterOption {
 
 const String _libraryAllCollectionsFilterValue = 'all';
 const String _libraryAllCollectionsFilterLabel = 'All Collections';
+const String _libraryPioneerCollectionsFilterValue =
+    'adventist_pioneer_library';
+const String _libraryPioneerCollectionsFilterLabel =
+    'Adventist Pioneer Library';
 const List<String> _libraryCollectionFilterPriority = <String>[
   'egw_books',
   'egw_devotionals',
@@ -20,6 +24,7 @@ const List<String> _libraryCollectionFilterPriority = <String>[
   'egw_pamphlets',
   'egw_periodicals',
   'egw_manuscript_releases',
+  _libraryPioneerCollectionsFilterValue,
 ];
 
 List<LibraryCollectionFilterOption> buildLibraryCollectionFilterOptions(
@@ -62,11 +67,14 @@ bool libraryItemMatchesCollectionFilter(
   String filterValue,
 ) {
   final normalizedFilter = _normalizeLibraryCollectionFilterValue(filterValue);
-  if (normalizedFilter.isEmpty ||
-      normalizedFilter == _libraryAllCollectionsFilterValue) {
+  final canonicalFilter = _canonicalLibraryCollectionFilterValue(
+    normalizedFilter,
+  );
+  if (canonicalFilter.isEmpty ||
+      canonicalFilter == _libraryAllCollectionsFilterValue) {
     return true;
   }
-  return libraryCollectionFilterValueForItem(item) == normalizedFilter;
+  return libraryCollectionFilterValueForItem(item) == canonicalFilter;
 }
 
 String libraryCollectionFilterValueForItem(LibraryCatalogItem item) {
@@ -74,15 +82,43 @@ String libraryCollectionFilterValueForItem(LibraryCatalogItem item) {
   if (candidate == null || candidate.trim().isEmpty) {
     return _libraryAllCollectionsFilterValue;
   }
-  return _normalizeLibraryCollectionFilterValue(candidate);
+  return _canonicalLibraryCollectionFilterValue(
+    _normalizeLibraryCollectionFilterValue(candidate),
+  );
 }
 
 String libraryCollectionFilterLabelForItem(LibraryCatalogItem item) {
-  final candidate = _libraryCollectionFilterCandidateForItem(item);
-  if (candidate == null || candidate.trim().isEmpty) {
-    return _libraryAllCollectionsFilterLabel;
+  return libraryCollectionFilterLabelForValue(
+    libraryCollectionFilterValueForItem(item),
+  );
+}
+
+String libraryCollectionFilterLabelForValue(String value) {
+  final normalized = _canonicalLibraryCollectionFilterValue(
+    _normalizeLibraryCollectionFilterValue(value),
+  );
+  switch (normalized) {
+    case _libraryAllCollectionsFilterValue:
+      return _libraryAllCollectionsFilterLabel;
+    case 'egw_books':
+      return 'EGW Books';
+    case 'egw_devotionals':
+      return 'EGW Devotionals';
+    case 'egw_commentaries':
+      return 'EGW Commentaries';
+    case 'egw_misc_collections':
+      return 'EGW Misc Collections';
+    case 'egw_pamphlets':
+      return 'EGW Pamphlets';
+    case 'egw_periodicals':
+      return 'EGW Periodicals';
+    case 'egw_manuscript_releases':
+      return 'EGW Manuscript Releases';
+    case 'pioneer_authors':
+    case _libraryPioneerCollectionsFilterValue:
+      return _libraryPioneerCollectionsFilterLabel;
   }
-  return _humanizeLibraryCollectionLabel(candidate);
+  return _humanizeLibraryCollectionLabel(normalized);
 }
 
 String? _libraryCollectionFilterCandidateForItem(LibraryCatalogItem item) {
@@ -107,6 +143,14 @@ String? _collectionFolderFromRelativePath(String relativePath) {
       .toList(growable: false);
   for (final segment in segments) {
     if (segment.startsWith('EGW_')) return segment;
+  }
+  for (final segment in segments) {
+    final normalizedSegment = _normalizeLibraryCollectionFilterValue(segment);
+    if (normalizedSegment == _libraryPioneerCollectionsFilterValue ||
+        normalizedSegment == 'pioneer_authors' ||
+        normalizedSegment == 'pioneerauthors') {
+      return _libraryPioneerCollectionsFilterLabel;
+    }
   }
   if (segments.length >= 3) return segments[2];
   if (segments.length >= 2) return segments[1];
@@ -136,4 +180,13 @@ String _normalizeLibraryCollectionFilterValue(String value) {
       .replaceAll(RegExp(r'[^a-z0-9_]+'), '')
       .replaceAll(RegExp(r'_+'), '_')
       .replaceAll(RegExp(r'^_|_$'), '');
+}
+
+String _canonicalLibraryCollectionFilterValue(String normalizedValue) {
+  switch (normalizedValue) {
+    case 'pioneer_authors':
+    case 'adventist_pioneer_library':
+      return _libraryPioneerCollectionsFilterValue;
+  }
+  return normalizedValue;
 }

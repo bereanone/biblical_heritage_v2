@@ -1028,7 +1028,7 @@ class _BookListTile extends StatelessWidget {
             ),
           ),
           subtitle: Text(
-            '${item.subtitle}${item.lastOpened == null ? '' : ' • ${_stamp(item.lastOpened!)}'}',
+            item.displayAuthor,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: libraryCaptionTextStyle(
@@ -1103,12 +1103,20 @@ class _BookThumbnail extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Image.file(
-              File(coverPath),
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) =>
-                  _fallbackThumbnail(context),
-            ),
+            if (_isLibraryAssetCoverPath(coverPath))
+              Image.asset(
+                coverPath,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) =>
+                    _fallbackThumbnail(context),
+              )
+            else
+              Image.file(
+                File(coverPath),
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) =>
+                    _fallbackThumbnail(context),
+              ),
           ],
         ),
       );
@@ -1128,4 +1136,8 @@ class _BookThumbnail extends StatelessWidget {
       showCenterTitle: false,
     );
   }
+}
+
+bool _isLibraryAssetCoverPath(String path) {
+  return path.trim().replaceAll('\\', '/').startsWith('assets/');
 }

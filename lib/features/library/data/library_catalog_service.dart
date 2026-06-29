@@ -13,6 +13,7 @@ import '../../../core/database/elibrary_read_resolver.dart';
 import 'library_citation_display_helper.dart';
 import '../../search/search_highlight_helper.dart';
 import 'library_author_resolver.dart';
+import 'library_contributor.dart';
 import 'library_epub_metadata.dart';
 import 'library_item_identity.dart';
 import '../../utilities/data/elibrary_folder_policy.dart';
@@ -40,10 +41,28 @@ class LibraryCatalogService {
     final where = <String>['deleted_at IS NULL'];
     final args = <Object?>[];
 
-    where.add(
-      "(LOWER(COALESCE(file_format, '')) = ? OR LOWER(COALESCE(file_format, '')) = ?)",
-    );
-    args.addAll(['epub', 'pdf']);
+    where.add('''
+      (
+        LOWER(COALESCE(file_format, '')) = ?
+        OR LOWER(COALESCE(file_format, '')) = ?
+        OR (
+          LOWER(COALESCE(file_format, '')) = ?
+          AND (
+            LOWER(COALESCE(collection_name, '')) LIKE ?
+            OR LOWER(COALESCE(collection_name, '')) LIKE ?
+            OR LOWER(COALESCE(relative_path, '')) LIKE ?
+          )
+        )
+      )
+      ''');
+    args.addAll([
+      'epub',
+      'pdf',
+      'html',
+      '%pioneer authors%',
+      '%adventist pioneer library%',
+      '%adventist pioneer library%',
+    ]);
 
     switch (normalized) {
       case 'epubs':
@@ -100,7 +119,7 @@ class LibraryCatalogService {
         li.file_name COLLATE NOCASE ASC
     ''', args),
           hasData: (rows) => rows.isNotEmpty,
-    );
+        );
     final rows = rowResult.value;
     if (rows.isEmpty) {
       return const [];
@@ -370,7 +389,7 @@ class LibraryCatalogService {
     final args = <Object?>[];
     if (normalizedCollectionFilter.isNotEmpty &&
         normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
-      where.add(_libraryCollectionSearchClause());
+      where.add(_libraryCollectionSearchClause(normalizedCollectionFilter));
       args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
     }
 
@@ -397,7 +416,7 @@ class LibraryCatalogService {
     final args = <Object?>[];
     if (normalizedCollectionFilter.isNotEmpty &&
         normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
-      where.add(_libraryCollectionSearchClause());
+      where.add(_libraryCollectionSearchClause(normalizedCollectionFilter));
       args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
     }
 
@@ -431,7 +450,7 @@ class LibraryCatalogService {
     );
     if (normalizedCollectionFilter.isNotEmpty &&
         normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
-      where.add(_libraryCollectionSearchClause());
+      where.add(_libraryCollectionSearchClause(normalizedCollectionFilter));
       args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
     }
 
@@ -466,27 +485,75 @@ class LibraryCatalogService {
     return result.value;
   }
 
-  String _libraryCollectionSearchClause() {
-    return '''
-      (
-        LOWER(COALESCE(li.collection_name, '')) LIKE ?
-        OR LOWER(COALESCE(li.relative_path, '')) LIKE ?
-        OR LOWER(COALESCE(li.folder_type, '')) LIKE ?
-        OR LOWER(COALESCE(li.library_role, '')) LIKE ?
-      )
-    ''';
+  String _libraryCollectionSearchClause(String normalizedCollectionFilter) {
+    final searchTerms = _libraryCollectionSearchTerms(
+      normalizedCollectionFilter,
+    );
+    if (searchTerms.isEmpty) {
+      return '1 = 1';
+    }
+
+    final clauses = searchTerms
+        .map(
+          (_) => '''
+            (
+              LOWER(COALESCE(li.collection_name, '')) LIKE ?
+              OR LOWER(COALESCE(li.relative_path, '')) LIKE ?
+              OR LOWER(COALESCE(li.folder_type, '')) LIKE ?
+              OR LOWER(COALESCE(li.library_role, '')) LIKE ?
+            )
+          ''',
+        )
+        .join(' OR ');
+    return '($clauses)';
   }
 
   List<Object?> _libraryCollectionSearchArgs(
     String normalizedCollectionFilter,
   ) {
+    final args = <Object?>[];
+    for (final term in _libraryCollectionSearchTerms(
+      normalizedCollectionFilter,
+    )) {
+      final likePattern = '%$term%';
+      args.addAll(<Object?>[
+        likePattern,
+        likePattern,
+        likePattern,
+        likePattern,
+      ]);
+    }
+    return args;
+  }
+
+  List<String> _libraryCollectionSearchTerms(
+    String normalizedCollectionFilter,
+  ) {
+    switch (normalizedCollectionFilter) {
+      case _libraryAllCollectionsFilterValue:
+      case '':
+        return const [];
+      case 'egw_books':
+        return const ['egw books', 'egw_books'];
+      case 'egw_devotionals':
+        return const ['egw devotionals', 'egw_devotionals'];
+      case 'egw_commentaries':
+        return const ['egw commentaries', 'egw_commentaries'];
+      case 'egw_misc_collections':
+        return const ['egw misc collections', 'egw_misc_collections'];
+      case 'egw_pamphlets':
+        return const ['egw pamphlets', 'egw_pamphlets'];
+      case 'egw_periodicals':
+        return const ['egw periodicals', 'egw_periodicals'];
+      case 'egw_manuscript_releases':
+        return const ['egw manuscript releases', 'egw_manuscript_releases'];
+      case 'pioneer_authors':
+      case 'adventist_pioneer_library':
+        return const ['adventist pioneer library', 'pioneer authors'];
+    }
+
     final humanizedFilter = normalizedCollectionFilter.replaceAll('_', ' ');
-    return <Object?>[
-      '%$humanizedFilter%',
-      '%$normalizedCollectionFilter%',
-      normalizedCollectionFilter,
-      normalizedCollectionFilter,
-    ];
+    return <String>[humanizedFilter, normalizedCollectionFilter];
   }
 
   Future<List<LibraryCatalogSearchResult>> searchContent({
@@ -506,7 +573,7 @@ class LibraryCatalogService {
     );
     if (normalizedCollectionFilter.isNotEmpty &&
         normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
-      where.add(_libraryCollectionSearchClause());
+      where.add(_libraryCollectionSearchClause(normalizedCollectionFilter));
       args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
     }
     // Per-book deduplication: pick the earliest matching paragraph (MIN rowid)
@@ -537,9 +604,10 @@ class LibraryCatalogService {
             ? 8
             : 4);
 
-    final rowResult = await _readResolver.readWithFallback<List<Map<String, Object?>>>(
-      read: (db) => db.rawQuery(
-        '''
+    final rowResult = await _readResolver
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (db) => db.rawQuery(
+            '''
       WITH best_hits AS (
         SELECT ltb.library_item_id, MIN(ltb.rowid) AS best_rowid
         FROM library_text_blocks ltb
@@ -588,10 +656,10 @@ class LibraryCatalogService {
         AND eri.paragraph_index = ltb.paragraph_index
       ORDER BY li.title COLLATE NOCASE ASC
       ''',
-        [...args, fetchLimit],
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-    );
+            [...args, fetchLimit],
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+        );
     final rows = rowResult.value;
     if (rows.isEmpty) {
       return const [];
@@ -728,16 +796,17 @@ class LibraryCatalogService {
       where.add('paragraph_index = ?');
       args.add(paragraphIndex);
     }
-    final rowResult = await _readResolver.readWithFallback<List<Map<String, Object?>>>(
-      read: (db) => db.rawQuery('''
+    final rowResult = await _readResolver
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (db) => db.rawQuery('''
       SELECT full_paragraph, anchor
       FROM library_links
       WHERE ${where.join(' AND ')}
       ORDER BY paragraph_index ASC
       LIMIT 1
       ''', args),
-      hasData: (rows) => rows.isNotEmpty,
-    );
+          hasData: (rows) => rows.isNotEmpty,
+        );
     final rows = rowResult.value;
     if (rows.isEmpty) return existing;
     return _firstNonEmpty([
@@ -750,30 +819,31 @@ class LibraryCatalogService {
   Future<List<LibraryCatalogNavigationItem>> loadNavigationItems(
     String libraryItemId,
   ) async {
-    final rowResult = await _readResolver.readWithFallback<List<Map<String, Object?>>>(
-      read: (db) => db.query(
-        'library_navigation_items',
-        columns: const [
-          'id',
-          'parent_id',
-          'label',
-          'href',
-          'anchor_id',
-          'spine_index',
-          'sort_order',
-          'depth',
-          'nav_type',
-          'content_kind',
-          'is_front_matter',
-          'is_body_start',
-          'body_order',
-        ],
-        where: 'library_item_id = ? AND deleted_at IS NULL',
-        whereArgs: [libraryItemId],
-        orderBy: 'sort_order ASC, depth ASC, label COLLATE NOCASE ASC',
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-    );
+    final rowResult = await _readResolver
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (db) => db.query(
+            'library_navigation_items',
+            columns: const [
+              'id',
+              'parent_id',
+              'label',
+              'href',
+              'anchor_id',
+              'spine_index',
+              'sort_order',
+              'depth',
+              'nav_type',
+              'content_kind',
+              'is_front_matter',
+              'is_body_start',
+              'body_order',
+            ],
+            where: 'library_item_id = ? AND deleted_at IS NULL',
+            whereArgs: [libraryItemId],
+            orderBy: 'sort_order ASC, depth ASC, label COLLATE NOCASE ASC',
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+        );
     final rows = rowResult.value;
     final items = rows
         .map(
@@ -835,8 +905,9 @@ class LibraryCatalogService {
     final args = <Object?>[normalizedTitle];
     final normalizedCollection = collectionName?.trim().toLowerCase() ?? '';
     if (normalizedCollection.isNotEmpty) {
-      where.write(' AND LOWER(COALESCE(li.collection_name, \'\')) = ?');
-      args.add(normalizedCollection);
+      where.write(' AND ');
+      where.write(_libraryCollectionSearchClause(normalizedCollection));
+      args.addAll(_libraryCollectionSearchArgs(normalizedCollection));
     }
 
     return _queryItems(where: where.toString(), args: args, limit: limit);
@@ -871,10 +942,9 @@ class LibraryCatalogService {
     }
 
     final warmResults = await Future.wait(
-      candidates.map((row) => _ensureEpubCoverPath(
-        database: database,
-        row: row,
-      )),
+      candidates.map(
+        (row) => _ensureEpubCoverPath(database: database, row: row),
+      ),
     );
     for (var index = 0; index < candidates.length; index++) {
       final coverPath = warmResults[index];
@@ -927,10 +997,7 @@ class LibraryCatalogService {
     }
 
     final warmResults = await Future.wait(
-      candidates.map((row) => _ensureEpubAuthor(
-        database: database,
-        row: row,
-      )),
+      candidates.map((row) => _ensureEpubAuthor(database: database, row: row)),
     );
     for (var index = 0; index < candidates.length; index++) {
       final author = warmResults[index];
@@ -971,10 +1038,7 @@ class LibraryCatalogService {
     }
 
     final warmResults = await Future.wait(
-      candidates.map((row) => _ensureEpubTitle(
-        database: database,
-        row: row,
-      )),
+      candidates.map((row) => _ensureEpubTitle(database: database, row: row)),
     );
     for (var index = 0; index < candidates.length; index++) {
       final title = warmResults[index];
@@ -1036,9 +1100,10 @@ class LibraryCatalogService {
     required List<Object?> args,
     required int limit,
   }) async {
-    final rowResult = await _readResolver.readWithFallback<List<Map<String, Object?>>>(
-      read: (db) => db.rawQuery(
-        '''
+    final rowResult = await _readResolver
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (db) => db.rawQuery(
+            '''
       SELECT
         li.id,
         li.title,
@@ -1078,10 +1143,10 @@ class LibraryCatalogService {
         li.file_name COLLATE NOCASE ASC
       LIMIT ?
       ''',
-        [...args, limit],
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-    );
+            [...args, limit],
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+        );
     final rows = rowResult.value;
     return rows.map(LibraryCatalogItem.fromRow).toList(growable: false);
   }
@@ -1406,6 +1471,11 @@ class LibraryCatalogService {
     final cacheKey = '$id|$relativePath';
     return _coverWarmJobs.putIfAbsent(cacheKey, () async {
       final existingCoverPath = row['cover_path']?.toString().trim();
+      if (existingCoverPath != null &&
+          existingCoverPath.isNotEmpty &&
+          _isFlutterAssetPath(existingCoverPath)) {
+        return existingCoverPath;
+      }
       if (existingCoverPath != null &&
           existingCoverPath.isNotEmpty &&
           File(existingCoverPath).existsSync()) {
@@ -1785,6 +1855,7 @@ class LibraryCatalogItem {
     required this.epubHref,
     required this.paragraphIndex,
     required this.navigationCount,
+    this.contributors = const [],
   });
 
   factory LibraryCatalogItem.fromRow(Map<String, Object?> row) {
@@ -1792,7 +1863,8 @@ class LibraryCatalogItem {
     final resolvedCoverPath =
         coverPathValue != null &&
             coverPathValue.isNotEmpty &&
-            File(coverPathValue).existsSync()
+            (_isFlutterAssetPath(coverPathValue) ||
+                File(coverPathValue).existsSync())
         ? coverPathValue
         : null;
     return LibraryCatalogItem(
@@ -1847,8 +1919,14 @@ class LibraryCatalogItem {
   final String? epubHref;
   final int? paragraphIndex;
   final int navigationCount;
+  final List<LibraryItemContributor> contributors;
 
-  bool get isEpub => (fileFormat ?? '').toLowerCase() == 'epub';
+  bool get isEpub {
+    final normalizedFileFormat = (fileFormat ?? '').toLowerCase();
+    if (normalizedFileFormat == 'epub') return true;
+    if (normalizedFileFormat != 'html') return false;
+    return collectionGroupKey == 'adventist_pioneer_library';
+  }
 
   bool get isPdf => (fileFormat ?? '').toLowerCase() == 'pdf';
 
@@ -1899,6 +1977,7 @@ class LibraryCatalogItem {
     String? epubHref,
     int? paragraphIndex,
     int? navigationCount,
+    List<LibraryItemContributor>? contributors,
   }) {
     return LibraryCatalogItem(
       id: id,
@@ -1925,6 +2004,7 @@ class LibraryCatalogItem {
       epubHref: epubHref ?? this.epubHref,
       paragraphIndex: paragraphIndex ?? this.paragraphIndex,
       navigationCount: navigationCount ?? this.navigationCount,
+      contributors: contributors ?? this.contributors,
     );
   }
 
@@ -1955,8 +2035,11 @@ class LibraryCatalogItem {
   }
 
   String get subtitle {
+    final authorPart = contributors.isNotEmpty
+        ? displayAuthorsFromContributors(contributors)
+        : (author ?? '').trim();
     final parts = <String>[
-      if ((author ?? '').trim().isNotEmpty) author!.trim(),
+      if (authorPart.isNotEmpty) authorPart,
       if ((collectionName ?? '').trim().isNotEmpty) collectionName!.trim(),
     ];
     if (parts.isEmpty) return _fileTypeLabel;
@@ -1973,6 +2056,29 @@ class LibraryCatalogItem {
       relativePath: relativePath,
     );
     return resolved ?? 'Unknown author';
+  }
+
+  /// All contributor display names joined with "; ".
+  /// e.g. "A. T. Jones; E. J. Waggoner"
+  /// Falls back to [displayAuthor] when no contributors are loaded.
+  String get displayAuthors {
+    if (contributors.isNotEmpty) {
+      return displayAuthorsFromContributors(contributors);
+    }
+    return displayAuthor;
+  }
+
+  /// Contributor last names joined with " & ".
+  /// e.g. "Jones & Waggoner"
+  /// Falls back to [displayAuthor] when no contributors are loaded.
+  String get shortAuthors {
+    if (contributors.isNotEmpty) {
+      return shortAuthorsFromContributors(contributors);
+    }
+    // Parse the denormalized author field if it contains ";".
+    final a = author?.trim() ?? '';
+    if (a.contains(';')) return shortAuthorsFromDisplayString(a);
+    return displayAuthor;
   }
 
   String get _fileTypeLabel {
@@ -2114,8 +2220,7 @@ class LibraryCatalogSearchSessionSnapshot {
       }
       return LibraryCatalogSearchSessionSnapshot(
         query: query,
-        collectionFilter:
-            collectionFilter == null || collectionFilter.isEmpty
+        collectionFilter: collectionFilter == null || collectionFilter.isEmpty
             ? null
             : collectionFilter,
         currentIndex: currentIndex,
@@ -2376,6 +2481,21 @@ List<LibraryCatalogItem> _dedupeLibraryItems(List<LibraryCatalogItem> items) {
 }
 
 String _libraryItemDedupKey(LibraryCatalogItem item) {
+  if (item.collectionGroupKey == 'adventist_pioneer_library') {
+    final normalizedTitle = _normalizedLibraryText(item.displayTitle);
+    final normalizedAuthor = _normalizedLibraryText(item.displayAuthor);
+    final parts = <String>['pioneer'];
+    if (normalizedTitle.isNotEmpty) {
+      parts.add('title:$normalizedTitle');
+    }
+    if (normalizedAuthor.isNotEmpty) {
+      parts.add('author:$normalizedAuthor');
+    }
+    if (parts.length > 1) {
+      return parts.join('|');
+    }
+  }
+
   final sourceUrl = item.sourceUrl?.trim() ?? '';
   if (sourceUrl.isNotEmpty) {
     return 'source:${sourceUrl.toLowerCase()}';
@@ -2491,6 +2611,10 @@ int _libraryItemSourcePriority(LibraryCatalogItem item) {
 
 bool _isVisibleLibraryItem(LibraryCatalogItem item) {
   return true;
+}
+
+bool _isFlutterAssetPath(String path) {
+  return path.trim().replaceAll('\\', '/').startsWith('assets/');
 }
 
 int _compareLibraryCatalogItems(LibraryCatalogItem a, LibraryCatalogItem b) {

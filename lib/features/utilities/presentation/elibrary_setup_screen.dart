@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/library_root_service.dart';
+import '../../../core/bootstrap/library_root_native.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/user_database.dart';
 import '../../library/data/library_catalog_service.dart';
@@ -16,6 +17,7 @@ import '../data/elibrary_install_estimate_repository.dart';
 import '../data/elibrary_migration_service.dart';
 import '../data/elibrary_download_service.dart';
 import '../data/elibrary_storage_policy.dart';
+import '../data/pioneer_captured_html_import_folder_service.dart';
 import 'library_root_setup_screen.dart';
 
 const _sourceCleanupDeferredMessage =
@@ -52,6 +54,8 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   bool _installEpub = false;
   bool _installPdf = false;
   bool _refreshingEstimateCache = false;
+  bool _loadingCaptureFolder = true;
+  bool _captureFolderBusy = false;
   ELibraryStoragePolicy _storagePolicy = ELibraryStoragePolicy.saveSpace;
   Map<String, Map<String, ELibraryInstallEstimateRecord>>
   _estimateCacheByCollection =
@@ -74,12 +78,16 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   int _manualIndexCompleted = 0;
   int _manualIndexTotal = 0;
   String? _manualIndexCurrentTitle;
+  String? _captureFolderPath;
+  String? _captureFolderBookmark;
+  String? _captureFolderStatus;
 
   @override
   void initState() {
     super.initState();
     _load();
     _loadEstimateCache();
+    _loadCaptureFolderState();
   }
 
   @override
@@ -144,6 +152,109 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         _estimateCacheByCollection =
             <String, Map<String, ELibraryInstallEstimateRecord>>{};
       });
+    }
+  }
+
+  Future<void> _loadCaptureFolderState() async {
+    setState(() => _loadingCaptureFolder = true);
+    try {
+      final path = await LocalSettingsStore.instance
+          .loadPioneerCapturedHtmlFolderPath();
+      final bookmark = await LocalSettingsStore.instance
+          .loadPioneerCapturedHtmlFolderBookmark();
+      if (!mounted) return;
+      setState(() {
+        _captureFolderPath = path;
+        _captureFolderBookmark = bookmark;
+        _captureFolderStatus = path == null
+            ? 'No CaptureClipper folder configured.'
+            : 'CaptureClipper folder ready.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _captureFolderPath = null;
+        _captureFolderBookmark = null;
+        _captureFolderStatus = 'Failed to load CaptureClipper folder: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _loadingCaptureFolder = false);
+      }
+    }
+  }
+
+  Future<void> _chooseCaptureFolder() async {
+    if (_captureFolderBusy) return;
+    setState(() => _captureFolderBusy = true);
+    try {
+      final result = await LibraryRootNative.pickFolder();
+      if (result == null) return;
+      await LocalSettingsStore.instance.savePioneerCapturedHtmlFolder(
+        path: result.path,
+        bookmark: result.bookmark,
+      );
+      await _loadCaptureFolderState();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('CaptureClipper folder saved.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _captureFolderBusy = false);
+      }
+    }
+  }
+
+  Future<void> _clearCaptureFolder() async {
+    if (_captureFolderBusy) return;
+    setState(() => _captureFolderBusy = true);
+    try {
+      await LocalSettingsStore.instance.clearPioneerCapturedHtmlFolder();
+      await _loadCaptureFolderState();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('CaptureClipper folder cleared.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _captureFolderBusy = false);
+      }
+    }
+  }
+
+  Future<void> _importCaptureFolder() async {
+    if (_captureFolderBusy) return;
+    setState(() {
+      _captureFolderBusy = true;
+      _captureFolderStatus = 'Scanning CaptureClipper folder...';
+    });
+    try {
+      final report = await PioneerCapturedHtmlImportFolderService.instance
+          .importConfiguredFolder();
+      if (!mounted) return;
+      final summary = report.folderPath.trim().isEmpty
+          ? 'No CaptureClipper folder is configured.'
+          : 'Imported ${report.importedCount}, '
+                'skipped duplicates ${report.skippedDuplicateCount}, '
+                'needs cleanup ${report.needsCleanupCount}, '
+                'failed ${report.failedCount}.';
+      setState(() => _captureFolderStatus = summary);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(summary)));
+    } catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _captureFolderStatus = 'CaptureClipper import failed: $error',
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('CaptureClipper import failed: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _captureFolderBusy = false);
+      }
     }
   }
 
@@ -1218,6 +1329,72 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                             const SizedBox(height: 8),
                             Text(_manualIndexStatus!),
                           ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'CaptureClipper Imports',
+                            style: theme.textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Choose the folder where CaptureClipper saves captured HTML files, then import anything new into the Pioneer authors library. This is a local HTML import path, not EGW online downloads.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          if (_loadingCaptureFolder)
+                            const LinearProgressIndicator()
+                          else ...[
+                            _pathLine('Folder path', _captureFolderPath),
+                            _pathLine(
+                              'Folder bookmark',
+                              _captureFolderBookmark,
+                            ),
+                            if (_captureFolderStatus != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                _captureFolderStatus!,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ],
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              FilledButton(
+                                onPressed: _captureFolderBusy
+                                    ? null
+                                    : _chooseCaptureFolder,
+                                child: const Text('Choose Folder'),
+                              ),
+                              OutlinedButton(
+                                onPressed: _captureFolderBusy
+                                    ? null
+                                    : _importCaptureFolder,
+                                child: const Text('Import Folder'),
+                              ),
+                              OutlinedButton(
+                                onPressed: _captureFolderBusy
+                                    ? null
+                                    : _clearCaptureFolder,
+                                child: const Text('Clear Folder'),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),

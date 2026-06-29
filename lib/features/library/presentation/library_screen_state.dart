@@ -9,6 +9,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     'egw_pamphlets',
     'egw_periodicals',
     'egw_manuscript_releases',
+    'adventist_pioneer_library',
   };
 
   final _service = LibraryCatalogService.instance;
@@ -134,11 +135,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _openBookReader(LibraryCatalogItem item) async {
-    final initialHref = _initialBookHref(item);
+    final resolvedItem = await _service.loadItemById(item.id) ?? item;
+    if (!mounted) return;
+    final initialHref = _initialBookHref(resolvedItem);
     await Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute<void>(
         builder: (_) => LibraryBookReaderScreen(
-          item: item,
+          item: resolvedItem,
           initialHref: initialHref,
           onReturnToBible: _returnToBibleFromBookReader,
           themeMode: widget.themeMode,
@@ -330,6 +333,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final initial = query.isEmpty
         ? _selectedInitialLetter?.trim().toUpperCase()
         : null;
+    final sortByAuthorFirst =
+        _collectionFilter.trim().toLowerCase() == 'adventist_pioneer_library';
     final filtered = _items.where((item) {
       if (!_matchesFileTypeFilter(item, _fileTypeFilter)) return false;
       if (!libraryItemMatchesCollectionFilter(item, _collectionFilter)) {
@@ -340,7 +345,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
       final haystack = libraryCatalogSearchTextForItem(item);
       return haystack.contains(query);
     }).toList();
-    filtered.sort(_compareBooksForShelf);
+    filtered.sort(
+      (a, b) =>
+          _compareBooksForShelf(a, b, sortByAuthorFirst: sortByAuthorFirst),
+    );
     return filtered;
   }
 
@@ -349,6 +357,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final initial = query.isEmpty
         ? _selectedInitialLetter?.trim().toUpperCase()
         : null;
+    final sortByAuthorFirst =
+        _collectionFilter.trim().toLowerCase() == 'adventist_pioneer_library';
     final filtered = _items.where((item) {
       if (!_matchesFileTypeFilter(item, _fileTypeFilter)) return false;
       if (!libraryItemMatchesCollectionFilter(item, _collectionFilter)) {
@@ -366,7 +376,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           a.lastOpened ?? a.dateAdded ?? DateTime.fromMillisecondsSinceEpoch(0);
       final compare = left.compareTo(right);
       if (compare != 0) return compare;
-      return _compareBooksForShelf(a, b);
+      return _compareBooksForShelf(a, b, sortByAuthorFirst: sortByAuthorFirst);
     });
     return filtered;
   }
@@ -492,13 +502,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return sorted.first;
   }
 
-  int _compareBooksForShelf(LibraryCatalogItem a, LibraryCatalogItem b) {
+  int _compareBooksForShelf(
+    LibraryCatalogItem a,
+    LibraryCatalogItem b, {
+    required bool sortByAuthorFirst,
+  }) {
+    if (sortByAuthorFirst) {
+      final authorCompare = _naturalCompare(a.displayAuthor, b.displayAuthor);
+      if (authorCompare != 0) return authorCompare;
+    }
     final titleCompare = _naturalCompare(
       _sortableTitle(a.displayTitle),
       _sortableTitle(b.displayTitle),
     );
     if (titleCompare != 0) return titleCompare;
-    final authorCompare = _naturalCompare(a.author ?? '', b.author ?? '');
+    final authorCompare = _naturalCompare(a.displayAuthor, b.displayAuthor);
     if (authorCompare != 0) return authorCompare;
     return (a.lastOpened ??
             a.dateAdded ??

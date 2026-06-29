@@ -16,6 +16,7 @@ import '../../../core/database/user_database.dart';
 import '../../library/data/library_author_resolver.dart';
 import '../../library/data/library_citation_display_helper.dart';
 import '../../library/data/library_item_identity.dart';
+import '../../library/data/library_section_heuristics.dart';
 import 'commentary_research_models.dart';
 import 'commentary_research_filters.dart';
 import 'commentary_reference_parser.dart';
@@ -47,6 +48,11 @@ class CommentaryResearchLibraryService
     required String libraryItemId,
     bool includeFrontMatter = true,
   }) async {
+    final itemProfile = await _loadLibraryItemProfile(libraryItemId);
+    if (itemProfile?.preferStoredTextBlocks == true) {
+      return _loadBookSectionsFromTextBlocks(libraryItemId: libraryItemId);
+    }
+
     final file = File(filePath);
     if (await file.exists()) {
       final chunks = await _readBodySections(
@@ -64,6 +70,33 @@ class CommentaryResearchLibraryService
     // If the EPUB parser cannot expose body sections, reuse the indexed text
     // blocks so books that already have stored content still open in the reader.
     return _loadBookSectionsFromTextBlocks(libraryItemId: libraryItemId);
+  }
+
+  Future<_LibraryItemProfile?> _loadLibraryItemProfile(String libraryItemId) {
+    final normalizedId = libraryItemId.trim();
+    if (normalizedId.isEmpty) {
+      return Future.value(null);
+    }
+
+    return ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (db) => db.query(
+            'library_items',
+            columns: const ['source_type'],
+            where: 'id = ?',
+            whereArgs: [normalizedId],
+            limit: 1,
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+          fallbackDatabase: null,
+        )
+        .then((result) {
+          final rows = result.value;
+          if (rows.isEmpty) return null;
+          final sourceType = rows.first['source_type']?.toString().trim() ?? '';
+          if (sourceType.isEmpty) return null;
+          return _LibraryItemProfile(sourceType: sourceType.toLowerCase());
+        });
   }
 
   List<LibraryBookSection> _sectionsFromChunks(List<_EpubSectionChunk> chunks) {
@@ -99,47 +132,45 @@ class CommentaryResearchLibraryService
   Future<List<LibraryBookSection>> _loadBookSectionsFromTextBlocks({
     required String libraryItemId,
   }) async {
-    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
-      List<Map<String, Object?>>
-    >(
-      read: (db) => db.query(
-        'library_text_blocks',
-        columns: const [
-          'id',
-          'epub_href',
-          'spine_index',
-          'paragraph_index',
-          'paragraph_on_section',
-          'section_title',
-          'plain_text',
-        ],
-        where: 'library_item_id = ?',
-        whereArgs: [libraryItemId],
-        orderBy:
-            'COALESCE(spine_index, 1073741824), epub_href COLLATE NOCASE ASC, paragraph_index ASC',
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-      fallbackDatabase: UserDatabase.instance.database,
-    );
+    final rowResult = await ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (db) => db.query(
+            'library_text_blocks',
+            columns: const [
+              'id',
+              'epub_href',
+              'spine_index',
+              'paragraph_index',
+              'paragraph_on_section',
+              'section_title',
+              'plain_text',
+            ],
+            where: 'library_item_id = ?',
+            whereArgs: [libraryItemId],
+            orderBy:
+                'COALESCE(spine_index, 1073741824), epub_href COLLATE NOCASE ASC, paragraph_index ASC',
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+          fallbackDatabase: null,
+        );
     final rows = rowResult.value;
 
     if (rows.isEmpty) {
       return const [];
     }
 
-    final itemResult = await ELibraryReadResolver.instance.readWithFallback<
-      List<Map<String, Object?>>
-    >(
-      read: (db) => db.query(
-        'library_items',
-        columns: const ['title', 'file_name', 'relative_path'],
-        where: 'id = ?',
-        whereArgs: [libraryItemId],
-        limit: 1,
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-      fallbackDatabase: UserDatabase.instance.database,
-    );
+    final itemResult = await ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (db) => db.query(
+            'library_items',
+            columns: const ['title', 'file_name', 'relative_path'],
+            where: 'id = ?',
+            whereArgs: [libraryItemId],
+            limit: 1,
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+          fallbackDatabase: null,
+        );
     final itemRows = itemResult.value;
     final itemRow = itemRows.isEmpty
         ? const <String, Object?>{}
@@ -149,11 +180,15 @@ class CommentaryResearchLibraryService
       fileName: itemRow['file_name']?.toString(),
       relativePath: itemRow['relative_path']?.toString(),
     );
-    final referenceCodes = generateLibraryTextBlockReferenceCodes(
+    final generatedReferenceCodes = generateLibraryTextBlockReferenceCodes(
       plainTexts: rows
           .map((row) => row['plain_text']?.toString() ?? '')
           .toList(growable: false),
       itemAbbreviation: itemAbbreviation,
+    );
+    final refCodesByLocation = await loadManagedEgwReferenceCodesForItem(
+      db: rowResult.database,
+      libraryItemId: libraryItemId,
     );
 
     final orderedKeys = <String>[];
@@ -161,10 +196,13 @@ class CommentaryResearchLibraryService
 
     for (var index = 0; index < rows.length; index++) {
       final row = rows[index];
-      final text = row['plain_text']?.toString().trim() ?? '';
+      final text = libraryCleanVisibleMarginArtifacts(
+        row['plain_text']?.toString().trim() ?? '',
+      );
       if (text.isEmpty) continue;
 
       final href = row['epub_href']?.toString().trim() ?? '';
+      final paragraphIndex = (row['paragraph_index'] as num?)?.toInt() ?? 0;
       final fallbackKey = 'row_${row['id']?.toString() ?? orderedKeys.length}';
       final key = href.isNotEmpty
           ? p.normalize(href).toLowerCase()
@@ -177,7 +215,14 @@ class CommentaryResearchLibraryService
           spineIndex: (row['spine_index'] as num?)?.toInt(),
         );
       });
-      builder.addRow(row, text, referenceCode: referenceCodes[index]);
+      final locationKey = _refCodeLocationKey(
+        libraryItemId: libraryItemId,
+        href: href,
+        paragraphIndex: paragraphIndex,
+      );
+      final referenceCode =
+          refCodesByLocation[locationKey] ?? generatedReferenceCodes[index];
+      builder.addRow(row, text, referenceCode: referenceCode);
     }
 
     final sections = <LibraryBookSection>[];
@@ -529,18 +574,17 @@ class CommentaryResearchLibraryService
   Future<List<CommentaryResearchNavigationItem>> loadNavigationItems({
     required String libraryItemId,
   }) async {
-    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
-      List<Map<String, Object?>>
-    >(
-      read: (db) => db.query(
-        'library_navigation_items',
-        where: 'library_item_id = ? AND deleted_at IS NULL',
-        whereArgs: [libraryItemId],
-        orderBy: 'sort_order ASC, depth ASC, label COLLATE NOCASE ASC',
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-      fallbackDatabase: UserDatabase.instance.database,
-    );
+    final rowResult = await ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (db) => db.query(
+            'library_navigation_items',
+            where: 'library_item_id = ? AND deleted_at IS NULL',
+            whereArgs: [libraryItemId],
+            orderBy: 'sort_order ASC, depth ASC, label COLLATE NOCASE ASC',
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+          fallbackDatabase: null,
+        );
     final rows = rowResult.value;
     return rows
         .map(
@@ -813,6 +857,19 @@ class CommentaryResearchLibraryService
       stats: stats,
     );
   }
+}
+
+class _LibraryItemProfile {
+  const _LibraryItemProfile({required this.sourceType});
+
+  final String sourceType;
+
+  bool get preferStoredTextBlocks =>
+      sourceType == 'egw_copied_range' ||
+      sourceType == 'egw_browser_capture' ||
+      sourceType == 'egw_text_capture' ||
+      sourceType == 'pioneer_captured_html' ||
+      sourceType == 'pioneer_epub_import';
 }
 
 Future<int> _countDiscoverableFiles({

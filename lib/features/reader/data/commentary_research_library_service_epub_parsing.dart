@@ -568,7 +568,7 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
       if (openIndex < 0) continue;
       final frame = stack.removeAt(openIndex);
       final innerHtml = source.substring(frame.contentStart, match.start);
-      final text = _stripHtml(innerHtml);
+      final text = libraryCleanVisibleMarginArtifacts(_stripHtml(innerHtml));
       if (text.isEmpty) continue;
       if (_isHiddenLikeBlock(attrs: frame.attrs, innerHtml: innerHtml) ||
           _isFootnoteOrEndnoteBlock(attrs: frame.attrs)) {
@@ -706,14 +706,16 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
     if (classMatch != null) {
       final classValue = classMatch.group(1)!.toLowerCase();
       final classTokens = classValue.split(RegExp(r'[\s_-]+'));
-      if (classTokens.any((token) =>
-          token.contains('footnote') ||
-          token.contains('endnote') ||
-          token.contains('rearnote') ||
-          token.contains('chapternote') ||
-          token.contains('sourcenote') ||
-          token.contains('sourcecredit') ||
-          token == 'reference')) {
+      if (classTokens.any(
+        (token) =>
+            token.contains('footnote') ||
+            token.contains('endnote') ||
+            token.contains('rearnote') ||
+            token.contains('chapternote') ||
+            token.contains('sourcenote') ||
+            token.contains('sourcecredit') ||
+            token == 'reference',
+      )) {
         return true;
       }
     }

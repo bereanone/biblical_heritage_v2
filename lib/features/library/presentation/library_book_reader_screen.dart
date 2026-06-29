@@ -18,6 +18,7 @@ import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/theme_preferences.dart';
 import '../data/elibrary_markup_repository.dart';
 import '../data/library_citation_display_helper.dart';
+import '../data/library_section_heuristics.dart';
 import '../../reader/data/commentary_research_library_service.dart';
 import '../../reader/presentation/highlight_render.dart';
 import '../../reader/presentation/tag_quick_apply_helper.dart';
@@ -1134,17 +1135,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   }
 
   String get _currentSubtitle {
-    final sectionTitle = _currentSection?.title.trim() ?? '';
-    if (sectionTitle.isNotEmpty) {
-      return sectionTitle;
-    }
-
-    final collectionName = widget.item.collectionName?.trim() ?? '';
-    if (collectionName.isNotEmpty && collectionName.toLowerCase() != 'user') {
-      return collectionName;
-    }
-
-    return '';
+    return libraryReaderBookSubtitle(
+      widget.item,
+      sectionTitle: _currentSection?.title,
+    );
   }
 
   int _initialSectionIndex({
@@ -1309,31 +1303,25 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   int? _firstRealContentSectionIndex(List<LibraryBookSection> sections) {
     for (var index = 0; index < sections.length; index++) {
       final section = sections[index];
-      if (_isReaderChapterOneLabel(section.title) ||
-          _isReaderChapterOneLabel(
-            p.basenameWithoutExtension(section.entryName),
-          )) {
+      if (libraryIsMeaningfulReadingSection(
+        title: section.title,
+        href: section.entryName,
+        paragraphs: section.paragraphs,
+        bookTitle: widget.item.displayTitle,
+      )) {
         return index;
       }
     }
-
-    for (var index = 0; index < sections.length; index++) {
-      final section = sections[index];
-      if (_isReaderMetadataHelpLabel(section.title) ||
-          _isReaderMetadataHelpLabel(
-            p.basenameWithoutExtension(section.entryName),
-          )) {
-        continue;
-      }
-      return index;
-    }
-    return null;
+    return sections.isEmpty ? null : 0;
   }
 
   bool _isRealContentSection(LibraryBookSection section) {
-    final entryLabel = p.basenameWithoutExtension(section.entryName);
-    return !_isReaderMetadataHelpLabel(section.title) &&
-        !_isReaderMetadataHelpLabel(entryLabel);
+    return libraryIsMeaningfulReadingSection(
+      title: section.title,
+      href: section.entryName,
+      paragraphs: section.paragraphs,
+      bookTitle: widget.item.displayTitle,
+    );
   }
 
   bool _isReaderChapterOneLabel(String value) {
@@ -1603,8 +1591,16 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         ? _sections[sectionIndex]
         : _currentSection;
     final targetKey =
-        _navigationTargetKey(navItem) ??
+        libraryReaderContentsTargetKeyForNavigationItem(
+          navItem: navItem,
+          sections: _sections,
+        ) ??
         _fallbackTargetKeyForNavigationItem(navItem, section: targetSection);
+    final shouldJumpToSectionStart =
+        libraryReaderNavigationItemTargetsSectionStart(
+          navItem: navItem,
+          sections: _sections,
+        );
     setState(() {
       if (navIndex >= 0) {
         _selectedNavigationIndex = navIndex;
@@ -1616,6 +1612,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
+        if (shouldJumpToSectionStart && sectionIndex != null) {
+          _selectSection(sectionIndex);
+          return;
+        }
         _scrollToTarget(targetKey);
       }
     });
@@ -1806,6 +1806,11 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     final savedTargetKey = _savedLocationTargetKey();
     if (savedTargetKey != null) return savedTargetKey;
 
+    final headingTargets = _headingTargetsForCurrentSection();
+    if (headingTargets.isNotEmpty) {
+      return headingTargets.first.key;
+    }
+
     return null;
   }
 
@@ -1914,7 +1919,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     return null;
   }
 
-  void _scrollToTarget(String? targetKey) {
+  void _scrollToTarget(String? targetKey, {int attempt = 0}) {
     if (!_bodyScrollController.hasClients) return;
     final resolvedTargetKey = targetKey ?? _pendingBodyScrollTargetKey;
     final targetContext = resolvedTargetKey == null
@@ -1929,6 +1934,14 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         curve: Curves.easeInOut,
       );
       _pendingBodyScrollTargetKey = null;
+      return;
+    }
+
+    if (resolvedTargetKey != null && attempt < 4) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _scrollToTarget(resolvedTargetKey, attempt: attempt + 1);
+      });
       return;
     }
 

@@ -38,15 +38,18 @@ class _LibraryCatalogSearchDialog extends StatelessWidget {
 
   final VoidCallback? onReturnToBible;
 
-  void _openItem(
+  Future<void> _openItem(
     BuildContext context,
     LibraryCatalogSearchResult result,
     int index,
     List<LibraryCatalogSearchResult> results,
     String searchQuery,
     String collectionFilter,
-  ) {
+  ) async {
     final navigator = Navigator.of(context, rootNavigator: true);
+    final resolvedItem =
+        await LibraryCatalogService.instance.loadItemById(result.item.id) ??
+        result.item;
     navigator.pop();
     final session = LibraryCatalogSearchSession(
       query: searchQuery,
@@ -66,11 +69,11 @@ class _LibraryCatalogSearchDialog extends StatelessWidget {
         navigator.push(
           MaterialPageRoute<void>(
             builder: (_) => LibraryBookReaderScreen(
-              item: result.item,
-              initialHref: result.item.epubHref,
-              initialAnchorId: result.item.anchorId,
-              initialSpineIndex: result.item.spineIndex,
-              initialParagraphIndex: result.item.paragraphIndex,
+              item: resolvedItem,
+              initialHref: resolvedItem.epubHref,
+              initialAnchorId: resolvedItem.anchorId,
+              initialSpineIndex: resolvedItem.spineIndex,
+              initialParagraphIndex: resolvedItem.paragraphIndex,
               searchQuery: searchQuery,
               highlightTerms: extractLibrarySearchHighlightTerms(searchQuery),
               searchSession: session,
@@ -161,55 +164,54 @@ class _LibraryCatalogSearchDialog extends StatelessWidget {
             maxHeight: screenSize.height * 0.85,
           ),
           child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.close),
-                          tooltip: 'Close Search',
-                          onPressed: () => Navigator.of(context).pop(),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            'eLibrary Search',
-                            style: libraryScaledTextStyle(
-                              theme.textTheme.titleMedium,
-                              fontScale,
-                              multiplier: 1.0,
-                              fontWeight: FontWeight.w700,
-                              color: theme.colorScheme.onSurface,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                        const SizedBox(width: 48),
-                      ],
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Close Search',
+                      onPressed: () => Navigator.of(context).pop(),
                     ),
-                  ),
-                  Divider(height: 1, color: theme.dividerColor),
-                  Expanded(
-                    child: LibraryCatalogSearchPanel(
-                      onSelectItem:
-                          (result, index, results, query, collection) =>
-                              _openItem(
-                                context,
-                                result,
-                                index,
-                                results,
-                                query,
-                                collection,
-                              ),
-                      onQuickApplyItem: (result, query) =>
-                          _quickApplyItem(context, result, query),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        'eLibrary Search',
+                        style: libraryScaledTextStyle(
+                          theme.textTheme.titleMedium,
+                          fontScale,
+                          multiplier: 1.0,
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 48),
+                  ],
+                ),
               ),
-            ),
+              Divider(height: 1, color: theme.dividerColor),
+              Expanded(
+                child: LibraryCatalogSearchPanel(
+                  onSelectItem: (result, index, results, query, collection) =>
+                      _openItem(
+                        context,
+                        result,
+                        index,
+                        results,
+                        query,
+                        collection,
+                      ),
+                  onQuickApplyItem: (result, query) =>
+                      _quickApplyItem(context, result, query),
+                ),
+              ),
+            ],
           ),
+        ),
+      ),
     );
   }
 }

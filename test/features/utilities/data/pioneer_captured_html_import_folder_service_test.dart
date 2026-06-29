@@ -10,9 +10,13 @@ import 'package:studybible2/core/bootstrap/local_settings_store.dart';
 import 'package:studybible2/core/database/elibrary_database.dart';
 import 'package:studybible2/core/database/user_database.dart';
 import 'package:studybible2/features/library/data/library_catalog_service.dart';
+import 'package:studybible2/features/library/data/library_contributor.dart';
 import 'package:studybible2/features/reader/data/commentary_research_library_service.dart';
 import 'package:studybible2/features/utilities/data/pioneer_capture_folder_metadata.dart';
+import 'package:studybible2/features/utilities/data/pioneer_captured_html_import_review_store.dart';
 import 'package:studybible2/features/utilities/data/pioneer_captured_html_import_folder_service.dart';
+import 'package:studybible2/features/utilities/data/pioneer_source_catalog.dart';
+import 'package:studybible2/features/utilities/data/pioneer_text_import_service.dart';
 
 Future<void> _installPathProviderMocks({
   required Directory supportDir,
@@ -93,6 +97,66 @@ Future<int> _countRows(
   }
   final rows = await db.rawQuery(sql.toString(), whereArgs);
   return rows.isEmpty ? 0 : (rows.first['cnt'] as num?)?.toInt() ?? 0;
+}
+
+class _FailingCapturedHtmlImportService extends PioneerTextImportService {
+  @override
+  Future<PioneerImportBatchResult> importFromParsedCapturedHtml({
+    required PioneerSourceWork work,
+    required PioneerImportDocument document,
+    required Uint8List sourceBytes,
+    String? sourceUrl,
+    String? sourceLabel,
+    String? sourceType,
+    String? sourceSite,
+    String? relativePath,
+    String? coverPath,
+    List<ImportContributorSpec>? contributors,
+    PioneerImportProgressCallback? onProgress,
+    PioneerImportShouldContinue? shouldContinue,
+    bool allowRepair = false,
+    PioneerExistingImportPolicy existingImportPolicy =
+        PioneerExistingImportPolicy.skipExisting,
+    String? indexStatus,
+    String? indexError,
+  }) async {
+    return PioneerImportBatchResult(
+      workResults: [
+        PioneerImportWorkResult(
+          work: work,
+          status: PioneerImportWorkStatus.failed,
+          stage: 'failed',
+          sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+          reason: 'Simulated import failure.',
+          libraryItemId: '',
+          sourceType: sourceType,
+          insertedLibraryItems: 0,
+          insertedNavigationItems: 0,
+          insertedTextBlocks: 0,
+          skippedExisting: false,
+          refCodeHandlingSummary: 'Simulated failure.',
+          detail: 'Simulated import failure.',
+          exceptionType: 'SimulatedFailure',
+          httpStatusCode: null,
+          contentType: 'text/html',
+          downloadedByteCount: sourceBytes.length,
+          parsedSectionCount: document.sections.length,
+          parsedParagraphCount: document.sections.fold<int>(
+            0,
+            (sum, section) => sum + section.paragraphs.length,
+          ),
+          requiresManualVerification: false,
+          manualVerificationHint: null,
+          epubAvailable: false,
+          epubValidated: false,
+          epubRejectedReason: null,
+          textCaptureAvailable: true,
+          preferredImportPreference: PioneerSourcePathPreference.textCapture,
+          qualityValidationSummary: 'Simulated failure.',
+        ),
+      ],
+    );
+  }
 }
 
 void main() {
@@ -246,6 +310,19 @@ void main() {
       expect(firstFile.author, authorName);
       expect(firstFile.libraryItemId, isNotNull);
 
+      final reviewEntries = await PioneerCapturedHtmlImportReviewStore.instance
+          .loadRecentEntries(limit: 5);
+      expect(reviewEntries, hasLength(1));
+      final reviewEntry = reviewEntries.single;
+      expect(reviewEntry.status, 'imported');
+      expect(reviewEntry.libraryItemId, firstFile.libraryItemId);
+      expect(
+        await LibraryCatalogService.instance.loadItemById(
+          reviewEntry.libraryItemId!,
+        ),
+        isNotNull,
+      );
+
       final db = await ELibraryDatabase.instance.database;
       final rows = await db.query(
         'library_items',
@@ -293,6 +370,73 @@ void main() {
         duplicateReport.files.single.status,
         PioneerCapturedHtmlFileStatus.skippedDuplicate,
       );
+    },
+  );
+
+  test(
+    'persists needsCleanup review entries with warning text',
+    () async {
+      const title = 'Captured Sermon Cleanup';
+      const abbreviation = 'CSC';
+      const workId = 'captured_sermon_cleanup';
+      const sourceUrl = 'https://example.invalid/captured-sermon-cleanup';
+      const authorName = 'E. G. White';
+
+      final folder = await _createCaptureFolder(
+        root: captureRootDir,
+        title: title,
+        abbreviation: abbreviation,
+        workId: workId,
+        sourceUrl: sourceUrl,
+        authorName: authorName,
+        bodyHtml: '''
+    <p>First paragraph.</p>
+    <p>Second paragraph.</p>
+''',
+      );
+      await File(p.join(folder.path, 'capture.html')).writeAsString('''
+<!doctype html>
+<html>
+  <head>
+    <title>$title</title>
+    <meta name="author" content="$authorName" />
+    <link rel="canonical" href="$sourceUrl" />
+  </head>
+  <body>
+    <p>First paragraph.</p>
+    <p>Second paragraph.</p>
+  </body>
+</html>
+''');
+
+      await LocalSettingsStore.instance.savePioneerCapturedHtmlFolder(
+        path: folder.path,
+      );
+
+      final report = await PioneerCapturedHtmlImportFolderService.instance
+          .importConfiguredFolder();
+      expect(report.needsCleanupCount, 1);
+
+      final settings = await LocalSettingsStore.instance.load();
+      expect(
+        settings['pioneer_captured_html_review_entries'],
+        isA<List>(),
+      );
+      expect(settings['pioneer_captured_html_review_entries'], isNotEmpty);
+
+      final reviewEntries = await PioneerCapturedHtmlImportReviewStore.instance
+          .loadRecentEntries();
+      expect(reviewEntries, hasLength(1));
+      final reviewEntry = reviewEntries.single;
+      expect(reviewEntry.status, 'needsCleanup');
+      expect(reviewEntry.libraryItemId, isNotNull);
+      expect(reviewEntry.warningOrFailureReason, isNotNull);
+      expect(
+        reviewEntry.warningOrFailureReason,
+        contains('No h1/h2/h3 headings were found.'),
+      );
+      expect(reviewEntry.isNeedsCleanup, isTrue);
+      expect(reviewEntry.isImported, isFalse);
     },
   );
 
@@ -356,6 +500,60 @@ void main() {
       expect(secondFile.status, PioneerCapturedHtmlFileStatus.needsCleanup);
       expect(secondFile.reason, contains('contents changed'));
       expect(secondFile.libraryItemId, isNotNull);
+    },
+  );
+
+  test(
+    'persists failed review entries without creating broken catalog items',
+    () async {
+      const title = 'Captured Failure Sermon';
+      const abbreviation = 'CFS';
+      const workId = 'captured_failure_sermon';
+      const sourceUrl = 'https://example.invalid/captured-failure-sermon';
+      const authorName = 'E. G. White';
+
+      final folder = await _createCaptureFolder(
+        root: captureRootDir,
+        title: title,
+        abbreviation: abbreviation,
+        workId: workId,
+        sourceUrl: sourceUrl,
+        authorName: authorName,
+        bodyHtml: '''
+    <p>First paragraph.</p>
+    <h2>Section 2</h2>
+    <p>Second paragraph.</p>
+''',
+      );
+
+      await LocalSettingsStore.instance.savePioneerCapturedHtmlFolder(
+        path: folder.path,
+      );
+
+      final service = PioneerCapturedHtmlImportFolderService(
+        importService: _FailingCapturedHtmlImportService(),
+      );
+      final report = await service.importConfiguredFolder();
+
+      expect(report.failedCount, 1);
+      final file = report.files.single;
+      expect(file.status, PioneerCapturedHtmlFileStatus.failed);
+      expect(file.reason, contains('Simulated import failure.'));
+      expect(file.libraryItemId, isNull);
+
+      final reviewEntries = await PioneerCapturedHtmlImportReviewStore.instance
+          .loadRecentEntries();
+      expect(reviewEntries, hasLength(1));
+      final reviewEntry = reviewEntries.single;
+      expect(reviewEntry.status, 'failed');
+      expect(reviewEntry.libraryItemId, isNull);
+      expect(reviewEntry.warningOrFailureReason, contains('Simulated'));
+
+      final catalogItems = await LibraryCatalogService.instance.loadItems();
+      expect(
+        catalogItems.where((item) => item.displayTitle == title),
+        isEmpty,
+      );
     },
   );
 

@@ -9,6 +9,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/elibrary_database.dart';
 import 'pioneer_capture_folder_metadata.dart';
+import 'pioneer_captured_html_import_review_store.dart';
 import 'pioneer_source_catalog.dart';
 import 'pioneer_text_import_service.dart';
 
@@ -307,11 +308,19 @@ class PioneerCapturedHtmlImportFolderService {
   Future<PioneerCapturedHtmlFolderImportReport> importConfiguredFolder({
     PioneerExistingImportPolicy existingImportPolicy =
         PioneerExistingImportPolicy.skipExisting,
-  }) {
-    return scanConfiguredFolder(
+  }) async {
+    final report = await scanConfiguredFolder(
       importFiles: true,
       existingImportPolicy: existingImportPolicy,
     );
+    try {
+      await PioneerCapturedHtmlImportReviewStore.instance.recordEntries(
+        _reviewEntriesFromReport(report),
+      );
+    } catch (error) {
+      debugPrint('Failed to persist CaptureClipper import review: $error');
+    }
+    return report;
   }
 
   Future<PioneerCapturedHtmlFileReport> _analyzeFile({
@@ -427,6 +436,8 @@ class PioneerCapturedHtmlImportFolderService {
     final result = importResult.workResults.isEmpty
         ? null
         : importResult.workResults.first;
+    final resolvedLibraryItemId =
+        result == null ? '' : result.libraryItemId.trim();
     final fileStatus = result == null
         ? PioneerCapturedHtmlFileStatus.failed
         : switch (result.status) {
@@ -457,7 +468,38 @@ class PioneerCapturedHtmlImportFolderService {
       warnings: parsed.warnings,
       status: fileStatus,
       reason: result?.reason ?? parsed.warnings.join(' | '),
-      libraryItemId: result?.libraryItemId,
+      libraryItemId:
+          resolvedLibraryItemId.isNotEmpty ? resolvedLibraryItemId : null,
+    );
+  }
+}
+
+Iterable<PioneerCapturedHtmlImportReviewEntry> _reviewEntriesFromReport(
+  PioneerCapturedHtmlFolderImportReport report,
+) sync* {
+  for (var index = 0; index < report.files.length; index++) {
+    final file = report.files[index];
+    yield PioneerCapturedHtmlImportReviewEntry(
+      importedAt: report.completedAt.add(Duration(microseconds: index)),
+      title: file.title,
+      author: file.author,
+      sourceFilePath: file.filePath,
+      sourceRelativePath: file.relativePath,
+      sourceType: file.sourceType,
+      status: file.status.name,
+      warningOrFailureReason:
+          file.status == PioneerCapturedHtmlFileStatus.needsCleanup
+          ? (file.warnings.isEmpty
+                ? file.reason?.trim()
+                : file.warnings.join(' | '))
+          : file.reason?.trim().isNotEmpty == true
+          ? file.reason!.trim()
+          : file.warnings.isEmpty
+          ? null
+          : file.warnings.join(' | '),
+      libraryItemId: file.libraryItemId?.trim().isNotEmpty == true
+          ? file.libraryItemId!.trim()
+          : null,
     );
   }
 }

@@ -18,6 +18,7 @@ import '../data/elibrary_migration_service.dart';
 import '../data/elibrary_download_service.dart';
 import '../data/elibrary_storage_policy.dart';
 import '../data/pioneer_captured_html_import_folder_service.dart';
+import 'pioneer_captured_html_import_review_screen.dart';
 import 'library_root_setup_screen.dart';
 
 const _sourceCleanupDeferredMessage =
@@ -256,6 +257,16 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         setState(() => _captureFolderBusy = false);
       }
     }
+  }
+
+  Future<void> _reviewCaptureFolderImports() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const PioneerCapturedHtmlImportReviewScreen(),
+      ),
+    );
+    if (!mounted) return;
+    await _loadCaptureFolderState();
   }
 
   Future<void> _refreshEstimateCache() async {
@@ -1392,6 +1403,12 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                                     ? null
                                     : _clearCaptureFolder,
                                 child: const Text('Clear Folder'),
+                              ),
+                              TextButton(
+                                onPressed: _captureFolderBusy
+                                    ? null
+                                    : _reviewCaptureFolderImports,
+                                child: const Text('Review Imports'),
                               ),
                             ],
                           ),

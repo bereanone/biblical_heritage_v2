@@ -5,10 +5,12 @@
 import FlutterMacOS
 import Foundation
 
-import file_selector_macos
+import file_picker
+import flutter_paste_input
 import sqflite_darwin
 
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
-  FileSelectorPlugin.register(with: registry.registrar(forPlugin: "FileSelectorPlugin"))
+  FilePickerPlugin.register(with: registry.registrar(forPlugin: "FilePickerPlugin"))
+  FlutterPasteInputPlugin.register(with: registry.registrar(forPlugin: "FlutterPasteInputPlugin"))
   SqflitePlugin.register(with: registry.registrar(forPlugin: "SqflitePlugin"))
 }

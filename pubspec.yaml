@@ -36,6 +36,7 @@ dependencies:
   crypto: ^3.0.7
   file_picker: ^8.3.7
   flutter_paste_input: ^1.0.0
+  image: ^4.8.0
   path: ^1.9.1
   path_provider: ^2.1.5
   scrollable_positioned_list: ^0.3.8
@@ -73,7 +74,11 @@ flutter:
   assets:
     - assets/databases/bible_base.db
     - assets/databases/user.db
+    - assets/databases/eLibrary.db
     - assets/elibrary_sources/pioneer_sources.json
+    - assets/scans/
+    - assets/library_covers/
+    - assets/library_covers/thumbs/
     - assets/icons/GoldLogo.png
     - assets/icons/Logo2.png
     - tool/elibrary_download_manifest.json

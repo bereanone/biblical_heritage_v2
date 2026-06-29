@@ -12,8 +12,8 @@ import 'package:studybible2/core/database/user_database.dart';
 import 'package:studybible2/features/utilities/data/pioneer_capture_folder_metadata.dart';
 import 'package:studybible2/features/utilities/data/pioneer_source_catalog.dart';
 import 'package:studybible2/features/utilities/data/pioneer_html_capture_folder_scanner.dart';
+import 'package:studybible2/features/utilities/data/pioneer_capture_page_inspection.dart';
 import 'package:studybible2/features/utilities/data/pioneer_text_import_service.dart';
-import 'package:studybible2/features/utilities/presentation/pioneer_verified_capture_screen.dart';
 
 Future<void> _installPathProviderMocks({
   required Directory supportDir,

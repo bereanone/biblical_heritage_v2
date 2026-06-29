@@ -46,3 +46,14 @@ app.*.map.json
 
 # Local project planning notes
 UpgradePath.txt
+
+# Generated cover art cache; keep placeholder files tracked.
+assets/library_covers/*
+!assets/library_covers/.gitkeep
+!assets/library_covers/thumbs/
+assets/library_covers/thumbs/*
+!assets/library_covers/thumbs/.gitkeep
+
+# Local backup artifacts for the baseline eLibrary database.
+assets/databases/eLibrary.db.bak
+assets/databases/*before-scans-import*

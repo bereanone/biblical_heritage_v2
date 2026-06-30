@@ -62,7 +62,7 @@ void main() {
     final homeHere = catalog.workById('home_here_and_home_in_heaven_with_other_poems');
     expect(homeHere, isNotNull);
     expect(homeHere!.title, 'Home Here, and Home in Heaven; With Other Poems');
-    expect(homeHere.isImportable, isTrue);
+    expect(homeHere.isImportable, isFalse);
 
     final livingFountains = catalog.workById('living_fountains_or_broken_cisterns');
     expect(livingFountains, isNotNull);

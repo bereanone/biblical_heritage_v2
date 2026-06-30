@@ -134,10 +134,15 @@ class _CommentaryResearchScreenState extends State<CommentaryResearchScreen> {
     final segmentBorderColor = scheme.outlineVariant.withValues(alpha: 0.95);
     final section = isCommentary ? _commentarySection : _researchSection;
     final statusMessage = section?.statusMessage ?? '';
+    final hasLoadedContent =
+        section != null &&
+        (section.files.isNotEmpty || section.matches.isNotEmpty);
     final showSetupAction =
-        statusMessage.contains('library not found') ||
-        statusMessage.contains('root not found') ||
-        statusMessage.contains('Open eLibrary Setup');
+        !hasLoadedContent &&
+        (statusMessage.contains('library not found') ||
+            statusMessage.contains('root not found') ||
+            statusMessage.contains('Open eLibrary Setup') ||
+            statusMessage.contains('not found'));
     final showIndexAction =
         statusMessage.contains('index needed') ||
         statusMessage.contains('not indexed');

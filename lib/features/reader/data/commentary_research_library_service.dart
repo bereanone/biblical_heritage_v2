@@ -242,7 +242,8 @@ class CommentaryResearchLibraryService
     bool refresh = false,
   }) async {
     final selection = await LibraryRootService.instance.loadSelection();
-    final rootPath = selection.path;
+    final rootPath = selection.path?.trim() ?? '';
+    final rootAvailable = rootPath.isNotEmpty && selection.exists;
     final commentaryFolderPath = selection.path == null
         ? null
         : p.join(selection.path!, 'ePubs', 'EGW');
@@ -252,50 +253,9 @@ class CommentaryResearchLibraryService
     final reportPath = selection.path == null
         ? null
         : p.join(selection.path!, 'Index', 'commentary_index_report.json');
-
-    if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
-      final commentaryMissingMessage =
-          'Commentary library not found. Open eLibrary Setup.';
-      final researchMissingMessage =
-          'Research library not found. Open eLibrary Setup.';
-      if (_debugCommentaryResearchLogs) {
-        debugPrint(
-          '[CommentaryResearch] Root reconnect required for $bookName $chapter:$verse',
-        );
-      }
-      return CommentaryResearchPassageData(
-        bookId: bookId,
-        chapter: chapter,
-        verse: verse,
-        bookName: bookName,
-        rootPath: selection.path,
-        commentaryFolderPath: commentaryFolderPath,
-        researchFolderPath: researchFolderPath,
-        commentary: CommentaryResearchSectionData(
-          folderType: 'commentary',
-          title: 'Commentary',
-          statusMessage: commentaryMissingMessage,
-          files: <CommentaryResearchFileItem>[],
-          matches: <CommentaryResearchMatchItem>[],
-          discoveredCount: 0,
-          indexedCount: 0,
-          matchCount: 0,
-        ),
-        research: CommentaryResearchSectionData(
-          folderType: 'research',
-          title: 'Research',
-          statusMessage: researchMissingMessage,
-          files: <CommentaryResearchFileItem>[],
-          matches: <CommentaryResearchMatchItem>[],
-          discoveredCount: 0,
-          indexedCount: 0,
-          matchCount: 0,
-        ),
-        indexReportPath: reportPath,
-      );
+    if (rootAvailable) {
+      await LibraryRootService.instance.ensureStructure(rootPath);
     }
-
-    await LibraryRootService.instance.ensureStructure(rootPath);
 
     final db = await ELibraryDatabase.instance.database;
     final books = await StudyBibleDatabase.instance.loadBooks();
@@ -303,22 +263,26 @@ class CommentaryResearchLibraryService
     final bookAliases = BibleReferenceParser.buildBookAliases(books);
     final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
     final preferredCommentaryVolume = _volumeForBook(bookId);
-    final commentaryCandidatePaths = [
-      p.join(rootPath, 'ePubs', 'EGW'),
-      p.join(rootPath, 'PDFs', 'EGW'),
-      p.join(rootPath, 'ePubs', 'Commentaries'),
-      p.join(rootPath, 'PDFs', 'Commentaries'),
-      p.join(rootPath, 'ePubs', 'Research'),
-      p.join(rootPath, 'PDFs', 'Research'),
-    ];
-    final researchCandidatePaths = [
-      p.join(rootPath, 'ePubs', 'EGW'),
-      p.join(rootPath, 'PDFs', 'EGW'),
-      p.join(rootPath, 'ePubs', 'Commentaries'),
-      p.join(rootPath, 'PDFs', 'Commentaries'),
-      p.join(rootPath, 'ePubs', 'Research'),
-      p.join(rootPath, 'PDFs', 'Research'),
-    ];
+    final commentaryCandidatePaths = rootAvailable
+        ? [
+            p.join(rootPath, 'ePubs', 'EGW'),
+            p.join(rootPath, 'PDFs', 'EGW'),
+            p.join(rootPath, 'ePubs', 'Commentaries'),
+            p.join(rootPath, 'PDFs', 'Commentaries'),
+            p.join(rootPath, 'ePubs', 'Research'),
+            p.join(rootPath, 'PDFs', 'Research'),
+          ]
+        : const <String>[];
+    final researchCandidatePaths = rootAvailable
+        ? [
+            p.join(rootPath, 'ePubs', 'EGW'),
+            p.join(rootPath, 'PDFs', 'EGW'),
+            p.join(rootPath, 'ePubs', 'Commentaries'),
+            p.join(rootPath, 'PDFs', 'Commentaries'),
+            p.join(rootPath, 'ePubs', 'Research'),
+            p.join(rootPath, 'PDFs', 'Research'),
+          ]
+        : const <String>[];
     final sections = await Future.wait<_SectionLoadResult>([
       _loadSection(
         db: db,
@@ -401,7 +365,7 @@ class CommentaryResearchLibraryService
       chapter: chapter,
       verse: verse,
       bookName: bookName,
-      rootPath: rootPath,
+      rootPath: selection.path,
       commentaryFolderPath: commentaryFolderPath,
       researchFolderPath: researchFolderPath,
       commentary: commentary,
@@ -423,31 +387,21 @@ class CommentaryResearchLibraryService
     bool refresh = false,
   }) async {
     final selection = await LibraryRootService.instance.loadSelection();
-    final rootPath = selection.path;
+    final rootPath = selection.path?.trim() ?? '';
+    final rootAvailable = rootPath.isNotEmpty && selection.exists;
 
-    if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
-      final missingMessage = folderLabel == 'Commentary'
-          ? 'Commentary library not found. Open eLibrary Setup.'
-          : 'Research library not found. Open eLibrary Setup.';
-      return CommentaryResearchSectionData(
-        folderType: folderType,
-        title: folderLabel,
-        statusMessage: missingMessage,
-        files: const <CommentaryResearchFileItem>[],
-        matches: const <CommentaryResearchMatchItem>[],
-        discoveredCount: 0,
-        indexedCount: 0,
-        matchCount: 0,
-      );
+    if (rootAvailable) {
+      await LibraryRootService.instance.ensureStructure(rootPath);
     }
-
-    await LibraryRootService.instance.ensureStructure(rootPath);
 
     final db = await ELibraryDatabase.instance.database;
     final books = await StudyBibleDatabase.instance.loadBooks();
     final bookLookup = BibleReferenceParser.buildBookLookup(books);
     final bookAliases = BibleReferenceParser.buildBookAliases(books);
     final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+    final effectiveCandidatePaths = rootAvailable
+        ? candidatePaths
+        : const <String>[];
 
     final sectionResult = await _loadSection(
       db: db,
@@ -455,7 +409,7 @@ class CommentaryResearchLibraryService
       folderType: folderType,
       folderLabel: folderLabel,
       preferredVolumeCode: preferredVolumeCode,
-      candidatePaths: candidatePaths,
+      candidatePaths: effectiveCandidatePaths,
       bookLookup: bookLookup,
       bookAliases: bookAliases,
       refresh: refresh,
@@ -676,6 +630,8 @@ class CommentaryResearchLibraryService
     required bool chapterWideMatches,
   }) async {
     final stats = _IndexingStats();
+    final rootAvailable =
+        rootPath.trim().isNotEmpty && await Directory(rootPath).exists();
     if (!refresh) {
       final cached = await _loadCachedSection(
         db: db,
@@ -692,6 +648,23 @@ class CommentaryResearchLibraryService
       );
       if (cached != null) {
         return _SectionLoadResult(section: cached, stats: stats);
+      }
+      if (!rootAvailable) {
+        return _SectionLoadResult(
+          section: CommentaryResearchSectionData(
+            folderType: folderType,
+            title: folderLabel,
+            statusMessage: folderLabel == 'Commentary'
+                ? 'Commentary library not found. Open eLibrary Setup.'
+                : 'Research library not found. Open eLibrary Setup.',
+            files: const <CommentaryResearchFileItem>[],
+            matches: const <CommentaryResearchMatchItem>[],
+            discoveredCount: 0,
+            indexedCount: 0,
+            matchCount: 0,
+          ),
+          stats: stats,
+        );
       }
       final discoveredCount = await _countDiscoverableFiles(
         candidatePaths: candidatePaths,
@@ -716,6 +689,24 @@ class CommentaryResearchLibraryService
           files: const <CommentaryResearchFileItem>[],
           matches: const <CommentaryResearchMatchItem>[],
           discoveredCount: discoveredCount,
+          indexedCount: 0,
+          matchCount: 0,
+        ),
+        stats: stats,
+      );
+    }
+
+    if (!rootAvailable) {
+      return _SectionLoadResult(
+        section: CommentaryResearchSectionData(
+          folderType: folderType,
+          title: folderLabel,
+          statusMessage: folderLabel == 'Commentary'
+              ? 'Commentary library not found. Open eLibrary Setup.'
+              : 'Research library not found. Open eLibrary Setup.',
+          files: const <CommentaryResearchFileItem>[],
+          matches: const <CommentaryResearchMatchItem>[],
+          discoveredCount: 0,
           indexedCount: 0,
           matchCount: 0,
         ),

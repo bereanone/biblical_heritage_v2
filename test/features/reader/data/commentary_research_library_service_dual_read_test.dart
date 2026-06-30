@@ -38,44 +38,65 @@ Future<void> _seedLibraryItem({
   required String itemId,
   required String title,
   required List<String> paragraphs,
+  String fileName = 'Acts.epub',
+  String relativePath = 'ePubs/EGW_Books/Acts.epub',
+  String fileFormat = 'epub',
+  String folderType = 'research',
+  String sourceType = 'official_download',
+  String collectionName = 'EGW_Books',
+  bool addRefIndexRows = false,
 }) async {
   final now = DateTime.now().toUtc().toIso8601String();
-  await db.insert(
-    'library_items',
-    <String, Object?>{
-      'id': itemId,
-      'title': title,
-      'file_name': 'Acts.epub',
-      'relative_path': 'ePubs/EGW_Books/Acts.epub',
-      'file_format': 'epub',
-      'folder_type': 'research',
-      'library_role': 'user_added',
-      'collection_name': 'EGW_Books',
-      'source_type': 'official_download',
-      'index_status': 'indexed',
-      'created_at': now,
-      'updated_at': now,
-      'device_id': deviceId,
-    },
-    conflictAlgorithm: ConflictAlgorithm.replace,
-  );
+  await db.insert('library_items', <String, Object?>{
+    'id': itemId,
+    'title': title,
+    'file_name': fileName,
+    'relative_path': relativePath,
+    'file_format': fileFormat,
+    'folder_type': folderType,
+    'library_role': 'user_added',
+    'collection_name': collectionName,
+    'source_type': sourceType,
+    'index_status': 'indexed',
+    'created_at': now,
+    'updated_at': now,
+    'device_id': deviceId,
+  }, conflictAlgorithm: ConflictAlgorithm.replace);
 
   for (var i = 0; i < paragraphs.length; i++) {
-    await db.insert(
-      'library_text_blocks',
-      <String, Object?>{
-        'library_item_id': itemId,
-        'epub_href': 'OEBPS/content01.xhtml',
-        'spine_index': 1,
-        'paragraph_index': i + 1,
-        'paragraph_on_section': i + 1,
-        'section_title': 'Chapter 1',
-        'plain_text': paragraphs[i],
-        'created_at': now,
-        'updated_at': now,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('library_text_blocks', <String, Object?>{
+      'library_item_id': itemId,
+      'epub_href': 'OEBPS/content01.xhtml',
+      'spine_index': 1,
+      'paragraph_index': i + 1,
+      'paragraph_on_section': i + 1,
+      'section_title': 'Chapter 1',
+      'plain_text': paragraphs[i],
+      'created_at': now,
+      'updated_at': now,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+    if (!addRefIndexRows) continue;
+    await db.insert('elibrary_ref_index', <String, Object?>{
+      'library_item_id': itemId,
+      'work_key': 'test-work',
+      'edition_key': 'test-edition',
+      'edition_year': 1900,
+      'book_title': title,
+      'book_abbrev': 'TEST',
+      'href': 'section_1.xhtml',
+      'anchor_id': null,
+      'paragraph_index': i + 1,
+      'page_number': i + 1,
+      'paragraph_on_page': i + 1,
+      'ref_code': 'TEST ${i + 1}',
+      'stable_ref': 'TEST ${i + 1}',
+      'plain_text': paragraphs[i],
+      'text_hash': null,
+      'ref_source': sourceType,
+      'created_at': now,
+      'updated_at': now,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 }
 
@@ -91,7 +112,9 @@ void main() {
 
   setUp(() async {
     supportDir = await Directory.systemTemp.createTemp('dual_read_support_');
-    documentsDir = await Directory.systemTemp.createTemp('dual_read_documents_');
+    documentsDir = await Directory.systemTemp.createTemp(
+      'dual_read_documents_',
+    );
     libraryRootDir = await Directory.systemTemp.createTemp('dual_read_root_');
     LibraryRootService.instance.invalidateCachedSelection();
     await _installPathProviderMocks(
@@ -140,11 +163,12 @@ void main() {
       paragraphs: paragraphs,
     );
 
-    final sections = await CommentaryResearchLibraryService.instance.loadBookSections(
-      filePath: p.join(libraryRootDir.path, 'missing', 'Acts.epub'),
-      libraryItemId: itemId,
-      includeFrontMatter: true,
-    );
+    final sections = await CommentaryResearchLibraryService.instance
+        .loadBookSections(
+          filePath: p.join(libraryRootDir.path, 'missing', 'Acts.epub'),
+          libraryItemId: itemId,
+          includeFrontMatter: true,
+        );
 
     expect(sections, isNotEmpty);
     expect(sections.first.blocks.map((block) => block.text), paragraphs);
@@ -182,16 +206,101 @@ void main() {
       paragraphs: eLibraryParagraphs,
     );
 
-    final sections = await CommentaryResearchLibraryService.instance.loadBookSections(
-      filePath: p.join(libraryRootDir.path, 'missing', 'Acts.epub'),
-      libraryItemId: itemId,
-      includeFrontMatter: true,
-    );
+    final sections = await CommentaryResearchLibraryService.instance
+        .loadBookSections(
+          filePath: p.join(libraryRootDir.path, 'missing', 'Acts.epub'),
+          libraryItemId: itemId,
+          includeFrontMatter: true,
+        );
 
     expect(sections, isNotEmpty);
-    expect(sections.first.blocks.map((block) => block.text), eLibraryParagraphs);
+    expect(
+      sections.first.blocks.map((block) => block.text),
+      eLibraryParagraphs,
+    );
     expect(sections.first.blocks.first.referenceCode, isNotNull);
   });
+
+  test(
+    'loads DB-backed commentary research content even when source folders are missing',
+    () async {
+      final eLibraryDb = await ELibraryDatabase.instance.database;
+      const itemId = 'dar-us-html';
+      const paragraphs = <String>[
+        'Section one paragraph one.',
+        'Section one paragraph two [10].',
+        'Section two paragraph one.',
+      ];
+
+      await _seedLibraryItem(
+        db: eLibraryDb,
+        deviceId: deviceId,
+        itemId: itemId,
+        title: 'Daniel and the Revelation',
+        paragraphs: paragraphs,
+        fileName: 'capture.html',
+        relativePath: 'assets/scans/DAR/capture.html',
+        fileFormat: 'html',
+        folderType: 'research',
+        sourceType: 'egw_html_capture',
+        collectionName: 'Research',
+        addRefIndexRows: true,
+      );
+
+      final section = await CommentaryResearchLibraryService.instance
+          .loadSection(
+            bookId: 1,
+            chapter: 1,
+            verse: 1,
+            bookName: 'Genesis',
+            folderType: 'research',
+            folderLabel: 'Research',
+            candidatePaths: [
+              p.join(libraryRootDir.path, 'ePubs', 'Research'),
+              p.join(libraryRootDir.path, 'PDFs', 'Research'),
+            ],
+            chapterWideMatches: true,
+          );
+
+      expect(section.files, isNotEmpty);
+      expect(section.statusMessage, isNot(contains('Open eLibrary Setup')));
+      expect(section.statusMessage, contains('Research'));
+
+      final passage = await CommentaryResearchLibraryService.instance
+          .loadPassage(bookId: 1, chapter: 1, verse: 1, bookName: 'Genesis');
+
+      expect(passage.research.files, isNotEmpty);
+      expect(
+        passage.research.statusMessage,
+        isNot(contains('Open eLibrary Setup')),
+      );
+      expect(passage.research.statusMessage, contains('Research'));
+    },
+  );
+
+  test(
+    'falls back to missing-folder diagnostics when no DB-backed content exists',
+    () async {
+      final section = await CommentaryResearchLibraryService.instance
+          .loadSection(
+            bookId: 1,
+            chapter: 1,
+            verse: 1,
+            bookName: 'Genesis',
+            folderType: 'research',
+            folderLabel: 'Research',
+            candidatePaths: [
+              p.join(libraryRootDir.path, 'ePubs', 'Research'),
+              p.join(libraryRootDir.path, 'PDFs', 'Research'),
+            ],
+            chapterWideMatches: true,
+          );
+
+      expect(section.files, isEmpty);
+      expect(section.matches, isEmpty);
+      expect(section.statusMessage, contains('imported yet'));
+    },
+  );
 
   test(
     'shows a clean empty-state message when baseline commentary folders exist but contain no files',
@@ -204,17 +313,13 @@ void main() {
         'ePubs/Research',
         'PDFs/Research',
       ]) {
-        await Directory(p.join(libraryRootDir.path, relative)).create(
-          recursive: true,
-        );
+        await Directory(
+          p.join(libraryRootDir.path, relative),
+        ).create(recursive: true);
       }
 
-      final passage = await CommentaryResearchLibraryService.instance.loadPassage(
-        bookId: 1,
-        chapter: 1,
-        verse: 1,
-        bookName: 'Genesis',
-      );
+      final passage = await CommentaryResearchLibraryService.instance
+          .loadPassage(bookId: 1, chapter: 1, verse: 1, bookName: 'Genesis');
 
       expect(
         passage.commentary.statusMessage,

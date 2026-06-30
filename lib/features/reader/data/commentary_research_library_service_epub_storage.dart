@@ -65,12 +65,11 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
     required String? preferredVolumeCode,
     required bool chapterWideMatches,
   }) async {
-    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
-      List<Map<String, Object?>>
-    >(
-      read: (readDb) => readDb.rawQuery(
-        chapterWideMatches
-            ? '''
+    final rowResult = await ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (readDb) => readDb.rawQuery(
+            chapterWideMatches
+                ? '''
       SELECT
         ll.library_item_id,
         li.title,
@@ -98,7 +97,7 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
         AND ll.chapter = ?
       ORDER BY li.title COLLATE NOCASE ASC, ll.verse_start ASC, ll.verse_end ASC
       '''
-            : '''
+                : '''
       SELECT
         li.title,
         li.file_name,
@@ -127,17 +126,19 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
         AND ll.verse_end >= ?
       ORDER BY li.title COLLATE NOCASE ASC, ll.verse_start ASC, ll.verse_end ASC
       ''',
-        chapterWideMatches
-            ? [folderType, bookId, chapter]
-            : [folderType, bookId, chapter, verse, verse],
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-      fallbackDatabase: Future.value(db),
-    );
+            chapterWideMatches
+                ? [folderType, bookId, chapter]
+                : [folderType, bookId, chapter, verse, verse],
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+          fallbackDatabase: Future.value(db),
+        );
     final rows = rowResult.value;
 
-    final visibleRows =
-        filterRowsByPreferredCommentaryVolume(rows, preferredVolumeCode);
+    final visibleRows = filterRowsByPreferredCommentaryVolume(
+      rows,
+      preferredVolumeCode,
+    );
 
     return visibleRows
         .map(
@@ -226,23 +227,22 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
   }
 
   Future<int> _countLinks(Database db, String itemId, String folderType) async {
-    final countResult = await ELibraryReadResolver.instance.readWithFallback<
-      int
-    >(
-      read: (readDb) async {
-        final rows = await readDb.rawQuery(
-          '''
+    final countResult = await ELibraryReadResolver.instance
+        .readWithFallback<int>(
+          read: (readDb) async {
+            final rows = await readDb.rawQuery(
+              '''
       SELECT COUNT(*) AS count
       FROM library_links
       WHERE library_item_id = ? AND link_type = ?
       ''',
-          [itemId, folderType],
+              [itemId, folderType],
+            );
+            return (rows.first['count'] as num?)?.toInt() ?? 0;
+          },
+          hasData: (count) => count > 0,
+          fallbackDatabase: Future.value(db),
         );
-        return (rows.first['count'] as num?)?.toInt() ?? 0;
-      },
-      hasData: (count) => count > 0,
-      fallbackDatabase: Future.value(db),
-    );
     return countResult.value;
   }
 
@@ -431,51 +431,39 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
     required int chapter,
     required int verse,
   }) async {
-    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
-      List<Map<String, Object?>>
-    >(
-      read: (readDb) => readDb.query(
-        'library_items',
-        columns: const [
-          'id',
-          'title',
-          'file_name',
-          'relative_path',
-          'file_size',
-          'file_format',
-          'index_status',
-          'index_error',
-        ],
-        where: 'folder_type = ? AND deleted_at IS NULL',
-        whereArgs: [folderType],
-        orderBy: 'title COLLATE NOCASE ASC, file_name COLLATE NOCASE ASC',
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-      fallbackDatabase: Future.value(db),
-    );
+    final rowResult = await ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (readDb) => readDb.query(
+            'library_items',
+            columns: const [
+              'id',
+              'title',
+              'file_name',
+              'relative_path',
+              'file_size',
+              'file_format',
+              'index_status',
+              'index_error',
+            ],
+            where: 'folder_type = ? AND deleted_at IS NULL',
+            whereArgs: [folderType],
+            orderBy: 'title COLLATE NOCASE ASC, file_name COLLATE NOCASE ASC',
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+          fallbackDatabase: Future.value(db),
+        );
     final rows = rowResult.value;
     if (rows.isEmpty) return null;
-    final hasEpubFiles = rows.any((row) {
-      final format =
-          row['file_format']?.toString().toLowerCase() ??
-          row['source_type']?.toString().toLowerCase() ??
-          '';
-      return format == 'epub';
-    });
-    if (!hasEpubFiles) return null;
-
     final linkCounts = await _loadLinkCountsByItemId(
       db: db,
       folderType: folderType,
     );
+    final textBlockCounts = await _loadTextBlockCountsByItemId(db: db);
+    final refIndexCounts = await _loadRefIndexCountsByItemId(db: db);
     final files = <CommentaryResearchFileItem>[];
     var indexedCount = 0;
+    var hasContent = false;
     for (final row in rows) {
-      final format =
-          row['file_format']?.toString().toLowerCase() ??
-          row['source_type']?.toString().toLowerCase() ??
-          '';
-      if (format != 'epub') continue;
       final itemId = row['id']?.toString() ?? '';
       final fileName = row['file_name']?.toString() ?? '';
       final title = row['title']?.toString().trim().isNotEmpty == true
@@ -484,7 +472,15 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
       final relativePath = row['relative_path']?.toString() ?? '';
       final fileSize = (row['file_size'] as num?)?.toInt() ?? 0;
       final linksCount = linkCounts[itemId] ?? 0;
-      indexedCount += linksCount;
+      final textBlockCount = textBlockCounts[itemId] ?? 0;
+      final refIndexCount = refIndexCounts[itemId] ?? 0;
+      final contentCount = _preferGreaterCount(
+        linksCount,
+        _preferGreaterCount(textBlockCount, refIndexCount),
+      );
+      if (contentCount <= 0) continue;
+      hasContent = true;
+      indexedCount += contentCount;
       files.add(
         CommentaryResearchFileItem(
           id: itemId,
@@ -492,10 +488,11 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
           fileName: fileName,
           relativePath: relativePath,
           fileSize: fileSize,
-          indexed: linksCount > 0,
+          indexed: contentCount > 0,
         ),
       );
     }
+    if (!hasContent) return null;
 
     final matches = await _loadMatches(
       db: db,
@@ -567,21 +564,20 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
     required Database db,
     required String folderType,
   }) async {
-    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
-      List<Map<String, Object?>>
-    >(
-      read: (readDb) => readDb.rawQuery(
-        '''
+    final rowResult = await ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (readDb) => readDb.rawQuery(
+            '''
       SELECT library_item_id, COUNT(*) AS count
       FROM library_links
       WHERE link_type = ?
       GROUP BY library_item_id
       ''',
-        [folderType],
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-      fallbackDatabase: Future.value(db),
-    );
+            [folderType],
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+          fallbackDatabase: Future.value(db),
+        );
     final rows = rowResult.value;
     final counts = <String, int>{};
     for (final row in rows) {
@@ -591,6 +587,54 @@ mixin _CommentaryResearchLibraryServiceEpubStorageSupport {
     }
     return counts;
   }
+
+  Future<Map<String, int>> _loadTextBlockCountsByItemId({
+    required Database db,
+  }) async {
+    final rowResult = await ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (readDb) => readDb.rawQuery('''
+      SELECT library_item_id, COUNT(*) AS count
+      FROM library_text_blocks
+      GROUP BY library_item_id
+      ''', const []),
+          hasData: (rows) => rows.isNotEmpty,
+          fallbackDatabase: Future.value(db),
+        );
+    final rows = rowResult.value;
+    final counts = <String, int>{};
+    for (final row in rows) {
+      final itemId = row['library_item_id']?.toString().trim() ?? '';
+      if (itemId.isEmpty) continue;
+      counts[itemId] = (row['count'] as num?)?.toInt() ?? 0;
+    }
+    return counts;
+  }
+
+  Future<Map<String, int>> _loadRefIndexCountsByItemId({
+    required Database db,
+  }) async {
+    final rowResult = await ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (readDb) => readDb.rawQuery('''
+      SELECT library_item_id, COUNT(*) AS count
+      FROM elibrary_ref_index
+      GROUP BY library_item_id
+      ''', const []),
+          hasData: (rows) => rows.isNotEmpty,
+          fallbackDatabase: Future.value(db),
+        );
+    final rows = rowResult.value;
+    final counts = <String, int>{};
+    for (final row in rows) {
+      final itemId = row['library_item_id']?.toString().trim() ?? '';
+      if (itemId.isEmpty) continue;
+      counts[itemId] = (row['count'] as num?)?.toInt() ?? 0;
+    }
+    return counts;
+  }
+
+  int _preferGreaterCount(int left, int right) => left >= right ? left : right;
 
   Future<void> _writeIndexReport(
     String? reportPath,

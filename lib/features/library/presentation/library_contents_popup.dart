@@ -143,6 +143,9 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     if (_isPeriodicalDateEntry(item)) {
       return true;
     }
+    if (item.isFrontMatter) {
+      return false;
+    }
     return !_isReaderFrontMatterLabel(item.label) &&
         !_isReaderFrontMatterLabel(hrefLabel) &&
         !_isReaderMetadataHelpLabel(item.label) &&

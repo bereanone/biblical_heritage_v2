@@ -37,7 +37,7 @@ class LibraryCatalogSearchPanel extends StatefulWidget {
 }
 
 const List<({String value, String label})> _kEgwCollectionFilters = [
-  (value: 'all', label: 'All'),
+  (value: 'all', label: 'All Collections'),
   (value: 'egw_books', label: 'Books'),
   (value: 'egw_devotionals', label: 'Devotionals'),
   (value: 'egw_commentaries', label: 'Commentaries'),
@@ -45,6 +45,7 @@ const List<({String value, String label})> _kEgwCollectionFilters = [
   (value: 'egw_pamphlets', label: 'Pamphlets'),
   (value: 'egw_periodicals', label: 'Periodicals'),
   (value: 'egw_manuscript_releases', label: 'Manuscript Releases'),
+  (value: 'adventist_pioneer_library', label: 'Adventist Pioneer Library'),
 ];
 
 class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
@@ -91,10 +92,9 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
   }
 
   Future<void> _loadRememberedSearch() async {
-    final rememberedSession = LibraryCatalogSearchSessionSnapshot
-        .fromJsonString(
-          await AppSettingsService.instance
-              .loadLastElibrarySearchSessionJson(),
+    final rememberedSession =
+        LibraryCatalogSearchSessionSnapshot.fromJsonString(
+          await AppSettingsService.instance.loadLastElibrarySearchSessionJson(),
         );
     final remembered = await AppSettingsService.instance
         .loadLastElibrarySearch();
@@ -172,8 +172,8 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
       final hasCollectionFilter = _selectedCollection != 'all';
       var hasIndexedContent = true;
       if (hasCollectionFilter && results.isEmpty) {
-        hasIndexedContent = await LibraryCatalogService.instance
-            .countIndexedSearchableItems(
+        hasIndexedContent =
+            await LibraryCatalogService.instance.countIndexedSearchableItems(
               collectionFilter: _selectedCollection,
             ) >
             0;
@@ -225,8 +225,9 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
     final rememberedSearchLabel = _buildRememberedSearchLabel();
     final results = _results;
     final hasSelectedIndex = _rememberedSession?.hasCurrentIndex == true;
-    final selectedIndex =
-        hasSelectedIndex ? _rememberedSession!.currentIndex : null;
+    final selectedIndex = hasSelectedIndex
+        ? _rememberedSession!.currentIndex
+        : null;
 
     return Column(
       children: [
@@ -332,8 +333,7 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                onPressed: () =>
-                    _resumeRememberedSearch(),
+                onPressed: () => _resumeRememberedSearch(),
                 child: Text.rich(
                   TextSpan(
                     text: rememberedSearchLabel,
@@ -395,8 +395,8 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                         ),
                       );
                     },
-                    )
-                  : results.isEmpty
+                  )
+                : results.isEmpty
                 ? Center(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -437,8 +437,9 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                           horizontal: 4,
                         ),
                         selected: selectedIndex == index,
-                        selectedTileColor: scheme.secondaryContainer
-                            .withValues(alpha: 0.45),
+                        selectedTileColor: scheme.secondaryContainer.withValues(
+                          alpha: 0.45,
+                        ),
                         leading: widget.onQuickApplyItem == null
                             ? Icon(
                                 item.isPdf
@@ -506,7 +507,7 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                           ],
                         ),
                         isThreeLine: true,
-                      onTap: () => widget.onSelectItem(
+                        onTap: () => widget.onSelectItem(
                           result,
                           index,
                           results,
@@ -527,12 +528,7 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
     if (normalized.isEmpty || normalized == 'all') {
       return '';
     }
-    for (final filter in _kEgwCollectionFilters) {
-      if (filter.value.toLowerCase() == normalized) {
-        return filter.label;
-      }
-    }
-    return filterValue!.trim();
+    return libraryCollectionFilterLabelForValue(normalized);
   }
 
   String _buildRememberedSearchLabel() {
@@ -544,9 +540,7 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
       return '';
     }
 
-    final parts = <String>[
-      stripWrappingSearchQuotes(query),
-    ];
+    final parts = <String>[stripWrappingSearchQuotes(query)];
 
     final collectionLabel = _collectionFilterLabel(session?.collectionFilter);
     if (collectionLabel.isNotEmpty) {
@@ -571,7 +565,8 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
       return;
     }
 
-    final collectionFilter = session?.collectionFilter?.trim().isNotEmpty == true
+    final collectionFilter =
+        session?.collectionFilter?.trim().isNotEmpty == true
         ? session!.collectionFilter!.trim()
         : 'all';
     if (!mounted) return;

@@ -45,7 +45,10 @@ void main() {
 
     expect(item.collectionGroupKey, 'egw_misc_collections');
     expect(item.collectionGroupLabel, 'EGW Misc Collections');
-    expect(libraryItemMatchesCollectionFilter(item, 'egw_misc_collections'), isTrue);
+    expect(
+      libraryItemMatchesCollectionFilter(item, 'egw_misc_collections'),
+      isTrue,
+    );
     expect(libraryItemMatchesCollectionFilter(item, 'egw_books'), isFalse);
   });
 
@@ -68,14 +71,48 @@ void main() {
       ),
     ]);
 
-    expect(
-      options.map((option) => option.label).toList(),
-      <String>[
-        'All Collections',
-        'EGW Books',
-        'EGW Devotionals',
-        'EGW Misc Collections',
-      ],
+    expect(options.map((option) => option.label).toList(), <String>[
+      'All Collections',
+      'EGW Books',
+      'EGW Devotionals',
+      'EGW Misc Collections',
+    ]);
+  });
+
+  test('classifies Pioneer rows as Adventist Pioneer Library', () {
+    final item = _item(
+      title: 'Home Here, and Home in Heaven; With Other Poems',
+      collectionName: 'Pioneer Authors',
+      relativePath: 'ePubs/Research/Pioneer Authors/annie_smith/HHAH.html',
     );
+
+    expect(item.collectionGroupKey, 'adventist_pioneer_library');
+    expect(item.collectionGroupLabel, 'Adventist Pioneer Library');
+    expect(
+      libraryItemMatchesCollectionFilter(item, 'adventist_pioneer_library'),
+      isTrue,
+    );
+    expect(libraryItemMatchesCollectionFilter(item, 'egw_books'), isFalse);
+  });
+
+  test('includes Adventist Pioneer Library in collection options', () {
+    final options = buildLibraryCollectionFilterOptions([
+      _item(
+        title: 'Home Here, and Home in Heaven; With Other Poems',
+        collectionName: 'Pioneer Authors',
+        relativePath: 'ePubs/Research/Pioneer Authors/annie_smith/HHAH.html',
+      ),
+      _item(
+        title: 'Christ Object Lessons',
+        collectionName: 'EGW_Books',
+        relativePath: 'ePubs/Research/EGW_Books/en_COL.epub',
+      ),
+    ]);
+
+    expect(options.map((option) => option.label).toList(), <String>[
+      'All Collections',
+      'EGW Books',
+      'Adventist Pioneer Library',
+    ]);
   });
 }

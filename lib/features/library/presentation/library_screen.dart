@@ -6,6 +6,7 @@ import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/app_theme_mode.dart';
 import '../data/library_catalog_service.dart';
+import '../data/library_section_heuristics.dart';
 import 'library_book_reader_screen.dart';
 import 'library_catalog_search_dialog.dart';
 import 'library_navigation_tree.dart';

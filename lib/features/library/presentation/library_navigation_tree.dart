@@ -1,6 +1,7 @@
 import 'package:path/path.dart' as p;
 
 import '../data/library_catalog_service.dart';
+import '../data/library_section_heuristics.dart';
 
 class LibraryNavigationTreeResult {
   const LibraryNavigationTreeResult({
@@ -269,8 +270,9 @@ int _compareNavigationDisplayEntries(
 }
 
 int _navigationDisplayBucket(LibraryCatalogNavigationItem item) {
-  if (_isNavigationMetadataHelpEntry(item)) return 2;
   if (item.isBodyStart) return 0;
+  if (item.isFrontMatter) return 2;
+  if (_isNavigationMetadataHelpEntry(item)) return 3;
   return 1;
 }
 
@@ -300,15 +302,13 @@ bool _isNavigationMetadataHelpEntry(LibraryCatalogNavigationItem item) {
 }
 
 bool _isNavigationMetadataHelpLabel(String value) {
-  return value.contains('overview') ||
+  return libraryIsMetadataSectionLabel(value) ||
+      value.contains('overview') ||
       value.contains('table of contents') ||
       value == 'toc' ||
       value.startsWith('toc ') ||
       value.contains(' contents') ||
       value.startsWith('nav ') ||
-      value.contains('cover') ||
-      value.contains('title page') ||
-      value.contains('titlepage') ||
       value.contains('about book') ||
       value.contains('aboutbook') ||
       value.contains('information about this book') ||
@@ -317,19 +317,7 @@ bool _isNavigationMetadataHelpLabel(String value) {
       value.contains('further links') ||
       value.contains('further information') ||
       value.contains('end user license agreement') ||
-      value.contains('copyright') ||
-      value.contains('publisher') ||
-      value.contains('editorial') ||
-      value.contains('publication information') ||
-      value.contains('source credits') ||
-      value.contains('dedication') ||
-      value.contains('acknowledgments') ||
-      value.contains('acknowledgements') ||
-      value.contains('index') ||
-      value.contains('bibliography') ||
-      value.contains('ellen g white') ||
-      value.contains('foreword') ||
-      value.contains('preface');
+      value.contains('ellen g white');
 }
 
 String _normalizedNavigationText(String value) {

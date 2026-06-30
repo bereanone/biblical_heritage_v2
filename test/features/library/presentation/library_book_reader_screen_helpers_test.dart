@@ -10,18 +10,20 @@ import 'package:studybible2/core/database/elibrary_database.dart';
 import 'package:studybible2/core/database/user_database.dart';
 import 'package:studybible2/features/library/data/library_catalog_service.dart';
 import 'package:studybible2/features/library/presentation/library_book_reader_screen.dart';
+import 'package:studybible2/features/library/presentation/library_navigation_tree.dart';
 import 'package:studybible2/features/reader/data/commentary_research_library_service.dart';
 
 LibraryCatalogItem _catalogItem({
   required String id,
   required String title,
+  String? author,
   required String fileName,
   required String relativePath,
 }) {
   return LibraryCatalogItem(
     id: id,
     title: title,
-    author: null,
+    author: author,
     fileName: fileName,
     fileHash: null,
     relativePath: relativePath,
@@ -69,53 +71,49 @@ Future<void> _installPathProviderMocks({
 
 Future<void> _seedLibraryLink(
   Database db,
-  String itemId,
-  {
+  String itemId, {
   required int paragraphIndex,
   required String anchor,
   required String fullParagraph,
 }) async {
   final now = DateTime.now().toUtc().toIso8601String();
-  await db.insert(
-    'library_links',
-    <String, Object?>{
-      'id': 'link-$itemId-$paragraphIndex',
-      'library_item_id': itemId,
-      'book_id': 1,
-      'chapter': 1,
-      'verse_start': paragraphIndex,
-      'verse_end': paragraphIndex,
-      'link_type': 'research',
-      'anchor': anchor,
-      'original_reference_text': 'Acts 9:$paragraphIndex',
-      'confidence': 1.0,
-      'parser_warning': null,
-      'epub_href': 'OEBPS/content01.xhtml',
-      'epub_cfi': null,
-      'anchor_id': 'anchor-$paragraphIndex',
-      'spine_index': 1,
-      'paragraph_index': paragraphIndex,
-      'full_paragraph': fullParagraph,
-      'created_by': 'test',
-      'created_at': now,
-      'updated_at': now,
-      'deleted_at': null,
-      'device_id': 'device-test',
-      'revision': 1,
-      'sync_status': 'pending',
-      'last_synced_at': null,
-      'change_id': null,
-    },
-    conflictAlgorithm: ConflictAlgorithm.replace,
-  );
+  await db.insert('library_links', <String, Object?>{
+    'id': 'link-$itemId-$paragraphIndex',
+    'library_item_id': itemId,
+    'book_id': 1,
+    'chapter': 1,
+    'verse_start': paragraphIndex,
+    'verse_end': paragraphIndex,
+    'link_type': 'research',
+    'anchor': anchor,
+    'original_reference_text': 'Acts 9:$paragraphIndex',
+    'confidence': 1.0,
+    'parser_warning': null,
+    'epub_href': 'OEBPS/content01.xhtml',
+    'epub_cfi': null,
+    'anchor_id': 'anchor-$paragraphIndex',
+    'spine_index': 1,
+    'paragraph_index': paragraphIndex,
+    'full_paragraph': fullParagraph,
+    'created_by': 'test',
+    'created_at': now,
+    'updated_at': now,
+    'deleted_at': null,
+    'device_id': 'device-test',
+    'revision': 1,
+    'sync_status': 'pending',
+    'last_synced_at': null,
+    'change_id': null,
+  }, conflictAlgorithm: ConflictAlgorithm.replace);
 }
 
 Future<Directory> _prepareIsolatedLibraryRoot() async {
   final sourceDbDir = Directory(
     '/Users/deanbowen/Development/StudyBible2/test/Databases',
   );
-  final libraryRootDir = await Directory.systemTemp
-      .createTemp('library_reader_refcodes_root_');
+  final libraryRootDir = await Directory.systemTemp.createTemp(
+    'library_reader_refcodes_root_',
+  );
   final dbDir = Directory(p.join(libraryRootDir.path, 'Databases'));
   await dbDir.create(recursive: true);
   for (final fileName in const ['user.db', 'eLibrary.db']) {
@@ -190,6 +188,18 @@ void main() {
       ),
       'Mar May 13.1',
     );
+  });
+
+  test('prefers the real author in the reader subtitle', () {
+    final item = _catalogItem(
+      id: 'annie',
+      title: 'Home Here, and Home in Heaven; With Other Poems',
+      author: 'Annie Smith',
+      fileName: 'HHAH.html',
+      relativePath: 'ePubs/Research/Pioneer Authors/annie_smith/HHAH.html',
+    );
+
+    expect(libraryReaderBookSubtitle(item), 'Annie Smith');
   });
 
   test('does not apply devotional fallback to non-devotional books', () {
@@ -384,16 +394,202 @@ void main() {
     );
   });
 
+  test('Contents Chapter I opens the first text block of Chapter I', () {
+    final section = LibraryBookSection(
+      entryName: 'OPS/chapter-5.xhtml',
+      title: 'CHAPTER I',
+      paragraphs: const <String>[
+        'Although Daniel lived twenty-five hundred years ago, he is a latter-day prophet.',
+        'True, it was once a sealed book.',
+        'The text continues.',
+      ],
+      blocks: const <LibraryBookBlock>[
+        LibraryBookBlock(
+          html: '<p>Although Daniel lived twenty-five hundred years ago...</p>',
+          text: 'Although Daniel lived twenty-five hundred years ago...',
+          kind: 'paragraph',
+          bodyOrder: 1,
+        ),
+        LibraryBookBlock(
+          html: '<p>True, it was once a sealed book.</p>',
+          text: 'True, it was once a sealed book.',
+          kind: 'paragraph',
+          bodyOrder: 2,
+        ),
+      ],
+      spineIndex: 5,
+    );
+    final navItem = LibraryCatalogNavigationItem(
+      id: 'chapter-i',
+      parentId: null,
+      label: 'CHAPTER I',
+      href: 'OPS/chapter-5.xhtml',
+      anchorId: null,
+      spineIndex: 5,
+      sortOrder: 5,
+      depth: 0,
+      navType: 'toc',
+      contentKind: 'chapter',
+      isFrontMatter: false,
+      isBodyStart: false,
+      bodyOrder: 5,
+    );
+
+    expect(
+      libraryReaderContentsTargetKeyForNavigationItem(
+        navItem: navItem,
+        sections: [section],
+      ),
+      'body:1',
+    );
+    expect(
+      libraryReaderNavigationItemTargetsSectionStart(
+        navItem: navItem,
+        sections: [section],
+      ),
+      isTrue,
+    );
+  });
+
+  test('Contents Chapter II also resolves to the start of Chapter II', () {
+    final chapterOne = LibraryBookSection(
+      entryName: 'OPS/chapter-5.xhtml',
+      title: 'CHAPTER I',
+      paragraphs: const <String>['Chapter one paragraph.'],
+      blocks: const <LibraryBookBlock>[
+        LibraryBookBlock(
+          html: '<p>Chapter one paragraph.</p>',
+          text: 'Chapter one paragraph.',
+          kind: 'paragraph',
+          bodyOrder: 1,
+        ),
+      ],
+      spineIndex: 5,
+    );
+    final chapterTwo = LibraryBookSection(
+      entryName: 'OPS/chapter-6.xhtml',
+      title: 'CHAPTER II',
+      paragraphs: const <String>[
+        'Chapter two paragraph one.',
+        'Chapter two paragraph two.',
+      ],
+      blocks: const <LibraryBookBlock>[
+        LibraryBookBlock(
+          html: '<p>Chapter two paragraph one.</p>',
+          text: 'Chapter two paragraph one.',
+          kind: 'paragraph',
+          bodyOrder: 1,
+        ),
+        LibraryBookBlock(
+          html: '<p>Chapter two paragraph two.</p>',
+          text: 'Chapter two paragraph two.',
+          kind: 'paragraph',
+          bodyOrder: 2,
+        ),
+      ],
+      spineIndex: 6,
+    );
+    final navItem = LibraryCatalogNavigationItem(
+      id: 'chapter-ii',
+      parentId: null,
+      label: 'CHAPTER II',
+      href: 'OPS/chapter-6.xhtml',
+      anchorId: null,
+      spineIndex: 6,
+      sortOrder: 6,
+      depth: 0,
+      navType: 'toc',
+      contentKind: 'chapter',
+      isFrontMatter: false,
+      isBodyStart: false,
+      bodyOrder: 6,
+    );
+
+    expect(
+      libraryReaderContentsTargetKeyForNavigationItem(
+        navItem: navItem,
+        sections: [chapterOne, chapterTwo],
+      ),
+      'body:1',
+    );
+    expect(
+      libraryReaderNavigationItemTargetsSectionStart(
+        navItem: navItem,
+        sections: [chapterOne, chapterTwo],
+      ),
+      isTrue,
+    );
+  });
+
+  test('Contents and heading navigation keep the same cleaned ordering', () {
+    final items = <LibraryCatalogNavigationItem>[
+      LibraryCatalogNavigationItem(
+        id: 'title',
+        parentId: null,
+        label: 'The Story of Daniel the Prophet',
+        href: 'OPS/chapter-1.xhtml',
+        anchorId: null,
+        spineIndex: 1,
+        sortOrder: 1,
+        depth: 0,
+        navType: 'toc',
+        contentKind: 'chapter',
+        isFrontMatter: true,
+        isBodyStart: true,
+        bodyOrder: 1,
+      ),
+      LibraryCatalogNavigationItem(
+        id: 'chapter1',
+        parentId: null,
+        label: 'CHAPTER I',
+        href: 'OPS/chapter-5.xhtml',
+        anchorId: null,
+        spineIndex: 5,
+        sortOrder: 5,
+        depth: 0,
+        navType: 'toc',
+        contentKind: 'chapter',
+        isFrontMatter: false,
+        isBodyStart: false,
+        bodyOrder: 5,
+      ),
+      LibraryCatalogNavigationItem(
+        id: 'chapter2',
+        parentId: null,
+        label: 'CHAPTER II',
+        href: 'OPS/chapter-6.xhtml',
+        anchorId: null,
+        spineIndex: 6,
+        sortOrder: 6,
+        depth: 0,
+        navType: 'toc',
+        contentKind: 'chapter',
+        isFrontMatter: false,
+        isBodyStart: false,
+        bodyOrder: 1,
+      ),
+    ];
+
+    final tree = buildLibraryNavigationTree(items);
+    expect(tree.items.map((item) => item.id), [
+      'title',
+      'chapter1',
+      'chapter2',
+    ]);
+  });
+
   group('section reference codes', () {
     late Directory supportDir;
     late Directory documentsDir;
     late Directory libraryRootDir;
 
     setUp(() async {
-      supportDir = await Directory.systemTemp
-          .createTemp('library_reader_refcodes_support_');
-      documentsDir = await Directory.systemTemp
-          .createTemp('library_reader_refcodes_documents_');
+      supportDir = await Directory.systemTemp.createTemp(
+        'library_reader_refcodes_support_',
+      );
+      documentsDir = await Directory.systemTemp.createTemp(
+        'library_reader_refcodes_documents_',
+      );
       libraryRootDir = await _prepareIsolatedLibraryRoot();
       await _installPathProviderMocks(
         supportDir: supportDir,
@@ -478,40 +674,43 @@ void main() {
       expect(codes, const <int, String>{1: 'AA 9.1', 2: 'AA 9.2'});
     });
 
-    test('falls back to user.db when eLibrary.db lacks section codes', () async {
-      final userDb = await UserDatabase.instance.database;
+    test(
+      'falls back to user.db when eLibrary.db lacks section codes',
+      () async {
+        final userDb = await UserDatabase.instance.database;
 
-      await _seedLibraryLink(
-        userDb,
-        'acts-item-fallback',
-        paragraphIndex: 1,
-        anchor: '[7]',
-        fullParagraph: 'Fallback page marker [7] for user.db',
-      );
-      await _seedLibraryLink(
-        userDb,
-        'acts-item-fallback',
-        paragraphIndex: 2,
-        anchor: '',
-        fullParagraph: 'Fallback second paragraph for user.db',
-      );
+        await _seedLibraryLink(
+          userDb,
+          'acts-item-fallback',
+          paragraphIndex: 1,
+          anchor: '[7]',
+          fullParagraph: 'Fallback page marker [7] for user.db',
+        );
+        await _seedLibraryLink(
+          userDb,
+          'acts-item-fallback',
+          paragraphIndex: 2,
+          anchor: '',
+          fullParagraph: 'Fallback second paragraph for user.db',
+        );
 
-      final section = LibraryBookSection(
-        entryName: 'OEBPS/content01.xhtml',
-        title: 'Acts 9',
-        paragraphs: const <String>[],
-        blocks: const <LibraryBookBlock>[],
-        spineIndex: 1,
-      );
+        final section = LibraryBookSection(
+          entryName: 'OEBPS/content01.xhtml',
+          title: 'Acts 9',
+          paragraphs: const <String>[],
+          blocks: const <LibraryBookBlock>[],
+          spineIndex: 1,
+        );
 
-      final codes = await loadReaderSectionReferenceCodes(
-        libraryItemId: 'acts-item-fallback',
-        section: section,
-        itemAbbreviation: 'AA',
-        isDevotional: false,
-      );
+        final codes = await loadReaderSectionReferenceCodes(
+          libraryItemId: 'acts-item-fallback',
+          section: section,
+          itemAbbreviation: 'AA',
+          isDevotional: false,
+        );
 
-      expect(codes, const <int, String>{1: 'AA 7.1', 2: 'AA 7.2'});
-    });
+        expect(codes, const <int, String>{1: 'AA 7.1', 2: 'AA 7.2'});
+      },
+    );
   });
 }

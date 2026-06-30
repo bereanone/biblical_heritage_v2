@@ -1,5 +1,109 @@
 part of 'library_book_reader_screen.dart';
 
+String libraryReaderBookSubtitle(
+  LibraryCatalogItem item, {
+  String? sectionTitle,
+}) {
+  final author = item.displayAuthor.trim();
+  if (author.isNotEmpty && author.toLowerCase() != 'unknown author') {
+    return author;
+  }
+
+  final cleanSectionTitle = sectionTitle?.trim() ?? '';
+  if (cleanSectionTitle.isNotEmpty) {
+    return cleanSectionTitle;
+  }
+
+  final collectionName = item.collectionName?.trim() ?? '';
+  if (collectionName.isNotEmpty && collectionName.toLowerCase() != 'user') {
+    return collectionName;
+  }
+
+  return '';
+}
+
+String? libraryReaderContentsTargetKeyForNavigationItem({
+  required LibraryCatalogNavigationItem navItem,
+  required List<LibraryBookSection> sections,
+}) {
+  final sectionIndex = _librarySectionIndexForNavigationItem(
+    sections: sections,
+    navItem: navItem,
+  );
+  if (sectionIndex == null) return null;
+  return libraryReaderSectionStartTargetKey(sections[sectionIndex].blocks);
+}
+
+bool libraryReaderNavigationItemTargetsSectionStart({
+  required LibraryCatalogNavigationItem navItem,
+  required List<LibraryBookSection> sections,
+}) {
+  final sectionIndex = _librarySectionIndexForNavigationItem(
+    sections: sections,
+    navItem: navItem,
+  );
+  if (sectionIndex == null) return false;
+
+  final sectionStartTargetKey = libraryReaderSectionStartTargetKey(
+    sections[sectionIndex].blocks,
+  );
+  if (sectionStartTargetKey == null) return false;
+
+  return libraryReaderContentsTargetKeyForNavigationItem(
+        navItem: navItem,
+        sections: sections,
+      ) ==
+      sectionStartTargetKey;
+}
+
+String? libraryReaderSectionStartTargetKey(List<LibraryBookBlock> blocks) {
+  for (var index = 0; index < blocks.length; index++) {
+    final block = blocks[index];
+    if (block.text.trim().isEmpty) continue;
+    final anchorId = block.anchorId?.trim();
+    if (anchorId != null && anchorId.isNotEmpty) {
+      return 'anchor:${_normalizeBlockKey(anchorId)}';
+    }
+    final bodyOrder = block.bodyOrder;
+    if (bodyOrder != null) {
+      return 'body:$bodyOrder';
+    }
+    return 'block:$index';
+  }
+  return null;
+}
+
+String _normalizeBlockKey(String value) {
+  return value
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'_+'), '_')
+      .replaceAll(RegExp(r'^_|_$'), '');
+}
+
+int? _librarySectionIndexForNavigationItem({
+  required List<LibraryBookSection> sections,
+  required LibraryCatalogNavigationItem navItem,
+}) {
+  if (sections.isEmpty) return null;
+  final href = _cleanNavigationHref(navItem.href);
+  if (href != null) {
+    final normalizedHref = href.toLowerCase();
+    for (var index = 0; index < sections.length; index++) {
+      if (_hrefMatchesSection(sections[index].entryName, normalizedHref)) {
+        return index;
+      }
+    }
+  }
+
+  if (navItem.spineIndex != null) {
+    final index = navItem.spineIndex! - 1;
+    if (index >= 0 && index < sections.length) return index;
+  }
+
+  return null;
+}
+
 String _normalizeReaderLabel(String value) {
   return value
       .toLowerCase()
@@ -88,90 +192,7 @@ String? _cleanNavigationHref(String? href) {
 }
 
 bool _isReaderMetadataHelpLabel(String value) {
-  final normalized = _normalizeReaderLabel(value);
-  if (normalized.isEmpty) return false;
-
-  const exactMatches = <String>{
-    'cover',
-    'title page',
-    'titlepage',
-    'table of contents',
-    'contents',
-    'toc',
-    'nav',
-    'foreword',
-    'preface',
-    'about this book',
-    'about book',
-    'aboutbook',
-    'about the author',
-    'information about this book',
-    'overview',
-    'further links',
-    'further information',
-    'end user license agreement',
-    'a word to the reader',
-    'word to the reader',
-    'copyright',
-    'publisher note',
-    'publisher',
-    'editor note',
-    'editorial note',
-    'editorial',
-    'publication information',
-    'source credits',
-    'dedication',
-    'acknowledgments',
-    'acknowledgements',
-    'index',
-    'bibliography',
-    'ellen g white',
-    'ellen white',
-  };
-  if (exactMatches.contains(normalized)) return true;
-
-  const prefixes = <String>[
-    'cover ',
-    'title page',
-    'titlepage',
-    'table of contents',
-    'contents',
-    'toc',
-    'nav',
-    'foreword',
-    'preface',
-    'about this book',
-    'about book',
-    'aboutbook',
-    'about the author',
-    'information about this book',
-    'overview',
-    'further links',
-    'further information',
-    'end user license agreement',
-    'a word to the reader',
-    'word to the reader',
-    'copyright',
-    'publisher note',
-    'publisher',
-    'editor note',
-    'editorial note',
-    'editorial',
-    'publication information',
-    'source credits',
-    'dedication',
-    'acknowledgments',
-    'acknowledgements',
-    'index',
-    'bibliography',
-    'ellen g white',
-    'ellen white',
-  ];
-  for (final prefix in prefixes) {
-    if (normalized.startsWith(prefix)) return true;
-  }
-
-  return false;
+  return libraryIsMetadataSectionLabel(value);
 }
 
 bool _hrefMatchesSection(String sectionEntryName, String normalizedHref) {
@@ -225,11 +246,42 @@ Future<Map<int, String>> loadReaderSectionReferenceCodes({
     return const <int, String>{};
   }
 
-  final rowResult = await ELibraryReadResolver.instance.readWithFallback<
-    List<Map<String, Object?>>
-  >(
-    read: (db) => db.rawQuery(
-      '''
+  final normalizedHref = p.normalize(section.entryName).toLowerCase();
+  final refIndexRowResult = await ELibraryReadResolver.instance
+      .readWithFallback<List<Map<String, Object?>>>(
+        read: (db) => db.rawQuery(
+          '''
+      SELECT paragraph_index, ref_code
+      FROM elibrary_ref_index
+      WHERE library_item_id = ?
+        AND LOWER(REPLACE(REPLACE(COALESCE(href, ''), '\\', '/'), './', '')) = ?
+      ORDER BY paragraph_index ASC
+      ''',
+          [libraryItemId, normalizedHref],
+        ),
+        hasData: (rows) => rows.isNotEmpty,
+        fallbackDatabase: UserDatabase.instance.database,
+      );
+  final refIndexRows = refIndexRowResult.value;
+  if (refIndexRows.isNotEmpty) {
+    final resolvedFromRefIndex = <int, String>{};
+    for (final row in refIndexRows) {
+      final paragraphIndex = (row['paragraph_index'] as num?)?.toInt();
+      final refCode = row['ref_code']?.toString().trim() ?? '';
+      if (paragraphIndex == null || paragraphIndex <= 0 || refCode.isEmpty) {
+        continue;
+      }
+      resolvedFromRefIndex[paragraphIndex] = refCode;
+    }
+    if (resolvedFromRefIndex.isNotEmpty) {
+      return resolvedFromRefIndex;
+    }
+  }
+
+  final rowResult = await ELibraryReadResolver.instance
+      .readWithFallback<List<Map<String, Object?>>>(
+        read: (db) => db.rawQuery(
+          '''
       SELECT paragraph_index, anchor, full_paragraph, epub_href, anchor_id,
              spine_index, original_reference_text
       FROM library_links
@@ -238,11 +290,11 @@ Future<Map<int, String>> loadReaderSectionReferenceCodes({
         AND LOWER(REPLACE(REPLACE(COALESCE(epub_href, ''), '\\', '/'), './', '')) = ?
       ORDER BY paragraph_index ASC
       ''',
-      [libraryItemId, p.normalize(section.entryName).toLowerCase()],
-    ),
-    hasData: (rows) => rows.isNotEmpty,
-    fallbackDatabase: UserDatabase.instance.database,
-  );
+          [libraryItemId, normalizedHref],
+        ),
+        hasData: (rows) => rows.isNotEmpty,
+        fallbackDatabase: UserDatabase.instance.database,
+      );
   final rows = rowResult.value;
 
   final resolved = <int, String>{};
@@ -543,10 +595,7 @@ String? cleanDisplayRefCode(String? value) {
   return librarySafeUserFacingReferenceText(value);
 }
 
-String libraryCompactReferenceRangeLabel(
-  String? startRef,
-  String? endRef,
-) {
+String libraryCompactReferenceRangeLabel(String? startRef, String? endRef) {
   final start = cleanDisplayRefCode(startRef);
   final end = cleanDisplayRefCode(endRef);
   if (start == null || start.isEmpty) return end ?? '';

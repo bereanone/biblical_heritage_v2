@@ -85,9 +85,15 @@ List<String> _naturalSortTokens(String value) {
 String _sortableTitle(String displayTitle) {
   final trimmed = displayTitle.trim();
   final lower = trimmed.toLowerCase();
-  if (lower.startsWith('the ') && trimmed.length > 4) return trimmed.substring(4);
-  if (lower.startsWith('an ') && trimmed.length > 3) return trimmed.substring(3);
-  if (lower.startsWith('a ') && trimmed.length > 2) return trimmed.substring(2);
+  if (lower.startsWith('the ') && trimmed.length > 4) {
+    return trimmed.substring(4);
+  }
+  if (lower.startsWith('an ') && trimmed.length > 3) {
+    return trimmed.substring(3);
+  }
+  if (lower.startsWith('a ') && trimmed.length > 2) {
+    return trimmed.substring(2);
+  }
   return trimmed;
 }
 
@@ -110,83 +116,7 @@ bool _isLibraryMetadataHelpLabel(String value) {
   final normalized = _normalizeLibraryText(value);
   if (normalized.isEmpty) return false;
 
-  const exactMatches = <String>{
-    'cover',
-    'title page',
-    'titlepage',
-    'table of contents',
-    'contents',
-    'toc',
-    'nav',
-    'foreword',
-    'preface',
-    'about this book',
-    'about book',
-    'aboutbook',
-    'about the author',
-    'information about this book',
-    'overview',
-    'further links',
-    'further information',
-    'end user license agreement',
-    'copyright',
-    'publisher note',
-    'publisher',
-    'editor note',
-    'editorial note',
-    'editorial',
-    'publication information',
-    'source credits',
-    'dedication',
-    'acknowledgments',
-    'acknowledgements',
-    'index',
-    'bibliography',
-    'ellen g white',
-    'ellen white',
-  };
-  if (exactMatches.contains(normalized)) return true;
-
-  const prefixes = <String>[
-    'cover ',
-    'title page',
-    'titlepage',
-    'table of contents',
-    'contents',
-    'toc',
-    'nav',
-    'foreword',
-    'preface',
-    'about this book',
-    'about book',
-    'aboutbook',
-    'about the author',
-    'information about this book',
-    'overview',
-    'further links',
-    'further information',
-    'end user license agreement',
-    'copyright',
-    'publisher note',
-    'publisher',
-    'editor note',
-    'editorial note',
-    'editorial',
-    'publication information',
-    'source credits',
-    'dedication',
-    'acknowledgments',
-    'acknowledgements',
-    'index',
-    'bibliography',
-    'ellen g white',
-    'ellen white',
-  ];
-  for (final prefix in prefixes) {
-    if (normalized.startsWith(prefix)) return true;
-  }
-
-  return false;
+  return libraryIsMetadataSectionLabel(value);
 }
 
 bool _isLibraryChapterOneLabel(String value) {

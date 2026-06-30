@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'package:studybible2/core/database/user_v2_schema.dart';
 import 'package:studybible2/features/reader/data/tags/legacy_tag_adapter.dart';
 import 'package:studybible2/features/reader/data/tags/tag_models.dart';
 
@@ -17,69 +18,8 @@ Future<({Database db, Directory dir})> _openTestDatabase() async {
     path,
     version: 1,
     onCreate: (db, version) async {
-      await db.execute('''
-        CREATE TABLE app_settings (
-          key TEXT PRIMARY KEY,
-          value TEXT
-        )
-      ''');
-      await db.execute('''
-        CREATE TABLE hash_tags (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id INTEGER NOT NULL,
-          tag TEXT NOT NULL,
-          category TEXT,
-          verse_ref TEXT NOT NULL,
-          book_number INTEGER NOT NULL,
-          chapter_number INTEGER NOT NULL,
-          verse_number INTEGER NOT NULL,
-          token_number INTEGER,
-          note_text TEXT,
-          sort_order INTEGER,
-          presentation_slide_number INTEGER,
-          created_at INTEGER NOT NULL,
-          created_at_utc TEXT,
-          updated_at_utc TEXT,
-          deleted_at_utc TEXT,
-          device_id TEXT,
-          revision INTEGER DEFAULT 1,
-          sync_status TEXT DEFAULT 'pending',
-          last_synced_at TEXT,
-          change_id TEXT
-        )
-      ''');
-      await db.execute('''
-        CREATE TABLE dollar_tags (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id INTEGER NOT NULL,
-          tag TEXT NOT NULL,
-          category TEXT,
-          verse_ref TEXT NOT NULL,
-          book_number INTEGER NOT NULL,
-          chapter_number INTEGER NOT NULL,
-          verse_number INTEGER NOT NULL,
-          token_number INTEGER,
-          content_html TEXT NOT NULL,
-          source_author TEXT,
-          source_work_title TEXT,
-          source_title_acronym TEXT,
-          source_chapter_title TEXT,
-          source_chapter_number TEXT,
-          source_page_number TEXT,
-          source_paragraph_number TEXT,
-          source_year TEXT,
-          study_order INTEGER NOT NULL DEFAULT 0,
-          created_at INTEGER NOT NULL,
-          created_at_utc TEXT,
-          updated_at_utc TEXT,
-          deleted_at_utc TEXT,
-          device_id TEXT,
-          revision INTEGER DEFAULT 1,
-          sync_status TEXT DEFAULT 'pending',
-          last_synced_at TEXT,
-          change_id TEXT
-        )
-      ''');
+      await UserV2Schema.ensure(db, deviceId: 'test-device');
+      await db.execute('ALTER TABLE hash_tags ADD COLUMN note_text TEXT');
     },
   );
   return (db: db, dir: tempDir);
@@ -120,7 +60,6 @@ void main() {
       await db.insert('hash_tags', {
         'user_id': 1,
         'tag': '#Grace',
-        'category': 'Favorites',
         'verse_ref': '43:3:16',
         'book_number': 43,
         'chapter_number': 3,
@@ -141,7 +80,6 @@ void main() {
       await db.insert('hash_tags', {
         'user_id': 1,
         'tag': '#Grace',
-        'category': 'Favorites',
         'verse_ref': '43:3:17',
         'book_number': 43,
         'chapter_number': 3,
@@ -162,7 +100,6 @@ void main() {
       await db.insert('hash_tags', {
         'user_id': 1,
         'tag': '#Grace',
-        'category': 'Favorites',
         'verse_ref': 'note:999',
         'book_number': 0,
         'chapter_number': 0,
@@ -184,7 +121,6 @@ void main() {
       await db.insert('dollar_tags', {
         'user_id': 1,
         'tag': r'$Chain',
-        'category': 'Study Lists',
         'verse_ref': '43:1:1',
         'book_number': 43,
         'chapter_number': 1,
@@ -213,7 +149,6 @@ void main() {
       await db.insert('dollar_tags', {
         'user_id': 1,
         'tag': r'$Chain',
-        'category': 'Study Lists',
         'verse_ref': 'note:999',
         'book_number': 0,
         'chapter_number': 0,

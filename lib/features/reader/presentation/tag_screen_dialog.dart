@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -11,6 +12,7 @@ import 'tag_dialog_models.dart';
 import 'tag_dialog_styles.dart';
 import 'tag_detail_screen_launcher.dart';
 import 'tag_quick_apply_helper.dart';
+import 'tag_trash_dialog.dart';
 import 'viewer_passage_models.dart';
 import 'viewer_range_selection.dart';
 import 'viewer_search_dialog.dart';
@@ -161,10 +163,13 @@ class _HashTagDialogState extends State<HashTagDialog>
   static const String _uncategorizedCategoryFilterValue =
       '__uncategorized_category_filter__';
 
+  bool _isVisibleActiveSummary(HashTagSummary summary) => summary.count > 0;
+
   List<MapEntry<String?, List<HashTagSummary>>> _groupedVisibleSummaries() {
     final searchTag = _repository.normalizeTagName(_searchController.text);
     final filtered = _summaries
         .where((summary) {
+          if (!_isVisibleActiveSummary(summary)) return false;
           if (searchTag.isNotEmpty &&
               _repository.normalizeTagName(summary.tag) != searchTag) {
             return false;
@@ -498,6 +503,7 @@ class _HashTagDialogState extends State<HashTagDialog>
     final selectedCategory = _selectedCategory?.trim() ?? '';
     return _summaries
         .where((summary) {
+          if (!_isVisibleActiveSummary(summary)) return false;
           final category = _summaryCategories[summary.identityKey]?.trim();
           final normalizedCategory = category == null || category.isEmpty
               ? ''
@@ -586,21 +592,11 @@ class _HashTagDialogState extends State<HashTagDialog>
         expectedBrowseStateRevision != _browseStateRevision) {
       return;
     }
-    final tagStillExists = summaries.any(
-      (summary) =>
-          summary.tag == normalizedTag &&
-          ((resolvedCategory == null &&
-                  (summary.category?.trim().isEmpty ?? true)) ||
-              (resolvedCategory != null &&
-                  summary.category?.trim().toLowerCase() ==
-                      resolvedCategory.trim().toLowerCase())),
-    );
     final resolvedCategoryRaw = resolvedCategory?.trim();
     String? resolvedCategoryValue = resolvedCategoryRaw;
     if (resolvedCategoryValue?.isEmpty ?? true) {
       resolvedCategoryValue = null;
     }
-    final shouldShowMissingRowSnack = !tagStillExists;
     setState(() {
       _summaries = summaries;
       _summaryCategories = summaryCategories;
@@ -611,15 +607,6 @@ class _HashTagDialogState extends State<HashTagDialog>
       _searchController.clear();
       _recomputeBrowseViews();
     });
-    if (shouldShowMissingRowSnack) {
-      debugPrint(
-        await _repository.debugTagReport(
-          normalizedTag,
-          category: resolvedCategory,
-        ),
-      );
-      _showMissingDefaultTagSnack(normalizedTag);
-    }
     await _refreshCategoryOptions(
       selectedCategory: resolvedCategory,
       expectedBrowseStateRevision: expectedBrowseStateRevision,
@@ -662,11 +649,6 @@ class _HashTagDialogState extends State<HashTagDialog>
       category: defaultCategory,
       syncBrowseFilter: true,
     );
-  }
-
-  void _showMissingDefaultTagSnack(String tag) {
-    if (!mounted) return;
-    _showSnack('$tag has no saved row yet. It is ready to tag with.');
   }
 
   Future<String?> _resolveFindTextTargetTag() async {
@@ -903,6 +885,44 @@ class _HashTagDialogState extends State<HashTagDialog>
         if (!mounted) return;
         await _reloadSelectedTag(tag, category: _tagCategory);
       },
+    );
+  }
+
+  Future<void> _refreshAfterTrashRestore() async {
+    final currentTag = _currentTag;
+    if (currentTag.isNotEmpty) {
+      await _reloadSelectedTag(currentTag, category: _tagCategory);
+      return;
+    }
+
+    final summaries = await _repository.loadSummaries();
+    final categoryOptions = await _repository.loadCategoryOptions();
+    final summaryCategories = await _loadSummaryCategories(summaries);
+    final defaultTag = await _repository.loadDefaultTag();
+    if (!mounted) return;
+    setState(() {
+      _summaries = summaries;
+      _categoryOptions = categoryOptions;
+      _summaryCategories = summaryCategories;
+      _defaultTag = defaultTag;
+      _recomputeBrowseViews();
+    });
+  }
+
+  Future<void> _openTrashView() async {
+    if (kDebugMode) {
+      debugPrint(
+        '[TrashDialog] open entryPoint=globalHeader '
+        'scopeKind=global tag=<none> category=<none>',
+      );
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (_) => HashTagTrashDialog(
+        repository: _repository,
+        entryPoint: 'globalHeader',
+        onRestored: _refreshAfterTrashRestore,
+      ),
     );
   }
 
@@ -1499,6 +1519,7 @@ class _HashTagDialogState extends State<HashTagDialog>
             onClose: () => Navigator.of(context).pop(),
             onShowInstructions: _showInstructions,
             onFindText: _showFindText,
+            onViewTrash: _openTrashView,
             onImportClipboard: _showClipboardImport,
             onRenameCurrentTag: _renameCurrentTag,
             defaultTag: _defaultTag,

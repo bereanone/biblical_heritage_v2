@@ -744,12 +744,12 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         final excerpt = displayOverride.isNotEmpty
             ? displayOverride
             : metaExcerpt.isNotEmpty
-                ? metaExcerpt
-                : metaSelectedText.isNotEmpty
-                    ? metaSelectedText
-                    : noteTextValue.isNotEmpty
-                        ? noteTextValue
-                        : sourceParagraph;
+            ? metaExcerpt
+            : metaSelectedText.isNotEmpty
+            ? metaSelectedText
+            : noteTextValue.isNotEmpty
+            ? noteTextValue
+            : sourceParagraph;
         if (excerpt.isNotEmpty) {
           lines.add('"$excerpt"');
         }
@@ -2341,9 +2341,7 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
 
     final current = widget.currentCategory?.trim() ?? '';
     if (current.isNotEmpty &&
-        !options.any(
-          (value) => value.toLowerCase() == current.toLowerCase(),
-        )) {
+        !options.any((value) => value.toLowerCase() == current.toLowerCase())) {
       options.insert(0, current);
     }
 
@@ -2553,8 +2551,7 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
                       final text = textEditingValue.text.trim();
                       if (text.isEmpty) return _categoryOptions;
                       return _categoryOptions.where(
-                        (opt) =>
-                            opt.toLowerCase().contains(text.toLowerCase()),
+                        (opt) => opt.toLowerCase().contains(text.toLowerCase()),
                       );
                     },
                     optionsViewBuilder: (context, onSelected, options) {
@@ -2586,35 +2583,31 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
                         ),
                       );
                     },
-                    fieldViewBuilder: (
-                      context,
-                      textController,
-                      focusNode,
-                      onFieldSubmitted,
-                    ) {
-                      return TextFormField(
-                        controller: textController,
-                        focusNode: focusNode,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        keyboardType: TextInputType.visiblePassword,
-                        textCapitalization: TextCapitalization.none,
-                        smartDashesType: SmartDashesType.disabled,
-                        smartQuotesType: SmartQuotesType.disabled,
-                        decoration: const InputDecoration(
-                          labelText: 'Move to category',
-                          hintText: 'Type a name, or clear for None',
-                          border: OutlineInputBorder(),
-                        ),
-                        onChanged: (value) {
-                          setState(() {
-                            _typedCategory = value;
-                            _errorText = null;
-                            _fieldEdited = true;
-                          });
+                    fieldViewBuilder:
+                        (context, textController, focusNode, onFieldSubmitted) {
+                          return TextFormField(
+                            controller: textController,
+                            focusNode: focusNode,
+                            autocorrect: false,
+                            enableSuggestions: false,
+                            keyboardType: TextInputType.visiblePassword,
+                            textCapitalization: TextCapitalization.none,
+                            smartDashesType: SmartDashesType.disabled,
+                            smartQuotesType: SmartQuotesType.disabled,
+                            decoration: const InputDecoration(
+                              labelText: 'Move to category',
+                              hintText: 'Type a name, or clear for None',
+                              border: OutlineInputBorder(),
+                            ),
+                            onChanged: (value) {
+                              setState(() {
+                                _typedCategory = value;
+                                _errorText = null;
+                                _fieldEdited = true;
+                              });
+                            },
+                          );
                         },
-                      );
-                    },
                     onSelected: (String selection) {
                       setState(() {
                         _typedCategory = selection;

@@ -117,6 +117,13 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
     });
   }
 
+  void _bumpMarkupRefresh() {
+    if (!mounted) return;
+    setState(() {
+      _highlightRefreshTick += 1;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -224,6 +231,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
                       onSelectBlockId: _openBlockId,
                       onTapSelectedRange: _openRangeActions,
                       rangeSelection: _rangeSelection,
+                      highlightRefreshTick: _highlightRefreshTick,
                       navigationTick: _navigationTick,
                     )
                   : ViewerBody(
@@ -455,6 +463,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
           launchMode: HashTagLaunchMode.scriptureOnly,
           initialTag: defaultTag,
         );
+        _bumpMarkupRefresh();
         return;
       }
       showReadableSnackBar(
@@ -465,6 +474,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
         fontScale: _fontScale,
         isRapid: true,
       );
+      _bumpMarkupRefresh();
     } finally {
       if (mounted) {
         setState(() {
@@ -492,6 +502,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
         launchMode: HashTagLaunchMode.scriptureOnly,
         initialTag: defaultTag,
       );
+      _bumpMarkupRefresh();
     } catch (error) {
       if (!mounted) return;
       showReadableSnackBar(
@@ -561,6 +572,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
           launchMode: HashTagLaunchMode.scriptureOnly,
           initialTag: null,
         );
+        _bumpMarkupRefresh();
         return;
       }
 

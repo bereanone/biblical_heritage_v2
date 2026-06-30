@@ -16,6 +16,7 @@ class ViewerVerseLine extends StatelessWidget {
     required this.line,
     required this.style,
     required this.isSelected,
+    this.hasUserMarkup = false,
     this.showChapterNumber = false,
     this.startsInRedLetter = false,
     this.isTagged = false,
@@ -37,6 +38,7 @@ class ViewerVerseLine extends StatelessWidget {
   final VerseLine line;
   final TextStyle style;
   final bool isSelected;
+  final bool hasUserMarkup;
   final bool showChapterNumber;
   final bool startsInRedLetter;
   final bool isTagged;
@@ -70,7 +72,9 @@ class ViewerVerseLine extends StatelessWidget {
     );
     final numberStyle = style.copyWith(
       fontSize: 12 * fontScaleFromStyle(style),
-      fontWeight: isSelected || isTagged ? FontWeight.w700 : FontWeight.w600,
+      fontWeight: isSelected || isTagged || hasUserMarkup
+          ? FontWeight.w700
+          : FontWeight.w600,
       height: 1,
       color: theme.colorScheme.onSurface.withValues(
         alpha: isTagged ? 0.94 : 0.56,

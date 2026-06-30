@@ -3,6 +3,7 @@ import 'package:flutter/rendering.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../core/database/study_bible_database.dart';
+import '../data/bible_markup_repository.dart';
 import 'viewer_acrostic_block.dart';
 import 'viewer_heading_block.dart';
 import 'viewer_interlinear_settings.dart';
@@ -26,6 +27,7 @@ class ViewerInterlinearBody extends StatefulWidget {
     required this.onSelectBlockId,
     this.onTapSelectedRange = _noop,
     this.rangeSelection = const ViewerRangeSelection(),
+    this.highlightRefreshTick = 0,
     this.navigationTick = 0,
   });
 
@@ -39,6 +41,7 @@ class ViewerInterlinearBody extends StatefulWidget {
   final ValueChanged<int> onSelectBlockId;
   final VoidCallback onTapSelectedRange;
   final ViewerRangeSelection rangeSelection;
+  final int highlightRefreshTick;
   final int navigationTick;
 
   static void _noop() {}
@@ -57,6 +60,7 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
       <String, Map<int, AcrosticRecord>>{};
   final Map<String, Map<int, List<InterlinearTokenRecord>>> _tokenCache =
       <String, Map<int, List<InterlinearTokenRecord>>>{};
+  final Map<String, Set<String>> _markupCache = <String, Set<String>>{};
   int? _lastScrolledBlockId;
   int _recenterToken = 0;
   bool _userIsScrolling = false;
@@ -74,6 +78,19 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
     }
     if (oldWidget.navigationTick != widget.navigationTick) {
       _lastScrolledBlockId = null;
+    }
+    if (oldWidget.highlightRefreshTick != widget.highlightRefreshTick) {
+      final passage = widget.passage;
+      if (passage != null) {
+        final blockIds = passage.lines
+            .map((line) => line.blockId ?? 0)
+            .where((id) => id > 0)
+            .toList(growable: false);
+        final cacheKey = blockIds.isEmpty
+            ? '${passage.bookName}|${passage.chapter}|${widget.settings.englishOrder}'
+            : '${blockIds.first}-${blockIds.last}|${widget.settings.englishOrder}';
+        _markupCache.remove(cacheKey);
+      }
     }
   }
 
@@ -100,6 +117,7 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
     final cachedHeadings = _headingCache[cacheKey];
     final cachedAcrostics = _acrosticCache[cacheKey];
     final cachedTokens = _tokenCache[cacheKey];
+    final cachedMarkups = _markupCache[cacheKey];
 
     if (cachedHeadings == null ||
         cachedAcrostics == null ||
@@ -127,6 +145,29 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
             _headingCache[cacheKey] = headings;
             _acrosticCache[cacheKey] = acrostics;
             _tokenCache[cacheKey] = tokens;
+            _loadError = null;
+          });
+        } catch (error) {
+          if (!mounted) return;
+          setState(() {
+            _loadError = error;
+          });
+        }
+      });
+    }
+
+    if (cachedMarkups == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        try {
+          final markups = await BibleMarkupRepository().loadMarkedVerseKeys(
+            lines: passage.lines,
+            bookNamesByNumber: {
+              for (final line in passage.lines) line.bookNumber: passage.bookName,
+            },
+          );
+          if (!mounted) return;
+          setState(() {
+            _markupCache[cacheKey] = markups;
             _loadError = null;
           });
         } catch (error) {
@@ -245,6 +286,9 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
               fontScale: widget.fontScale,
               settings: widget.settings,
               isSelected: _matchesSelectedLine(line),
+              hasUserMarkup: (cachedMarkups ?? const <String>{}).contains(
+                '${line.bookNumber}:${line.chapter}:${line.verse}',
+              ),
               showChapterNumber:
                   previousVerseLine == null ||
                   previousVerseLine.bookNumber != line.bookNumber ||
@@ -421,6 +465,7 @@ class _InterlinearVerseFlow extends StatefulWidget {
     required this.fontScale,
     required this.settings,
     required this.isSelected,
+    required this.hasUserMarkup,
     required this.showChapterNumber,
     required this.isHebrew,
     required this.showTopDivider,
@@ -434,6 +479,7 @@ class _InterlinearVerseFlow extends StatefulWidget {
   final double fontScale;
   final ViewerInterlinearSettings settings;
   final bool isSelected;
+  final bool hasUserMarkup;
   final bool showChapterNumber;
   final bool isHebrew;
   final bool showTopDivider;
@@ -488,6 +534,7 @@ class _InterlinearVerseFlowState extends State<_InterlinearVerseFlow> {
         fontScale: widget.fontScale,
         settings: widget.settings,
         isSelected: widget.isSelected,
+        hasUserMarkup: widget.hasUserMarkup,
         showChapterNumber: widget.showChapterNumber,
         isHebrew: widget.isHebrew,
         showTopDivider: widget.showTopDivider,
@@ -548,6 +595,7 @@ class _InterlinearVerseFlowState extends State<_InterlinearVerseFlow> {
           fontScale: widget.fontScale,
           settings: widget.settings,
           isSelected: widget.isSelected,
+          hasUserMarkup: widget.hasUserMarkup,
           showChapterNumber: widget.showChapterNumber,
           isHebrew: widget.isHebrew,
           showTopDivider: widget.showTopDivider,
@@ -566,6 +614,7 @@ class _InterlinearVerseContent extends StatelessWidget {
     required this.fontScale,
     required this.settings,
     required this.isSelected,
+    required this.hasUserMarkup,
     required this.showChapterNumber,
     required this.isHebrew,
     required this.showTopDivider,
@@ -578,6 +627,7 @@ class _InterlinearVerseContent extends StatelessWidget {
   final double fontScale;
   final ViewerInterlinearSettings settings;
   final bool isSelected;
+  final bool hasUserMarkup;
   final bool showChapterNumber;
   final bool isHebrew;
   final bool showTopDivider;
@@ -656,6 +706,7 @@ class _InterlinearVerseContent extends StatelessWidget {
                 verse: line.verse,
                 chapter: line.chapter,
                 showChapterNumber: showChapterNumber,
+                hasUserMarkup: hasUserMarkup,
                 text: headerText,
                 style: headerStyle,
                 fontScale: fontScale,
@@ -694,6 +745,7 @@ class _InterlinearHeaderRow extends StatelessWidget {
     required this.verse,
     required this.chapter,
     required this.showChapterNumber,
+    required this.hasUserMarkup,
     required this.text,
     required this.style,
     required this.fontScale,
@@ -702,6 +754,7 @@ class _InterlinearHeaderRow extends StatelessWidget {
   final int verse;
   final int chapter;
   final bool showChapterNumber;
+  final bool hasUserMarkup;
   final String text;
   final TextStyle style;
   final double fontScale;
@@ -717,6 +770,7 @@ class _InterlinearHeaderRow extends StatelessWidget {
             verse: verse,
             chapter: chapter,
             showChapterNumber: showChapterNumber,
+            hasUserMarkup: hasUserMarkup,
             fontScale: fontScale,
           ),
           const SizedBox(width: 8),
@@ -732,12 +786,14 @@ class _VerseNumberChip extends StatelessWidget {
     required this.verse,
     required this.chapter,
     required this.showChapterNumber,
+    required this.hasUserMarkup,
     required this.fontScale,
   });
 
   final int verse;
   final int chapter;
   final bool showChapterNumber;
+  final bool hasUserMarkup;
   final double fontScale;
 
   @override
@@ -755,7 +811,7 @@ class _VerseNumberChip extends StatelessWidget {
       child: Text(
         showChapterNumber ? '$chapter:$verse' : '$verse',
         style: (theme.textTheme.bodySmall ?? const TextStyle()).copyWith(
-          fontWeight: FontWeight.w700,
+          fontWeight: hasUserMarkup ? FontWeight.w700 : FontWeight.w600,
         ),
       ),
     );

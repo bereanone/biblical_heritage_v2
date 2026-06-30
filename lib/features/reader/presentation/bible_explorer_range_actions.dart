@@ -307,6 +307,11 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
           onTagTabChanged: _saveLastTagTabIndex,
           onSelectBlockId: _openBlockId,
         );
+        if (mounted) {
+          setState(() {
+            _highlightRefreshTick += 1;
+          });
+        }
         return;
       }
       final chapterGroups = <int, List<VerseLine>>{};
@@ -343,12 +348,22 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
           initialTag: defaultTag,
           onSelectBlockId: _openBlockId,
         );
+        if (mounted) {
+          setState(() {
+            _highlightRefreshTick += 1;
+          });
+        }
         return;
       }
       _showRangeActionMessage(
         'Tagged $inserted verse(s) with $defaultTag'
         '${skipped > 0 ? ' ($skipped already in this tag)' : ''}.',
       );
+      if (mounted) {
+        setState(() {
+          _highlightRefreshTick += 1;
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       _showRangeActionMessage('Could not open # tags: $error');
@@ -382,6 +397,11 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         onTagTabChanged: _saveLastTagTabIndex,
         onSelectBlockId: _openBlockId,
       );
+      if (mounted) {
+        setState(() {
+          _highlightRefreshTick += 1;
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       _showRangeActionMessage('Could not open # tags: $error');

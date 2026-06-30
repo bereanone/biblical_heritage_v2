@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../core/database/study_bible_database.dart';
+import '../data/bible_markup_repository.dart';
 import '../data/highlights_repository.dart';
 import 'viewer_acrostic_block.dart';
 import 'bible_explorer_range_interaction.dart';
@@ -80,6 +81,8 @@ class _ViewerBodyState extends State<ViewerBody> {
       <String, Map<String, VerseHighlightRecord>>{};
   final Map<String, Map<String, List<VerseHighlightRecord>>>
   _tokenHighlightCache = <String, Map<String, List<VerseHighlightRecord>>>{};
+  final Map<String, Set<String>> _verseMarkupCache =
+      <String, Set<String>>{};
 
   final Map<int, GlobalKey> _verseKeys = {};
   Timer? _scrollDebounce;
@@ -114,6 +117,7 @@ class _ViewerBodyState extends State<ViewerBody> {
         final cacheKey = '${loadedIds.first}-${loadedIds.last}';
         _highlightCache.remove(cacheKey);
         _tokenHighlightCache.remove(cacheKey);
+        _verseMarkupCache.remove(cacheKey);
       }
     }
   }
@@ -253,7 +257,12 @@ class _ViewerBodyState extends State<ViewerBody> {
         final cachedAcrostics = _acrosticCache[cacheKey];
         final cachedHighlights = _highlightCache[cacheKey];
         final cachedTokenHighlights = _tokenHighlightCache[cacheKey];
+        final cachedVerseMarkups = _verseMarkupCache[cacheKey];
         final blockContextById = _buildBlockContextMap(loadedIds);
+        final loadedLines = loadedIds
+            .map((id) => widget.data.getBlock(id))
+            .whereType<VerseLine>()
+            .toList(growable: false);
 
         if (cachedHeadings == null) {
           WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -295,6 +304,19 @@ class _ViewerBodyState extends State<ViewerBody> {
             setState(() {
               _highlightCache[cacheKey] = highlights;
               _tokenHighlightCache[cacheKey] = tokenHighlights;
+            });
+          });
+        }
+        if (cachedVerseMarkups == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            final markedVerseKeys = await BibleMarkupRepository()
+                .loadMarkedVerseKeys(
+                  lines: loadedLines,
+                  bookNamesByNumber: widget.bookNamesByNumber,
+                );
+            if (!mounted) return;
+            setState(() {
+              _verseMarkupCache[cacheKey] = markedVerseKeys;
             });
           });
         }
@@ -350,6 +372,8 @@ class _ViewerBodyState extends State<ViewerBody> {
                   widget.bookNamesByNumber[line.bookNumber] ??
                   'Book ${line.bookNumber}';
               final verseKey = '$bookName ${line.chapter}:${line.verse}';
+              final numericVerseKey =
+                  '${line.bookNumber}:${line.chapter}:${line.verse}';
               final rangeSelected = shouldOpenRangeActionsOnTap(
                 widget.rangeSelection,
                 blockId,
@@ -412,6 +436,9 @@ class _ViewerBodyState extends State<ViewerBody> {
                                   List<VerseHighlightRecord>
                                 >{})[verseKey] ??
                             const <VerseHighlightRecord>[],
+                        hasUserMarkup:
+                            (cachedVerseMarkups ??
+                                const <String>{}).contains(numericVerseKey),
                         showChapterNumber: showChapterNumber,
                         startsInRedLetter:
                             blockContext?.startsInRedLetter ?? false,

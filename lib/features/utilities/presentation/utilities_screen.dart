@@ -38,8 +38,9 @@ class UtilitiesScreen extends StatelessWidget {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Church AutoMute'),
         content: const Text(
-          'Church AutoMute is under construction for a future version.\n\n'
-          'We are simplifying the setup so it will be easier to use for silencing your phone during church and restoring normal mode afterward.',
+          'Church AutoMute is planned for a future version.\n\n'
+          'This feature will help silence your phone during church and restore normal sound afterward.\n\n'
+          'No location permission is requested yet because the automation feature is not active.',
         ),
         actions: [
           TextButton(

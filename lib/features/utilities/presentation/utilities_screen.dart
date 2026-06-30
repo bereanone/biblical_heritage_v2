@@ -576,7 +576,7 @@ class UtilitiesScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   _UtilityActionButton(
-                    label: 'Pioneer Text Import',
+                    label: 'Pioneer Library Import',
                     icon: Icons.menu_book_outlined,
                     filled: false,
                     onPressed: () {

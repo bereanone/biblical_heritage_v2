@@ -197,6 +197,35 @@ class HashTagImportFailure {
   final String line;
 }
 
+class HashTagTrashedEntry {
+  const HashTagTrashedEntry({
+    required this.numericId,
+    required this.stableId,
+    required this.isNormalized,
+    required this.tagName,
+    this.category,
+    required this.reference,
+    required this.previewText,
+    this.trashedAt,
+    this.trashedReason,
+  });
+
+  final int numericId;
+  final String stableId;
+  final bool isNormalized;
+  final String tagName;
+  final String? category;
+  final String reference;
+  final String previewText;
+  final String? trashedAt;
+  final String? trashedReason;
+
+  String get tagContext {
+    final cat = category?.trim() ?? '';
+    return cat.isEmpty ? tagName : '$tagName · $cat';
+  }
+}
+
 class _ParsedSharedList {
   const _ParsedSharedList({required this.tag, required this.slides});
 

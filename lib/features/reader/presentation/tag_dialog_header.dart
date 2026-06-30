@@ -12,6 +12,7 @@ class TagDialogHeader extends StatelessWidget {
     required this.onFindText,
     required this.onImportClipboard,
     required this.onRenameCurrentTag,
+    required this.onViewTrash,
     this.defaultTag,
     this.onUseDefault,
     this.onSaveDefault,
@@ -25,6 +26,7 @@ class TagDialogHeader extends StatelessWidget {
   final VoidCallback onFindText;
   final VoidCallback onImportClipboard;
   final VoidCallback onRenameCurrentTag;
+  final VoidCallback onViewTrash;
   final String? defaultTag;
   final VoidCallback? onUseDefault;
   final VoidCallback? onSaveDefault;
@@ -96,6 +98,14 @@ class TagDialogHeader extends StatelessWidget {
                         onPressed: onFindText,
                         compact: compact,
                         fontScale: fontScale,
+                      ),
+                      _TagHeaderChip(
+                        icon: Icons.restore_from_trash_outlined,
+                        label: 'View Trash',
+                        onPressed: onViewTrash,
+                        compact: compact,
+                        fontScale: fontScale,
+                        tooltip: 'View global trash',
                       ),
                       OutlinedButton(
                         onPressed: onImportClipboard,
@@ -252,6 +262,7 @@ class _TagHeaderChip extends StatelessWidget {
     required this.onPressed,
     required this.compact,
     required this.fontScale,
+    this.tooltip,
     this.showLabel = true,
   });
 
@@ -260,12 +271,13 @@ class _TagHeaderChip extends StatelessWidget {
   final VoidCallback onPressed;
   final bool compact;
   final double fontScale;
+  final String? tooltip;
   final bool showLabel;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return OutlinedButton(
+    final button = OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         foregroundColor: TagDialogStyles.accent(theme),
@@ -302,5 +314,8 @@ class _TagHeaderChip extends StatelessWidget {
               ],
             ),
     );
+    final message = tooltip?.trim() ?? '';
+    if (message.isEmpty) return button;
+    return Tooltip(message: message, child: button);
   }
 }

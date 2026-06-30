@@ -431,6 +431,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           tag_kind = ?
           AND name = ?
           AND COALESCE(deleted_at, '') = ''
+          AND COALESCE(trashed_at, '') = ''
+          AND COALESCE(trashed_reason, '') = ''
+          AND COALESCE(trash_batch_id, '') = ''
         ''',
         whereArgs: [tagKind, normalizedTag],
         orderBy: 'created_at ASC, id ASC',
@@ -445,6 +448,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       WHERE groups.tag_kind = ?
         AND groups.name = ?
         AND COALESCE(groups.deleted_at, '') = ''
+        AND COALESCE(groups.trashed_at, '') = ''
+        AND COALESCE(groups.trashed_reason, '') = ''
+        AND COALESCE(groups.trash_batch_id, '') = ''
         AND COALESCE(parent.name, '') = ?
       ORDER BY groups.created_at ASC, groups.id ASC
       ''',
@@ -464,6 +470,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       WHERE tag_group_id IN ($placeholders)
         AND COALESCE(deleted_at, '') = ''
         AND COALESCE(trashed_at, '') = ''
+        AND COALESCE(trashed_reason, '') = ''
+        AND COALESCE(trash_batch_id, '') = ''
       ORDER BY tag_group_id ASC, sort_order ASC, created_at ASC, id ASC
       ''', groupIds);
   }
@@ -497,6 +505,94 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       normalizedTag: normalizedCategory,
       now: now,
     );
+  }
+
+  Future<String> ensureNormalizedDestinationGroupId({
+    required DatabaseExecutor executor,
+    required String normalizedTag,
+    String? category,
+    required String now,
+  }) async {
+    final normalizedCategory = _normalizeCategoryName(category);
+    if (normalizedCategory == null) {
+      final groupId = await _ensureNormalizedTagGroup(
+        executor,
+        normalizedTag: normalizedTag,
+        now: now,
+      );
+      if (kDebugMode) {
+        debugPrint(
+          '[TrashRestore] destination group tag=$normalizedTag '
+          'category=<none> groupId=$groupId',
+        );
+      }
+      return groupId;
+    }
+    final tagKind = _tagKindForTable();
+    final rows = await executor.rawQuery(
+      '''
+      SELECT groups.id
+      FROM tag_groups AS groups
+      LEFT JOIN tag_groups AS parent
+        ON parent.id = groups.parent_group_id
+      WHERE groups.tag_kind = ?
+        AND groups.name = ?
+        AND COALESCE(groups.deleted_at, '') = ''
+        AND COALESCE(groups.trashed_at, '') = ''
+        AND COALESCE(groups.trashed_reason, '') = ''
+        AND COALESCE(groups.trash_batch_id, '') = ''
+        AND COALESCE(parent.name, '') = ?
+      ORDER BY groups.created_at ASC, groups.id ASC
+      LIMIT 1
+      ''',
+      [tagKind, normalizedTag, normalizedCategory],
+    );
+    if (rows.isNotEmpty) {
+      final groupId = rows.first['id']?.toString() ?? '';
+      if (kDebugMode) {
+        debugPrint(
+          '[TrashRestore] destination group tag=$normalizedTag '
+          'category=$normalizedCategory groupId=$groupId',
+        );
+      }
+      return groupId;
+    }
+
+    final parentGroupId = await _ensureNormalizedCategoryGroupId(
+      executor,
+      normalizedCategory,
+    );
+    final groupId =
+        'tag_group_${_slug(normalizedCategory)}_${_slug(normalizedTag)}';
+    final sortOrder = await _nextNormalizedTagGroupSortOrder(executor);
+    await executor.insert('tag_groups', {
+      'id': groupId,
+      'parent_group_id': parentGroupId,
+      'tag_kind': tagKind,
+      'name': normalizedTag,
+      'description': null,
+      'sort_order': sortOrder,
+      'source_device_name': null,
+      'legacy_group_id': null,
+      'legacy_item_id': null,
+      'legacy_import_package_id': null,
+      'imported_at': now,
+      'created_at': now,
+      'updated_at': now,
+      'deleted_at': null,
+      'device_id': await LocalSettingsStore.instance.ensureDeviceId(),
+      'revision': 1,
+      'sync_status': 'pending',
+      'last_synced_at': null,
+      'change_id': null,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    if (kDebugMode) {
+      debugPrint(
+        '[TrashRestore] destination group tag=$normalizedTag '
+        'category=$normalizedCategory groupId=$groupId',
+      );
+    }
+    return groupId;
   }
 
   Future<String?> loadDefaultTag() async {
@@ -1265,6 +1361,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       SELECT tag, COALESCE(TRIM(category), '') AS category, COUNT(*) AS cnt
       FROM $tableName
       WHERE COALESCE(trashed_at_utc, '') = ''
+        AND COALESCE(trashed_reason, '') = ''
+        AND COALESCE(trash_batch_id, '') = ''
       GROUP BY tag, COALESCE(TRIM(category), '')
     ''');
     final normalizedRows = await db.rawQuery(
@@ -1279,8 +1377,14 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       LEFT JOIN tag_items AS items
         ON items.tag_group_id = groups.id
        AND COALESCE(items.deleted_at, '') = ''
+       AND COALESCE(items.trashed_at, '') = ''
+       AND COALESCE(items.trashed_reason, '') = ''
+       AND COALESCE(items.trash_batch_id, '') = ''
       WHERE groups.tag_kind = ?
         AND COALESCE(groups.deleted_at, '') = ''
+        AND COALESCE(groups.trashed_at, '') = ''
+        AND COALESCE(groups.trashed_reason, '') = ''
+        AND COALESCE(groups.trash_batch_id, '') = ''
       GROUP BY groups.id, groups.name, COALESCE(parent.name, '')
     ''',
       [tagKind],
@@ -1365,7 +1469,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       final rows = await db.query(
         tableName,
         columns: columns,
-        where: "tag = ? AND $whereClause AND COALESCE(trashed_at_utc, '') = ''",
+        where:
+            "tag = ? AND $whereClause AND COALESCE(trashed_at_utc, '') = '' "
+            "AND COALESCE(trashed_reason, '') = '' AND COALESCE(trash_batch_id, '') = ''",
         whereArgs: whereArgs,
         orderBy: orderBy,
       );
@@ -1446,6 +1552,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
                 tag_kind = ?
                 AND name = ?
                 AND COALESCE(deleted_at, '') = ''
+                AND COALESCE(trashed_at, '') = ''
+                AND COALESCE(trashed_reason, '') = ''
+                AND COALESCE(trash_batch_id, '') = ''
               ''',
               whereArgs: [tagKind, normalized],
               orderBy: 'created_at ASC, id ASC',
@@ -1459,6 +1568,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
               WHERE groups.tag_kind = ?
                 AND groups.name = ?
                 AND COALESCE(groups.deleted_at, '') = ''
+                AND COALESCE(groups.trashed_at, '') = ''
+                AND COALESCE(groups.trashed_reason, '') = ''
+                AND COALESCE(groups.trash_batch_id, '') = ''
                 AND COALESCE(parent.name, '') = ?
               ORDER BY groups.created_at ASC, groups.id ASC
               ''',
@@ -1492,7 +1604,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           'note_text',
           'legacy_item_id',
         ],
-        where: "tag_group_id = ? AND COALESCE(deleted_at, '') = '' AND COALESCE(trashed_at, '') = ''",
+        where:
+            "tag_group_id = ? AND COALESCE(deleted_at, '') = '' AND COALESCE(trashed_at, '') = '' "
+            "AND COALESCE(trashed_reason, '') = '' AND COALESCE(trash_batch_id, '') = ''",
         whereArgs: [groupId],
         orderBy: orderBy,
       );
@@ -2785,8 +2899,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         limit: 1,
       );
       final itemId = itemRows.isEmpty ? null : itemRows.first['id']?.toString();
-      final tagGroupId =
-          itemRows.isEmpty ? null : itemRows.first['tag_group_id']?.toString();
+      final tagGroupId = itemRows.isEmpty
+          ? null
+          : itemRows.first['tag_group_id']?.toString();
       await db.transaction((txn) async {
         await txn.update(
           'tag_items',
@@ -2824,8 +2939,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       whereArgs: [id],
       limit: 1,
     );
-    final currentCategory =
-        legacyRows.isEmpty ? null : legacyRows.first['category']?.toString();
+    final currentCategory = legacyRows.isEmpty
+        ? null
+        : legacyRows.first['category']?.toString();
     await db.transaction((txn) async {
       await txn.update(
         tableName,
@@ -3465,10 +3581,10 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       final kind = slide.target != null
           ? 'scripture'
           : slide.elibraryMetadata != null
-              ? 'elibrary'
-              : slide.noteRef.startsWith('note:')
-                  ? 'note'
-                  : 'unsupported';
+          ? 'elibrary'
+          : slide.noteRef.startsWith('note:')
+          ? 'note'
+          : 'unsupported';
       if (kDebugMode) {
         debugPrint(
           '[ImportDiag] block[$i] → kind=$kind noteRef=${slide.noteRef.substring(0, slide.noteRef.length.clamp(0, 60))} contentLen=${slide.contentText.length}',
@@ -3476,14 +3592,17 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       }
       final dedupeKey = slide.target?.verseRef ?? slide.noteRef;
       if (!seen.add(dedupeKey)) {
-        if (kDebugMode) debugPrint('[ImportDiag] block[$i] DEDUPED (key already seen)');
+        if (kDebugMode)
+          debugPrint('[ImportDiag] block[$i] DEDUPED (key already seen)');
         continue;
       }
       slides.add(slide);
     }
 
     if (kDebugMode) {
-      debugPrint('[ImportDiag] _parseSharedListFromText → ${slides.length} unique slide(s)');
+      debugPrint(
+        '[ImportDiag] _parseSharedListFromText → ${slides.length} unique slide(s)',
+      );
     }
     if (slides.isEmpty) return null;
     return _ParsedSharedList(tag: normalizeTagName(tagName), slides: slides);
@@ -3681,8 +3800,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     if (studyBibleMetadata != null) {
       final kind = _s(studyBibleMetadata['kind']).trim().toLowerCase();
       if (kind == 'note') {
-        final noteText =
-            _s(studyBibleMetadata['note_text']).trim().isNotEmpty
+        final noteText = _s(studyBibleMetadata['note_text']).trim().isNotEmpty
             ? _s(studyBibleMetadata['note_text']).trim()
             : _extractSharedNoteContent(block, tagName);
         final noteKey = _sharedStudyBibleMetadataKey(
@@ -3703,8 +3821,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         final verseStart = _i(studyBibleMetadata['verse_number']) ?? 0;
         if (bookNumber > 0 && chapter > 0 && verseStart > 0) {
           final verseEnd = _i(studyBibleMetadata['verse_end']) ?? verseStart;
-          final verseRef =
-              _s(studyBibleMetadata['verse_ref']).trim().isNotEmpty
+          final verseRef = _s(studyBibleMetadata['verse_ref']).trim().isNotEmpty
               ? _s(studyBibleMetadata['verse_ref']).trim()
               : '$bookNumber:$chapter:$verseStart';
           return _ParsedSharedSlide(
@@ -3716,8 +3833,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
               verseEnd: verseEnd > verseStart ? verseEnd : null,
               tokenNumber: _i(studyBibleMetadata['token_number']),
             ),
-            contentText:
-                _s(studyBibleMetadata['verse_text']).trim().isNotEmpty
+            contentText: _s(studyBibleMetadata['verse_text']).trim().isNotEmpty
                 ? _s(studyBibleMetadata['verse_text']).trim()
                 : _extractSharedVerseContent(block.skip(1).toList()),
             noteRef: verseRef,
@@ -4168,10 +4284,10 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         final bucket = s.target != null
             ? 'scripture'
             : s.elibraryMetadata != null
-                ? 'elibrary'
-                : s.noteRef.startsWith('note:')
-                    ? 'note'
-                    : 'unsupported';
+            ? 'elibrary'
+            : s.noteRef.startsWith('note:')
+            ? 'note'
+            : 'unsupported';
         debugPrint(
           '[ImportDiag] slide[$i] bucket=$bucket noteRef=${s.noteRef.substring(0, s.noteRef.length.clamp(0, 60))}',
         );
@@ -4212,7 +4328,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         );
       }
     }
-    if (unsupportedSlides.isNotEmpty && recoveredAsNotes.length < unsupportedSlides.length) {
+    if (unsupportedSlides.isNotEmpty &&
+        recoveredAsNotes.length < unsupportedSlides.length) {
       final droppedCount = unsupportedSlides.length - recoveredAsNotes.length;
       warnings.add(
         'Skipped $droppedCount unsupported item${droppedCount == 1 ? '' : 's'} with no readable content.',
@@ -4221,8 +4338,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
 
     for (final slide in [...noteSlides, ...recoveredAsNotes]) {
       final metadata = slide.studyBibleMetadata ?? const <String, Object?>{};
-      final noteText =
-          _s(metadata['note_text']).trim().isNotEmpty
+      final noteText = _s(metadata['note_text']).trim().isNotEmpty
           ? _s(metadata['note_text']).trim()
           : slide.contentText.trim();
       final referenceCode = _s(metadata['reference_code']).trim();
@@ -4263,25 +4379,25 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         'chapter_number': 0,
         'verse_number': 0,
         'token_number': null,
-        'reference_code':
-            referenceCode.isNotEmpty ? referenceCode : null,
+        'reference_code': referenceCode.isNotEmpty ? referenceCode : null,
         'note_text': noteText.isNotEmpty ? noteText : null,
-        'note_format_json': jsonEncode(
-          <String, Object?>{
-            if (metadata.isNotEmpty) ...metadata,
-            'kind': 'studybible_note',
-            'note_key': noteKey,
-            if (referenceCode.isNotEmpty) 'reference_code': referenceCode,
-            if (noteText.isNotEmpty) 'note_text': noteText,
-          },
-        ),
+        'note_format_json': jsonEncode(<String, Object?>{
+          if (metadata.isNotEmpty) ...metadata,
+          'kind': 'studybible_note',
+          'note_key': noteKey,
+          if (referenceCode.isNotEmpty) 'reference_code': referenceCode,
+          if (noteText.isNotEmpty) 'note_text': noteText,
+        }),
         'sort_order': studyOrder,
         'created_at': now + inserted + updatedExisting,
       };
       if (exists.isNotEmpty) {
         final existingId = (exists.first['id'] as num?)?.toInt();
         if (existingId != null) {
-          if (kDebugMode) debugPrint('[ImportDiag] note UPDATE existing id=$existingId verseRef=$verseRef');
+          if (kDebugMode)
+            debugPrint(
+              '[ImportDiag] note UPDATE existing id=$existingId verseRef=$verseRef',
+            );
           await db.update(
             tableName,
             values,
@@ -4294,10 +4410,14 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           continue;
         }
         skippedExisting++;
-        if (kDebugMode) debugPrint('[ImportDiag] note SKIPPED (null id) verseRef=$verseRef');
+        if (kDebugMode)
+          debugPrint('[ImportDiag] note SKIPPED (null id) verseRef=$verseRef');
         continue;
       }
-      if (kDebugMode) debugPrint('[ImportDiag] note INSERT verseRef=$verseRef contentLen=${noteText.length}');
+      if (kDebugMode)
+        debugPrint(
+          '[ImportDiag] note INSERT verseRef=$verseRef contentLen=${noteText.length}',
+        );
       await db.insert(tableName, values);
       inserted++;
       noteImportedCount++;
@@ -4421,15 +4541,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       );
       final effectiveStableRef = stableRef.isNotEmpty
           ? stableRef
-          : 'elibrary:${_sharedStudyBibleMetadataKey(
-              metadata: metadata,
-              block: [
-                slide.contentText,
-                citation,
-                displayLabel,
-              ],
-              kind: 'elibrary_note',
-            )}';
+          : 'elibrary:${_sharedStudyBibleMetadataKey(metadata: metadata, block: [slide.contentText, citation, displayLabel], kind: 'elibrary_note')}';
       final effectiveParagraphText = paragraphText.isNotEmpty
           ? paragraphText
           : (displayLabel.trim().isNotEmpty ? displayLabel.trim() : citation);
@@ -4595,6 +4707,517 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       for (final row in rows)
         (row['book_number'] as num).toInt(): row['book_name']?.toString() ?? '',
     };
+  }
+
+  Future<List<HashTagTrashedEntry>> loadTrashedEntries(
+    String tag, {
+    String? category,
+  }) async {
+    return loadAllTrashedEntries(tag: tag, category: category);
+  }
+
+  Future<List<HashTagTrashedEntry>> loadAllTrashedEntries({
+    String? category,
+    String? tag,
+  }) async {
+    final normalizedTag = normalizeTagName(tag ?? '');
+    final normalizedCategory = _normalizeCategoryName(category);
+    await ensureSchema();
+    final db = await _db();
+    final results = <HashTagTrashedEntry>[];
+
+    if (kDebugMode) {
+      final scope = normalizedTag.isNotEmpty
+          ? 'tag=$normalizedTag'
+          : normalizedCategory != null
+          ? 'category=$normalizedCategory'
+          : 'global';
+      debugPrint('[TrashLoad] start scope=$scope');
+    }
+
+    final books = await StudyBibleDatabase.instance.loadBooks();
+    final bookNames = <int, String>{
+      for (final book in books) book.bookNumber: book.bookName,
+    };
+
+    Future<void> addLegacyRows() async {
+      final whereClauses = <String>["COALESCE(trashed_at_utc, '') != ''"];
+      final whereArgs = <Object?>[];
+      if (normalizedTag.isNotEmpty) {
+        whereClauses.add('tag = ?');
+        whereArgs.add(normalizedTag);
+      }
+      if (normalizedCategory != null) {
+        whereClauses.add("COALESCE(TRIM(category), '') = ?");
+        whereArgs.add(normalizedCategory);
+      }
+      final legacyRows = await db.rawQuery(
+        'SELECT id, tag, category, verse_ref, book_number, chapter_number, '
+        'verse_number, note_text, note_format_json, trashed_at_utc, trashed_reason '
+        'FROM $tableName '
+        'WHERE ${whereClauses.join(' AND ')} '
+        'ORDER BY trashed_at_utc DESC, id DESC',
+        whereArgs,
+      );
+      if (kDebugMode) {
+        debugPrint('[TrashLoad] legacy rows loaded=${legacyRows.length}');
+      }
+      for (final row in legacyRows) {
+        final numericId = _i(row['id']) ?? 0;
+        if (numericId <= 0) continue;
+        final bookNum = _i(row['book_number']) ?? 0;
+        final chapter = _i(row['chapter_number']) ?? 0;
+        final verse = _i(row['verse_number']) ?? 0;
+        final verseRef = _s(row['verse_ref']);
+        final noteText = _s(row['note_text']);
+        final noteFormatJson = _s(row['note_format_json']);
+        final trashedAt = row['trashed_at_utc']?.toString();
+        final trashedReason = row['trashed_reason']?.toString();
+        final tagCat = row['category']?.toString();
+        String reference;
+        String preview;
+        if (bookNum > 0 && chapter > 0 && verse > 0) {
+          final bookName = bookNames[bookNum]?.trim() ?? 'Book $bookNum';
+          reference = bibleRangeReferenceLabel(
+            bookName: bookName,
+            chapter: chapter,
+            verseStart: verse,
+            verseEnd: verse,
+          );
+          preview = await _loadVerseRangeText(
+            bookNumber: bookNum,
+            chapter: chapter,
+            verseStart: verse,
+            verseEnd: verse,
+          );
+        } else if (noteFormatJson.isNotEmpty) {
+          final elibraryTitle = _extractELibraryTitle(noteFormatJson);
+          if (elibraryTitle != null) {
+            reference = elibraryTitle;
+            preview = _extractELibraryExcerpt(noteFormatJson) ?? noteText;
+          } else {
+            reference = verseRef.startsWith('note:')
+                ? 'Note'
+                : (verseRef.isNotEmpty ? verseRef : 'Note');
+            preview = noteText;
+          }
+        } else {
+          reference = verseRef.startsWith('note:')
+              ? 'Note'
+              : (verseRef.isNotEmpty ? verseRef : 'Note');
+          preview = noteText;
+        }
+        results.add(
+          HashTagTrashedEntry(
+            numericId: numericId,
+            stableId: numericId.toString(),
+            isNormalized: false,
+            tagName: _s(row['tag']).trim().isNotEmpty
+                ? _s(row['tag']).trim()
+                : normalizedTag,
+            category: tagCat?.trim().isNotEmpty == true ? tagCat!.trim() : null,
+            reference: reference,
+            previewText: preview,
+            trashedAt: trashedAt,
+            trashedReason: trashedReason,
+          ),
+        );
+      }
+    }
+
+    Future<void> addNormalizedRows() async {
+      final whereClauses = <String>[
+        'tg.tag_kind = ?',
+        "COALESCE(ti.deleted_at, '') = ''",
+        "COALESCE(ti.trashed_at, '') != ''",
+      ];
+      final whereArgs = <Object?>[_tagKindForTable()];
+      if (normalizedTag.isNotEmpty) {
+        whereClauses.add('tg.name = ?');
+        whereArgs.add(normalizedTag);
+      }
+      if (normalizedCategory != null) {
+        whereClauses.add("COALESCE(parent.name, '') = ?");
+        whereArgs.add(normalizedCategory);
+      }
+
+      final normalizedRows = await db.rawQuery(
+        'SELECT ti.rowid AS numeric_id, ti.id, ti.book_id, ti.chapter, '
+        'ti.verse_start, ti.verse_end, ti.note_text, ti.note_format_json, '
+        'ti.trashed_at, ti.trashed_reason, '
+        'tg.name AS group_name, parent.name AS parent_name '
+        'FROM tag_items ti '
+        'JOIN tag_groups tg ON tg.id = ti.tag_group_id '
+        'LEFT JOIN tag_groups parent ON parent.id = tg.parent_group_id '
+        'WHERE ${whereClauses.join(' AND ')} '
+        'ORDER BY ti.trashed_at DESC, ti.id DESC',
+        whereArgs,
+      );
+      if (kDebugMode) {
+        debugPrint(
+          '[TrashLoad] normalized rows loaded=${normalizedRows.length}',
+        );
+      }
+      for (final row in normalizedRows) {
+        final numericId = _i(row['numeric_id']) ?? 0;
+        if (numericId <= 0) continue;
+        final stableId = _s(row['id']);
+        final bookId = _i(row['book_id']) ?? 0;
+        final chapter = _i(row['chapter']) ?? 0;
+        final verseStart = _i(row['verse_start']) ?? 0;
+        final verseEnd = _i(row['verse_end']) ?? verseStart;
+        final noteText = _s(row['note_text']);
+        final noteFormatJson = _s(row['note_format_json']);
+        final trashedAt = row['trashed_at']?.toString();
+        final trashedReason = row['trashed_reason']?.toString();
+        final groupName = _s(row['group_name']).isNotEmpty
+            ? _s(row['group_name'])
+            : normalizedTag;
+        final parentName = row['parent_name']?.toString();
+        String reference;
+        String preview;
+        if (bookId > 0 && chapter > 0 && verseStart > 0) {
+          final bookName = bookNames[bookId]?.trim() ?? 'Book $bookId';
+          reference = bibleRangeReferenceLabel(
+            bookName: bookName,
+            chapter: chapter,
+            verseStart: verseStart,
+            verseEnd: verseEnd,
+          );
+          preview = await _loadVerseRangeText(
+            bookNumber: bookId,
+            chapter: chapter,
+            verseStart: verseStart,
+            verseEnd: verseEnd,
+          );
+        } else if (noteFormatJson.isNotEmpty) {
+          final elibraryTitle = _extractELibraryTitle(noteFormatJson);
+          if (elibraryTitle != null) {
+            reference = elibraryTitle;
+            preview = _extractELibraryExcerpt(noteFormatJson) ?? noteText;
+          } else {
+            reference = noteText.isNotEmpty ? 'Note' : 'Content item';
+            preview = noteText;
+          }
+        } else {
+          reference = noteText.isNotEmpty ? 'Note' : 'Content item';
+          preview = noteText;
+        }
+        results.add(
+          HashTagTrashedEntry(
+            numericId: numericId,
+            stableId: stableId.isNotEmpty ? stableId : numericId.toString(),
+            isNormalized: true,
+            tagName: groupName,
+            category: parentName?.trim().isNotEmpty == true
+                ? parentName!.trim()
+                : null,
+            reference: reference,
+            previewText: preview,
+            trashedAt: trashedAt,
+            trashedReason: trashedReason,
+          ),
+        );
+      }
+    }
+
+    await addLegacyRows();
+    await addNormalizedRows();
+
+    results.sort((a, b) {
+      final aAt = a.trashedAt ?? '';
+      final bAt = b.trashedAt ?? '';
+      final cmp = bAt.compareTo(aAt);
+      if (cmp != 0) return cmp;
+      return b.numericId.compareTo(a.numericId);
+    });
+    if (kDebugMode) {
+      debugPrint('[TrashLoad] combined count=${results.length}');
+    }
+    return results;
+  }
+
+  String? _extractELibraryTitle(String noteFormatJson) {
+    try {
+      final decoded = jsonDecode(noteFormatJson);
+      if (decoded is! Map<String, dynamic>) return null;
+      if (decoded['kind']?.toString() != 'elibrary_note') return null;
+      final title = decoded['source_title']?.toString().trim() ?? '';
+      final acronym = decoded['source_title_acronym']?.toString().trim() ?? '';
+      return title.isNotEmpty ? title : (acronym.isNotEmpty ? acronym : null);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _extractELibraryExcerpt(String noteFormatJson) {
+    try {
+      final decoded = jsonDecode(noteFormatJson);
+      if (decoded is! Map<String, dynamic>) return null;
+      final excerpt = decoded['excerpt']?.toString().trim() ?? '';
+      if (excerpt.isNotEmpty) return excerpt;
+      final selected =
+          decoded['selected_text_snapshot']?.toString().trim() ?? '';
+      if (selected.isNotEmpty) return selected;
+      return decoded['source_paragraph']?.toString().trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> restoreEntry(int id, {bool normalized = false}) async {
+    await ensureSchema();
+    final db = await _db();
+    final now = _utcNow();
+    if (normalized) {
+      final itemRows = await db.query(
+        'tag_items',
+        columns: ['id'],
+        where: 'rowid = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      final itemId = itemRows.isEmpty ? null : itemRows.first['id']?.toString();
+      await db.transaction((txn) async {
+        await txn.update(
+          'tag_items',
+          {
+            'trashed_at': null,
+            'trashed_reason': null,
+            'trash_batch_id': null,
+            'updated_at': now,
+          },
+          where: 'rowid = ?',
+          whereArgs: [id],
+        );
+        if (itemId != null && itemId.isNotEmpty) {
+          await txn.update(
+            'tag_item_media',
+            {
+              'trashed_at': null,
+              'trashed_reason': null,
+              'trash_batch_id': null,
+            },
+            where: "tag_item_id = ? AND COALESCE(deleted_at, '') = ''",
+            whereArgs: [itemId],
+          );
+        }
+      });
+      return;
+    }
+    await db.update(
+      tableName,
+      {'trashed_at_utc': null, 'trashed_reason': null, 'trash_batch_id': null},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<bool> restoreTrashedEntryToDestination(
+    int id, {
+    required bool normalized,
+    required String tag,
+    String? category,
+  }) async {
+    final normalizedTag = normalizeTagName(tag);
+    final normalizedCategory = _normalizeCategoryName(category);
+    if (normalizedTag.isEmpty) return false;
+
+    if (kDebugMode) {
+      debugPrint(
+        '[TrashRestore] request id=$id normalized=$normalized '
+        'tag=$normalizedTag rawCategory=${category ?? "<none>"} '
+        'normalizedCategory=${normalizedCategory ?? "<none>"}',
+      );
+    }
+
+    await ensureSchema();
+    final db = await _db();
+    final now = _utcNow();
+
+    if (normalized) {
+      final rows = await db.query(
+        'tag_items',
+        columns: [
+          'id',
+          'trashed_at',
+          'trashed_reason',
+          'trash_batch_id',
+          'deleted_at',
+        ],
+        where: 'rowid = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (rows.isEmpty) return false;
+      final row = rows.first;
+      final trashedAt = row['trashed_at']?.toString().trim() ?? '';
+      final trashedReason = row['trashed_reason']?.toString().trim() ?? '';
+      final trashBatchId = row['trash_batch_id']?.toString().trim() ?? '';
+      if (trashedAt.isEmpty && trashedReason.isEmpty && trashBatchId.isEmpty) {
+        return false;
+      }
+      final itemId = row['id']?.toString().trim() ?? '';
+      final groupId = await ensureNormalizedDestinationGroupId(
+        executor: db,
+        normalizedTag: normalizedTag,
+        category: normalizedCategory,
+        now: now,
+      );
+      if (kDebugMode) {
+        debugPrint(
+          '[TrashRestore] apply id=$id tag=$normalizedTag '
+          'groupId=$groupId category=${normalizedCategory ?? "<none>"}',
+        );
+      }
+      await db.transaction((txn) async {
+        await txn.update(
+          'tag_items',
+          {
+            'tag_group_id': groupId,
+            'trashed_at': null,
+            'trashed_reason': null,
+            'trash_batch_id': null,
+            'updated_at': now,
+          },
+          where: 'rowid = ?',
+          whereArgs: [id],
+        );
+        if (itemId.isNotEmpty) {
+          await txn.update(
+            'tag_item_media',
+            {
+              'trashed_at': null,
+              'trashed_reason': null,
+              'trash_batch_id': null,
+            },
+            where: "tag_item_id = ? AND COALESCE(deleted_at, '') = ''",
+            whereArgs: [itemId],
+          );
+        }
+      });
+      return true;
+    }
+
+    final rows = await db.query(
+      tableName,
+      columns: ['trashed_at_utc', 'trashed_reason', 'trash_batch_id'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    final row = rows.first;
+    final trashedAt = row['trashed_at_utc']?.toString().trim() ?? '';
+    final trashedReason = row['trashed_reason']?.toString().trim() ?? '';
+    final trashBatchId = row['trash_batch_id']?.toString().trim() ?? '';
+    if (trashedAt.isEmpty && trashedReason.isEmpty && trashBatchId.isEmpty) {
+      return false;
+    }
+    if (kDebugMode) {
+      debugPrint(
+        '[TrashRestore] apply id=$id tag=$normalizedTag '
+        'legacyCategory=${normalizedCategory ?? "<none>"}',
+      );
+    }
+    await db.transaction((txn) async {
+      await txn.update(
+        tableName,
+        {
+          'tag': normalizedTag,
+          'category': normalizedCategory,
+          'trashed_at_utc': null,
+          'trashed_reason': null,
+          'trash_batch_id': null,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await txn.update(
+        'tag_item_media',
+        {'trashed_at': null, 'trashed_reason': null, 'trash_batch_id': null},
+        where: "tag_item_id = ? AND COALESCE(deleted_at, '') = ''",
+        whereArgs: [id.toString()],
+      );
+    });
+    return true;
+  }
+
+  Future<int> permanentlyDeleteTrashedEntry(
+    int id, {
+    required bool normalized,
+  }) async {
+    await ensureSchema();
+    final db = await _db();
+
+    if (normalized) {
+      final rows = await db.query(
+        'tag_items',
+        columns: ['id', 'trashed_at', 'trashed_reason', 'trash_batch_id'],
+        where: 'rowid = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (rows.isEmpty) return 0;
+      final row = rows.first;
+      final trashedAt = row['trashed_at']?.toString().trim() ?? '';
+      final trashedReason = row['trashed_reason']?.toString().trim() ?? '';
+      final trashBatchId = row['trash_batch_id']?.toString().trim() ?? '';
+      final deletedAt = row['deleted_at']?.toString().trim() ?? '';
+      if (trashedAt.isEmpty &&
+          trashedReason.isEmpty &&
+          trashBatchId.isEmpty &&
+          deletedAt.isEmpty) {
+        return 0;
+      }
+      final itemId = row['id']?.toString().trim() ?? '';
+      return db.transaction((txn) async {
+        if (itemId.isNotEmpty) {
+          await txn.delete(
+            'tag_item_media',
+            where: 'tag_item_id = ?',
+            whereArgs: [itemId],
+          );
+        }
+        return txn.delete('tag_items', where: 'rowid = ?', whereArgs: [id]);
+      });
+    }
+
+    final rows = await db.query(
+      tableName,
+      columns: ['trashed_at_utc', 'trashed_reason', 'trash_batch_id'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (rows.isEmpty) return 0;
+    final row = rows.first;
+    final trashedAt = row['trashed_at_utc']?.toString().trim() ?? '';
+    final trashedReason = row['trashed_reason']?.toString().trim() ?? '';
+    final trashBatchId = row['trash_batch_id']?.toString().trim() ?? '';
+    if (trashedAt.isEmpty && trashedReason.isEmpty && trashBatchId.isEmpty) {
+      return 0;
+    }
+    return db.transaction((txn) async {
+      await txn.delete(
+        'tag_item_media',
+        where: 'tag_item_id = ?',
+        whereArgs: [id.toString()],
+      );
+      return txn.delete(tableName, where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  Future<int> emptyTrash({String? category, String? tag}) async {
+    final entries = await loadAllTrashedEntries(category: category, tag: tag);
+    var deleted = 0;
+    for (final entry in entries) {
+      deleted += await permanentlyDeleteTrashedEntry(
+        entry.numericId,
+        normalized: entry.isNormalized,
+      );
+    }
+    return deleted;
   }
 }
 

@@ -43,12 +43,6 @@ class _ELibraryDownloadScreenState extends State<ELibraryDownloadScreen> {
     }
   }
 
-  Future<void> _setStoragePolicy(ELibraryStoragePolicy policy) async {
-    if (_storagePolicy == policy) return;
-    setState(() => _storagePolicy = policy);
-    await LocalSettingsStore.instance.saveELibraryStoragePolicy(policy);
-  }
-
   @override
   void dispose() {
     _cancelRequested = true;
@@ -130,12 +124,12 @@ class _ELibraryDownloadScreenState extends State<ELibraryDownloadScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'eLibrary acquisition',
+                      'EGW / Commentary downloads',
                       style: theme.textTheme.titleLarge,
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'EPUB is preferred when available. TXT/HTML fallback is used only when EPUB is missing or selected. Imported works stay in the app database for search, reading, tagging, and navigation.',
+                      'This screen downloads EGW/Commentary EPUB and PDF content. EPUB is preferred when available, TXT/HTML fallback is used only when EPUB is missing or selected, and imported works stay in eLibrary.db for search, reading, tagging, and navigation.',
                       style: theme.textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 12),
@@ -147,7 +141,7 @@ class _ELibraryDownloadScreenState extends State<ELibraryDownloadScreen> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'Storage after successful import',
+                      'Source-file cleanup policy (future behavior)',
                       style: theme.textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),
@@ -157,28 +151,25 @@ class _ELibraryDownloadScreenState extends State<ELibraryDownloadScreen> {
                         child: LinearProgressIndicator(),
                       )
                     else
-                      RadioGroup<ELibraryStoragePolicy>(
-                        groupValue: _storagePolicy,
-                        onChanged: (value) {
-                          if (value == null) return;
-                          _setStoragePolicy(value);
-                        },
-                        child: Column(
-                          children: ELibraryStoragePolicy.values
-                              .map((policy) {
-                                return RadioListTile<ELibraryStoragePolicy>(
-                                  contentPadding: EdgeInsets.zero,
-                                  value: policy,
-                                  title: Text(policy.label),
-                                  subtitle: Text(policy.description),
-                                );
-                              })
-                              .toList(growable: false),
-                        ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Saved preference: ${_storagePolicy.label}',
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Source-file cleanup only affects downloaded EPUB/PDF files. It does not change imported eLibrary.db content, and this preference is stored for future cleanup behavior only.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
                     const SizedBox(height: 8),
                     Text(
-                      'Source cleanup happens after verified import. Cleanup is deferred until the import-to-database path is wired, so downloaded files are kept for now.',
+                      'Downloaded source files can be kept for backup or re-import. Imported works always remain in eLibrary.db for reading, search, tagging, and navigation.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
@@ -189,7 +180,8 @@ class _ELibraryDownloadScreenState extends State<ELibraryDownloadScreen> {
                     Text(
                       '• EPUB: import into the library database, then removable after verified success.\n'
                       '• TXT/HTML: import cleaned text into the library database, then removable after verified success.\n'
-                      '• PDF: keep only when original page layout or page images are needed.',
+                      '• PDF: keep only when original page layout or page images are needed.\n'
+                      '• CaptureClipper HTML imports: use eLibrary Setup, not this screen.',
                       style: theme.textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 16),
@@ -239,12 +231,12 @@ class _ELibraryDownloadScreenState extends State<ELibraryDownloadScreen> {
                       ),
                     ] else if (!_hasStartedDownload) ...[
                       Text(
-                        'Tap Start Download to begin. Existing downloaded books are preserved and skipped when already current, so the screen will only download missing or changed EPUB and PDF files.',
+                        'Tap Start Download to begin an EGW/Commentary download run. Existing downloaded books are preserved and skipped when already current, and imported works are stored in eLibrary.db for reading, search, tagging, and navigation.',
                         style: theme.textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'No download starts until you choose Start Download.',
+                        'No download run starts until you choose Start Download.',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: scheme.onSurfaceVariant,
                         ),

@@ -22,7 +22,7 @@ import 'pioneer_captured_html_import_review_screen.dart';
 import 'library_root_setup_screen.dart';
 
 const _sourceCleanupDeferredMessage =
-    'Deferred until verified import-to-db is wired.';
+    'Future-facing cleanup policy: imported works stay in eLibrary.db and only downloaded source files are eligible for removal.';
 
 enum _ELibraryRunCompletionStatus {
   cleanSuccess,
@@ -936,8 +936,8 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         'source_files_not_removed_because_import_not_verified':
             downloadReport.filesDownloaded.length +
             downloadReport.filesSkipped.length,
-        // TODO: Enable source cleanup once downloaded files are imported into
-        // eLibrary.db and the app can verify the indexed result.
+        // Source cleanup is future-facing here; imported works already live in
+        // eLibrary.db and only downloaded source files can be removed.
         'files_downloaded': downloadReport.filesDownloaded
             .map((item) => item.toJson())
             .toList(growable: false),
@@ -1256,11 +1256,11 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                           _pathLine('Root source', selection?.sourceLabel),
                           const SizedBox(height: 8),
                           Text(
-                            'Storage after successful import: ${_storagePolicy.label}',
+                            'Source-file cleanup policy (future behavior): ${_storagePolicy.label}',
                             style: theme.textTheme.bodyMedium,
                           ),
                           Text(
-                            'Cleanup deferred: source files are retained until verified import-to-db cleanup is wired.',
+                            'Imported works stay in eLibrary.db for reading, search, tagging, and navigation. Source-file cleanup only affects downloaded EPUB/PDF files.',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: scheme.onSurfaceVariant,
                             ),
@@ -1845,17 +1845,17 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              'Source cleanup policy: ${_storagePolicy.label}',
+                              'Source cleanup policy: ${_storagePolicy.label} (future behavior)',
                             ),
                             Text(
                               'Source files downloaded: ${_downloadReport!.filesDownloaded.length}',
                             ),
                             Text(
-                              'Source files retained: ${_downloadReport!.filesDownloaded.length + _downloadReport!.filesSkipped.length}',
+                              'Source files retained for backup/re-import: ${_downloadReport!.filesDownloaded.length + _downloadReport!.filesSkipped.length}',
                             ),
                             Text('Source files removed after import: 0'),
                             Text(
-                              'Source files not removed because import was not verified: ${_downloadReport!.filesDownloaded.length + _downloadReport!.filesSkipped.length}',
+                              'Source files not removed yet: ${_downloadReport!.filesDownloaded.length + _downloadReport!.filesSkipped.length}',
                             ),
                             Text(
                               'Cleanup status: $_sourceCleanupDeferredMessage',

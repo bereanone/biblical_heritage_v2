@@ -5,6 +5,7 @@ class ELibrarySchema {
 
   static const currentVersion = 1;
   static const initialMigrationKey = 'phase_1_initial_schema';
+  static const contributorsMigrationKey = 'phase_2_contributors';
 
   static Future<void> ensure(Database db) async {
     await _retryOnLocked(() async {
@@ -223,6 +224,28 @@ class ELibrarySchema {
       )
     ''');
     await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_contributors (
+        id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        full_name TEXT,
+        sort_name TEXT,
+        normalized_name TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_item_contributors (
+        library_item_id TEXT NOT NULL,
+        contributor_id TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'author',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_primary INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (library_item_id, contributor_id)
+      )
+    ''');
+    await db.execute('''
       CREATE TABLE IF NOT EXISTS elibrary_markups (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         library_item_id TEXT NOT NULL,
@@ -284,6 +307,14 @@ class ELibrarySchema {
       CREATE INDEX IF NOT EXISTS idx_elibrary_markups_item_type
       ON elibrary_markups (library_item_id, markup_type, deleted_at)
     ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_library_item_contributors_item
+      ON library_item_contributors (library_item_id)
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_library_item_contributors_contributor
+      ON library_item_contributors (contributor_id)
+    ''');
   }
 
   static Future<void> _seedInitialMigration(Database db) async {
@@ -295,6 +326,14 @@ class ELibrarySchema {
       'applied_at': now,
       'status': 'completed',
       'details': 'Initial eLibrary schema bootstrap.',
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.insert('elibrary_schema_migrations', {
+      'migration_key': contributorsMigrationKey,
+      'from_version': 1,
+      'to_version': currentVersion,
+      'applied_at': now,
+      'status': 'completed',
+      'details': 'Added library_contributors and library_item_contributors tables.',
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 

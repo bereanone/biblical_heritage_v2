@@ -11,7 +11,7 @@ String libraryReaderBookSubtitle(
 
   final cleanSectionTitle = sectionTitle?.trim() ?? '';
   if (cleanSectionTitle.isNotEmpty) {
-    return cleanSectionTitle;
+    return libraryReaderDisplaySectionTitle(cleanSectionTitle);
   }
 
   final collectionName = item.collectionName?.trim() ?? '';
@@ -20,6 +20,46 @@ String libraryReaderBookSubtitle(
   }
 
   return '';
+}
+
+bool libraryReaderCanManageImportedBook(LibraryCatalogItem item) {
+  final sourceType = item.sourceType?.trim().toLowerCase() ?? '';
+  if (sourceType.contains('captured_html') ||
+      sourceType.contains('html_capture') ||
+      sourceType.contains('pioneer_captured_html')) {
+    return true;
+  }
+
+  final collectionName = item.collectionName?.trim().toLowerCase() ?? '';
+  if (collectionName.contains('pioneer authors')) {
+    return true;
+  }
+
+  final relativePath = item.relativePath.trim().toLowerCase();
+  return relativePath.contains('textcaptures/research/pioneer authors') ||
+      relativePath.contains('/pioneer authors/') ||
+      relativePath.contains('html_capture');
+}
+
+String libraryReaderDisplaySectionTitle(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return '';
+
+  final normalized = _normalizeReaderLabel(trimmed);
+  if (normalized.startsWith('chapter 0') || normalized.startsWith('section 0')) {
+    final stripped = trimmed.replaceFirst(
+      RegExp(
+        r'^(chapter|section)\s+0\s*([—\-:]\s*)?',
+        caseSensitive: false,
+      ),
+      '',
+    ).trim();
+    if (stripped.isNotEmpty) {
+      return stripped;
+    }
+  }
+
+  return trimmed;
 }
 
 String? libraryReaderContentsTargetKeyForNavigationItem({

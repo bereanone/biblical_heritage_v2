@@ -34,6 +34,9 @@ import 'elibrary_highlight_color_picker.dart';
 import 'library_font_scale.dart';
 import 'library_navigation_tree.dart';
 import '../../reader/presentation/text_range_geometry.dart';
+import '../../utilities/data/pioneer_captured_html_import_folder_service.dart';
+import '../../utilities/data/pioneer_text_import_service.dart';
+import '../../utilities/presentation/elibrary_setup_screen.dart';
 
 part 'epub_inline_span_builder.dart';
 part 'epub_body_block_parser.dart';
@@ -44,6 +47,12 @@ part 'library_book_reader_selection_menu.dart';
 part 'library_book_reader_screen_helpers.dart';
 
 const bool _enableTextRangeGeometry = false;
+
+enum _ReaderBookMenuAction {
+  openELibrarySetup,
+  removeCurrentBook,
+  repairCurrentImportedBook,
+}
 
 class LibraryBookReaderScreen extends StatefulWidget {
   const LibraryBookReaderScreen({
@@ -339,7 +348,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     required Map<int, String> sectionReferenceCodes,
   }) {
     if (block.kind != 'paragraph') return null;
-    final sectionTitle = section?.title ?? '';
+    final sectionTitle = libraryReaderDisplaySectionTitle(section?.title ?? '');
     if (item.isDevotional) {
       return libraryReaderDevotionalFallbackRefCodeForBlock(
         item: item,
@@ -450,7 +459,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     required LibraryBookSection? section,
   }) {
     final title = item.displayTitle.trim();
-    final sectionTitle = section?.title.trim() ?? '';
+    final sectionTitle = libraryReaderDisplaySectionTitle(section?.title ?? '');
 
     if (title.isNotEmpty && sectionTitle.isNotEmpty) {
       return '$title, $sectionTitle';
@@ -1059,6 +1068,206 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     }
   }
 
+  bool get _canDropImportedBook {
+    return libraryReaderCanManageImportedBook(widget.item);
+  }
+
+  Future<void> _dropImportedBook() async {
+    if (!_canDropImportedBook) return;
+
+    final theme = Theme.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remove Current Book from Library?'),
+        content: Text(
+          'This removes the imported database copy only. It does not delete '
+          'or modify the original CaptureClipper source files.\n\n'
+          'Book: "${widget.item.displayTitle}"',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(
+              foregroundColor: theme.colorScheme.error,
+            ),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+
+    final removed = await PioneerTextImportService.instance
+        .removeImportedLibraryItem(widget.item.id);
+    if (!mounted) return;
+    if (!removed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('That book could not be removed from the library.'),
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Removed "${widget.item.displayTitle}" from eLibrary.'),
+      ),
+    );
+    await _closeToLibrary();
+  }
+
+  Future<void> _repairImportedBook() async {
+    if (!_canDropImportedBook) return;
+
+    final theme = Theme.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Repair Current Imported Book?'),
+        content: Text(
+          'This removes the imported database copy and reimports it from the '
+          'configured CaptureClipper source folder.\n\n'
+          'The original source files are not changed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(
+              foregroundColor: theme.colorScheme.primary,
+            ),
+            child: const Text('Repair'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+
+    final report = await PioneerCapturedHtmlImportFolderService.instance
+        .repairImportedCaptureClipperBook(libraryItemId: widget.item.id);
+    if (!mounted) return;
+    if (report == null || report.entries.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not find the original CaptureClipper source for this book.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final repaired = report.entries.firstWhere(
+      (entry) => entry.libraryItemId == widget.item.id,
+      orElse: () => report.entries.first,
+    );
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Repaired "${repaired.title}" from its CaptureClipper source.',
+        ),
+      ),
+    );
+    await _load();
+  }
+
+  Future<void> _openELibrarySetup() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const ELibrarySetupScreen()),
+    );
+  }
+
+  Widget _buildReaderActionsMenu({
+    required ThemeData theme,
+    required Color textColor,
+    required Color cardBackground,
+    required Color cardBorder,
+  }) {
+    return PopupMenuButton<_ReaderBookMenuAction>(
+      tooltip: 'Library actions',
+      onSelected: (action) {
+        switch (action) {
+          case _ReaderBookMenuAction.openELibrarySetup:
+            unawaited(_openELibrarySetup());
+            return;
+          case _ReaderBookMenuAction.removeCurrentBook:
+            unawaited(_dropImportedBook());
+            return;
+          case _ReaderBookMenuAction.repairCurrentImportedBook:
+            unawaited(_repairImportedBook());
+            return;
+        }
+      },
+      itemBuilder: (context) {
+        final items = <PopupMenuEntry<_ReaderBookMenuAction>>[
+          const PopupMenuItem<_ReaderBookMenuAction>(
+            value: _ReaderBookMenuAction.openELibrarySetup,
+            child: Text('Open eLibrary Setup'),
+          ),
+        ];
+        if (_canDropImportedBook) {
+          items.addAll(const [
+            PopupMenuItem<_ReaderBookMenuAction>(
+              enabled: false,
+              child: Text('Maintenance'),
+            ),
+            PopupMenuItem<_ReaderBookMenuAction>(
+              value: _ReaderBookMenuAction.removeCurrentBook,
+              child: Text('Remove Current Book from Library'),
+            ),
+            PopupMenuItem<_ReaderBookMenuAction>(
+              value: _ReaderBookMenuAction.repairCurrentImportedBook,
+              child: Text('Repair Current Imported Book'),
+            ),
+          ]);
+        }
+        return items;
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: cardBackground,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: cardBorder),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.more_horiz,
+              size: 18,
+              color: textColor.withValues(alpha: 0.82),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              'Menu',
+              style: libraryControlTextStyle(
+                context,
+                theme.textTheme.labelLarge,
+                fontWeight: FontWeight.w800,
+                color: textColor,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(
+              Icons.arrow_drop_down,
+              color: textColor.withValues(alpha: 0.82),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _saveCurrentLocation() async {
     if (_sections.isEmpty ||
         _selectedIndex < 0 ||
@@ -1137,7 +1346,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   String get _currentSubtitle {
     return libraryReaderBookSubtitle(
       widget.item,
-      sectionTitle: _currentSection?.title,
+      sectionTitle: libraryReaderDisplaySectionTitle(
+        _currentSection?.title ?? '',
+      ),
     );
   }
 
@@ -2633,7 +2844,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
             entries: entries,
             sections: _sections,
             currentSectionEntryName: _currentSection?.entryName,
-            currentSectionTitle: _currentSection?.title,
+            currentSectionTitle: libraryReaderDisplaySectionTitle(
+              _currentSection?.title ?? '',
+            ),
             currentSectionSpineIndex: _currentSection?.spineIndex,
             selectedNavigationItemId: _selectedNavigationItem?.id,
             selectedNavigationIndex: _selectedNavigationIndex,
@@ -2679,7 +2892,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
               const <int, String>{};
     final showSectionTitle = _shouldShowSectionTitle(
       sectionBlocks,
-      currentSection?.title ?? '',
+      libraryReaderDisplaySectionTitle(currentSection?.title ?? ''),
     );
     final sectionMarkups = currentSection == null
         ? const <ElibraryMarkupRecord>[]
@@ -2715,14 +2928,18 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
             ? (item.isDevotional
                   ? libraryReaderDevotionalFallbackRefCodeForBlock(
                       item: item,
-                      sectionTitle: currentSection?.title ?? '',
+                      sectionTitle: libraryReaderDisplaySectionTitle(
+                        currentSection?.title ?? '',
+                      ),
                       block: block,
                       fallbackParagraphCount: devotionalFallbackParagraphCount,
                     )
                   : item.isPeriodical
                   ? libraryReaderPeriodicalRefCode(
                       item: item,
-                      sectionTitle: currentSection?.title ?? '',
+                      sectionTitle: libraryReaderDisplaySectionTitle(
+                        currentSection?.title ?? '',
+                      ),
                       paragraphIndex: paragraphIndex,
                     )
                   : _refCodeByLocation[_refCodeLocationKey(
@@ -2746,7 +2963,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
             geometryRegistry: _geometryRegistry,
             geometryScopeId: geometryScopeId,
             geometryRevision: _enableTextRangeGeometry ? _geometryTick : 0,
-            sectionTitle: currentSection?.title ?? '',
+            sectionTitle: libraryReaderDisplaySectionTitle(
+              currentSection?.title ?? '',
+            ),
             sectionEntryName: currentSection?.entryName ?? '',
             paragraphIndex: isParagraph ? paragraphIndex : null,
             textColor: textColor,
@@ -2843,95 +3062,208 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      FilledButton.tonalIcon(
-                        onPressed: _backToBible,
-                        icon: const Icon(Icons.arrow_back),
-                        label: Text(
-                          'Back to Bible',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: libraryControlTextStyle(
-                            context,
-                            theme.textTheme.labelLarge,
-                            fontWeight: FontWeight.w800,
-                            color: textColor,
+                  if (MediaQuery.sizeOf(context).width < 900) ...[
+                    Row(
+                      children: [
+                        FilledButton.tonalIcon(
+                          onPressed: _backToBible,
+                          icon: const Icon(Icons.arrow_back),
+                          label: Text(
+                            'Back to Bible',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: libraryControlTextStyle(
+                              context,
+                              theme.textTheme.labelLarge,
+                              fontWeight: FontWeight.w800,
+                              color: textColor,
+                            ),
+                          ),
+                          style: FilledButton.styleFrom(
+                            foregroundColor: textColor,
+                            backgroundColor: cardBackground,
+                            side: BorderSide(color: cardBorder),
                           ),
                         ),
-                        style: FilledButton.styleFrom(
-                          foregroundColor: textColor,
-                          backgroundColor: cardBackground,
-                          side: BorderSide(color: cardBorder),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        'eLibrary',
-                        style: libraryScaledTextStyle(
-                          theme.textTheme.headlineMedium,
-                          libraryTitleScale(_fontScale),
-                          fontWeight: FontWeight.w800,
-                          color: textColor,
-                        ),
-                      ),
-                      const Spacer(),
-                      FilledButton.tonalIcon(
-                        onPressed: _openSearch,
-                        icon: const Icon(Icons.search),
-                        label: Text(
-                          'Search',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: libraryControlTextStyle(
-                            context,
-                            theme.textTheme.labelLarge,
-                            fontWeight: FontWeight.w800,
-                            color: textColor,
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'eLibrary',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: libraryScaledTextStyle(
+                              theme.textTheme.headlineMedium,
+                              libraryTitleScale(_fontScale),
+                              fontWeight: FontWeight.w800,
+                              color: textColor,
+                            ),
                           ),
-                        ),
-                        style: FilledButton.styleFrom(
-                          foregroundColor: textColor,
-                          backgroundColor: cardBackground,
-                          side: BorderSide(color: cardBorder),
-                        ),
-                      ),
-                      if (_hasSearchSession) ...[
-                        const SizedBox(width: 10),
-                        _SearchHitNavigator(
-                          label: widget.searchSession!.counterLabel,
-                          canGoPrevious: widget.searchSession!.hasPrevious,
-                          canGoNext: widget.searchSession!.hasNext,
-                          onPrevious: () => _navigateSearchHit(-1),
-                          onNext: () => _navigateSearchHit(1),
-                          textColor: textColor,
-                          backgroundColor: cardBackground,
-                          borderColor: cardBorder,
                         ),
                       ],
-                      const SizedBox(width: 12),
-                      FilledButton.tonalIcon(
-                        onPressed: _closeToLibrary,
-                        icon: const Icon(Icons.library_books_outlined),
-                        label: Text(
-                          'Library',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: libraryControlTextStyle(
-                            context,
-                            theme.textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        FilledButton.tonalIcon(
+                          onPressed: _openSearch,
+                          icon: const Icon(Icons.search),
+                          label: Text(
+                            'Search',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: libraryControlTextStyle(
+                              context,
+                              theme.textTheme.labelLarge,
+                              fontWeight: FontWeight.w800,
+                              color: textColor,
+                            ),
+                          ),
+                          style: FilledButton.styleFrom(
+                            foregroundColor: textColor,
+                            backgroundColor: cardBackground,
+                            side: BorderSide(color: cardBorder),
+                          ),
+                        ),
+                        if (_hasSearchSession)
+                          _SearchHitNavigator(
+                            label: widget.searchSession!.counterLabel,
+                            canGoPrevious: widget.searchSession!.hasPrevious,
+                            canGoNext: widget.searchSession!.hasNext,
+                            onPrevious: () => _navigateSearchHit(-1),
+                            onNext: () => _navigateSearchHit(1),
+                            textColor: textColor,
+                            backgroundColor: cardBackground,
+                            borderColor: cardBorder,
+                          ),
+                        FilledButton.tonalIcon(
+                          onPressed: _closeToLibrary,
+                          icon: const Icon(Icons.library_books_outlined),
+                          label: Text(
+                            'Library',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: libraryControlTextStyle(
+                              context,
+                              theme.textTheme.labelLarge,
+                              fontWeight: FontWeight.w800,
+                              color: textColor,
+                            ),
+                          ),
+                          style: FilledButton.styleFrom(
+                            foregroundColor: textColor,
+                            backgroundColor: cardBackground,
+                            side: BorderSide(color: cardBorder),
+                          ),
+                        ),
+                        _buildReaderActionsMenu(
+                          theme: theme,
+                          textColor: textColor,
+                          cardBackground: cardBackground,
+                          cardBorder: cardBorder,
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    Row(
+                      children: [
+                        FilledButton.tonalIcon(
+                          onPressed: _backToBible,
+                          icon: const Icon(Icons.arrow_back),
+                          label: Text(
+                            'Back to Bible',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: libraryControlTextStyle(
+                              context,
+                              theme.textTheme.labelLarge,
+                              fontWeight: FontWeight.w800,
+                              color: textColor,
+                            ),
+                          ),
+                          style: FilledButton.styleFrom(
+                            foregroundColor: textColor,
+                            backgroundColor: cardBackground,
+                            side: BorderSide(color: cardBorder),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          'eLibrary',
+                          style: libraryScaledTextStyle(
+                            theme.textTheme.headlineMedium,
+                            libraryTitleScale(_fontScale),
                             fontWeight: FontWeight.w800,
                             color: textColor,
                           ),
                         ),
-                        style: FilledButton.styleFrom(
-                          foregroundColor: textColor,
-                          backgroundColor: cardBackground,
-                          side: BorderSide(color: cardBorder),
+                        const Spacer(),
+                        FilledButton.tonalIcon(
+                          onPressed: _openSearch,
+                          icon: const Icon(Icons.search),
+                          label: Text(
+                            'Search',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: libraryControlTextStyle(
+                              context,
+                              theme.textTheme.labelLarge,
+                              fontWeight: FontWeight.w800,
+                              color: textColor,
+                            ),
+                          ),
+                          style: FilledButton.styleFrom(
+                            foregroundColor: textColor,
+                            backgroundColor: cardBackground,
+                            side: BorderSide(color: cardBorder),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                        if (_hasSearchSession) ...[
+                          const SizedBox(width: 10),
+                          _SearchHitNavigator(
+                            label: widget.searchSession!.counterLabel,
+                            canGoPrevious: widget.searchSession!.hasPrevious,
+                            canGoNext: widget.searchSession!.hasNext,
+                            onPrevious: () => _navigateSearchHit(-1),
+                            onNext: () => _navigateSearchHit(1),
+                            textColor: textColor,
+                            backgroundColor: cardBackground,
+                            borderColor: cardBorder,
+                          ),
+                        ],
+                        const SizedBox(width: 12),
+                        FilledButton.tonalIcon(
+                          onPressed: _closeToLibrary,
+                          icon: const Icon(Icons.library_books_outlined),
+                          label: Text(
+                            'Library',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: libraryControlTextStyle(
+                              context,
+                              theme.textTheme.labelLarge,
+                              fontWeight: FontWeight.w800,
+                              color: textColor,
+                            ),
+                          ),
+                          style: FilledButton.styleFrom(
+                            foregroundColor: textColor,
+                            backgroundColor: cardBackground,
+                            side: BorderSide(color: cardBorder),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        _buildReaderActionsMenu(
+                          theme: theme,
+                          textColor: textColor,
+                          cardBackground: cardBackground,
+                          cardBorder: cardBorder,
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Material(
                     color: summaryBackground,
@@ -3024,8 +3356,15 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                                       children: [
                                         if (showSectionTitle) ...[
                                           Text(
-                                            currentSection?.title ??
-                                                item.displayTitle,
+                                            () {
+                                              final sectionTitle =
+                                                  libraryReaderDisplaySectionTitle(
+                                                    currentSection?.title ?? '',
+                                                  );
+                                              return sectionTitle.isNotEmpty
+                                                  ? sectionTitle
+                                                  : item.displayTitle;
+                                            }(),
                                             style: libraryScaledTextStyle(
                                               theme.textTheme.headlineSmall,
                                               _fontScale * _zoomScale,

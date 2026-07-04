@@ -1,17 +1,20 @@
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:studybible2/core/bootstrap/library_root_service.dart';
 import 'package:studybible2/core/bootstrap/local_settings_store.dart';
+import 'package:studybible2/core/bootstrap/library_root_service.dart';
 import 'package:studybible2/core/database/elibrary_database.dart';
 import 'package:studybible2/core/database/user_database.dart';
 import 'package:studybible2/features/library/data/library_catalog_service.dart';
 import 'package:studybible2/features/library/presentation/library_book_reader_screen.dart';
 import 'package:studybible2/features/library/presentation/library_navigation_tree.dart';
 import 'package:studybible2/features/reader/data/commentary_research_library_service.dart';
+import 'package:studybible2/features/utilities/data/pioneer_captured_html_import_folder_service.dart';
+import 'package:studybible2/features/utilities/data/pioneer_text_import_service.dart';
 
 LibraryCatalogItem _catalogItem({
   required String id,
@@ -125,6 +128,58 @@ Future<Directory> _prepareIsolatedLibraryRoot() async {
   return libraryRootDir;
 }
 
+Future<Directory> _createCaptureFolder({
+  required Directory root,
+  required String folderName,
+  required String title,
+  required String abbreviation,
+  required String workId,
+  required String authorName,
+  required String bodyHtml,
+}) async {
+  final folder = Directory(p.join(root.path, folderName));
+  await folder.create(recursive: true);
+  await File(p.join(folder.path, 'metadata.json')).writeAsString('''
+{
+  "title": "$title",
+  "abbreviation": "$abbreviation",
+  "work_id": "$workId",
+  "source_type": "pioneer_captured_html",
+  "source_site": "user_capture",
+  "contributors": [
+    {
+      "name": "$authorName",
+      "role": "author",
+      "sort_order": 1,
+      "primary": true
+    }
+  ]
+}
+''');
+  await File(p.join(folder.path, 'capture.html')).writeAsString(bodyHtml);
+  return folder;
+}
+
+Future<void> _pumpUntilFinder(
+  WidgetTester tester,
+  Finder finder, {
+  int maxAttempts = 30,
+  Duration step = const Duration(milliseconds: 200),
+}) async {
+  for (var attempt = 0; attempt < maxAttempts; attempt++) {
+    if (finder.evaluate().isNotEmpty) {
+      return;
+    }
+    await tester.pump(step);
+  }
+  expect(finder, findsOneWidget);
+}
+
+Future<void> _pumpTransient(WidgetTester tester) async {
+  await tester.pump(const Duration(milliseconds: 250));
+  await tester.pump(const Duration(milliseconds: 250));
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
@@ -200,6 +255,17 @@ void main() {
     );
 
     expect(libraryReaderBookSubtitle(item), 'Annie Smith');
+  });
+
+  test('suppresses Chapter 0 from reader section titles', () {
+    expect(
+      libraryReaderDisplaySectionTitle('Chapter 0 — Section 1 — The Sanctuary'),
+      'Section 1 — The Sanctuary',
+    );
+    expect(
+      libraryReaderDisplaySectionTitle('Chapter 0 — The Sanctuary'),
+      'The Sanctuary',
+    );
   });
 
   test('does not apply devotional fallback to non-devotional books', () {
@@ -521,6 +587,140 @@ void main() {
     );
   });
 
+  test('SSP-style chapter navigation targets the real section starts', () {
+    final preface = LibraryBookSection(
+      entryName: 'ssp.xhtml',
+      title: 'AUTHORS PREFACE.',
+      paragraphs: const <String>['These pages introduce the book.'],
+      blocks: const <LibraryBookBlock>[
+        LibraryBookBlock(
+          html: '<b class="calibre1">AUTHORS PREFACE.</b>',
+          text: 'AUTHORS PREFACE.',
+          kind: 'heading',
+          anchorId: 'preface-start',
+        ),
+      ],
+      spineIndex: 1,
+    );
+    final chapterOne = LibraryBookSection(
+      entryName: 'ssp.xhtml#chapter-1',
+      title: 'CHAPTER 1. THE SEER OF PATMOS.',
+      paragraphs: const <String>[
+        'SSP 1.1 First paragraph.',
+        'SSP 1.2 Second paragraph.',
+      ],
+      blocks: const <LibraryBookBlock>[
+        LibraryBookBlock(
+          html:
+              '<b id="calibre_toc_1" class="calibre1">CHAPTER 1. THE SEER OF PATMOS.</b>',
+          text: 'CHAPTER 1. THE SEER OF PATMOS.',
+          kind: 'heading',
+          anchorId: 'chapter-1-start',
+        ),
+      ],
+      spineIndex: 2,
+    );
+    final chapterTwo = LibraryBookSection(
+      entryName: 'ssp.xhtml#chapter-2',
+      title: 'CHAPTER 2. THE CHRIST OF THE APOCALYPSE.',
+      paragraphs: const <String>['SSP 2.1 Third paragraph.'],
+      blocks: const <LibraryBookBlock>[
+        LibraryBookBlock(
+          html:
+              '<b id="calibre_toc_2" class="calibre1">CHAPTER 2. THE CHRIST OF THE APOCALYPSE.</b>',
+          text: 'CHAPTER 2. THE CHRIST OF THE APOCALYPSE.',
+          kind: 'heading',
+          anchorId: 'chapter-2-start',
+        ),
+      ],
+      spineIndex: 3,
+    );
+
+    final navItems = <LibraryCatalogNavigationItem>[
+      LibraryCatalogNavigationItem(
+        id: 'preface',
+        parentId: null,
+        label: 'AUTHORS PREFACE.',
+        href: 'ssp.xhtml',
+        anchorId: 'preface-start',
+        spineIndex: 1,
+        sortOrder: 1,
+        depth: 0,
+        navType: 'toc',
+        contentKind: 'front_matter',
+        isFrontMatter: true,
+        isBodyStart: false,
+        bodyOrder: 1,
+      ),
+      LibraryCatalogNavigationItem(
+        id: 'chapter-1',
+        parentId: null,
+        label: 'CHAPTER 1. THE SEER OF PATMOS.',
+        href: null,
+        anchorId: 'chapter-1-start',
+        spineIndex: 2,
+        sortOrder: 2,
+        depth: 0,
+        navType: 'toc',
+        contentKind: 'chapter',
+        isFrontMatter: false,
+        isBodyStart: true,
+        bodyOrder: 2,
+      ),
+      LibraryCatalogNavigationItem(
+        id: 'chapter-2',
+        parentId: null,
+        label: 'CHAPTER 2. THE CHRIST OF THE APOCALYPSE.',
+        href: null,
+        anchorId: 'chapter-2-start',
+        spineIndex: 3,
+        sortOrder: 3,
+        depth: 0,
+        navType: 'toc',
+        contentKind: 'chapter',
+        isFrontMatter: false,
+        isBodyStart: false,
+        bodyOrder: 3,
+      ),
+    ];
+
+    expect(
+      libraryReaderContentsTargetKeyForNavigationItem(
+        navItem: navItems[0],
+        sections: [preface, chapterOne, chapterTwo],
+      ),
+      'anchor:preface_start',
+    );
+    expect(
+      libraryReaderContentsTargetKeyForNavigationItem(
+        navItem: navItems[1],
+        sections: [preface, chapterOne, chapterTwo],
+      ),
+      'anchor:chapter_1_start',
+    );
+    expect(
+      libraryReaderContentsTargetKeyForNavigationItem(
+        navItem: navItems[2],
+        sections: [preface, chapterOne, chapterTwo],
+      ),
+      'anchor:chapter_2_start',
+    );
+    expect(
+      libraryReaderNavigationItemTargetsSectionStart(
+        navItem: navItems[1],
+        sections: [preface, chapterOne, chapterTwo],
+      ),
+      isTrue,
+    );
+    expect(
+      libraryReaderNavigationItemTargetsSectionStart(
+        navItem: navItems[2],
+        sections: [preface, chapterOne, chapterTwo],
+      ),
+      isTrue,
+    );
+  });
+
   test('Contents and heading navigation keep the same cleaned ordering', () {
     final items = <LibraryCatalogNavigationItem>[
       LibraryCatalogNavigationItem(
@@ -712,5 +912,267 @@ void main() {
         expect(codes, const <int, String>{1: 'AA 7.1', 2: 'AA 7.2'});
       },
     );
+
+    group('reader maintenance menu', () {
+      late Directory supportDir;
+      late Directory documentsDir;
+      late Directory libraryRootDir;
+      late Directory captureRootDir;
+      late Directory sourceFolder;
+      late LibraryCatalogItem importedItem;
+
+      setUp(() async {
+        supportDir = await Directory.systemTemp.createTemp(
+          'reader_menu_support_',
+        );
+        documentsDir = await Directory.systemTemp.createTemp(
+          'reader_menu_docs_',
+        );
+        libraryRootDir = await Directory.systemTemp.createTemp(
+          'reader_menu_root_',
+        );
+        captureRootDir = await Directory.systemTemp.createTemp(
+          'reader_menu_capture_',
+        );
+
+        LibraryRootService.instance.invalidateCachedSelection();
+        await _installPathProviderMocks(
+          supportDir: supportDir,
+          documentsDir: documentsDir,
+        );
+        await LibraryRootService.instance.setLibraryRoot(
+          path: libraryRootDir.path,
+        );
+        await LocalSettingsStore.instance.ensureDeviceId();
+
+        sourceFolder = await _createCaptureFolder(
+          root: captureRootDir,
+          folderName: 'SSP',
+          title: 'SSP',
+          abbreviation: 'SSP',
+          workId: 'the_story_of_the_seer_of_patmos',
+          authorName: 'S. N. Haskell',
+          bodyHtml: '''
+<!doctype html>
+<html>
+  <head>
+    <title>SSP</title>
+    <meta name="author" content="S. N. Haskell" />
+  </head>
+  <body>
+    <h1>The Story of the Seer of Patmos</h1>
+    <h2>CHAPTER 1. THE SEER OF PATMOS.</h2>
+    <div class="clip clip-text">
+      <p>SSP 1.1 First paragraph. SSP 1.2 Second paragraph.</p>
+    </div>
+    <h2>CHAPTER 2. THE CHRIST OF THE APOCALYPSE.</h2>
+    <div class="clip clip-text">
+      <p>SSP 2.1 Third paragraph. SSP 2.2 Fourth paragraph.</p>
+    </div>
+  </body>
+</html>
+''',
+        );
+
+        await LocalSettingsStore.instance.savePioneerCapturedHtmlFolder(
+          path: captureRootDir.path,
+        );
+
+        final importReport = await PioneerCapturedHtmlImportFolderService.instance
+            .importConfiguredCloudFolder(
+              selectedFolderPaths: [sourceFolder.path],
+              archiveImportedFolders: false,
+            );
+        expect(importReport.importedCount, 1);
+
+        final items = await LibraryCatalogService.instance.loadItems();
+        importedItem = items.singleWhere(
+          (item) => item.displayTitle == 'The Story of the Seer of Patmos',
+        );
+      });
+
+      tearDown(() async {
+        LibraryRootService.instance.invalidateCachedSelection();
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              const MethodChannel('plugins.flutter.io/path_provider'),
+              null,
+            );
+        await UserDatabase.instance.close();
+        await ELibraryDatabase.instance.close();
+        if (supportDir.existsSync()) {
+          await supportDir.delete(recursive: true);
+        }
+        if (documentsDir.existsSync()) {
+          await documentsDir.delete(recursive: true);
+        }
+        if (libraryRootDir.existsSync()) {
+          await libraryRootDir.delete(recursive: true);
+        }
+        if (captureRootDir.existsSync()) {
+          await captureRootDir.delete(recursive: true);
+        }
+      });
+
+      testWidgets(
+        'reader page hides inline maintenance buttons and exposes them in the menu',
+        (tester) async {
+          await tester.pumpWidget(
+            const MaterialApp(
+              home: Scaffold(body: Text('Library Home')),
+            ),
+          );
+          await tester.pump();
+
+          final navigator = tester.state<NavigatorState>(
+            find.byType(Navigator),
+          );
+          navigator.push(
+            MaterialPageRoute<void>(
+              builder: (_) => LibraryBookReaderScreen(item: importedItem),
+            ),
+          );
+          await _pumpUntilFinder(
+            tester,
+            find.text('The Story of the Seer of Patmos'),
+          );
+
+          expect(find.text('Remove from Library'), findsNothing);
+          expect(find.text('Repair Imported Book'), findsNothing);
+          expect(find.text('Menu'), findsOneWidget);
+
+          await tester.tap(find.text('Menu'));
+          await _pumpTransient(tester);
+
+          expect(find.text('Open eLibrary Setup'), findsOneWidget);
+          expect(find.text('Maintenance'), findsOneWidget);
+          expect(
+            find.text('Remove Current Book from Library'),
+            findsOneWidget,
+          );
+          expect(
+            find.text('Repair Current Imported Book'),
+            findsOneWidget,
+          );
+        },
+      );
+
+      test('maintenance eligibility skips non-imported books', () {
+        final normalBook = _catalogItem(
+          id: 'normal',
+          title: 'Some Other Book',
+          author: 'Jane Doe',
+          fileName: 'en_norm.epub',
+          relativePath: 'ePubs/Research/EGW_Books/en_norm.epub',
+        );
+
+        expect(libraryReaderCanManageImportedBook(importedItem), isTrue);
+        expect(libraryReaderCanManageImportedBook(normalBook), isFalse);
+      });
+
+      testWidgets(
+        'remove from menu is DB-only and cancel does nothing',
+        (tester) async {
+          await tester.pumpWidget(
+            const MaterialApp(
+              home: Scaffold(body: Text('Library Home')),
+            ),
+          );
+          await tester.pump();
+
+          final navigator = tester.state<NavigatorState>(
+            find.byType(Navigator),
+          );
+          navigator.push(
+            MaterialPageRoute<void>(
+              builder: (_) => LibraryBookReaderScreen(item: importedItem),
+            ),
+          );
+          await _pumpUntilFinder(
+            tester,
+            find.text('The Story of the Seer of Patmos'),
+          );
+
+          await tester.tap(find.text('Menu'));
+          await _pumpTransient(tester);
+          await tester.tap(find.text('Remove Current Book from Library'));
+          await _pumpUntilFinder(
+            tester,
+            find.textContaining(
+              'This removes the imported database copy only.',
+            ),
+          );
+
+          expect(
+            find.textContaining(
+              'This removes the imported database copy only.',
+            ),
+            findsOneWidget,
+          );
+
+          await tester.tap(find.text('Cancel'));
+          await _pumpTransient(tester);
+          expect(find.text('Library Home'), findsNothing);
+          expect(find.text('Menu'), findsOneWidget);
+
+          final itemsAfterCancel = await LibraryCatalogService.instance
+              .loadItems();
+          expect(
+            itemsAfterCancel
+                .where(
+                  (item) =>
+                      item.displayTitle == 'The Story of the Seer of Patmos',
+                ),
+            isNotEmpty,
+          );
+        },
+      );
+
+      test(
+        'remove path deletes only the database copy and keeps the source folder',
+        () async {
+          final removed = await PioneerTextImportService.instance
+              .removeImportedLibraryItem(importedItem.id);
+          expect(removed, isTrue);
+          expect(sourceFolder.existsSync(), isTrue);
+
+          final itemsAfterRemove = await LibraryCatalogService.instance
+              .loadItems();
+          expect(
+            itemsAfterRemove
+                .where(
+                  (item) =>
+                      item.displayTitle == 'The Story of the Seer of Patmos',
+                ),
+            isEmpty,
+          );
+        },
+      );
+
+      test(
+        'repair path fails gracefully when the source folder is missing',
+        () async {
+          await sourceFolder.delete(recursive: true);
+
+          final report = await PioneerCapturedHtmlImportFolderService.instance
+              .repairImportedCaptureClipperBook(
+                libraryItemId: importedItem.id,
+              );
+
+          expect(report, isNull);
+
+          final itemsAfterRepair = await LibraryCatalogService.instance
+              .loadItems();
+          expect(
+            itemsAfterRepair
+                .where(
+                  (item) =>
+                      item.displayTitle == 'The Story of the Seer of Patmos',
+                ),
+            isNotEmpty,
+          );
+        },
+      );
+    });
   });
 }

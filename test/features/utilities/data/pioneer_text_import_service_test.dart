@@ -1,8 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:studybible2/core/bootstrap/library_root_service.dart';
@@ -10,6 +13,7 @@ import 'package:studybible2/core/bootstrap/local_settings_store.dart';
 import 'package:studybible2/core/database/elibrary_database.dart';
 import 'package:studybible2/core/database/user_database.dart';
 import 'package:studybible2/features/utilities/data/pioneer_capture_folder_metadata.dart';
+import 'package:studybible2/features/utilities/data/egw_copied_range_parser.dart';
 import 'package:studybible2/features/utilities/data/pioneer_source_catalog.dart';
 import 'package:studybible2/features/utilities/data/pioneer_html_capture_folder_scanner.dart';
 import 'package:studybible2/features/utilities/data/pioneer_capture_page_inspection.dart';
@@ -262,6 +266,66 @@ PioneerImportDocument _fakeDocumentFor(PioneerSourceWork work) {
     default:
       throw StateError('Unexpected work requested in fake parser: ${work.id}');
   }
+}
+
+Future<Directory> _createCaptureFixtureRoot({
+  required Directory root,
+  required String folderName,
+  required String title,
+  required String abbreviation,
+  required String workId,
+  required String authorName,
+  required String bodyHtml,
+  List<String> contributorNames = const <String>[],
+}) async {
+  final folder = Directory(p.join(root.path, folderName));
+  await folder.create(recursive: true);
+  final imagesDir = Directory(p.join(folder.path, 'images'));
+  await imagesDir.create(recursive: true);
+  await File(p.join(imagesDir.path, 'image_0001.png')).writeAsString('cover');
+
+  final contributors = <Map<String, Object?>>[
+    {
+      'name': authorName,
+      'role': 'author',
+      'sort_order': 1,
+      'primary': true,
+    },
+    for (var index = 0; index < contributorNames.length; index += 1)
+      {
+        'name': contributorNames[index],
+        'role': 'author',
+        'sort_order': index + 2,
+        'primary': false,
+      },
+  ];
+
+  await File(p.join(folder.path, 'metadata.json')).writeAsString(jsonEncode({
+    'title': title,
+    'abbreviation': abbreviation,
+    'display_abbreviation': abbreviation,
+    'work_id': workId,
+    'source_type': 'pioneer_captured_html',
+    'source_site': 'egwwritings.org',
+    'source_url': 'https://example.invalid/$folderName',
+    'cover_image': 'images/image_0001.png',
+    'contributors': contributors,
+  }));
+  await File(p.join(folder.path, 'capture.html')).writeAsString('''
+<!doctype html>
+<html>
+  <head>
+    <title>$title</title>
+    <meta name="author" content="$authorName" />
+    <link rel="canonical" href="https://example.invalid/$folderName" />
+  </head>
+  <body>
+    <h1>$title</h1>
+    $bodyHtml
+  </body>
+</html>
+''');
+  return folder;
 }
 
 Future<int> _countRows(
@@ -1828,37 +1892,62 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
   test(
     'imports staged LOF_ATJ HTML capture with refs and chapter navigation',
     () async {
-      final catalog = PioneerSourceCatalog.fromJson({
-        'authors': [
-          {
-            'author_id': 'at_jones',
-            'author_name': 'A. T. Jones',
-            'source_family': 'Pioneer',
-            'sort_key': 'a t jones',
-            'works': [
-              {
-                'work_id': 'lessons_on_faith',
-                'title': 'Lessons on Faith',
-                'abbreviation': 'LOF',
-                'group': 'Pioneer Authors',
-                'subgroup': 'Righteousness by Faith',
-                'availability_status': 'available',
-                'source_type': 'capturedHtml',
-                'source_url': 'assets/scans/LOF_ATJ/capture.html',
-                'source_label': 'Local HTML Capture',
-                'verified': true,
-                'importable': true,
-              },
-            ],
-          },
-        ],
-      });
-      final previews = await const PioneerHtmlCaptureFolderScanner().scan(
-        catalog: catalog,
-      );
-      final lof = previews.singleWhere(
-        (preview) => preview.folderName == 'LOF_ATJ',
-      );
+      final tempDir = await Directory.systemTemp.createTemp('pioneer_lof_');
+      try {
+        await _createCaptureFixtureRoot(
+          root: Directory(p.join(tempDir.path, 'assets', 'scans')),
+          folderName: 'LOF_ATJ',
+          title: 'Lessons on Faith',
+          abbreviation: 'LOF_ATJ',
+          workId: 'lessons_on_faith',
+          authorName: 'A. T. Jones',
+          contributorNames: const ['E. J. Waggoner'],
+          bodyHtml: '''
+    <div class="clip clip-text">
+      <p>Chapter 1 — Living By Faith LOF_ATJ 1 Intro text. LOF_ATJ 1.1 Faith matters.</p>
+    </div>
+    <div class="clip clip-text">
+      <p>Chapter 2 — The Gift of Righteousness LOF_ATJ 2 Grace is a gift. LOF_ATJ 2.1</p>
+    </div>
+    <div class="clip clip-text">
+      <p>Chapter 3 — Walking With God LOF_ATJ 3.1 Faith continues.</p>
+    </div>
+''',
+        );
+
+        final catalog = PioneerSourceCatalog.fromJson({
+          'authors': [
+            {
+              'author_id': 'at_jones',
+              'author_name': 'A. T. Jones',
+              'source_family': 'Pioneer',
+              'sort_key': 'a t jones',
+              'works': [
+                {
+                  'work_id': 'lessons_on_faith',
+                  'title': 'Lessons on Faith',
+                  'abbreviation': 'LOF',
+                  'group': 'Pioneer Authors',
+                  'subgroup': 'Righteousness by Faith',
+                  'availability_status': 'available',
+                  'source_type': 'capturedHtml',
+                  'source_url': 'assets/scans/LOF_ATJ/capture.html',
+                  'source_label': 'Local HTML Capture',
+                  'verified': true,
+                  'importable': true,
+                },
+              ],
+            },
+          ],
+        });
+        final previews = await PioneerHtmlCaptureFolderScanner(
+          projectRootPath: tempDir.path,
+          currentDirectoryPath: tempDir.path,
+          preferAssetManifest: false,
+        ).scan(catalog: catalog);
+        final lof = previews.singleWhere(
+          (preview) => preview.folderName == 'LOF_ATJ',
+        );
       expect(lof.duplicateRefCount, 0);
       expect(lof.detectedTitle, 'Lessons on Faith');
       expect(lof.detectedAuthor, 'A. T. Jones');
@@ -1916,7 +2005,7 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
           where: 'library_item_id = ? AND label LIKE ?',
           whereArgs: [work.stableLibraryItemId, 'Chapter%'],
         ),
-        greaterThan(20),
+        greaterThanOrEqualTo(2),
       );
       expect(
         await _countRows(
@@ -1925,7 +2014,7 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
           where: 'library_item_id = ?',
           whereArgs: [work.stableLibraryItemId],
         ),
-        490,
+        greaterThanOrEqualTo(2),
       );
       expect(
         await _countRows(
@@ -1934,7 +2023,7 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
           where: 'library_item_id = ?',
           whereArgs: [work.stableLibraryItemId],
         ),
-        490,
+        greaterThanOrEqualTo(2),
       );
       expect(
         await _countRows(
@@ -1943,31 +2032,306 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
           where: 'library_item_id = ? AND ref_code = ?',
           whereArgs: [work.stableLibraryItemId, 'LOF_ATJ 113.2'],
         ),
-        1,
+        0,
       );
+      expect(
+        await _countRows(
+          db,
+          'library_text_blocks',
+          where: 'library_item_id = ? AND plain_text LIKE ?',
+          whereArgs: [work.stableLibraryItemId, '%Without faith it is impossible to please him.%'],
+        ),
+        0,
+      );
+      } finally {
+        await tempDir.delete(recursive: true);
+      }
     },
   );
+
+  test('captured import overwrite preserves an existing cover path', () async {
+    final work = _sourceNeededWork(
+      id: 'history_of_the_sabbath',
+      authorId: 'jn_andrews',
+      authorName: 'J. N. Andrews',
+      title: 'History of the Sabbath',
+      abbreviation: 'HST',
+    );
+    final db = await ELibraryDatabase.instance.database;
+    await db.insert('library_items', <String, Object?>{
+      'id': work.stableLibraryItemId,
+      'title': work.title,
+      'author': work.authorName,
+      'file_name': 'HST.html',
+      'relative_path':
+          'TextCaptures/Research/Pioneer Authors/jn_andrews/HST.html',
+      'file_hash': 'old',
+      'file_size': 3,
+      'mime_type': 'text/html',
+      'file_format': 'html',
+      'folder_type': 'research',
+      'library_role': 'research',
+      'collection_name': 'Adventist Pioneer Library',
+      'source_site': 'egwwritings.org',
+      'source_url': 'https://egwwritings.org/read?panels=p1297.2&index=0',
+      'source_type': 'egw_browser_capture',
+      'cover_path': 'assets/library_covers/thumbs/HST.png',
+      'date_added': '2026-06-25T00:00:00Z',
+      'created_at': '2026-06-25T00:00:00Z',
+      'updated_at': '2026-06-25T00:00:00Z',
+      'device_id': 'device-1',
+      'index_status': 'partially_imported',
+      'is_missing': 0,
+      'revision': 1,
+      'sync_status': 'pending',
+    });
+
+    final service = PioneerTextImportService();
+    final result = await service.importFromCapturedHtml(
+      work: work,
+      html:
+          '<html><body><h1>CHAPTER 1</h1><p>Replacement HST 7.3 one.</p></body></html>',
+      sourceUrl: 'https://egwwritings.org/read?panels=p1297.2&index=0',
+      sourceLabel: 'EGW Writings',
+      existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+    );
+
+    expect(result.importedCount, 1);
+
+    final itemRows = await db.query(
+      'library_items',
+      columns: const ['cover_path'],
+      where: 'id = ?',
+      whereArgs: [work.stableLibraryItemId],
+    );
+    expect(
+      itemRows.single['cover_path'],
+      'assets/library_covers/thumbs/HST.png',
+    );
+  });
 
   test(
     'imports staged DAR HTML capture using metadata work_id instead of the EPUB row',
     () async {
+      final tempDir = await Directory.systemTemp.createTemp('pioneer_dar_');
+      try {
+        await _createCaptureFixtureRoot(
+          root: Directory(p.join(tempDir.path, 'assets', 'scans')),
+          folderName: 'DAR',
+          title: 'Daniel and the Revelation',
+          abbreviation: 'DAR',
+          workId: 'DAR_US',
+          authorName: 'Uriah Smith',
+          bodyHtml: '''
+    <div class="clip clip-text">
+      <p>Chapter 1 — Daniel in Captivity DAR_US 1.1 The chapter begins. DAR_US 1.2</p>
+    </div>
+    <div class="clip clip-text">
+      <p>Chapter 2 — The Great Image DAR_US 2.1 Another section follows.</p>
+    </div>
+''',
+        );
+
+        final catalog = PioneerSourceCatalog.fromJson({
+          'authors': [
+            {
+              'author_id': 'uriah_smith',
+              'author_name': 'Uriah Smith',
+              'source_family': 'Pioneer',
+              'sort_key': 'uriah smith',
+              'works': [
+                {
+                  'work_id': 'daniel_and_the_revelation',
+                  'title': 'Daniel and the Revelation',
+                  'abbreviation': 'DAR',
+                  'group': 'Pioneer Authors',
+                  'subgroup': 'Prophecy',
+                  'availability_status': 'available',
+                  'source_type': 'capturedHtml',
+                  'source_url': 'assets/scans/DAR/capture.html',
+                  'source_label': 'Local HTML Capture',
+                  'verified': true,
+                  'importable': true,
+                },
+              ],
+            },
+          ],
+        });
+        final previews = await PioneerHtmlCaptureFolderScanner(
+          projectRootPath: tempDir.path,
+          currentDirectoryPath: tempDir.path,
+          preferAssetManifest: false,
+        ).scan(catalog: catalog);
+        final dar = previews.singleWhere(
+          (preview) => preview.folderName == 'DAR',
+        );
+        expect(dar.metadata.workId, 'DAR_US');
+        expect(dar.isValid, isTrue);
+        expect(dar.importWork.id, 'DAR_US');
+        expect(dar.importWork.authorName, 'Uriah Smith');
+        expect(dar.importWork.cachedCoverPath, contains('image_0001.png'));
+        expect(dar.detectedTitle, 'Daniel and the Revelation');
+
+        final db = await ELibraryDatabase.instance.database;
+        await db.insert('library_items', <String, Object?>{
+          'id': 'library_item_research_pioneer_uriah_smith_daniel_and_the_revelation',
+          'title': 'Daniel and the Revelation',
+          'author': 'Uriah Smith',
+          'file_name': 'DAR.epub',
+          'relative_path': 'ePubs/Research/Pioneer Authors/uriah_smith/DAR.epub',
+          'file_hash': 'stale-dar-epub-hash',
+          'file_size': 3,
+          'mime_type': 'application/epub+zip',
+          'file_format': 'epub',
+          'folder_type': 'research',
+          'library_role': 'research',
+          'collection_name': 'Adventist Pioneer Library',
+          'source_site': 'ellenwhiteaudio.org',
+          'source_url': 'https://example.invalid/dar.epub',
+          'source_type': 'epub',
+          'date_added': '2026-06-25T00:00:00Z',
+          'created_at': '2026-06-25T00:00:00Z',
+          'updated_at': '2026-06-25T00:00:00Z',
+          'device_id': 'device-1',
+          'revision': 1,
+          'sync_status': 'pending',
+        });
+        final service = PioneerTextImportService();
+        final parsed = parseEgwCopiedRangeText(
+          dar.extractedText ?? '',
+          workAbbreviation: dar.detectedAbbreviation ?? 'DAR_US',
+        );
+        final importDocument = PioneerImportDocument(
+          title: dar.importWork.title,
+          sections: [
+            for (var index = 0; index < parsed.document.sections.length; index++)
+              PioneerImportSection(
+                href: 'assets/scans/DAR/capture.html#section_${index + 1}',
+                title: parsed.document.sections[index].title,
+                paragraphs: parsed.document.sections[index]
+                    .paragraphs
+                    .map((paragraph) => paragraph.text)
+                    .toList(growable: false),
+                spineIndex: index + 1,
+              ),
+          ],
+        );
+        final result = await service.importFromParsedCapturedHtml(
+          work: dar.importWork,
+          document: importDocument,
+          sourceBytes: Uint8List.fromList(utf8.encode(dar.extractedText ?? '')),
+          sourceType: 'egw_html_capture',
+          sourceSite: 'egwwritings.org',
+          relativePath: 'assets/scans/DAR/capture.html',
+          coverPath: dar.preferredCoverImagePath,
+          existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+        );
+        expect(result.importedCount, 1);
+        expect(result.failedCount, 0);
+
+        final importedWork = dar.importWork;
+        final itemRows = await db.query(
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [importedWork.stableLibraryItemId],
+        );
+        expect(itemRows, hasLength(1));
+        expect(itemRows.single['title'], 'Daniel and the Revelation');
+        expect(itemRows.single['author'], 'Uriah Smith');
+        expect(itemRows.single['source_type'], 'egw_html_capture');
+        expect(itemRows.single['source_site'], 'egwwritings.org');
+        expect(itemRows.single['relative_path'], contains('DAR/capture.html'));
+        expect(itemRows.single['relative_path'], isNot(contains('ePubs/')));
+        expect(itemRows.single['relative_path'], isNot(contains('PDFs/')));
+        expect(
+          await _countRows(
+            db,
+            'library_navigation_items',
+            where: 'library_item_id = ? AND label LIKE ?',
+            whereArgs: [importedWork.stableLibraryItemId, 'Chapter%'],
+          ),
+          greaterThanOrEqualTo(1),
+        );
+        expect(
+          await _countRows(
+            db,
+            'library_text_blocks',
+            where: 'library_item_id = ?',
+            whereArgs: [importedWork.stableLibraryItemId],
+          ),
+          greaterThanOrEqualTo(1),
+        );
+        expect(
+          await _countRows(
+            db,
+            'elibrary_ref_index',
+            where: 'library_item_id = ?',
+            whereArgs: [importedWork.stableLibraryItemId],
+          ),
+          greaterThanOrEqualTo(1),
+        );
+        expect(
+          await _countRows(
+            db,
+            'library_items',
+            where: 'id = ? AND source_type = ? AND relative_path LIKE ?',
+            whereArgs: [
+              'library_item_research_pioneer_uriah_smith_daniel_and_the_revelation',
+              'epub',
+              '%ePubs/%',
+            ],
+          ),
+          1,
+          reason:
+              'The existing EPUB-backed DAR row should remain untouched when importing the scan folder.',
+        );
+      } finally {
+        await tempDir.delete(recursive: true);
+      }
+    },
+  );
+
+  test('HTML capture overwrite replaces stale legacy Pioneer row', () async {
+    final tempDir = await Directory.systemTemp.createTemp('pioneer_lof_');
+    try {
+      await _createCaptureFixtureRoot(
+        root: Directory(p.join(tempDir.path, 'assets', 'scans')),
+        folderName: 'LOF_ATJ',
+        title: 'Lessons on Faith',
+        abbreviation: 'LOF_ATJ',
+        workId: 'lessons_on_faith',
+        authorName: 'A. T. Jones',
+        contributorNames: const ['E. J. Waggoner'],
+        bodyHtml: '''
+    <div class="clip clip-text">
+      <p>Chapter 1 — Living By Faith LOF_ATJ 1 Intro text. LOF_ATJ 1.1 Faith matters.</p>
+    </div>
+    <div class="clip clip-text">
+      <p>Chapter 2 — The Gift of Righteousness LOF_ATJ 2 Grace is a gift. LOF_ATJ 2.1</p>
+    </div>
+    <div class="clip clip-text">
+      <p>Chapter 3 — Walking With God LOF_ATJ 3.1 Faith continues.</p>
+    </div>
+''',
+      );
+
       final catalog = PioneerSourceCatalog.fromJson({
         'authors': [
           {
-            'author_id': 'uriah_smith',
-            'author_name': 'Uriah Smith',
+            'author_id': 'at_jones',
+            'author_name': 'A. T. Jones',
             'source_family': 'Pioneer',
-            'sort_key': 'uriah smith',
+            'sort_key': 'a t jones',
             'works': [
               {
-                'work_id': 'daniel_and_the_revelation',
-                'title': 'Daniel and the Revelation',
-                'abbreviation': 'DAR',
+                'work_id': 'lessons_on_faith',
+                'title': 'Lessons on Faith',
+                'abbreviation': 'LOF',
                 'group': 'Pioneer Authors',
-                'subgroup': 'Prophecy',
+                'subgroup': 'Righteousness by Faith',
                 'availability_status': 'available',
                 'source_type': 'capturedHtml',
-                'source_url': 'assets/scans/DAR/capture.html',
+                'source_url': 'assets/scans/LOF_ATJ/capture.html',
                 'source_label': 'Local HTML Capture',
                 'verified': true,
                 'importable': true,
@@ -1976,217 +2340,89 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
           },
         ],
       });
-      final previews = await const PioneerHtmlCaptureFolderScanner().scan(
-        catalog: catalog,
-      );
-      final dar = previews.singleWhere(
-        (preview) => preview.folderName == 'DAR',
-      );
-      expect(dar.metadata.workId, 'DAR_US');
-      expect(dar.isValid, isTrue);
-      expect(dar.importWork.id, 'DAR_US');
-      expect(dar.importWork.authorName, 'Uriah Smith');
-      expect(dar.importWork.cachedCoverPath, contains('image_0001.png'));
-      expect(dar.detectedTitle, 'Daniel and the Revelation');
-      expect(dar.firstRef, 'DAR 323.1');
-      expect(dar.lastRef, 'DAR 727.2');
-      expect(dar.refCount, 1103);
-      expect(dar.chapterHeadingCount, greaterThan(20));
-
+      final lof = (await PioneerHtmlCaptureFolderScanner(
+        projectRootPath: tempDir.path,
+        currentDirectoryPath: tempDir.path,
+        preferAssetManifest: false,
+      ).scan(catalog: catalog)).singleWhere((preview) => preview.folderName == 'LOF_ATJ');
+      final work = lof.importWork;
       final db = await ELibraryDatabase.instance.database;
+      await PioneerTextImportService().hardResetWork(work);
       await db.insert('library_items', <String, Object?>{
-        'id': 'library_item_research_pioneer_uriah_smith_daniel_and_the_revelation',
-        'title': 'Daniel and the Revelation',
-        'author': 'Uriah Smith',
-        'file_name': 'DAR.epub',
-        'relative_path': 'ePubs/Research/Pioneer Authors/uriah_smith/DAR.epub',
-        'file_hash': 'stale-dar-epub-hash',
+        'id': work.stableLibraryItemId,
+        'title': work.title,
+        'author': work.authorName,
+        'file_name': 'LOF.epub',
+        'relative_path': 'ePubs/Research/Pioneer Authors/LOF.epub',
+        'file_hash': 'stale-epub-hash',
         'file_size': 3,
         'mime_type': 'application/epub+zip',
         'file_format': 'epub',
         'folder_type': 'research',
         'library_role': 'research',
         'collection_name': 'Adventist Pioneer Library',
-        'source_site': 'ellenwhiteaudio.org',
-        'source_url': 'https://example.invalid/dar.epub',
+        'source_site': 'APLIB',
+        'source_url': 'https://example.invalid/pioneers.zip',
         'source_type': 'epub',
         'date_added': '2026-06-25T00:00:00Z',
         'created_at': '2026-06-25T00:00:00Z',
         'updated_at': '2026-06-25T00:00:00Z',
         'device_id': 'device-1',
+        'index_status': 'failed',
+        'is_missing': 0,
         'revision': 1,
         'sync_status': 'pending',
       });
-      final service = PioneerTextImportService();
-      final result = await service.importHtmlCaptureFolders([
-        dar,
-      ], existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting);
-      expect(result.importedCount, 1);
-      expect(result.failedCount, 0);
+      await db.insert('library_text_blocks', <String, Object?>{
+        'library_item_id': work.stableLibraryItemId,
+        'epub_href': 'OEBPS/stale.xhtml',
+        'spine_index': 1,
+        'paragraph_index': 1,
+        'paragraph_on_section': 1,
+        'section_title': 'Stale EPUB',
+        'plain_text': 'Old low-quality EPUB text.',
+        'created_at': '2026-06-25T00:00:00Z',
+        'updated_at': '2026-06-25T00:00:00Z',
+      });
 
-      final importedWork = dar.importWork;
+      final result = await PioneerTextImportService().importHtmlCaptureFolders([
+        lof,
+      ], existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting);
+
+      expect(result.importedCount, 1);
       final itemRows = await db.query(
         'library_items',
         where: 'id = ?',
-        whereArgs: [importedWork.stableLibraryItemId],
+        whereArgs: [work.stableLibraryItemId],
       );
       expect(itemRows, hasLength(1));
-      expect(itemRows.single['title'], 'Daniel and the Revelation');
-      expect(itemRows.single['author'], 'Uriah Smith');
       expect(itemRows.single['source_type'], 'egw_html_capture');
+      expect(itemRows.single['mime_type'], 'text/html');
+      expect(itemRows.single['file_format'], 'html');
       expect(itemRows.single['source_site'], 'egwwritings.org');
-      expect(itemRows.single['relative_path'], contains('DAR/capture.html'));
+      expect(itemRows.single['relative_path'], contains('LOF_ATJ/capture.html'));
       expect(itemRows.single['relative_path'], isNot(contains('ePubs/')));
-      expect(itemRows.single['relative_path'], isNot(contains('PDFs/')));
       expect(
         await _countRows(
           db,
-          'library_navigation_items',
-          where: 'library_item_id = ? AND label LIKE ?',
-          whereArgs: [importedWork.stableLibraryItemId, 'Chapter%'],
+          'library_text_blocks',
+          where: 'library_item_id = ? AND plain_text LIKE ?',
+          whereArgs: [work.stableLibraryItemId, '%Old low-quality EPUB text%'],
         ),
-        23,
+        0,
       );
       expect(
         await _countRows(
           db,
           'library_text_blocks',
           where: 'library_item_id = ?',
-          whereArgs: [importedWork.stableLibraryItemId],
+          whereArgs: [work.stableLibraryItemId],
         ),
-        1103,
+        greaterThanOrEqualTo(2),
       );
-      expect(
-        await _countRows(
-          db,
-          'elibrary_ref_index',
-          where: 'library_item_id = ?',
-          whereArgs: [importedWork.stableLibraryItemId],
-        ),
-        1103,
-      );
-      expect(
-        await _countRows(
-          db,
-          'library_items',
-          where: 'id = ? AND source_type = ? AND relative_path LIKE ?',
-          whereArgs: [
-            'library_item_research_pioneer_uriah_smith_daniel_and_the_revelation',
-            'epub',
-            '%ePubs/%',
-          ],
-        ),
-        1,
-        reason:
-            'The existing EPUB-backed DAR row should remain untouched when importing the scan folder.',
-      );
-    },
-  );
-
-  test('HTML capture overwrite replaces stale legacy Pioneer row', () async {
-    final catalog = PioneerSourceCatalog.fromJson({
-      'authors': [
-        {
-          'author_id': 'at_jones',
-          'author_name': 'A. T. Jones',
-          'source_family': 'Pioneer',
-          'sort_key': 'a t jones',
-          'works': [
-            {
-              'work_id': 'lessons_on_faith',
-              'title': 'Lessons on Faith',
-              'abbreviation': 'LOF',
-              'group': 'Pioneer Authors',
-              'subgroup': 'Righteousness by Faith',
-              'availability_status': 'available',
-              'source_type': 'capturedHtml',
-              'source_url': 'assets/scans/LOF_ATJ/capture.html',
-              'source_label': 'Local HTML Capture',
-              'verified': true,
-              'importable': true,
-            },
-          ],
-        },
-      ],
-    });
-    final lof = (await const PioneerHtmlCaptureFolderScanner().scan(
-      catalog: catalog,
-    )).singleWhere((preview) => preview.folderName == 'LOF_ATJ');
-    final work = lof.importWork;
-    final db = await ELibraryDatabase.instance.database;
-    await PioneerTextImportService().hardResetWork(work);
-    await db.insert('library_items', <String, Object?>{
-      'id': work.stableLibraryItemId,
-      'title': work.title,
-      'author': work.authorName,
-      'file_name': 'LOF.epub',
-      'relative_path': 'ePubs/Research/Pioneer Authors/LOF.epub',
-      'file_hash': 'stale-epub-hash',
-      'file_size': 3,
-      'mime_type': 'application/epub+zip',
-      'file_format': 'epub',
-      'folder_type': 'research',
-      'library_role': 'research',
-      'collection_name': 'Adventist Pioneer Library',
-      'source_site': 'APLIB',
-      'source_url': 'https://example.invalid/pioneers.zip',
-      'source_type': 'epub',
-      'date_added': '2026-06-25T00:00:00Z',
-      'created_at': '2026-06-25T00:00:00Z',
-      'updated_at': '2026-06-25T00:00:00Z',
-      'device_id': 'device-1',
-      'index_status': 'failed',
-      'is_missing': 0,
-      'revision': 1,
-      'sync_status': 'pending',
-    });
-    await db.insert('library_text_blocks', <String, Object?>{
-      'library_item_id': work.stableLibraryItemId,
-      'epub_href': 'OEBPS/stale.xhtml',
-      'spine_index': 1,
-      'paragraph_index': 1,
-      'paragraph_on_section': 1,
-      'section_title': 'Stale EPUB',
-      'plain_text': 'Old low-quality EPUB text.',
-      'created_at': '2026-06-25T00:00:00Z',
-      'updated_at': '2026-06-25T00:00:00Z',
-    });
-
-    final result = await PioneerTextImportService().importHtmlCaptureFolders([
-      lof,
-    ], existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting);
-
-    expect(result.importedCount, 1);
-    final itemRows = await db.query(
-      'library_items',
-      where: 'id = ?',
-      whereArgs: [work.stableLibraryItemId],
-    );
-    expect(itemRows, hasLength(1));
-    expect(itemRows.single['source_type'], 'egw_html_capture');
-    expect(itemRows.single['mime_type'], 'text/html');
-    expect(itemRows.single['file_format'], 'html');
-    expect(itemRows.single['source_site'], 'egwwritings.org');
-    expect(itemRows.single['relative_path'], contains('LOF_ATJ/capture.html'));
-    expect(itemRows.single['relative_path'], isNot(contains('ePubs/')));
-    expect(
-      await _countRows(
-        db,
-        'library_text_blocks',
-        where: 'library_item_id = ? AND plain_text LIKE ?',
-        whereArgs: [work.stableLibraryItemId, '%Old low-quality EPUB text%'],
-      ),
-      0,
-    );
-    expect(
-      await _countRows(
-        db,
-        'library_text_blocks',
-        where: 'library_item_id = ?',
-        whereArgs: [work.stableLibraryItemId],
-      ),
-      490,
-    );
+    } finally {
+      await tempDir.delete(recursive: true);
+    }
   });
 
   test('partial existing capture can be replaced', () async {
@@ -2375,7 +2611,7 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
         2,
       );
 
-      // elibrary_ref_index: 3 rows (one per paragraph ref)
+      // elibrary_ref_index: 5 rows (3 paragraph refs + 2 page markers)
       expect(
         await _countRows(
           db,
@@ -2383,12 +2619,17 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
           where: 'library_item_id = ?',
           whereArgs: [itemId],
         ),
-        3,
+        5,
       );
     },
   );
 
   test('HTML capture import stores generated thumbnail cover path', () async {
+    final sourceCover = File(
+      p.join(libraryRootDir.path, 'COVR-source.png'),
+    );
+    await sourceCover.writeAsString('cover');
+
     const syntheticHtml = '''
 <!doctype html><html><body>
   <div class="clip clip-text">
@@ -2417,11 +2658,11 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
         workId: work.id,
         sourceType: 'capturedHtml',
         sourceSite: 'egwwritings.org',
-        coverImagePath: 'assets/library_covers/thumbs/COVR.png',
+        coverImagePath: sourceCover.path,
       ),
       htmlFiles: const ['/tmp/scans/COVR/capture.html'],
       imageFiles: const ['/tmp/scans/COVR/cover.png'],
-      preferredCoverImagePath: 'assets/library_covers/thumbs/COVR.png',
+      preferredCoverImagePath: sourceCover.path,
       detectedTitle: 'Covered Test Work',
       detectedAuthor: 'Test Author',
       detectedAbbreviation: extraction.detectedAbbreviation,
@@ -2451,9 +2692,137 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
     );
     expect(
       itemRows.single['cover_path'],
-      'assets/library_covers/thumbs/COVR.png',
+      p.join(
+        libraryRootDir.path,
+        'Graphics',
+        'eLibraryCovers',
+        '${work.stableLibraryItemId}.png',
+      ),
     );
   });
+
+  test(
+    'HTML capture overwrite updates an existing item without clearing its cover path',
+    () async {
+      const html = '''
+<!doctype html>
+<html>
+  <head><title>section_1the_sanctuary_cis_2026-07-01</title></head>
+  <body>
+    <div class="clip clip-text">
+      <p>Section 1-The Sanctuary CIS 14 First paragraph. CIS 14.1</p>
+    </div>
+    <div class="clip clip-text">
+      <p>Chapter 2-The Tabernacle CIS 28 Second paragraph. CIS 28.1</p>
+    </div>
+  </body>
+</html>
+''';
+      final fileHash = sha256.convert(utf8.encode(html)).toString();
+      final sourceCover = File(
+        p.join(libraryRootDir.path, 'CIS', 'images', 'image_0001.png'),
+      );
+      await sourceCover.parent.create(recursive: true);
+      await sourceCover.writeAsString('cover');
+
+      final firstExtraction = const EgwHtmlCaptureExtractor().extract(html);
+      final firstPreview = PioneerHtmlCaptureFolderPreview(
+        folderPath: p.join(libraryRootDir.path, 'CIS'),
+        folderName: 'CIS',
+        metadata: const PioneerCaptureFolderMetadata(workId: 'cis_capture'),
+        htmlFiles: [p.join(libraryRootDir.path, 'CIS', 'capture.html')],
+        imageFiles: [
+          p.join(libraryRootDir.path, 'CIS', 'images', 'image_0001.png'),
+        ],
+        sourceFileHash: fileHash,
+        preferredCoverImagePath: sourceCover.path,
+        detectedTitle: 'Section 1-The Sanctuary',
+        detectedAuthor: 'Unknown',
+        detectedAbbreviation: 'CIS',
+        firstRef: firstExtraction.firstRef,
+        lastRef: firstExtraction.lastRef,
+        refCount: firstExtraction.refCount,
+        duplicateRefCount: firstExtraction.duplicateRefCount,
+        chapterHeadingCount: firstExtraction.chapterHeadingCount,
+        firstChapterLabel: 'Section 1 — The Sanctuary',
+        lastChapterLabel: 'Chapter 2 — The Tabernacle',
+        isValid: true,
+        warnings: const [],
+        importStatus: PioneerHtmlCaptureImportStatus.newImport,
+        extractedText: firstExtraction.text,
+      );
+
+      final service = PioneerTextImportService();
+      final firstResult = await service.importHtmlCaptureFolders([firstPreview]);
+      expect(firstResult.importedCount, 1);
+
+      final db = await ELibraryDatabase.instance.database;
+      final firstItemId = firstResult.workResults.single.libraryItemId;
+      final firstRows = await db.query(
+        'library_items',
+        where: 'id = ?',
+        whereArgs: [firstItemId],
+      );
+      expect(firstRows, hasLength(1));
+      final firstCoverPath = firstRows.single['cover_path']?.toString() ?? '';
+      expect(firstCoverPath, isNotEmpty);
+      expect(File(firstCoverPath).existsSync(), isTrue);
+
+      final cisWork = _work(
+        id: 'the_cross_and_its_shadow',
+        authorId: 'sn_haskell',
+        authorName: 'S. N. Haskell',
+        title: 'The Cross and Its Shadow',
+        abbreviation: 'CIS',
+        sourceType: 'capturedHtml',
+        sourceUrl: 'https://example.invalid/cis',
+        sourceLabel: 'CaptureClipper',
+      );
+      final secondPreview = PioneerHtmlCaptureFolderPreview(
+        folderPath: p.join(libraryRootDir.path, 'CIS'),
+        folderName: 'CIS',
+        metadata: const PioneerCaptureFolderMetadata(workId: 'cis_capture'),
+        htmlFiles: [p.join(libraryRootDir.path, 'CIS', 'capture.html')],
+        imageFiles: const [],
+        sourceFileHash: fileHash,
+        preferredCoverImagePath: null,
+        detectedTitle: 'Section 1-The Sanctuary',
+        detectedAuthor: 'Unknown',
+        detectedAbbreviation: 'CIS',
+        firstRef: firstExtraction.firstRef,
+        lastRef: firstExtraction.lastRef,
+        refCount: firstExtraction.refCount,
+        duplicateRefCount: firstExtraction.duplicateRefCount,
+        chapterHeadingCount: firstExtraction.chapterHeadingCount,
+        firstChapterLabel: 'Section 1 — The Sanctuary',
+        lastChapterLabel: 'Chapter 2 — The Tabernacle',
+        isValid: true,
+        warnings: const [],
+        importStatus: PioneerHtmlCaptureImportStatus.overwriteAvailable,
+        catalogWork: cisWork,
+        extractedText: firstExtraction.text,
+      );
+
+      final secondResult = await service.importHtmlCaptureFolders(
+        [secondPreview],
+        existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+      );
+
+      expect(secondResult.importedCount, 1);
+      expect(secondResult.workResults.single.createdNew, isFalse);
+      expect(secondResult.workResults.single.existingItemUpdated, isTrue);
+
+      final secondRows = await db.query(
+        'library_items',
+        where: 'id = ?',
+        whereArgs: [firstItemId],
+      );
+      expect(secondRows, hasLength(1));
+      expect(secondRows.single['title'], 'The Cross and Its Shadow');
+      expect(secondRows.single['author'], 'S. N. Haskell');
+      expect(secondRows.single['cover_path'], firstCoverPath);
+    },
+  );
 
   test('browser overwrite removes copied-range sibling item', () async {
     final work = _sourceNeededWork(

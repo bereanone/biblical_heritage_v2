@@ -856,6 +856,11 @@ class PioneerImportWorkResult {
     this.textCaptureAvailable = false,
     this.preferredImportPreference = PioneerSourcePathPreference.sourceNeeded,
     this.qualityValidationSummary,
+    this.coverImported = false,
+    this.existingItemUpdated = false,
+    this.createdNew = false,
+    this.firstSectionLabel,
+    this.lastSectionLabel,
   });
 
   final PioneerSourceWork work;
@@ -885,6 +890,11 @@ class PioneerImportWorkResult {
   final bool textCaptureAvailable;
   final PioneerSourcePathPreference preferredImportPreference;
   final String? qualityValidationSummary;
+  final bool coverImported;
+  final bool existingItemUpdated;
+  final bool createdNew;
+  final String? firstSectionLabel;
+  final String? lastSectionLabel;
 
   String get title => work.title;
   String get sourceMethodLabel => sourceMethod.label;
@@ -893,6 +903,92 @@ class PioneerImportWorkResult {
   int get navigationCount => insertedNavigationItems;
   bool get isImported => status == PioneerImportWorkStatus.imported;
   bool get isSkipped => status != PioneerImportWorkStatus.imported;
+
+  PioneerImportWorkResult copyWith({
+    PioneerSourceWork? work,
+    PioneerImportWorkStatus? status,
+    String? stage,
+    PioneerImportSourceMethod? sourceMethod,
+    String? reason,
+    String? libraryItemId,
+    String? sourceType,
+    int? insertedLibraryItems,
+    int? insertedNavigationItems,
+    int? insertedTextBlocks,
+    bool? skippedExisting,
+    String? refCodeHandlingSummary,
+    String? detail,
+    String? exceptionType,
+    int? httpStatusCode,
+    String? contentType,
+    int? downloadedByteCount,
+    int? parsedSectionCount,
+    int? parsedParagraphCount,
+    bool? requiresManualVerification,
+    String? manualVerificationHint,
+    bool? epubAvailable,
+    bool? epubValidated,
+    String? epubRejectedReason,
+    bool? textCaptureAvailable,
+    PioneerSourcePathPreference? preferredImportPreference,
+    String? qualityValidationSummary,
+    bool? coverImported,
+    bool? existingItemUpdated,
+    bool? createdNew,
+    String? firstSectionLabel,
+    String? lastSectionLabel,
+  }) {
+    return PioneerImportWorkResult(
+      work: work ?? this.work,
+      status: status ?? this.status,
+      stage: stage ?? this.stage,
+      sourceMethod: sourceMethod ?? this.sourceMethod,
+      reason: reason ?? this.reason,
+      libraryItemId: libraryItemId ?? this.libraryItemId,
+      sourceType: sourceType ?? this.sourceType,
+      insertedLibraryItems: insertedLibraryItems ?? this.insertedLibraryItems,
+      insertedNavigationItems:
+          insertedNavigationItems ?? this.insertedNavigationItems,
+      insertedTextBlocks: insertedTextBlocks ?? this.insertedTextBlocks,
+      skippedExisting: skippedExisting ?? this.skippedExisting,
+      refCodeHandlingSummary:
+          refCodeHandlingSummary ?? this.refCodeHandlingSummary,
+      detail: detail ?? this.detail,
+      exceptionType: exceptionType ?? this.exceptionType,
+      httpStatusCode: httpStatusCode ?? this.httpStatusCode,
+      contentType: contentType ?? this.contentType,
+      downloadedByteCount: downloadedByteCount ?? this.downloadedByteCount,
+      parsedSectionCount: parsedSectionCount ?? this.parsedSectionCount,
+      parsedParagraphCount: parsedParagraphCount ?? this.parsedParagraphCount,
+      requiresManualVerification:
+          requiresManualVerification ?? this.requiresManualVerification,
+      manualVerificationHint:
+          manualVerificationHint ?? this.manualVerificationHint,
+      epubAvailable: epubAvailable ?? this.epubAvailable,
+      epubValidated: epubValidated ?? this.epubValidated,
+      epubRejectedReason: epubRejectedReason ?? this.epubRejectedReason,
+      textCaptureAvailable: textCaptureAvailable ?? this.textCaptureAvailable,
+      preferredImportPreference:
+          preferredImportPreference ?? this.preferredImportPreference,
+      qualityValidationSummary:
+          qualityValidationSummary ?? this.qualityValidationSummary,
+      coverImported: coverImported ?? this.coverImported,
+      existingItemUpdated: existingItemUpdated ?? this.existingItemUpdated,
+      createdNew: createdNew ?? this.createdNew,
+      firstSectionLabel: firstSectionLabel ?? this.firstSectionLabel,
+      lastSectionLabel: lastSectionLabel ?? this.lastSectionLabel,
+    );
+  }
+}
+
+class _CapturedHtmlRepairAssessment {
+  const _CapturedHtmlRepairAssessment({
+    required this.shouldRepair,
+    required this.reasons,
+  });
+
+  final bool shouldRepair;
+  final List<String> reasons;
 }
 
 class PioneerExistingCapturedImportSummary {
@@ -1527,9 +1623,15 @@ class PioneerTextImportService {
     }
 
     final existing = await _existingImportSummary(db, itemId);
+    debugPrint(
+      'CaptureClipper write check: itemId=$itemId, existing=${existing.hasItem}, '
+      'nav=${existing.hasNavigationItems}, text=${existing.hasTextBlocks}, '
+      'policy=${effectiveExistingImportPolicy.label}',
+    );
     if (existing.hasItem &&
         effectiveExistingImportPolicy ==
             PioneerExistingImportPolicy.skipExisting) {
+      debugPrint('CaptureClipper write check: skipping existing item $itemId.');
       return PioneerImportBatchResult(
         workResults: [
           _buildSkippedExistingResult(
@@ -1581,7 +1683,10 @@ class PioneerTextImportService {
       sourceType: sourceType,
       sourceSite: sourceSite,
       relativePath: relativePath,
-      coverPath: coverPath,
+      coverPath: await cachePioneerCaptureCoverPath(
+        coverPath: coverPath,
+        itemId: itemId,
+      ),
       contributors: contributors,
       indexStatus: indexStatus,
       indexError: indexError,
@@ -1707,46 +1812,13 @@ class PioneerTextImportService {
     var completed = 0;
 
     for (final preview in selectedPreviews.values) {
-      final work = preview.isValid ? preview.importWork : null;
-      final itemId = work?.stableLibraryItemId ?? preview.folderName;
+      final work = preview.bestEffortWork;
+      final fallbackItemId = work.stableLibraryItemId;
       if (shouldContinue != null && !shouldContinue()) {
         return PioneerImportBatchResult(
           workResults: results,
           wasCancelled: true,
         );
-      }
-
-      if (!preview.isValid || work == null) {
-        results.add(
-          _buildSkippedNotImportableResult(
-            work:
-                work ??
-                PioneerSourceWork(
-                  id: _slug(preview.folderName),
-                  authorId: 'unknown',
-                  authorName: preview.detectedAuthor ?? 'Unknown',
-                  sourceFamily: 'Pioneer',
-                  title: preview.detectedTitle ?? preview.folderName,
-                  abbreviation: preview.detectedAbbreviation ?? '',
-                  group: 'Pioneer Authors',
-                  subgroup: 'Captured HTML',
-                  availability: PioneerSourceAvailability.sourceNeeded,
-                  verified: false,
-                  catalogImportable: false,
-                  sourceType: 'capturedHtml',
-                  sourceUrl: null,
-                  sourceLabel: 'Local HTML Capture',
-                  notes: preview.warnings.join(' '),
-                ),
-            libraryItemId: itemId,
-            sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
-            reason: preview.warnings.isEmpty
-                ? 'Capture folder is not importable.'
-                : preview.warnings.join(' '),
-          ),
-        );
-        completed += 1;
-        continue;
       }
 
       final progressPrefix = '${completed + 1}/$total';
@@ -1760,16 +1832,47 @@ class PioneerTextImportService {
         ),
       );
 
-      final existing = await _existingCanonicalCapturedImportSummary(db, work);
-      if (existing.hasExistingImport &&
-          existingImportPolicy == PioneerExistingImportPolicy.skipExisting) {
+      final existingCaptureItemId = await _existingCapturedHtmlImportItemId(
+        db,
+        work,
+        folderName: preview.folderName,
+        sourceFileHash: preview.sourceFileHash,
+        sourceUrl: preview.metadata.sourceUrl,
+      );
+      debugPrint(
+        'CaptureClipper import candidate: folder=${preview.folderName}, '
+        'path=${preview.folderPath}, title=${work.title}, '
+        'author=${work.authorName}, existingItem=${existingCaptureItemId ?? '(none)'}, '
+        'policy=${existingImportPolicy.label}',
+      );
+      if (existingCaptureItemId != null) {
+        await _softDeleteMatchingCapturedHtmlDuplicateItems(
+          db,
+          keepItemId: existingCaptureItemId,
+          folderName: preview.folderName,
+        );
+      }
+      if (!preview.isValid) {
+        _logInvalidCapturedHtmlPreview(
+          preview: preview,
+          existingCaptureItemId: existingCaptureItemId,
+        );
+      }
+      final itemId =
+          existingCaptureItemId ??
+          (existingImportPolicy == PioneerExistingImportPolicy.importAsNewCopy
+              ? _newCopyLibraryItemId(work)
+              : work.stableLibraryItemId);
+
+      if (!preview.isValid && existingCaptureItemId == null) {
         results.add(
-          _buildSkippedExistingResult(
+          _buildSkippedNotImportableResult(
             work: work,
-            libraryItemId: existing.itemIds.first,
+            libraryItemId: fallbackItemId,
             sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
-            refCodeHandlingSummary:
-                'HTML capture refs preserved in source; import skipped.',
+            reason: preview.validationReasons.isEmpty
+                ? 'Capture folder is not importable.'
+                : 'Capture folder is not importable: ${preview.validationReasons.join('; ')}.',
           ),
         );
         completed += 1;
@@ -1778,13 +1881,58 @@ class PioneerTextImportService {
 
       try {
         final sourceText = preview.extractedText?.trim() ?? '';
-        if (sourceText.isEmpty) {
+        if (sourceText.isEmpty && preview.isValid) {
           results.add(
             _buildSkippedNotImportableResult(
               work: work,
               libraryItemId: itemId,
               sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
               reason: 'No extracted capture text was available.',
+            ),
+          );
+          completed += 1;
+          continue;
+        }
+
+        final canUseSourceRepair = sourceText.isNotEmpty;
+        final parseResult = canUseSourceRepair
+            ? parseEgwCopiedRangeText(
+                sourceText,
+                workAbbreviation:
+                    preview.detectedAbbreviation?.trim().isNotEmpty == true
+                    ? preview.detectedAbbreviation!.trim()
+                    : work.abbreviation,
+              )
+            : null;
+        final existing = await _existingImportSummary(db, itemId);
+        final repairAssessment = existing.hasItem && parseResult != null
+            ? await _capturedHtmlRepairAssessment(
+                db: db,
+                itemId: itemId,
+                work: work,
+                preview: preview,
+                parseResult: parseResult,
+              )
+            : const _CapturedHtmlRepairAssessment(
+                shouldRepair: false,
+                reasons: <String>[],
+              );
+        final shouldRepairExisting =
+            existing.hasItem &&
+            (existingImportPolicy == PioneerExistingImportPolicy.skipExisting ||
+                existingImportPolicy ==
+                    PioneerExistingImportPolicy.overwriteExisting) &&
+            (parseResult != null ? repairAssessment.shouldRepair : true);
+        if (existing.hasItem &&
+            existingImportPolicy == PioneerExistingImportPolicy.skipExisting &&
+            !shouldRepairExisting) {
+          results.add(
+            _buildSkippedExistingResult(
+              work: work,
+              libraryItemId: itemId,
+              sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+              refCodeHandlingSummary:
+                  'HTML capture refs preserved in source; import skipped.',
             ),
           );
           completed += 1;
@@ -1800,13 +1948,6 @@ class PioneerTextImportService {
             message: '$progressPrefix Parsing ${work.title}',
           ),
         );
-        final parseResult = parseEgwCopiedRangeText(
-          sourceText,
-          workAbbreviation:
-              preview.detectedAbbreviation?.trim().isNotEmpty == true
-              ? preview.detectedAbbreviation!.trim()
-              : work.abbreviation,
-        );
 
         onProgress?.call(
           PioneerImportProgress(
@@ -1820,33 +1961,78 @@ class PioneerTextImportService {
         final metaContributors = _readCaptureMetadataContributors(
           preview.folderPath,
         );
-        final result = await _writeCopiedRangeImportedWork(
-          db: db,
-          deviceId: deviceId,
-          work: work,
-          libraryItemId: itemId,
-          replaceCanonicalSiblings:
-              existingImportPolicy ==
-              PioneerExistingImportPolicy.overwriteExisting,
-          parseResult: parseResult,
-          sourceText: sourceText,
-          sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
-          sourceType: 'egw_html_capture',
-          sourceSite: preview.metadata.sourceSite ?? 'egwwritings.org',
-          sourceUrl: p.relative(preview.htmlFiles.first),
-          sourceLabel: preview.folderName,
-          coverPath: _normalizeCaptureCoverPath(
-            preview.preferredCoverImagePath,
-          ),
-          relativePath: _buildHtmlCaptureRelativePath(
-            work,
-            preview.htmlFiles.first,
-          ),
-          contentType: 'text/html',
-          shouldContinue: shouldContinue,
-          contributors: metaContributors ?? _metadataContributors(preview),
-        );
-        results.add(result);
+        final effectiveImportPolicy = shouldRepairExisting
+            ? PioneerExistingImportPolicy.overwriteExisting
+            : existingImportPolicy;
+        if (parseResult != null &&
+            !existing.hasItem &&
+            (parseResult.document.sections.isEmpty ||
+                parseResult.report.paragraphCount == 0 ||
+                parseResult.report.firstRef == null)) {
+          results.add(
+            _buildSkippedNotImportableResult(
+              work: work,
+              libraryItemId: itemId,
+              sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+              reason:
+                  'Could not detect clean chapters and referenced paragraphs '
+                  'in the captured HTML; the source folder was left in place.',
+            ),
+          );
+          completed += 1;
+          continue;
+        }
+        if (parseResult != null) {
+          final result = await _writeCopiedRangeImportedWork(
+            db: db,
+            deviceId: deviceId,
+            work: work,
+            libraryItemId: itemId,
+            fileHashOverride: preview.sourceFileHash,
+            parseResult: parseResult,
+            sourceText: sourceText,
+            sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+            sourceType: 'egw_html_capture',
+            sourceSite: preview.metadata.sourceSite ?? 'egwwritings.org',
+            sourceUrl: p.relative(preview.htmlFiles.first),
+            sourceLabel: preview.folderName,
+            coverPath: await cachePioneerCaptureCoverPath(
+              coverPath: preview.preferredCoverImagePath,
+              itemId: itemId,
+            ),
+            relativePath: _buildHtmlCaptureRelativePath(
+              work,
+              preview.htmlFiles.first,
+            ),
+            contentType: 'text/html',
+            shouldContinue: shouldContinue,
+            contributors: metaContributors ?? _metadataContributors(preview),
+            replaceCanonicalSiblings:
+                effectiveImportPolicy ==
+                PioneerExistingImportPolicy.overwriteExisting,
+          );
+          results.add(
+            shouldRepairExisting && repairAssessment.reasons.isNotEmpty
+                ? result.copyWith(
+                    detail:
+                        '${result.detail ?? ''}'
+                        '${result.detail == null || result.detail!.isEmpty ? '' : ' '}'
+                        'Repaired existing item: ${repairAssessment.reasons.join(', ')}.',
+                    reason: 'Repaired existing CaptureClipper item in place.',
+                  )
+                : result,
+          );
+        } else {
+          final repaired = await _repairBrokenCapturedHtmlItemInPlace(
+            db: db,
+            deviceId: deviceId,
+            itemId: itemId,
+            preview: preview,
+            work: work,
+            shouldContinue: shouldContinue,
+          );
+          results.add(repaired);
+        }
       } catch (error, stackTrace) {
         final stage = _failureStageFor(error);
         debugPrint(
@@ -1879,11 +2065,265 @@ class PioneerTextImportService {
     return PioneerImportBatchResult(workResults: results);
   }
 
+  Future<_CapturedHtmlRepairAssessment> _capturedHtmlRepairAssessment({
+    required Database db,
+    required String itemId,
+    required PioneerSourceWork work,
+    required PioneerHtmlCaptureFolderPreview preview,
+    required EgwCopiedRangeParseResult parseResult,
+  }) async {
+    final repairWork = preview.bestEffortWork;
+    final itemRows = await db.query(
+      'library_items',
+      columns: const ['title', 'author', 'cover_path'],
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: [itemId],
+      limit: 1,
+    );
+    if (itemRows.isEmpty) {
+      return const _CapturedHtmlRepairAssessment(
+        shouldRepair: false,
+        reasons: <String>[],
+      );
+    }
+
+    final itemRow = itemRows.first;
+    final reasons = <String>[];
+    final storedTitle = itemRow['title']?.toString().trim() ?? '';
+    final storedAuthor = itemRow['author']?.toString().trim() ?? '';
+    final storedCoverPath = itemRow['cover_path']?.toString().trim() ?? '';
+    final expectedTitle = repairWork.title.trim();
+    final expectedAuthor = repairWork.authorName.trim();
+    final expectedCoverPath =
+        repairWork.cachedCoverPath?.trim().isNotEmpty == true
+        ? repairWork.cachedCoverPath!.trim()
+        : preview.preferredCoverImagePath?.trim() ?? '';
+
+    if (_looksLikeBadCapturedHtmlTitle(storedTitle) &&
+        expectedTitle.isNotEmpty) {
+      reasons.add('title');
+    }
+    if (_needsCapturedHtmlAuthorRepair(storedAuthor, expectedAuthor)) {
+      reasons.add('author');
+    }
+    if (_needsCapturedHtmlCoverRepair(storedCoverPath, expectedCoverPath)) {
+      reasons.add('cover');
+    }
+
+    final navigationRows = await db.query(
+      'library_navigation_items',
+      columns: const ['label'],
+      where: 'library_item_id = ? AND deleted_at IS NULL',
+      whereArgs: [itemId],
+      orderBy: 'sort_order ASC',
+      limit: 1,
+    );
+    final firstStoredHeading = navigationRows.isEmpty
+        ? ''
+        : navigationRows.first['label']?.toString().trim() ?? '';
+    final expectedFirstHeading = preview.firstChapterLabel?.trim() ?? '';
+    if (_needsCapturedHtmlHeadingRepair(
+      storedHeading: firstStoredHeading,
+      expectedHeading: expectedFirstHeading,
+    )) {
+      reasons.add('heading');
+    }
+
+    final textRows = await db.query(
+      'library_text_blocks',
+      columns: const ['plain_text'],
+      where: 'library_item_id = ?',
+      whereArgs: [itemId],
+      orderBy: 'paragraph_index ASC',
+      limit: 1,
+    );
+    final firstStoredParagraph = textRows.isEmpty
+        ? ''
+        : textRows.first['plain_text']?.toString().trim() ?? '';
+    final expectedFirstParagraph = _firstParagraphText(parseResult.document);
+    if (_needsCapturedHtmlParagraphRepair(
+      storedParagraph: firstStoredParagraph,
+      storedHeading: firstStoredHeading,
+      expectedHeading: expectedFirstHeading,
+      expectedParagraph: expectedFirstParagraph,
+    )) {
+      reasons.add('body');
+    }
+
+    final refCount = _firstCount(
+      await db.rawQuery(
+        'SELECT COUNT(*) AS cnt FROM elibrary_ref_index WHERE library_item_id = ?',
+        [itemId],
+      ),
+    );
+    final expectedRefCount =
+        parseResult.report.paragraphCount +
+        parseResult.report.pageNumbers.length;
+    if (refCount == 0 || refCount != expectedRefCount) {
+      reasons.add('refs');
+    }
+
+    return _CapturedHtmlRepairAssessment(
+      shouldRepair: reasons.isNotEmpty,
+      reasons: List<String>.unmodifiable(reasons),
+    );
+  }
+
+  void _logInvalidCapturedHtmlPreview({
+    required PioneerHtmlCaptureFolderPreview preview,
+    required String? existingCaptureItemId,
+  }) {
+    final existingLabel = existingCaptureItemId?.trim().isNotEmpty == true
+        ? existingCaptureItemId!
+        : '(none)';
+    debugPrint(
+      'CaptureClipper invalid candidate folder: path=${preview.folderPath}, '
+      'folder=${preview.folderName}, files=${preview.availableFileNames.join(', ')}, '
+      'expected=html + metadata.json/manifest.json + optional cover image, '
+      'rule=${preview.validationReasons.join('; ')}, '
+      'existingItem=$existingLabel',
+    );
+  }
+
+  Future<PioneerImportWorkResult> _repairBrokenCapturedHtmlItemInPlace({
+    required Database db,
+    required String deviceId,
+    required String itemId,
+    required PioneerHtmlCaptureFolderPreview preview,
+    required PioneerSourceWork work,
+    PioneerImportShouldContinue? shouldContinue,
+  }) async {
+    if (shouldContinue != null && !shouldContinue()) {
+      return _buildSkippedNotImportableResult(
+        work: work,
+        libraryItemId: itemId,
+        sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+        reason: 'CaptureClipper repair was cancelled.',
+      );
+    }
+
+    final itemRows = await db.query(
+      'library_items',
+      columns: const ['id', 'title', 'author', 'cover_path', 'updated_at'],
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: [itemId],
+      limit: 1,
+    );
+    if (itemRows.isEmpty) {
+      return _buildFailedResult(
+        work: work,
+        libraryItemId: itemId,
+        error: StateError('Existing CaptureClipper item not found.'),
+        stage: 'repairing',
+        sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+        refCodeHandlingSummary: 'Repair could not locate the existing item.',
+      );
+    }
+
+    final existingRow = itemRows.first;
+    final updates = <String, Object?>{};
+    final now = _utcNow();
+    final repairWork = preview.bestEffortWork;
+    final existingTitle = existingRow['title']?.toString().trim() ?? '';
+    final existingAuthor = existingRow['author']?.toString().trim() ?? '';
+    final existingCoverPath =
+        existingRow['cover_path']?.toString().trim() ?? '';
+
+    if (_needsCapturedHtmlTitleRepair(existingTitle, repairWork.title)) {
+      updates['title'] = repairWork.title.trim();
+    }
+    if (_needsCapturedHtmlAuthorRepair(existingAuthor, repairWork.authorName)) {
+      updates['author'] = repairWork.authorName.trim();
+    }
+
+    final preferredCoverPath = preview.preferredCoverImagePath?.trim() ?? '';
+    if (preferredCoverPath.isNotEmpty) {
+      final repairedCoverPath = await cachePioneerCaptureCoverPath(
+        coverPath: preferredCoverPath,
+        itemId: itemId,
+      );
+      if (repairedCoverPath != null && repairedCoverPath.trim().isNotEmpty) {
+        updates['cover_path'] = repairedCoverPath;
+      }
+    } else if (existingCoverPath.trim().isEmpty) {
+      // Leave the placeholder in place, but record the reason for the manual repair log.
+      debugPrint(
+        'CaptureClipper item $itemId could not repair cover because no cover file was available.',
+      );
+    }
+
+    if (updates.isEmpty) {
+      return _buildSkippedExistingResult(
+        work: work,
+        libraryItemId: itemId,
+        sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+        refCodeHandlingSummary:
+            'CaptureClipper item was already as repaired as possible from stored rows.',
+      );
+    }
+
+    updates['updated_at'] = now;
+    updates['device_id'] = deviceId;
+    await db.update(
+      'library_items',
+      updates,
+      where: 'id = ?',
+      whereArgs: [itemId],
+    );
+
+    return PioneerImportWorkResult(
+      work: work,
+      status: PioneerImportWorkStatus.imported,
+      stage: 'repaired-existing',
+      sourceMethod: PioneerImportSourceMethod.htmlCaptureFolder,
+      reason: 'Repaired existing CaptureClipper item in place.',
+      libraryItemId: itemId,
+      sourceType: 'egw_html_capture',
+      insertedLibraryItems: 0,
+      insertedNavigationItems: 0,
+      insertedTextBlocks: 0,
+      skippedExisting: false,
+      refCodeHandlingSummary:
+          'Repaired stored item rows without reimporting the source folder.',
+      detail: 'Updated stored title/author/cover metadata where possible.',
+      exceptionType: null,
+      httpStatusCode: null,
+      contentType: null,
+      downloadedByteCount: null,
+      parsedSectionCount: null,
+      parsedParagraphCount: null,
+      requiresManualVerification: false,
+      manualVerificationHint: null,
+      epubAvailable: work.epubAvailable,
+      epubValidated: false,
+      epubRejectedReason: null,
+      textCaptureAvailable: work.textCaptureAvailable,
+      preferredImportPreference:
+          PioneerSourcePathPreference.userSuppliedCleanedSource,
+      qualityValidationSummary: null,
+      coverImported: updates.containsKey('cover_path'),
+      existingItemUpdated: true,
+      createdNew: false,
+      firstSectionLabel: preview.firstChapterLabel,
+      lastSectionLabel: preview.lastChapterLabel,
+    );
+  }
+
+  bool _needsCapturedHtmlTitleRepair(String storedTitle, String expectedTitle) {
+    final normalizedStored = storedTitle.trim().toLowerCase();
+    final normalizedExpected = expectedTitle.trim().toLowerCase();
+    if (normalizedExpected.isEmpty) return false;
+    if (normalizedStored.isEmpty) return true;
+    return _looksLikeBadCapturedHtmlTitle(storedTitle) ||
+        normalizedStored != normalizedExpected;
+  }
+
   Future<PioneerImportWorkResult> _writeCopiedRangeImportedWork({
     required Database db,
     required String deviceId,
     required PioneerSourceWork work,
     String? libraryItemId,
+    String? fileHashOverride,
     bool replaceCanonicalSiblings = true,
     required EgwCopiedRangeParseResult parseResult,
     required String sourceText,
@@ -1903,16 +2343,19 @@ class PioneerTextImportService {
     final document = parseResult.document;
     final report = parseResult.report;
     final sourceBytes = Uint8List.fromList(utf8.encode(sourceText));
-    final fileHash = sha256.convert(sourceBytes).toString();
+    final fileHash = fileHashOverride?.trim().isNotEmpty == true
+        ? fileHashOverride!.trim()
+        : sha256.convert(sourceBytes).toString();
     final resolvedRelativePath =
         relativePath ?? _buildCopiedRangeRelativePath(work);
     final fileName = p.basename(resolvedRelativePath);
     final existingItemRows = await db.query(
       'library_items',
-      where: 'id = ?',
+      where: 'id = ? AND deleted_at IS NULL',
       whereArgs: [itemId],
       limit: 1,
     );
+    final createdNew = existingItemRows.isEmpty;
     final existingItem = existingItemRows.isEmpty
         ? null
         : existingItemRows.first;
@@ -1959,6 +2402,7 @@ class PioneerTextImportService {
     final conflictRefs = <String>[];
     final importedRefs = <String>[];
     final seenRefTextByCode = <String, String>{};
+    final seenPageMarkerByHrefAndPage = <String>{};
     final warnings = <String>[...report.warnings];
     final pageParagraphCounts = <int, int>{};
     const insertedLibraryItems = 1;
@@ -1986,6 +2430,9 @@ class PioneerTextImportService {
       }
       final href = sectionInfo.href;
       final chapterNumber = sectionInfo.chapterNumber;
+      final normalizedBookAbbrev = work.abbreviation.trim().isNotEmpty
+          ? work.abbreviation.trim().toUpperCase()
+          : 'DAR';
       final navId = _copiedRangeNavigationItemId(
         itemId: itemId,
         chapterNumber: chapterNumber,
@@ -2019,6 +2466,7 @@ class PioneerTextImportService {
       for (final paragraph in section.paragraphs) {
         final ref = paragraph.ref?.trim() ?? '';
         final paragraphText = paragraph.text.trim();
+        final pageNumber = paragraph.page ?? 0;
         if (paragraphText.isEmpty) {
           if (ref.isNotEmpty) {
             warnings.add('Empty paragraph text for ref $ref');
@@ -2054,7 +2502,33 @@ class PioneerTextImportService {
           continue;
         }
 
-        final pageNumber = paragraph.page ?? 0;
+        if (pageNumber > 0) {
+          final pageMarkerKey = '$href|$pageNumber';
+          final pageMarkerRef = '$normalizedBookAbbrev $pageNumber';
+          if (seenPageMarkerByHrefAndPage.add(pageMarkerKey) &&
+              !existingRefByCode.containsKey(pageMarkerRef)) {
+            refRows.add(<String, Object?>{
+              'library_item_id': itemId,
+              'work_key': itemId,
+              'edition_key': null,
+              'edition_year': null,
+              'book_title': work.title,
+              'book_abbrev': normalizedBookAbbrev,
+              'href': href,
+              'anchor_id': null,
+              'paragraph_index': -pageNumber,
+              'page_number': pageNumber,
+              'paragraph_on_page': 0,
+              'ref_code': pageMarkerRef,
+              'stable_ref': pageMarkerRef,
+              'plain_text': null,
+              'text_hash': null,
+              'ref_source': '${sourceMethod.label}:page-marker',
+              'created_at': now,
+              'updated_at': now,
+            });
+          }
+        }
         final nextOnPage = (pageParagraphCounts[pageNumber] ?? 0) + 1;
         pageParagraphCounts[pageNumber] = nextOnPage;
         final nextParagraphIndex = (currentParagraphIndexByHref[href] ?? 0) + 1;
@@ -2266,6 +2740,10 @@ class PioneerTextImportService {
       sourceMethod: sourceMethod,
       reason: insertedParagraphCount == 0 && conflictRefs.isNotEmpty
           ? 'Copied range import conflicts need review.'
+          : sourceMethod == PioneerImportSourceMethod.htmlCaptureFolder
+          ? (conflictRefs.isNotEmpty
+                ? 'Imported captured HTML book with ref conflicts that need review.'
+                : 'Imported captured HTML book into eLibrary.db.')
           : conflictRefs.isNotEmpty
           ? 'Imported copied EGW text with ref conflicts that need review.'
           : 'Imported copied EGW text into eLibrary.db.',
@@ -2295,6 +2773,15 @@ class PioneerTextImportService {
       qualityValidationSummary: validationWarnings.isEmpty
           ? null
           : validationWarnings.join(' • '),
+      coverImported: coverPath?.trim().isNotEmpty == true,
+      existingItemUpdated: !createdNew,
+      createdNew: createdNew,
+      firstSectionLabel: document.sections.isEmpty
+          ? null
+          : document.sections.first.title,
+      lastSectionLabel: document.sections.isEmpty
+          ? null
+          : document.sections.last.title,
     );
   }
 
@@ -2320,6 +2807,14 @@ class PioneerTextImportService {
     List<ImportContributorSpec>? contributors,
   }) async {
     final itemId = libraryItemId ?? work.stableLibraryItemId;
+    final existingItemRows = await db.query(
+      'library_items',
+      columns: const ['id'],
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: [itemId],
+      limit: 1,
+    );
+    final createdNew = existingItemRows.isEmpty;
     final now = _utcNow();
     final fileHash = sha256.convert(sourceBytes).toString();
     final resolvedRelativePath =
@@ -2533,6 +3028,15 @@ class PioneerTextImportService {
           qualityValidation?.preferredImportPreference ??
           _preferredImportPreferenceForSourceMethod(sourceMethod),
       qualityValidationSummary: qualityValidation?.summaryText,
+      coverImported: coverPath?.trim().isNotEmpty == true,
+      existingItemUpdated: !createdNew,
+      createdNew: createdNew,
+      firstSectionLabel: document.sections.isEmpty
+          ? null
+          : document.sections.first.title,
+      lastSectionLabel: document.sections.isEmpty
+          ? null
+          : document.sections.last.title,
     );
   }
 
@@ -2663,10 +3167,12 @@ class PioneerTextImportService {
     required String keepItemId,
   }) async {
     for (final itemId in _canonicalCapturedImportItemIds(work)) {
-      await _deleteImportedWorkRows(txn, itemId);
-      if (itemId != keepItemId) {
-        await _softDeleteLibraryItem(txn, itemId);
+      if (itemId == keepItemId) {
+        await _deleteImportedWorkRowsPreservingMarkups(txn, itemId);
+        continue;
       }
+      await _deleteImportedWorkRows(txn, itemId);
+      await _softDeleteLibraryItem(txn, itemId);
     }
   }
 
@@ -2686,6 +3192,47 @@ class PioneerTextImportService {
     DatabaseExecutor txn,
     String libraryItemId,
   ) async {
+    await txn.delete(
+      'library_item_contributors',
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+    );
+    await txn.delete(
+      'library_navigation_items',
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+    );
+    await txn.delete(
+      'library_text_blocks',
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+    );
+    await txn.delete(
+      'library_links',
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+    );
+    await txn.delete(
+      'elibrary_ref_index',
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+    );
+    await txn.delete(
+      'elibrary_markups',
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+    );
+  }
+
+  Future<void> _deleteImportedWorkRowsPreservingMarkups(
+    DatabaseExecutor txn,
+    String libraryItemId,
+  ) async {
+    await txn.delete(
+      'library_item_contributors',
+      where: 'library_item_id = ?',
+      whereArgs: [libraryItemId],
+    );
     await txn.delete(
       'library_navigation_items',
       where: 'library_item_id = ?',
@@ -2725,6 +3272,291 @@ class PioneerTextImportService {
     );
   }
 
+  Future<String?> _existingCapturedHtmlImportItemId(
+    Database db,
+    PioneerSourceWork work, {
+    String? folderName,
+    String? sourceFileHash,
+    String? sourceUrl,
+  }) async {
+    final normalizedHash = sourceFileHash?.trim().toLowerCase() ?? '';
+    if (normalizedHash.isNotEmpty) {
+      final hashRows = await db.query(
+        'library_items',
+        columns: const ['id'],
+        where: '''
+          deleted_at IS NULL
+          AND LOWER(COALESCE(file_hash, '')) = ?
+          AND LOWER(COALESCE(file_format, '')) = 'html'
+        ''',
+        whereArgs: [normalizedHash],
+        limit: 1,
+      );
+      if (hashRows.isNotEmpty) {
+        final id = hashRows.first['id']?.toString().trim() ?? '';
+        if (id.isNotEmpty) return id;
+      }
+    }
+
+    final existing = await _existingCanonicalCapturedImportSummary(db, work);
+    if (existing.itemIds.isNotEmpty) {
+      return existing.itemIds.first;
+    }
+
+    final normalizedFolderName = folderName?.trim().toLowerCase() ?? '';
+    if (normalizedFolderName.isNotEmpty) {
+      final folderLikePatterns = <String>[
+        '%/${normalizedFolderName}/%',
+        '%\\${normalizedFolderName}\\%',
+        '%/$normalizedFolderName%',
+        '%\\$normalizedFolderName%',
+      ];
+      for (final folderLikePattern in folderLikePatterns) {
+        final folderRows = await db.query(
+          'library_items',
+          columns: const ['id', 'title', 'author', 'cover_path'],
+          where: '''
+            deleted_at IS NULL
+            AND LOWER(COALESCE(file_format, '')) = 'html'
+            AND (
+              LOWER(COALESCE(relative_path, '')) LIKE ?
+              OR LOWER(COALESCE(source_url, '')) LIKE ?
+              OR LOWER(COALESCE(id, '')) LIKE ?
+            )
+          ''',
+          whereArgs: [
+            folderLikePattern,
+            folderLikePattern,
+            '%$normalizedFolderName%',
+          ],
+          limit: 20,
+        );
+        if (folderRows.isEmpty) continue;
+        folderRows.sort((left, right) {
+          final leftScore = _scoreCapturedHtmlImportRow(left);
+          final rightScore = _scoreCapturedHtmlImportRow(right);
+          return rightScore.compareTo(leftScore);
+        });
+        final bestRow = folderRows.first;
+        if (_scoreCapturedHtmlImportRow(bestRow) < 5) {
+          continue;
+        }
+        final id = bestRow['id']?.toString().trim() ?? '';
+        if (id.isNotEmpty) return id;
+      }
+    }
+
+    final normalizedSourceUrls = <String>{
+      work.sourceUrl?.trim().toLowerCase() ?? '',
+      sourceUrl?.trim().toLowerCase() ?? '',
+    }.where((value) => value.isNotEmpty);
+    for (final normalizedSourceUrl in normalizedSourceUrls) {
+      final sourceUrlRows = await db.query(
+        'library_items',
+        columns: const ['id'],
+        where: '''
+          deleted_at IS NULL
+          AND LOWER(COALESCE(source_url, '')) = ?
+          AND LOWER(COALESCE(file_format, '')) = 'html'
+        ''',
+        whereArgs: [normalizedSourceUrl],
+        limit: 1,
+      );
+      if (sourceUrlRows.isNotEmpty) {
+        final id = sourceUrlRows.first['id']?.toString().trim() ?? '';
+        if (id.isNotEmpty) return id;
+      }
+    }
+    return null;
+  }
+
+  bool _isRemovableCapturedHtmlItem(Map<String, Object?> row) {
+    final sourceType =
+        row['source_type']?.toString().trim().toLowerCase() ?? '';
+    if (sourceType.contains('captured_html') ||
+        sourceType.contains('html_capture') ||
+        sourceType.contains('pioneer_captured_html')) {
+      return true;
+    }
+
+    final collectionName =
+        row['collection_name']?.toString().trim().toLowerCase() ?? '';
+    if (collectionName.contains('pioneer authors')) {
+      return true;
+    }
+
+    final relativePath =
+        row['relative_path']?.toString().trim().toLowerCase() ?? '';
+    return relativePath.contains('textcaptures/research/pioneer authors') ||
+        relativePath.contains('/pioneer authors/') ||
+        relativePath.contains('html_capture');
+  }
+
+  Future<void> _softDeleteMatchingCapturedHtmlDuplicateItems(
+    Database db, {
+    required String keepItemId,
+    required String folderName,
+  }) async {
+    final normalizedFolderName = folderName.trim().toLowerCase();
+    if (normalizedFolderName.isEmpty) return;
+
+    final folderLikePatterns = <String>[
+      '%/${normalizedFolderName}/%',
+      '%\\${normalizedFolderName}\\%',
+      '%/$normalizedFolderName%',
+      '%\\$normalizedFolderName%',
+    ];
+    final rows = <Map<String, Object?>>[];
+    for (final folderLikePattern in folderLikePatterns) {
+      final matchedRows = await db.query(
+        'library_items',
+        columns: const ['id', 'title', 'author', 'cover_path'],
+        where: '''
+          deleted_at IS NULL
+          AND LOWER(COALESCE(file_format, '')) = 'html'
+          AND (
+            LOWER(COALESCE(relative_path, '')) LIKE ?
+            OR LOWER(COALESCE(source_url, '')) LIKE ?
+            OR LOWER(COALESCE(id, '')) LIKE ?
+          )
+        ''',
+        whereArgs: [
+          folderLikePattern,
+          folderLikePattern,
+          '%$normalizedFolderName%',
+        ],
+        limit: 20,
+      );
+      rows.addAll(matchedRows);
+    }
+
+    final seenIds = <String>{};
+    final duplicateIds = <String>[];
+    for (final row in rows) {
+      final id = row['id']?.toString().trim() ?? '';
+      if (id.isEmpty || id == keepItemId || !seenIds.add(id)) continue;
+      duplicateIds.add(id);
+    }
+
+    if (duplicateIds.isEmpty) return;
+    final now = _utcNow();
+    for (final duplicateId in duplicateIds) {
+      await db.update(
+        'library_items',
+        {'deleted_at': now, 'updated_at': now, 'sync_status': 'pending'},
+        where: 'id = ?',
+        whereArgs: [duplicateId],
+      );
+    }
+  }
+
+  bool _needsCapturedHtmlAuthorRepair(
+    String storedAuthor,
+    String expectedAuthor,
+  ) {
+    if (expectedAuthor.trim().isEmpty) return false;
+    final normalizedStored = storedAuthor.trim().toLowerCase();
+    if (normalizedStored.isEmpty) return true;
+    return normalizedStored == 'unknown' ||
+        normalizedStored == 'unknown author' ||
+        normalizedStored != expectedAuthor.trim().toLowerCase();
+  }
+
+  bool _needsCapturedHtmlCoverRepair(
+    String storedCoverPath,
+    String expectedCoverPath,
+  ) {
+    if (expectedCoverPath.trim().isEmpty) return false;
+    if (storedCoverPath.trim().isEmpty) return true;
+    return !File(storedCoverPath.trim()).existsSync();
+  }
+
+  bool _needsCapturedHtmlHeadingRepair({
+    required String storedHeading,
+    required String expectedHeading,
+  }) {
+    if (expectedHeading.trim().isEmpty) return false;
+    if (storedHeading.trim().isEmpty) return true;
+    if (_looksLikeBadCapturedHtmlHeading(storedHeading)) return true;
+    return _normalizeLooseText(storedHeading) !=
+        _normalizeLooseText(expectedHeading);
+  }
+
+  bool _needsCapturedHtmlParagraphRepair({
+    required String storedParagraph,
+    required String storedHeading,
+    required String expectedHeading,
+    required String expectedParagraph,
+  }) {
+    if (expectedParagraph.trim().isEmpty) return false;
+    if (storedParagraph.trim().isEmpty) return true;
+    if (_looksLikeBadCapturedHtmlHeading(storedParagraph)) return true;
+    final normalizedStored = _normalizeLooseText(storedParagraph);
+    final normalizedExpected = _normalizeLooseText(expectedParagraph);
+    if (normalizedStored == normalizedExpected) return false;
+    final headingPrefix = _normalizeLooseText(
+      expectedHeading.isNotEmpty ? expectedHeading : storedHeading,
+    );
+    if (headingPrefix.isNotEmpty &&
+        normalizedStored.startsWith(headingPrefix)) {
+      return true;
+    }
+    return normalizedStored.contains(normalizedExpected) &&
+        normalizedStored != normalizedExpected;
+  }
+
+  bool _looksLikeBadCapturedHtmlTitle(String value) {
+    final normalized = _normalizeLooseText(value);
+    if (normalized.isEmpty) return true;
+    if (normalized.contains('...')) return true;
+    return _looksLikeBadCapturedHtmlHeading(value);
+  }
+
+  bool _looksLikeBadCapturedHtmlHeading(String value) {
+    final normalized = _normalizeLooseText(value);
+    if (normalized.isEmpty) return false;
+    return RegExp(r'^(chapter|section)\s+\d+\b').hasMatch(normalized) ||
+        normalized.startsWith('chapter 0') ||
+        normalized.startsWith('section 0');
+  }
+
+  int _scoreCapturedHtmlImportRow(Map<String, Object?> row) {
+    var score = 0;
+    final title = row['title']?.toString().trim() ?? '';
+    final author = row['author']?.toString().trim() ?? '';
+    final coverPath = row['cover_path']?.toString().trim() ?? '';
+
+    if (_looksLikeBadCapturedHtmlTitle(title)) {
+      score += 4;
+    }
+    if (author.isEmpty ||
+        author.toLowerCase() == 'unknown' ||
+        author.toLowerCase() == 'unknown author') {
+      score += 3;
+    }
+    if (coverPath.isEmpty || !File(coverPath).existsSync()) {
+      score += 2;
+    }
+    if ((row['id']?.toString().trim() ?? '').contains('unknown')) {
+      score += 1;
+    }
+    return score;
+  }
+
+  String _normalizeLooseText(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  String _firstParagraphText(EgwCopiedRangeDocument document) {
+    for (final section in document.sections) {
+      for (final paragraph in section.paragraphs) {
+        final text = paragraph.text.trim();
+        if (text.isNotEmpty) return text;
+      }
+    }
+    return '';
+  }
+
   /// Deletes all imported data for [work] and hard-deletes the library_items
   /// row so the catalog treats it as uninstalled. Temporary dev utility.
   Future<void> hardResetWork(PioneerSourceWork work) async {
@@ -2744,6 +3576,156 @@ class PioneerTextImportService {
     });
   }
 
+  /// Removes a captured HTML import from the library database without
+  /// touching the source folder or source files on disk.
+  Future<bool> removeImportedLibraryItem(String libraryItemId) async {
+    final normalizedItemId = libraryItemId.trim();
+    if (normalizedItemId.isEmpty) return false;
+
+    final db = await ELibraryDatabase.instance.database;
+    final existingRows = await db.query(
+      'library_items',
+      columns: const [
+        'id',
+        'source_type',
+        'collection_name',
+        'relative_path',
+        'file_format',
+        'deleted_at',
+      ],
+      where: 'id = ?',
+      whereArgs: [normalizedItemId],
+      limit: 1,
+    );
+    if (existingRows.isEmpty) return false;
+
+    final row = existingRows.first;
+    if ((row['deleted_at']?.toString().trim() ?? '').isNotEmpty) {
+      return false;
+    }
+    if (!_isRemovableCapturedHtmlItem(row)) {
+      return false;
+    }
+
+    final candidateIds = await _capturedHtmlRemovalCandidateIds(db, row);
+    if (candidateIds.isEmpty) {
+      return false;
+    }
+
+    debugPrint(
+      'CaptureClipper remove: removing ${candidateIds.length} captured HTML '
+      'item(s) for $normalizedItemId.',
+    );
+    await db.transaction((txn) async {
+      for (final candidateId in candidateIds) {
+        await _deleteImportedWorkRows(txn, candidateId);
+        await txn.delete(
+          'library_items',
+          where: 'id = ?',
+          whereArgs: [candidateId],
+        );
+      }
+    });
+    return true;
+  }
+
+  Future<List<String>> _capturedHtmlRemovalCandidateIds(
+    Database db,
+    Map<String, Object?> row,
+  ) async {
+    final candidateIds = <String>{};
+    void addId(Object? value) {
+      final id = value?.toString().trim() ?? '';
+      if (id.isNotEmpty) {
+        candidateIds.add(id);
+      }
+    }
+
+    addId(row['id']);
+
+    final normalizedFileHash = row['file_hash']?.toString().trim() ?? '';
+    if (normalizedFileHash.isNotEmpty) {
+      final rows = await db.query(
+        'library_items',
+        columns: const ['id'],
+        where: '''
+          deleted_at IS NULL
+          AND LOWER(COALESCE(file_hash, '')) = ?
+          AND LOWER(COALESCE(file_format, '')) = 'html'
+        ''',
+        whereArgs: [normalizedFileHash.toLowerCase()],
+      );
+      for (final candidate in rows) {
+        addId(candidate['id']);
+      }
+    }
+
+    final normalizedRelativePath =
+        row['relative_path']?.toString().trim() ?? '';
+    if (normalizedRelativePath.isNotEmpty) {
+      final rows = await db.query(
+        'library_items',
+        columns: const ['id'],
+        where: '''
+          deleted_at IS NULL
+          AND LOWER(COALESCE(relative_path, '')) = ?
+        ''',
+        whereArgs: [normalizedRelativePath.toLowerCase()],
+      );
+      for (final candidate in rows) {
+        addId(candidate['id']);
+      }
+
+      final folderName = p.basename(p.dirname(normalizedRelativePath)).trim();
+      if (folderName.isNotEmpty) {
+        final folderPattern = folderName.toLowerCase();
+        final folderLikePatterns = <String>[
+          '%/$folderPattern/%',
+          '%\\$folderPattern\\%',
+          '%/$folderPattern%',
+          '%\\$folderPattern%',
+        ];
+        for (final pattern in folderLikePatterns) {
+          final matchedRows = await db.query(
+            'library_items',
+            columns: const ['id'],
+            where: '''
+              deleted_at IS NULL
+              AND LOWER(COALESCE(file_format, '')) = 'html'
+              AND (
+                LOWER(COALESCE(relative_path, '')) LIKE ?
+                OR LOWER(COALESCE(source_url, '')) LIKE ?
+                OR LOWER(COALESCE(id, '')) LIKE ?
+              )
+            ''',
+            whereArgs: [pattern, pattern, '%$folderPattern%'],
+          );
+          for (final candidate in matchedRows) {
+            addId(candidate['id']);
+          }
+        }
+      }
+    }
+
+    final normalizedSourceUrl = row['source_url']?.toString().trim() ?? '';
+    if (normalizedSourceUrl.isNotEmpty) {
+      final rows = await db.query(
+        'library_items',
+        columns: const ['id'],
+        where: '''
+          deleted_at IS NULL
+          AND LOWER(COALESCE(source_url, '')) = ?
+        ''',
+        whereArgs: [normalizedSourceUrl.toLowerCase()],
+      );
+      for (final candidate in rows) {
+        addId(candidate['id']);
+      }
+    }
+
+    return candidateIds.toList(growable: false);
+  }
+
   Future<void> _upsertLibraryItem(
     DatabaseExecutor txn,
     Map<String, Object?> row,
@@ -2752,14 +3734,29 @@ class PioneerTextImportService {
     if (id == null || id.trim().isEmpty) {
       throw ArgumentError('library_items row requires a non-empty id');
     }
+    final incomingCoverPath = row['cover_path']?.toString().trim() ?? '';
+    final existingRows = await txn.query(
+      'library_items',
+      columns: const ['cover_path'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    final existingCoverPath = existingRows.isEmpty
+        ? ''
+        : existingRows.first['cover_path']?.toString().trim() ?? '';
+    final normalizedRow =
+        incomingCoverPath.isNotEmpty || existingCoverPath.isEmpty
+        ? row
+        : <String, Object?>{...row, 'cover_path': existingCoverPath};
     final updated = await txn.update(
       'library_items',
-      row,
+      normalizedRow,
       where: 'id = ?',
       whereArgs: [id],
     );
     if (updated == 0) {
-      await txn.insert('library_items', row);
+      await txn.insert('library_items', normalizedRow);
     }
   }
 
@@ -2860,17 +3857,6 @@ class PioneerTextImportService {
     );
   }
 
-  String? _normalizeCaptureCoverPath(String? coverPath) {
-    final value = coverPath?.trim() ?? '';
-    if (value.isEmpty) return null;
-    if (value.startsWith('assets/')) return value;
-    if (p.isAbsolute(value)) {
-      final relative = p.relative(value, from: Directory.current.path);
-      return relative.startsWith('..') ? value : relative;
-    }
-    return value;
-  }
-
   String _navigationItemId(String libraryItemId, int sectionNumber) {
     return 'nav_${_slug(libraryItemId)}_$sectionNumber';
   }
@@ -2915,11 +3901,8 @@ List<ImportContributorSpec>? _readCaptureMetadataContributors(
   String folderPath,
 ) {
   try {
-    final metaFile = File(p.join(folderPath, 'metadata.json'));
-    if (!metaFile.existsSync()) return null;
-    final metadata = PioneerCaptureFolderMetadata.fromFile(
-      metaFile,
-      folderPath: folderPath,
+    final metadata = PioneerCaptureFolderMetadata.fromFolder(
+      Directory(folderPath),
     );
     final specs = metadata.contributors
         .map(
@@ -4146,7 +5129,7 @@ List<_HtmlBlock> _extractHtmlBlocks(
   final blocks = <_HtmlBlock>[];
   final stack = <_HtmlFrame>[];
   final blockPattern = RegExp(
-    r'<(/?)(h[1-6]|p|div|blockquote|li)\b([^>]*)>',
+    r'<(/?)(h[1-6]|p|div|blockquote|li|b|strong)\b([^>]*)>',
     caseSensitive: false,
     dotAll: true,
   );
@@ -4180,6 +5163,11 @@ List<_HtmlBlock> _extractHtmlBlocks(
     if (text.isEmpty) continue;
     if (_isHiddenHtmlBlock(frame.attrs, innerHtml)) continue;
 
+    if ((tag == 'b' || tag == 'strong') &&
+        _hasInlineContainingBlock(stack, openIndex)) {
+      continue;
+    }
+
     if (_looksLikeHeadingLikeBlock(
       tag: tag,
       attrs: frame.attrs,
@@ -4193,7 +5181,7 @@ List<_HtmlBlock> _extractHtmlBlocks(
 
     if (tag == 'div') {
       if (RegExp(
-        r'<(/?)(h[1-6]|p|blockquote|li)\b',
+        r'<(/?)(h[1-6]|p|blockquote|li|b|strong)\b',
         caseSensitive: false,
       ).hasMatch(innerHtml)) {
         continue;
@@ -4220,14 +5208,18 @@ bool _looksLikeHeadingLikeBlock({
   required String text,
   required PioneerEpubParserProfile profile,
 }) {
+  final normalizedText = _normalizeText(text);
   if (tag.startsWith('h')) {
     return true;
+  }
+  if (tag == 'b' || tag == 'strong') {
+    return normalizedText.split(RegExp(r'\s+')).length <= 18 &&
+        normalizedText.length <= 140;
   }
   if (tag != 'p' && tag != 'div' && tag != 'blockquote' && tag != 'li') {
     return false;
   }
 
-  final normalizedText = _normalizeText(text);
   if (normalizedText.isEmpty) return false;
 
   final className = _extractClassName(attrs);
@@ -4270,6 +5262,19 @@ bool _looksLikeHeadingLikeBlock({
     return true;
   }
 
+  return false;
+}
+
+bool _hasInlineContainingBlock(List<_HtmlFrame> stack, int openIndex) {
+  for (var index = openIndex - 1; index >= 0; index--) {
+    final tag = stack[index].tag;
+    if (tag == 'p' || tag == 'li' || tag == 'blockquote') {
+      return true;
+    }
+    if (tag == 'div' || tag.startsWith('h')) {
+      return false;
+    }
+  }
   return false;
 }
 

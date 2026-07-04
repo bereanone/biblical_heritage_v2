@@ -69,6 +69,83 @@ void main() {
     expect(pageTransitionParagraph.page, greaterThanOrEqualTo(24));
   });
 
+  test(
+    'normalizes chapter headings and keeps page-start refs separate from body refs',
+    () {
+      const text = '''
+Chapter 33-The Jubilee
+CIS 247
+THE jubilee the climax of a series of sabbatical institutions.
+CIS 247.1
+After the children of Israel entered the promised land, God commanded...
+CIS 247.2
+''';
+
+      final result = parseEgwCopiedRangeText(text, workAbbreviation: 'CIS');
+      final section = result.document.sections.single;
+
+      expect(section.title, 'Chapter 33 — The Jubilee');
+      expect(section.paragraphs, hasLength(2));
+      expect(section.paragraphs.first.ref, 'CIS 247.1');
+      expect(section.paragraphs.first.text, contains('THE jubilee'));
+      expect(section.paragraphs.first.page, 247);
+      expect(section.paragraphs.last.ref, 'CIS 247.2');
+      expect(section.paragraphs.last.page, 247);
+      expect(result.report.firstRef, 'CIS 247.1');
+      expect(result.report.lastRef, 'CIS 247.2');
+      expect(result.report.pageNumbers, <int>[247]);
+      expect(result.report.warnings, isEmpty);
+    },
+  );
+
+  test(
+    'normalizes section headings without merging them into paragraph text',
+    () {
+      const text = '''
+Section 1-The Sanctuary
+CIS 1
+The Heavenly Sanctuary
+CIS 1.1
+There is a house in heaven built...
+CIS 1.2
+''';
+
+      final result = parseEgwCopiedRangeText(text, workAbbreviation: 'CIS');
+      final section = result.document.sections.single;
+
+      expect(section.title, 'Section 1 — The Sanctuary');
+      expect(section.paragraphs, hasLength(2));
+      expect(section.paragraphs.first.ref, 'CIS 1.1');
+      expect(section.paragraphs.first.text, contains('The Heavenly Sanctuary'));
+      expect(section.paragraphs.last.ref, 'CIS 1.2');
+      expect(result.report.firstRef, 'CIS 1.1');
+      expect(result.report.lastRef, 'CIS 1.2');
+    },
+  );
+
+  test('accepts brace-wrapped paragraph refs from captured HTML', () {
+    const text = '''
+Chapter 1 — The Seer of Patmos
+First paragraph.
+{SSP 1.1}
+Second paragraph.
+{SSP 1.2}
+''';
+
+    final result = parseEgwCopiedRangeText(text, workAbbreviation: 'SSP');
+    final section = result.document.sections.single;
+
+    expect(section.title, 'Chapter 1 — The Seer of Patmos');
+    expect(section.paragraphs, hasLength(2));
+    expect(section.paragraphs.first.ref, 'SSP 1.1');
+    expect(section.paragraphs.first.text, 'First paragraph.');
+    expect(section.paragraphs.last.ref, 'SSP 1.2');
+    expect(section.paragraphs.last.text, 'Second paragraph.');
+    expect(result.report.firstRef, 'SSP 1.1');
+    expect(result.report.lastRef, 'SSP 1.2');
+    expect(result.report.isValid, isTrue);
+  });
+
   test('flags duplicate refs without removing the first paragraph', () {
     const text = '''
 Chapter 1 — Daniel in Captivity

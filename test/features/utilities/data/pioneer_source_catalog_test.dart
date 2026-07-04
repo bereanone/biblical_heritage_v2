@@ -37,6 +37,22 @@ void main() {
         danielAndTheRevelation.stableLibraryItemId,
         'library_item_research_pioneer_uriah_smith_daniel_and_the_revelation',
       );
+
+      final crossAndShadow = catalog.workById('the_cross_and_its_shadow');
+      expect(crossAndShadow, isNotNull);
+      expect(crossAndShadow!.title, 'The Cross and Its Shadow');
+      expect(crossAndShadow.authorName, 'S. N. Haskell');
+      expect(crossAndShadow.abbreviation, 'CIS');
+
+      final storyOfTheSeer = catalog.workById(
+        'the_story_of_the_seer_of_patmos',
+      );
+      expect(storyOfTheSeer, isNotNull);
+      expect(storyOfTheSeer!.title, 'The Story of the Seer of Patmos');
+      expect(storyOfTheSeer.authorName, 'S. N. Haskell');
+      expect(storyOfTheSeer.abbreviation, 'SSP');
+      expect(storyOfTheSeer.sourceType, 'capturedhtml');
+      expect(storyOfTheSeer.sourceLabel, 'CaptureClipper');
     },
   );
 

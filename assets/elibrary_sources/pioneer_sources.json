@@ -336,6 +336,64 @@
           ]
         }
       ]
+    },
+    {
+      "author_id": "sn_haskell",
+      "author_name": "S. N. Haskell",
+      "source_family": "Pioneer",
+      "sort_key": "s n haskell",
+      "works": [
+        {
+          "work_id": "the_cross_and_its_shadow",
+          "title": "The Cross and Its Shadow",
+          "abbreviation": "CIS",
+          "group": "Pioneer Authors",
+          "subgroup": "Sanctuary",
+          "availability_status": "source_needed",
+          "source_type": "capturedHtml",
+          "source_family": "Pioneer",
+          "source_label": "CaptureClipper",
+          "verified": false,
+          "importable": false,
+          "notes": "Catalog identity for CaptureClipper HTML imports."
+        },
+        {
+          "work_id": "the_story_of_the_seer_of_patmos",
+          "title": "The Story of the Seer of Patmos",
+          "abbreviation": "SSP",
+          "group": "Pioneer Authors",
+          "subgroup": "Prophecy",
+          "availability_status": "source_needed",
+          "source_type": "capturedHtml",
+          "source_family": "Pioneer",
+          "source_label": "CaptureClipper",
+          "verified": false,
+          "importable": false,
+          "notes": "Catalog identity for CaptureClipper HTML imports."
+        }
+      ]
+    },
+    {
+      "author_id": "general_conference_of_sda",
+      "author_name": "General Conference of SDA",
+      "source_family": "Pioneer",
+      "sort_key": "general conference of sda",
+      "works": [
+        {
+          "work_id": "fundamental_principles_of_seventh_day_adventists",
+          "title": "Fundamental Principles of Seventh-day Adventists",
+          "abbreviation": "FP1872",
+          "group": "Pioneer Authors",
+          "subgroup": "Doctrine",
+          "availability_status": "source_needed",
+          "source_type": "capturedHtml",
+          "source_family": "Pioneer",
+          "source_label": "CaptureClipper",
+          "verified": false,
+          "importable": false,
+          "notes": "Catalog identity for CaptureClipper HTML imports."
+        }
+      ]
     }
   ]
 }

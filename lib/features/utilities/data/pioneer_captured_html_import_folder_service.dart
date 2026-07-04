@@ -7,9 +7,12 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/local_settings_store.dart';
+import '../../../core/bootstrap/library_root_native.dart';
 import '../../../core/database/elibrary_database.dart';
+import '../../library/data/library_catalog_service.dart';
 import 'pioneer_capture_folder_metadata.dart';
 import 'pioneer_captured_html_import_review_store.dart';
+import 'pioneer_html_capture_folder_scanner.dart';
 import 'pioneer_source_catalog.dart';
 import 'pioneer_text_import_service.dart';
 
@@ -35,15 +38,21 @@ class PioneerCapturedHtmlFileReport {
     required this.filePath,
     required this.relativePath,
     required this.fileHash,
+    required this.sourceFileHash,
     required this.title,
     required this.author,
     required this.sourceType,
     required this.sourceSite,
     required this.sourceUrl,
     required this.coverImagePath,
+    required this.coverImported,
     required this.headingCount,
     required this.paragraphCount,
     required this.sectionCount,
+    required this.firstChapterLabel,
+    required this.lastChapterLabel,
+    required this.createdNew,
+    required this.existingItemUpdated,
     required this.warnings,
     required this.status,
     this.reason,
@@ -53,15 +62,21 @@ class PioneerCapturedHtmlFileReport {
   final String filePath;
   final String relativePath;
   final String fileHash;
+  final String? sourceFileHash;
   final String title;
   final String author;
   final String sourceType;
   final String? sourceSite;
   final String? sourceUrl;
   final String? coverImagePath;
+  final bool coverImported;
   final int headingCount;
   final int paragraphCount;
   final int sectionCount;
+  final String? firstChapterLabel;
+  final String? lastChapterLabel;
+  final bool createdNew;
+  final bool existingItemUpdated;
   final List<String> warnings;
   final PioneerCapturedHtmlFileStatus status;
   final String? reason;
@@ -91,7 +106,11 @@ class PioneerCapturedHtmlFolderImportReport {
       .length;
 
   int get importedCount => files
-      .where((file) => file.status == PioneerCapturedHtmlFileStatus.imported)
+      .where(
+        (file) =>
+            file.status == PioneerCapturedHtmlFileStatus.imported &&
+            file.createdNew,
+      )
       .length;
 
   int get skippedDuplicateCount => files
@@ -109,6 +128,142 @@ class PioneerCapturedHtmlFolderImportReport {
   int get failedCount => files
       .where((file) => file.status == PioneerCapturedHtmlFileStatus.failed)
       .length;
+}
+
+@immutable
+class PioneerCapturedHtmlCloudFolderImportEntry {
+  const PioneerCapturedHtmlCloudFolderImportEntry({
+    required this.folderPath,
+    required this.folderName,
+    required this.htmlFileCount,
+    required this.title,
+    required this.author,
+    required this.coverImported,
+    required this.chapterCount,
+    required this.firstChapterLabel,
+    required this.lastChapterLabel,
+    required this.createdNew,
+    required this.updatedExisting,
+    required this.importStatus,
+    required this.reason,
+    required this.libraryItemId,
+    this.archivePath,
+    this.archiveError,
+  });
+
+  final String folderPath;
+  final String folderName;
+  final int htmlFileCount;
+  final String title;
+  final String author;
+  final bool coverImported;
+  final int chapterCount;
+  final String? firstChapterLabel;
+  final String? lastChapterLabel;
+  final bool createdNew;
+  final bool updatedExisting;
+  final PioneerImportWorkStatus? importStatus;
+  final String? reason;
+  final String? libraryItemId;
+  final String? archivePath;
+  final String? archiveError;
+
+  bool get imported => importStatus == PioneerImportWorkStatus.imported;
+  bool get archived => archivePath != null && archivePath!.trim().isNotEmpty;
+}
+
+@immutable
+class PioneerCapturedHtmlCloudFolderImportReport {
+  const PioneerCapturedHtmlCloudFolderImportReport({
+    required this.rootPath,
+    required this.entries,
+    required this.completedAt,
+  });
+
+  final String rootPath;
+  final List<PioneerCapturedHtmlCloudFolderImportEntry> entries;
+  final DateTime completedAt;
+
+  int get importedCount =>
+      entries.where((entry) => entry.imported && entry.createdNew).length;
+
+  int get repairedCount =>
+      entries.where((entry) => entry.imported && entry.updatedExisting).length;
+
+  int get archivedCount => entries.where((entry) => entry.archived).length;
+
+  int get failedCount => entries
+      .where((entry) => entry.importStatus == PioneerImportWorkStatus.failed)
+      .length;
+
+  int get healthySkippedCount => entries
+      .where(
+        (entry) =>
+            entry.importStatus == PioneerImportWorkStatus.skippedExisting,
+      )
+      .length;
+
+  int get invalidCount => entries.where((entry) {
+    final status = entry.importStatus;
+    return status == PioneerImportWorkStatus.skippedNotImportable ||
+        status == PioneerImportWorkStatus.skippedUnsupportedSource;
+  }).length;
+
+  int get skippedCount => entries.where((entry) {
+    final status = entry.importStatus;
+    return status == PioneerImportWorkStatus.skippedExisting ||
+        status == PioneerImportWorkStatus.skippedNotImportable ||
+        status == PioneerImportWorkStatus.skippedUnsupportedSource;
+  }).length;
+
+  PioneerCapturedHtmlCloudFolderImportEntry? entryForFolder(String folderPath) {
+    final normalized = folderPath.trim();
+    if (normalized.isEmpty) return null;
+    for (final entry in entries) {
+      if (entry.folderPath == normalized) {
+        return entry;
+      }
+    }
+    return null;
+  }
+}
+
+@immutable
+class PioneerCapturedHtmlAvailableImport {
+  const PioneerCapturedHtmlAvailableImport({
+    required this.preview,
+    required this.existingLibraryItemId,
+  });
+
+  final PioneerHtmlCaptureFolderPreview preview;
+  final String? existingLibraryItemId;
+
+  String get folderPath => preview.folderPath;
+  String get folderName => preview.folderName;
+  String get title => preview.importWork.title;
+  String get author => preview.importWork.authorName;
+  String get displayLabel => '$folderName — $title';
+
+  bool get isAlreadyImported =>
+      existingLibraryItemId?.trim().isNotEmpty == true;
+}
+
+@immutable
+class PioneerCapturedHtmlAvailableImportReport {
+  const PioneerCapturedHtmlAvailableImportReport({
+    required this.rootPath,
+    required this.imports,
+    required this.completedAt,
+    required this.message,
+  });
+
+  final String rootPath;
+  final List<PioneerCapturedHtmlAvailableImport> imports;
+  final DateTime completedAt;
+  final String message;
+
+  int get availableCount => imports.length;
+  bool get hasAvailableImports => imports.isNotEmpty;
 }
 
 @immutable
@@ -198,9 +353,6 @@ class PioneerCapturedHtmlParser {
     if (metaTitle.isEmpty && !hasTitleTag && headingTexts.isEmpty) {
       warnings.add('Title fell back to the filename.');
     }
-    if (author == 'Unknown') {
-      warnings.add('Author was not obvious in the HTML metadata or byline.');
-    }
     if (headingCount == 0) {
       warnings.add('No h1/h2/h3 headings were found.');
     }
@@ -242,10 +394,764 @@ class PioneerCapturedHtmlImportFolderService {
   final PioneerTextImportService _importService;
   final LocalSettingsStore _settingsStore;
 
+  static const Set<String> _ignoredConfiguredFolderNames = <String>{
+    'archive',
+    'archives',
+    'backup',
+    'imported',
+    'scanned',
+  };
+
+  Future<String?> _resolveAccessibleConfiguredRootPath() async {
+    final rootPath = await _settingsStore.loadPioneerCapturedHtmlFolderPath();
+    if (rootPath == null || rootPath.trim().isEmpty) {
+      return null;
+    }
+
+    final normalizedRootPath = rootPath.trim();
+    final bookmark = await _settingsStore
+        .loadPioneerCapturedHtmlFolderBookmark();
+    final bookmarkSaved = bookmark?.trim().isNotEmpty == true;
+    var accessibleRootPath = normalizedRootPath;
+    debugPrint(
+      'CaptureClipper cloud import: configured root=$normalizedRootPath '
+      'bookmarkSaved=$bookmarkSaved',
+    );
+    if (Platform.isMacOS && bookmarkSaved) {
+      try {
+        final activated = await LibraryRootNative.activateBookmark(bookmark!);
+        final activatedPath = activated?.trim() ?? '';
+        if (activatedPath.isNotEmpty) {
+          accessibleRootPath = activatedPath;
+          debugPrint(
+            'CaptureClipper cloud import: bookmark activated for folder access.',
+          );
+        } else {
+          debugPrint(
+            'CaptureClipper cloud import: bookmark activation returned no path; '
+            'using configured folder path.',
+          );
+        }
+      } catch (error) {
+        debugPrint(
+          'CaptureClipper cloud import: bookmark activation failed: $error',
+        );
+      }
+    }
+    return accessibleRootPath;
+  }
+
+  Future<PioneerSourceCatalog?> _loadConfiguredCatalog() async {
+    try {
+      return await PioneerSourceCatalog.load();
+    } catch (error) {
+      debugPrint('CaptureClipper cloud scan catalog load failed: $error');
+      return null;
+    }
+  }
+
+  Future<List<PioneerHtmlCaptureFolderPreview>> _scanConfiguredPreviews({
+    required String accessibleRootPath,
+    PioneerSourceCatalog? catalog,
+  }) async {
+    final rootDirectory = Directory(accessibleRootPath);
+    if (!await rootDirectory.exists()) {
+      debugPrint(
+        'CaptureClipper cloud import: folder missing or unavailable at '
+        '$accessibleRootPath',
+      );
+      return const <PioneerHtmlCaptureFolderPreview>[];
+    }
+
+    final resolvedCatalog = catalog ?? await _loadConfiguredCatalog();
+    return PioneerHtmlCaptureFolderScanner(
+      rootPath: accessibleRootPath,
+      preferAssetManifest: false,
+      knownDevScanPath: null,
+      ignoredFolderNames: _ignoredConfiguredFolderNames,
+    ).scan(catalog: resolvedCatalog);
+  }
+
+  Future<PioneerCapturedHtmlAvailableImportReport>
+  discoverConfiguredCloudFolderImports({PioneerSourceCatalog? catalog}) async {
+    final completedAt = DateTime.now();
+    final accessibleRootPath = await _resolveAccessibleConfiguredRootPath();
+    if (accessibleRootPath == null) {
+      final report = PioneerCapturedHtmlAvailableImportReport(
+        rootPath: '',
+        imports: const <PioneerCapturedHtmlAvailableImport>[],
+        completedAt: completedAt,
+        message: 'No CaptureClipper cloud folder is configured.',
+      );
+      debugPrint(report.message);
+      return report;
+    }
+
+    final rootDirectory = Directory(accessibleRootPath);
+    if (!await rootDirectory.exists()) {
+      final report = PioneerCapturedHtmlAvailableImportReport(
+        rootPath: accessibleRootPath,
+        imports: const <PioneerCapturedHtmlAvailableImport>[],
+        completedAt: completedAt,
+        message:
+            'CaptureClipper cloud folder is unavailable at $accessibleRootPath.',
+      );
+      debugPrint(report.message);
+      return report;
+    }
+
+    final loadedCatalog = catalog ?? await _loadConfiguredCatalog();
+    final previews = await _scanConfiguredPreviews(
+      accessibleRootPath: accessibleRootPath,
+      catalog: loadedCatalog,
+    );
+    if (previews.isEmpty) {
+      final report = PioneerCapturedHtmlAvailableImportReport(
+        rootPath: accessibleRootPath,
+        imports: const <PioneerCapturedHtmlAvailableImport>[],
+        completedAt: completedAt,
+        message:
+            'No CaptureClipper import folders were found under $accessibleRootPath.',
+      );
+      debugPrint(report.message);
+      return report;
+    }
+
+    final imports = <PioneerCapturedHtmlAvailableImport>[];
+    for (final preview in previews) {
+      if (!_isImportCandidate(preview)) {
+        continue;
+      }
+      final existingLibraryItemId = await _existingImportedItemId(preview);
+      if (existingLibraryItemId != null) {
+        continue;
+      }
+      imports.add(
+        PioneerCapturedHtmlAvailableImport(
+          preview: preview,
+          existingLibraryItemId: null,
+        ),
+      );
+    }
+
+    final message = imports.isEmpty
+        ? 'No CaptureClipper imports are currently available.'
+        : imports.length == 1
+        ? '1 CaptureClipper book is ready to import: ${imports.first.displayLabel}.'
+        : '${imports.length} CaptureClipper books are ready to import.';
+    final report = PioneerCapturedHtmlAvailableImportReport(
+      rootPath: accessibleRootPath,
+      imports: List<PioneerCapturedHtmlAvailableImport>.unmodifiable(imports),
+      completedAt: completedAt,
+      message: message,
+    );
+    debugPrint(
+      'CaptureClipper import discovery: ${report.availableCount} ready folder(s) '
+      'found under $accessibleRootPath.',
+    );
+    return report;
+  }
+
+  Future<PioneerCapturedHtmlCloudFolderImportReport>
+  importConfiguredCloudFolder({
+    Iterable<String>? selectedFolderPaths,
+    PioneerExistingImportPolicy existingImportPolicy =
+        PioneerExistingImportPolicy.skipExisting,
+    DateTime Function()? nowProvider,
+    bool archiveImportedFolders = true,
+    Future<PioneerImportBatchResult> Function(
+      Iterable<PioneerHtmlCaptureFolderPreview> previews,
+    )?
+    importPreviews,
+    PioneerSourceCatalog? catalog,
+  }) async {
+    final accessibleRootPath = await _resolveAccessibleConfiguredRootPath();
+    if (accessibleRootPath == null) {
+      return PioneerCapturedHtmlCloudFolderImportReport(
+        rootPath: '',
+        entries: const <PioneerCapturedHtmlCloudFolderImportEntry>[],
+        completedAt: DateTime.now(),
+      );
+    }
+
+    final rootDirectory = Directory(accessibleRootPath);
+    if (!await rootDirectory.exists()) {
+      debugPrint(
+        'CaptureClipper cloud import: folder missing or unavailable at '
+        '$accessibleRootPath',
+      );
+      return PioneerCapturedHtmlCloudFolderImportReport(
+        rootPath: accessibleRootPath,
+        entries: const <PioneerCapturedHtmlCloudFolderImportEntry>[],
+        completedAt: DateTime.now(),
+      );
+    }
+
+    final previews = await _scanConfiguredPreviews(
+      accessibleRootPath: accessibleRootPath,
+      catalog: catalog,
+    );
+
+    final normalizedSelection = selectedFolderPaths == null
+        ? null
+        : selectedFolderPaths
+              .map((path) => p.normalize(path.trim()).toLowerCase())
+              .where((path) => path.isNotEmpty)
+              .toSet();
+    final selectablePreviews = previews
+        .where((preview) {
+          if (!_isImportCandidate(preview)) return false;
+          if (normalizedSelection == null) return true;
+          return normalizedSelection.contains(
+            p.normalize(preview.folderPath).toLowerCase(),
+          );
+        })
+        .toList(growable: false);
+    if (selectablePreviews.isEmpty) {
+      return PioneerCapturedHtmlCloudFolderImportReport(
+        rootPath: accessibleRootPath,
+        entries: const <PioneerCapturedHtmlCloudFolderImportEntry>[],
+        completedAt: DateTime.now(),
+      );
+    }
+
+    debugPrint(
+      'CaptureClipper cloud import: ${selectablePreviews.length} candidate '
+      'folder(s) found under $accessibleRootPath.',
+    );
+
+    final batchResult =
+        await (importPreviews ??
+            ((Iterable<PioneerHtmlCaptureFolderPreview> previews) {
+              return _importService.importHtmlCaptureFolders(
+                previews,
+                existingImportPolicy: existingImportPolicy,
+              );
+            }))(selectablePreviews);
+    final completedAt = DateTime.now();
+    final archiveNow = nowProvider?.call() ?? DateTime.now();
+    final entries = <PioneerCapturedHtmlCloudFolderImportEntry>[];
+    for (var index = 0; index < selectablePreviews.length; index++) {
+      final preview = selectablePreviews[index];
+      final workResult = batchResult.workResults.length > index
+          ? batchResult.workResults[index]
+          : null;
+      final resultStatus = workResult?.status;
+      final libraryItemId = workResult?.libraryItemId.trim() ?? '';
+      final itemExists =
+          libraryItemId.isNotEmpty &&
+          (await LibraryCatalogService.instance.loadItemById(libraryItemId)) !=
+              null;
+      final importNeedsReview = workResult?.requiresManualVerification == true;
+      String? archivePath;
+      String? archiveError;
+      if (archiveImportedFolders &&
+          resultStatus == PioneerImportWorkStatus.imported &&
+          !importNeedsReview &&
+          itemExists) {
+        try {
+          archivePath = await _archiveImportedFolder(
+            sourceFolderPath: preview.folderPath,
+            rootPath: accessibleRootPath,
+            now: archiveNow,
+          );
+        } catch (error) {
+          archiveError = error.toString();
+          debugPrint(
+            'Failed to archive CaptureClipper folder ${preview.folderPath}: $error',
+          );
+        }
+      } else if (resultStatus == PioneerImportWorkStatus.imported &&
+          importNeedsReview) {
+        archiveError =
+            'Import needs review; the source folder was left in place.';
+      } else if (resultStatus == PioneerImportWorkStatus.imported &&
+          !itemExists) {
+        archiveError =
+            'Imported item ${libraryItemId.isEmpty ? '(unknown)' : libraryItemId} was not found in eLibrary.db.';
+      }
+
+      entries.add(
+        PioneerCapturedHtmlCloudFolderImportEntry(
+          folderPath: preview.folderPath,
+          folderName: preview.folderName,
+          htmlFileCount: preview.htmlFileCount,
+          title:
+              workResult?.title ?? preview.detectedTitle ?? preview.folderName,
+          author:
+              workResult?.work.authorName ??
+              preview.detectedAuthor ??
+              'Unknown',
+          coverImported: workResult?.coverImported ?? false,
+          chapterCount:
+              workResult?.parsedSectionCount ?? preview.chapterHeadingCount,
+          firstChapterLabel:
+              workResult?.firstSectionLabel ?? preview.firstChapterLabel,
+          lastChapterLabel:
+              workResult?.lastSectionLabel ?? preview.lastChapterLabel,
+          createdNew: workResult?.createdNew ?? false,
+          updatedExisting: workResult?.existingItemUpdated ?? false,
+          importStatus: resultStatus,
+          reason: workResult?.reason ?? preview.warnings.join(' | '),
+          libraryItemId: libraryItemId.isEmpty ? null : libraryItemId,
+          archivePath: archivePath,
+          archiveError: archiveError,
+        ),
+      );
+      final entry = entries.last;
+      debugPrint(
+        'CaptureClipper cloud import result: folder=${entry.folderName}, '
+        'path=${entry.folderPath}, title=${entry.title}, author=${entry.author}, '
+        'status=${entry.importStatus?.name ?? '(none)'}, '
+        'reason=${entry.reason ?? '(none)'}, '
+        'libraryItemId=${entry.libraryItemId ?? '(none)'}, '
+        'archivePath=${entry.archivePath ?? '(none)'}, '
+        'archiveError=${entry.archiveError ?? '(none)'}',
+      );
+    }
+
+    return PioneerCapturedHtmlCloudFolderImportReport(
+      rootPath: accessibleRootPath,
+      entries: List<PioneerCapturedHtmlCloudFolderImportEntry>.unmodifiable(
+        entries,
+      ),
+      completedAt: completedAt,
+    );
+  }
+
+  Future<PioneerCapturedHtmlCloudFolderImportReport?>
+  repairImportedCaptureClipperBook({
+    required String libraryItemId,
+    DateTime Function()? nowProvider,
+    PioneerSourceCatalog? catalog,
+  }) async {
+    final accessibleRootPath = await _resolveAccessibleConfiguredRootPath();
+    if (accessibleRootPath == null) {
+      return null;
+    }
+
+    final previews = await _scanConfiguredPreviews(
+      accessibleRootPath: accessibleRootPath,
+      catalog: catalog,
+    );
+    final db = await ELibraryDatabase.instance.database;
+    final itemRows = await db.query(
+      'library_items',
+      columns: const [
+        'id',
+        'title',
+        'author',
+        'relative_path',
+        'source_url',
+        'file_hash',
+      ],
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: [libraryItemId.trim()],
+      limit: 1,
+    );
+    PioneerHtmlCaptureFolderPreview? matchingPreview;
+    if (itemRows.isNotEmpty) {
+      matchingPreview = await _findPreviewForImportedLibraryItem(
+        previews,
+        itemRows.first,
+        requestedLibraryItemId: libraryItemId.trim(),
+      );
+    } else if (previews.length == 1) {
+      matchingPreview = previews.single;
+    } else {
+      matchingPreview = previews.firstWhere(
+        (preview) => preview.folderName.trim().toLowerCase() == 'ssp',
+        orElse: () => previews.isEmpty
+            ? throw StateError('No CaptureClipper preview was available.')
+            : previews.first,
+      );
+    }
+    if (matchingPreview == null) {
+      return null;
+    }
+
+    final removed = await _importService.removeImportedLibraryItem(
+      libraryItemId,
+    );
+    if (!removed) {
+      debugPrint(
+        'CaptureClipper repair: item $libraryItemId was not present in the '
+        'library database before reimport; continuing with source refresh.',
+      );
+    }
+
+    return importConfiguredCloudFolder(
+      selectedFolderPaths: [matchingPreview.folderPath],
+      existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+      nowProvider: nowProvider,
+      archiveImportedFolders: false,
+      catalog: catalog,
+    );
+  }
+
+  bool _isImportCandidate(PioneerHtmlCaptureFolderPreview preview) {
+    if (!preview.isValid) return false;
+    final normalizedFolderName = preview.folderName.trim().toLowerCase();
+    if (normalizedFolderName.isEmpty) return false;
+    return !_ignoredConfiguredFolderNames.contains(normalizedFolderName);
+  }
+
+  Future<String?> _existingImportedItemId(
+    PioneerHtmlCaptureFolderPreview preview,
+  ) async {
+    final work = preview.importWork;
+    final db = await ELibraryDatabase.instance.database;
+
+    final normalizedFileHash = preview.sourceFileHash?.trim() ?? '';
+    if (normalizedFileHash.isNotEmpty) {
+      final hashRows = await db.query(
+        'library_items',
+        columns: const ['id'],
+        where: '''
+          deleted_at IS NULL
+          AND LOWER(COALESCE(file_hash, '')) = ?
+          AND LOWER(COALESCE(file_format, '')) = 'html'
+        ''',
+        whereArgs: [normalizedFileHash.toLowerCase()],
+        limit: 1,
+      );
+      if (hashRows.isNotEmpty) {
+        final id = hashRows.first['id']?.toString().trim() ?? '';
+        if (id.isNotEmpty) {
+          return id;
+        }
+      }
+    }
+
+    final stableId = work.stableLibraryItemId;
+    final stableRows = await db.query(
+      'library_items',
+      columns: const ['id'],
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: [stableId],
+      limit: 1,
+    );
+    if (stableRows.isNotEmpty) {
+      final id = stableRows.first['id']?.toString().trim() ?? '';
+      if (id.isNotEmpty) {
+        return id;
+      }
+    }
+
+    if (preview.htmlFiles.isNotEmpty) {
+      final relativePath = _buildHtmlCaptureRelativePath(
+        work,
+        preview.htmlFiles.first,
+      );
+      final pathRows = await db.query(
+        'library_items',
+        columns: const ['id'],
+        where: '''
+          deleted_at IS NULL
+          AND LOWER(COALESCE(relative_path, '')) = ?
+        ''',
+        whereArgs: [relativePath.toLowerCase()],
+        limit: 1,
+      );
+      if (pathRows.isNotEmpty) {
+        final id = pathRows.first['id']?.toString().trim() ?? '';
+        if (id.isNotEmpty) {
+          return id;
+        }
+      }
+    }
+
+    final sourceUrl = preview.metadata.sourceUrl?.trim() ?? '';
+    if (sourceUrl.isNotEmpty) {
+      final sourceRows = await db.query(
+        'library_items',
+        columns: const ['id'],
+        where: '''
+          deleted_at IS NULL
+          AND LOWER(COALESCE(source_url, '')) = ?
+        ''',
+        whereArgs: [sourceUrl.toLowerCase()],
+        limit: 1,
+      );
+      if (sourceRows.isNotEmpty) {
+        final id = sourceRows.first['id']?.toString().trim() ?? '';
+        if (id.isNotEmpty) {
+          return id;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  Future<PioneerHtmlCaptureFolderPreview?> _findPreviewForImportedLibraryItem(
+    Iterable<PioneerHtmlCaptureFolderPreview> previews,
+    Map<String, Object?> itemRow, {
+    required String requestedLibraryItemId,
+  }) async {
+    final normalizedRequestedId = requestedLibraryItemId.trim().toLowerCase();
+    final storedTitle = itemRow['title']?.toString().trim().toLowerCase() ?? '';
+    final storedAuthor =
+        itemRow['author']?.toString().trim().toLowerCase() ?? '';
+    final storedRelativePath =
+        itemRow['relative_path']?.toString().trim().toLowerCase() ?? '';
+    final storedSourceUrl =
+        itemRow['source_url']?.toString().trim().toLowerCase() ?? '';
+    final storedFolderName = storedRelativePath.isEmpty
+        ? ''
+        : p.basename(p.dirname(storedRelativePath)).trim().toLowerCase();
+
+    PioneerHtmlCaptureFolderPreview? titleMatch;
+    for (final preview in previews) {
+      final existingLibraryItemId = await _existingImportedItemId(preview);
+      if (normalizedRequestedId.isNotEmpty &&
+          existingLibraryItemId?.trim().toLowerCase() ==
+              normalizedRequestedId) {
+        return preview;
+      }
+      if (storedFolderName.isNotEmpty &&
+          preview.folderName.trim().toLowerCase() == storedFolderName) {
+        return preview;
+      }
+      final previewSourceUrl =
+          preview.metadata.sourceUrl?.trim().toLowerCase() ?? '';
+      if (storedSourceUrl.isNotEmpty && previewSourceUrl == storedSourceUrl) {
+        return preview;
+      }
+      final previewWork = preview.importWork;
+      final previewTitle = previewWork.title.trim().toLowerCase();
+      final previewAuthor = previewWork.authorName.trim().toLowerCase();
+      if (storedTitle.isNotEmpty &&
+          previewTitle == storedTitle &&
+          (storedAuthor.isEmpty || previewAuthor == storedAuthor)) {
+        titleMatch ??= preview;
+      }
+    }
+    return titleMatch;
+  }
+
+  String _buildHtmlCaptureRelativePath(
+    PioneerSourceWork work,
+    String htmlFilePath,
+  ) {
+    final authorSegment = _htmlCaptureSlug(work.authorName);
+    final fileStem = work.abbreviation.trim().isNotEmpty
+        ? work.abbreviation.trim()
+        : _htmlCaptureSlug(work.title);
+    final fileName = p.basename(htmlFilePath).trim().isEmpty
+        ? 'capture.html'
+        : p.basename(htmlFilePath);
+    return p.join(
+      'TextCaptures',
+      'Research',
+      'Pioneer Authors',
+      authorSegment.isEmpty ? 'unknown_author' : authorSegment,
+      fileStem.isEmpty ? _htmlCaptureSlug(work.title) : fileStem,
+      fileName,
+    );
+  }
+
+  String _htmlCaptureSlug(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+  }
+
+  Future<String> _archiveImportedFolder({
+    required String sourceFolderPath,
+    required String rootPath,
+    required DateTime now,
+  }) async {
+    final sourceFolder = Directory(sourceFolderPath);
+    if (!await sourceFolder.exists()) {
+      throw FileSystemException(
+        'Source folder no longer exists.',
+        sourceFolderPath,
+      );
+    }
+
+    final backupRoot = Directory(p.join(rootPath, 'Backup'));
+    await backupRoot.create(recursive: true);
+
+    final sourceName = p.basename(sourceFolderPath);
+    final dateSuffix = _archiveDateSuffix(now);
+    final baseArchiveName = '$sourceName$dateSuffix';
+    var destinationPath = p.join(backupRoot.path, baseArchiveName);
+    var collision = 2;
+    while (await Directory(destinationPath).exists()) {
+      destinationPath = p.join(backupRoot.path, '$baseArchiveName-$collision');
+      collision += 1;
+    }
+
+    final archived = await sourceFolder.rename(destinationPath);
+    return archived.path;
+  }
+
+  String _archiveDateSuffix(DateTime now) {
+    final month = now.month.toString().padLeft(2, '0');
+    final day = now.day.toString().padLeft(2, '0');
+    final year = now.year.toString().padLeft(4, '0');
+    return '$month-$day-$year';
+  }
+
+  Future<void> _inspectStoredCaptureClipperItems() async {
+    final db = await ELibraryDatabase.instance.database;
+    final catalog = await PioneerSourceCatalog.load();
+    final rows = await db.query(
+      'library_items',
+      columns: const [
+        'id',
+        'title',
+        'author',
+        'cover_path',
+        'source_type',
+        'collection_name',
+      ],
+      where: '''
+        deleted_at IS NULL
+        AND (
+          LOWER(COALESCE(source_type, '')) LIKE '%html_capture%'
+          OR LOWER(COALESCE(collection_name, '')) = 'adventist pioneer library'
+        )
+      ''',
+    );
+
+    for (final row in rows) {
+      final itemId = row['id']?.toString().trim() ?? '';
+      if (itemId.isEmpty) continue;
+      final title = row['title']?.toString().trim() ?? '';
+      final author = row['author']?.toString().trim() ?? '';
+      final coverPath = row['cover_path']?.toString().trim() ?? '';
+      final brokenReasons = <String>[];
+      if (_looksLikeBadCapturedHtmlTitle(title)) {
+        brokenReasons.add('bad title');
+      }
+      if (author.isEmpty ||
+          author.toLowerCase() == 'unknown' ||
+          author.toLowerCase() == 'unknown author') {
+        brokenReasons.add('unknown author');
+      }
+      if (coverPath.isEmpty || !File(coverPath).existsSync()) {
+        brokenReasons.add('missing cover');
+      }
+      if (brokenReasons.isEmpty) continue;
+
+      debugPrint(
+        'Repair Broken CaptureClipper Items: item=$itemId needs ${brokenReasons.join(', ')}.',
+      );
+      try {
+        final hydrated = await LibraryCatalogService.instance.loadItemById(
+          itemId,
+        );
+        final repairRow = <String, Object?>{};
+        final catalogWork = _captureClipperCatalogWorkForRow(
+          row,
+          catalog: catalog,
+        );
+        if (catalogWork != null) {
+          if (_looksLikeBadCapturedHtmlTitle(title)) {
+            repairRow['title'] = catalogWork.title;
+          }
+          if (author.isEmpty ||
+              author.toLowerCase() == 'unknown' ||
+              author.toLowerCase() == 'unknown author') {
+            repairRow['author'] = catalogWork.authorName;
+          }
+          final catalogCoverPath = catalogWork.cachedCoverPath?.trim() ?? '';
+          if (coverPath.isEmpty ||
+              !File(coverPath).existsSync() &&
+                  catalogCoverPath.isNotEmpty &&
+                  File(catalogCoverPath).existsSync()) {
+            repairRow['cover_path'] = catalogCoverPath;
+          }
+        }
+        if (repairRow.isNotEmpty) {
+          repairRow['updated_at'] = DateTime.now().toUtc().toIso8601String();
+          await db.update(
+            'library_items',
+            repairRow,
+            where: 'id = ?',
+            whereArgs: [itemId],
+          );
+        }
+        if (hydrated == null) {
+          debugPrint(
+            'CaptureClipper item could not be repaired because source files are missing/invalid: '
+            '$itemId reason=catalog row unavailable',
+          );
+          continue;
+        }
+        final remainingReasons = <String>[];
+        if (_looksLikeBadCapturedHtmlTitle(hydrated.displayTitle)) {
+          remainingReasons.add('title');
+        }
+        if (hydrated.displayAuthor.trim().isEmpty ||
+            hydrated.displayAuthor.toLowerCase() == 'unknown author') {
+          remainingReasons.add('author');
+        }
+        if (hydrated.coverPath == null ||
+            !File(hydrated.coverPath!).existsSync()) {
+          remainingReasons.add('cover');
+        }
+        if (remainingReasons.isNotEmpty) {
+          debugPrint(
+            'CaptureClipper item could not be fully repaired because source files are missing/invalid: '
+            '$itemId remaining=${remainingReasons.join(', ')}',
+          );
+        }
+      } catch (error) {
+        debugPrint(
+          'CaptureClipper item could not be repaired because source files are missing/invalid: '
+          '$itemId error=$error',
+        );
+      }
+    }
+  }
+
+  PioneerSourceWork? _captureClipperCatalogWorkForRow(
+    Map<String, Object?> row, {
+    required PioneerSourceCatalog catalog,
+  }) {
+    final candidateKeys = <String>{};
+    final sourceUrl = row['source_url']?.toString().trim() ?? '';
+    final relativePath = row['relative_path']?.toString().trim() ?? '';
+    final itemId = row['id']?.toString().trim() ?? '';
+
+    void addCandidateFromPath(String value) {
+      if (value.trim().isEmpty) return;
+      final normalized = value.replaceAll('\\', '/');
+      final baseName = p.basename(p.dirname(normalized)).trim();
+      if (baseName.isNotEmpty) candidateKeys.add(baseName.toLowerCase());
+      final folderName = p.basename(normalized).trim();
+      if (folderName.isNotEmpty) candidateKeys.add(folderName.toLowerCase());
+    }
+
+    addCandidateFromPath(sourceUrl);
+    addCandidateFromPath(relativePath);
+
+    if (itemId.isNotEmpty) {
+      final tokens = itemId.split('_');
+      if (tokens.isNotEmpty) candidateKeys.add(tokens.last.toLowerCase());
+    }
+
+    for (final work in catalog.works) {
+      final abbreviation = work.abbreviation.trim().toLowerCase();
+      final workId = work.id.trim().toLowerCase();
+      if (candidateKeys.contains(abbreviation) ||
+          candidateKeys.contains(workId)) {
+        return work;
+      }
+    }
+    return null;
+  }
+
   Future<PioneerCapturedHtmlFolderImportReport> scanConfiguredFolder({
     bool importFiles = false,
     PioneerExistingImportPolicy existingImportPolicy =
         PioneerExistingImportPolicy.skipExisting,
+    PioneerSourceCatalog? catalog,
   }) async {
     final folderPath = await _settingsStore.loadPioneerCapturedHtmlFolderPath();
     if (folderPath == null || folderPath.trim().isEmpty) {
@@ -257,10 +1163,12 @@ class PioneerCapturedHtmlImportFolderService {
         completedAt: DateTime.now().toUtc(),
       );
     }
+    final loadedCatalog = catalog ?? await _loadConfiguredCatalog();
     return scanFolder(
       folderPath: folderPath,
       importFiles: importFiles,
       existingImportPolicy: existingImportPolicy,
+      catalog: loadedCatalog,
     );
   }
 
@@ -269,6 +1177,7 @@ class PioneerCapturedHtmlImportFolderService {
     bool importFiles = false,
     PioneerExistingImportPolicy existingImportPolicy =
         PioneerExistingImportPolicy.skipExisting,
+    PioneerSourceCatalog? catalog,
   }) async {
     final root = Directory(folderPath);
     if (!await root.exists()) {
@@ -292,6 +1201,7 @@ class PioneerCapturedHtmlImportFolderService {
           filePath: filePath,
           importFiles: importFiles,
           existingImportPolicy: existingImportPolicy,
+          catalog: catalog,
         ),
       );
     }
@@ -308,10 +1218,13 @@ class PioneerCapturedHtmlImportFolderService {
   Future<PioneerCapturedHtmlFolderImportReport> importConfiguredFolder({
     PioneerExistingImportPolicy existingImportPolicy =
         PioneerExistingImportPolicy.skipExisting,
+    PioneerSourceCatalog? catalog,
   }) async {
+    final loadedCatalog = catalog ?? await _loadConfiguredCatalog();
     final report = await scanConfiguredFolder(
       importFiles: true,
       existingImportPolicy: existingImportPolicy,
+      catalog: loadedCatalog,
     );
     try {
       await PioneerCapturedHtmlImportReviewStore.instance.recordEntries(
@@ -323,12 +1236,23 @@ class PioneerCapturedHtmlImportFolderService {
     return report;
   }
 
+  Future<PioneerCapturedHtmlCloudFolderImportReport>
+  repairBrokenCaptureClipperItems({DateTime Function()? nowProvider}) async {
+    final report = await importConfiguredCloudFolder(
+      existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+      nowProvider: nowProvider,
+    );
+    await _inspectStoredCaptureClipperItems();
+    return report;
+  }
+
   Future<PioneerCapturedHtmlFileReport> _analyzeFile({
     required Database db,
     required String rootPath,
     required String filePath,
     required bool importFiles,
     required PioneerExistingImportPolicy existingImportPolicy,
+    PioneerSourceCatalog? catalog,
   }) async {
     final file = File(filePath);
     final rawBytes = await file.readAsBytes();
@@ -342,8 +1266,24 @@ class PioneerCapturedHtmlImportFolderService {
       relativePath: relativePath,
       metadata: metadata,
     );
+    final resolvedTitle = _resolveCapturedTitle(
+      parsed: parsed,
+      metadata: metadata,
+      filePath: filePath,
+      catalog: catalog,
+    );
+    final resolvedAuthor = _resolveCapturedAuthor(
+      parsed: parsed,
+      metadata: metadata,
+      filePath: filePath,
+      catalog: catalog,
+    );
+    final resolvedCoverImagePath =
+        await _discoverFolderCoverImage(rootPath) ?? parsed.coverImagePath;
     final work = _workFromParsed(
       parsed: parsed,
+      title: resolvedTitle,
+      authorName: resolvedAuthor,
       relativePath: relativePath,
       filePath: filePath,
       metadata: metadata,
@@ -356,6 +1296,7 @@ class PioneerCapturedHtmlImportFolderService {
       relativePath: storageRelativePath,
       sourceUrl: parsed.sourceUrl,
     );
+    var importWork = work;
     if (duplicate != null) {
       final existingHash = duplicate['file_hash']?.toString().trim() ?? '';
       final existingPath = duplicate['relative_path']?.toString().trim() ?? '';
@@ -365,34 +1306,58 @@ class PioneerCapturedHtmlImportFolderService {
       final samePath =
           existingPath.isNotEmpty &&
           existingPath.toLowerCase() == storageRelativePath.toLowerCase();
-      return PioneerCapturedHtmlFileReport(
-        filePath: filePath,
-        relativePath: relativePath,
-        fileHash: fileHash,
-        title: parsed.title,
-        author: parsed.author,
-        sourceType: metadata.sourceType?.trim().isNotEmpty == true
-            ? metadata.sourceType!.trim()
-            : 'pioneer_captured_html',
-        sourceSite: parsed.sourceSite,
-        sourceUrl: parsed.sourceUrl,
-        coverImagePath: parsed.coverImagePath,
-        headingCount: parsed.headingCount,
-        paragraphCount: parsed.paragraphCount,
-        sectionCount: parsed.document.sections.length,
-        warnings: parsed.warnings,
-        status: sameHash
-            ? PioneerCapturedHtmlFileStatus.skippedDuplicate
-            : samePath
-            ? PioneerCapturedHtmlFileStatus.needsCleanup
-            : PioneerCapturedHtmlFileStatus.skippedDuplicate,
-        reason: sameHash
-            ? 'Already imported as ${duplicate['id']?.toString() ?? 'existing item'}.'
-            : samePath
-            ? 'A file already exists at this relative path but the contents changed.'
-            : 'Already imported as ${duplicate['id']?.toString() ?? 'existing item'}.',
-        libraryItemId: duplicate['id']?.toString(),
-      );
+      final duplicateId = duplicate['id']?.toString().trim() ?? '';
+      if (importFiles &&
+          existingImportPolicy ==
+              PioneerExistingImportPolicy.overwriteExisting &&
+          duplicateId.isNotEmpty) {
+        importWork = importWork.copyWith(id: duplicateId);
+      } else if (importFiles &&
+          existingImportPolicy == PioneerExistingImportPolicy.importAsNewCopy) {
+        debugPrint(
+          'CaptureClipper import duplicate matched but new-copy policy '
+          'selected for ${work.title}; creating a fresh library item.',
+        );
+      } else {
+        return PioneerCapturedHtmlFileReport(
+          filePath: filePath,
+          relativePath: relativePath,
+          fileHash: fileHash,
+          sourceFileHash: fileHash,
+          title: resolvedTitle,
+          author: resolvedAuthor,
+          sourceType: metadata.sourceType?.trim().isNotEmpty == true
+              ? metadata.sourceType!.trim()
+              : 'pioneer_captured_html',
+          sourceSite: parsed.sourceSite,
+          sourceUrl: parsed.sourceUrl,
+          coverImagePath: resolvedCoverImagePath,
+          coverImported: false,
+          headingCount: parsed.headingCount,
+          paragraphCount: parsed.paragraphCount,
+          sectionCount: parsed.document.sections.length,
+          firstChapterLabel: parsed.document.sections.isEmpty
+              ? null
+              : parsed.document.sections.first.title,
+          lastChapterLabel: parsed.document.sections.isEmpty
+              ? null
+              : parsed.document.sections.last.title,
+          createdNew: false,
+          existingItemUpdated: false,
+          warnings: parsed.warnings,
+          status: sameHash
+              ? PioneerCapturedHtmlFileStatus.skippedDuplicate
+              : samePath
+              ? PioneerCapturedHtmlFileStatus.needsCleanup
+              : PioneerCapturedHtmlFileStatus.skippedDuplicate,
+          reason: sameHash
+              ? 'Already imported as ${duplicate['id']?.toString() ?? 'existing item'}.'
+              : samePath
+              ? 'A file already exists at this relative path but the contents changed.'
+              : 'Already imported as ${duplicate['id']?.toString() ?? 'existing item'}.',
+          libraryItemId: duplicate['id']?.toString(),
+        );
+      }
     }
 
     final reportStatus = parsed.needsCleanup
@@ -403,15 +1368,25 @@ class PioneerCapturedHtmlImportFolderService {
         filePath: filePath,
         relativePath: relativePath,
         fileHash: fileHash,
-        title: parsed.title,
-        author: parsed.author,
+        sourceFileHash: fileHash,
+        title: resolvedTitle,
+        author: resolvedAuthor,
         sourceType: work.sourceType ?? 'pioneer_captured_html',
         sourceSite: parsed.sourceSite,
         sourceUrl: parsed.sourceUrl,
-        coverImagePath: parsed.coverImagePath,
+        coverImagePath: resolvedCoverImagePath,
+        coverImported: false,
         headingCount: parsed.headingCount,
         paragraphCount: parsed.paragraphCount,
         sectionCount: parsed.document.sections.length,
+        firstChapterLabel: parsed.document.sections.isEmpty
+            ? null
+            : parsed.document.sections.first.title,
+        lastChapterLabel: parsed.document.sections.isEmpty
+            ? null
+            : parsed.document.sections.last.title,
+        createdNew: false,
+        existingItemUpdated: false,
         warnings: parsed.warnings,
         status: reportStatus,
         reason: parsed.warnings.isEmpty ? null : parsed.warnings.join(' | '),
@@ -419,14 +1394,14 @@ class PioneerCapturedHtmlImportFolderService {
     }
 
     final importResult = await _importService.importFromParsedCapturedHtml(
-      work: work,
+      work: importWork,
       document: parsed.document,
       sourceBytes: rawBytes,
       sourceUrl: parsed.sourceUrl,
       sourceType: 'pioneer_captured_html',
       sourceSite: parsed.sourceSite,
-      relativePath: _virtualRelativePath(work, relativePath),
-      coverPath: parsed.coverImagePath,
+      relativePath: _virtualRelativePath(importWork, relativePath),
+      coverPath: resolvedCoverImagePath,
       existingImportPolicy: existingImportPolicy,
       indexStatus: parsed.needsCleanup
           ? 'partially_imported_needs_review'
@@ -436,8 +1411,9 @@ class PioneerCapturedHtmlImportFolderService {
     final result = importResult.workResults.isEmpty
         ? null
         : importResult.workResults.first;
-    final resolvedLibraryItemId =
-        result == null ? '' : result.libraryItemId.trim();
+    final resolvedLibraryItemId = result == null
+        ? ''
+        : result.libraryItemId.trim();
     final fileStatus = result == null
         ? PioneerCapturedHtmlFileStatus.failed
         : switch (result.status) {
@@ -456,20 +1432,31 @@ class PioneerCapturedHtmlImportFolderService {
       filePath: filePath,
       relativePath: relativePath,
       fileHash: fileHash,
-      title: parsed.title,
-      author: parsed.author,
-      sourceType: work.sourceType ?? 'pioneer_captured_html',
+      sourceFileHash: fileHash,
+      title: importWork.title,
+      author: importWork.authorName,
+      sourceType: importWork.sourceType ?? 'pioneer_captured_html',
       sourceSite: parsed.sourceSite,
       sourceUrl: parsed.sourceUrl,
-      coverImagePath: parsed.coverImagePath,
+      coverImagePath: resolvedCoverImagePath,
+      coverImported: result?.coverImported ?? false,
       headingCount: parsed.headingCount,
       paragraphCount: parsed.paragraphCount,
       sectionCount: parsed.document.sections.length,
+      firstChapterLabel: parsed.document.sections.isEmpty
+          ? null
+          : parsed.document.sections.first.title,
+      lastChapterLabel: parsed.document.sections.isEmpty
+          ? null
+          : parsed.document.sections.last.title,
+      createdNew: result?.createdNew ?? false,
+      existingItemUpdated: result?.existingItemUpdated ?? false,
       warnings: parsed.warnings,
       status: fileStatus,
       reason: result?.reason ?? parsed.warnings.join(' | '),
-      libraryItemId:
-          resolvedLibraryItemId.isNotEmpty ? resolvedLibraryItemId : null,
+      libraryItemId: resolvedLibraryItemId.isNotEmpty
+          ? resolvedLibraryItemId
+          : null,
     );
   }
 }
@@ -506,14 +1493,7 @@ Iterable<PioneerCapturedHtmlImportReviewEntry> _reviewEntriesFromReport(
 
 PioneerCaptureFolderMetadata _folderMetadataFor(String filePath) {
   final folder = Directory(p.dirname(filePath));
-  final metadataFile = File(p.join(folder.path, 'metadata.json'));
-  if (!metadataFile.existsSync()) {
-    return PioneerCaptureFolderMetadata.empty();
-  }
-  return PioneerCaptureFolderMetadata.fromFile(
-    metadataFile,
-    folderPath: folder.path,
-  );
+  return PioneerCaptureFolderMetadata.fromFolder(folder);
 }
 
 Future<List<String>> _discoverHtmlFiles(Directory root) async {
@@ -561,15 +1541,14 @@ Future<Map<String, Object?>?> _existingDuplicate({
 
 PioneerSourceWork _workFromParsed({
   required PioneerCapturedHtmlParseResult parsed,
+  required String title,
+  required String authorName,
   required String relativePath,
   required String filePath,
   required PioneerCaptureFolderMetadata metadata,
   required String fileHash,
 }) {
   final fileStem = p.basenameWithoutExtension(filePath);
-  final authorName = parsed.author.trim().isNotEmpty
-      ? parsed.author.trim()
-      : 'Unknown';
   final authorId = _stableId(
     authorName == 'Unknown' ? 'unknown_$relativePath' : authorName,
   );
@@ -578,7 +1557,7 @@ PioneerSourceWork _workFromParsed({
       : _stableId(relativePath.isNotEmpty ? relativePath : fileStem);
   final abbreviation = _capturedHtmlAbbreviation(
     metadata.preferredAbbreviation,
-    title: parsed.title,
+    title: title,
     fileStem: fileStem,
     fileHash: fileHash,
   );
@@ -588,7 +1567,7 @@ PioneerSourceWork _workFromParsed({
     authorId: authorId,
     authorName: authorName,
     sourceFamily: 'Pioneer',
-    title: parsed.title,
+    title: title,
     abbreviation: abbreviation,
     group: 'Pioneer Authors',
     subgroup: 'Captured HTML',
@@ -600,6 +1579,221 @@ PioneerSourceWork _workFromParsed({
     sourceLabel: parsed.sourceSite ?? 'local_cloud_folder',
     notes: notes,
   );
+}
+
+String _resolveCapturedTitle({
+  required PioneerCapturedHtmlParseResult parsed,
+  required PioneerCaptureFolderMetadata metadata,
+  required String filePath,
+  PioneerSourceCatalog? catalog,
+}) {
+  final folderName = p.basename(p.dirname(filePath)).trim();
+  final metadataTitle = metadata.title?.trim() ?? '';
+  final catalogWork = catalog == null
+      ? null
+      : _findCatalogWork(
+          catalog,
+          parsed: parsed,
+          metadata: metadata,
+          filePath: filePath,
+        );
+  if (catalogWork != null &&
+      looksLikeCaptureFolderPlaceholderTitle(
+        metadataTitle,
+        folderCode: folderName,
+        abbreviation: metadata.preferredAbbreviation,
+      )) {
+    return catalogWork.title;
+  }
+  if (metadataTitle.isNotEmpty) return metadataTitle;
+
+  final parsedTitle = parsed.title.trim();
+  if (parsedTitle.isNotEmpty &&
+      !_looksLikeSectionOrChapterHeading(parsedTitle)) {
+    return parsedTitle;
+  }
+  final normalizedFolderName = folderName.toUpperCase();
+  final folderCode = RegExp(
+    r'^[A-Z]{2,8}',
+  ).firstMatch(normalizedFolderName)?.group(0)?.trim();
+  if (folderCode != null &&
+      folderCode.isNotEmpty &&
+      folderName == normalizedFolderName) {
+    return folderCode;
+  }
+
+  final fileStem = p.basenameWithoutExtension(filePath).trim();
+  if (fileStem.isNotEmpty) return _titleCaseFromFileStem(fileStem);
+
+  return 'Captured HTML';
+}
+
+PioneerSourceWork? _findCatalogWork(
+  PioneerSourceCatalog catalog, {
+  required PioneerCapturedHtmlParseResult parsed,
+  required PioneerCaptureFolderMetadata metadata,
+  required String filePath,
+}) {
+  final folderName = p.basename(p.dirname(filePath));
+  final normalizedTitle = _stableTextKey(metadata.title?.trim() ?? '');
+  final normalizedDetectedTitle = _stableTextKey(parsed.title);
+  final normalizedFolder = _stableTextKey(folderName);
+  final normalizedAbbreviation = _stableTextKey(
+    metadata.preferredAbbreviation ?? folderName,
+  );
+
+  for (final work in catalog.works) {
+    if (normalizedTitle.isNotEmpty &&
+        _stableTextKey(work.title) == normalizedTitle) {
+      return work;
+    }
+    if (normalizedDetectedTitle.isNotEmpty &&
+        _stableTextKey(work.title) == normalizedDetectedTitle) {
+      return work;
+    }
+  }
+
+  for (final work in catalog.works) {
+    if (normalizedAbbreviation.isNotEmpty &&
+        _stableTextKey(work.abbreviation) == normalizedAbbreviation) {
+      return work;
+    }
+  }
+
+  for (final work in catalog.works) {
+    final workTitle = _stableTextKey(work.title);
+    if (workTitle.isNotEmpty &&
+        (normalizedFolder.contains(workTitle) ||
+            workTitle.contains(normalizedFolder))) {
+      return work;
+    }
+  }
+  return null;
+}
+
+String _resolveCapturedAuthor({
+  required PioneerCapturedHtmlParseResult parsed,
+  required PioneerCaptureFolderMetadata metadata,
+  required String filePath,
+  PioneerSourceCatalog? catalog,
+}) {
+  final metadataAuthor = metadata.primaryContributorName?.trim() ?? '';
+  final catalogWork = catalog == null
+      ? null
+      : _findCatalogWork(
+          catalog,
+          parsed: parsed,
+          metadata: metadata,
+          filePath: filePath,
+        );
+  final folderName = p.basename(p.dirname(filePath)).trim();
+  final placeholderMetadataAuthor =
+      metadataAuthor.isEmpty ||
+      metadataAuthor.toLowerCase() == 'unknown' ||
+      metadataAuthor.toLowerCase() == 'unknown author' ||
+      looksLikeCaptureFolderPlaceholderTitle(
+        metadataAuthor,
+        folderCode: folderName,
+        abbreviation: metadata.preferredAbbreviation,
+      );
+  final catalogAuthor = catalogWork?.authorName.trim() ?? '';
+  if (catalogAuthor.isNotEmpty && placeholderMetadataAuthor) {
+    return catalogAuthor;
+  }
+  if (metadataAuthor.isNotEmpty && !placeholderMetadataAuthor) {
+    return metadataAuthor;
+  }
+  if (catalogAuthor.isNotEmpty) return catalogAuthor;
+
+  final parsedAuthor = parsed.author.trim();
+  if (parsedAuthor.isNotEmpty && parsedAuthor.toLowerCase() != 'unknown') {
+    return parsedAuthor;
+  }
+
+  final folderAuthor = _authorFromFolderName(folderName);
+  if (folderAuthor != null && folderAuthor.trim().isNotEmpty) {
+    return folderAuthor.trim();
+  }
+
+  return 'Unknown';
+}
+
+String? _authorFromFolderName(String folderName) {
+  final upper = folderName.toUpperCase();
+  if (upper.endsWith('_ATJ')) return 'A. T. Jones';
+  if (upper.endsWith('_EJW')) return 'E. J. Waggoner';
+  if (upper.endsWith('_US')) return 'Uriah Smith';
+  if (upper.endsWith('_JNA')) return 'J. N. Andrews';
+  return null;
+}
+
+Future<String?> _discoverFolderCoverImage(String rootPath) async {
+  final folder = Directory(rootPath);
+  if (!await folder.exists()) return null;
+
+  final imageFiles = <String>[];
+  await for (final entity in folder.list(recursive: true, followLinks: false)) {
+    if (entity is! File) continue;
+    if (!_isImageFile(entity.path)) continue;
+    imageFiles.add(p.normalize(entity.path));
+  }
+  if (imageFiles.isEmpty) return null;
+  imageFiles.sort();
+
+  const priorityNames = <String>[
+    'cover.png',
+    'cover.jpg',
+    'cover.jpeg',
+    'thumbnail.png',
+    'thumbnail.jpg',
+    'thumbnail.jpeg',
+  ];
+  for (final priority in priorityNames) {
+    for (final image in imageFiles) {
+      if (p.basename(image).toLowerCase() == priority) {
+        return image;
+      }
+    }
+  }
+
+  return imageFiles.first;
+}
+
+bool _isImageFile(String path) {
+  switch (p.extension(path).toLowerCase()) {
+    case '.png':
+    case '.jpg':
+    case '.jpeg':
+    case '.webp':
+    case '.gif':
+    case '.bmp':
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool _looksLikeSectionOrChapterHeading(String value) {
+  final normalized = value.trim().toLowerCase();
+  return RegExp(r'^(chapter|section)\s+\d+\b').hasMatch(normalized);
+}
+
+bool _looksLikeBadCapturedHtmlTitle(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized.isEmpty) return true;
+  if (normalized.contains('...')) return true;
+  return looksLikeCaptureFolderPlaceholderTitle(value) ||
+      _looksLikeSectionOrChapterHeading(value) ||
+      normalized.startsWith('chapter 0') ||
+      normalized.startsWith('section 0');
+}
+
+String _stableTextKey(String text) {
+  return text
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
 }
 
 String _virtualRelativePath(PioneerSourceWork work, String sourceRelativePath) {
@@ -691,8 +1885,9 @@ List<PioneerImportSection> _sectionsFromBlocks(
   var currentParagraphs = <String>[];
   var sectionIndex = 1;
 
-  void flush() {
-    if (currentParagraphs.isEmpty) return;
+  void flush({bool allowEmpty = false}) {
+    if (currentParagraphs.isEmpty && !allowEmpty) return;
+    if (currentParagraphs.isEmpty && currentHeading.trim().isEmpty) return;
     final rootSegment = _stableId(relativePath).isEmpty
         ? 'captured_html'
         : _stableId(relativePath);
@@ -716,7 +1911,11 @@ List<PioneerImportSection> _sectionsFromBlocks(
 
   for (final block in blocks) {
     if (block.kind == 'heading') {
-      flush();
+      if (currentParagraphs.isEmpty && sections.isNotEmpty) {
+        flush(allowEmpty: true);
+      } else {
+        flush();
+      }
       final level = block.level ?? 1;
       while (pathSegments.length >= level) {
         pathSegments.removeLast();
@@ -783,9 +1982,17 @@ String _titleFromHtml({
     dotAll: true,
   ).firstMatch(rawHtml);
   final title = _cleanHtmlText(titleMatch?.group(1));
-  if (title.isNotEmpty) return title;
+  if (title.isNotEmpty && !_looksLikeSectionOrChapterHeading(title)) {
+    return title;
+  }
   for (final heading in _headingTexts(bodyHtml)) {
-    if (heading.isNotEmpty) return heading;
+    if (heading.isNotEmpty && !_looksLikeSectionOrChapterHeading(heading)) {
+      return heading;
+    }
+  }
+  final folderName = p.basename(p.dirname(filePath)).trim();
+  if (folderName.isNotEmpty && !_looksLikeSectionOrChapterHeading(folderName)) {
+    return folderName;
   }
   final fileStem = p.basenameWithoutExtension(filePath).trim();
   return fileStem.isEmpty ? 'Captured HTML' : _titleCaseFromFileStem(fileStem);
@@ -880,7 +2087,7 @@ List<_HtmlBlock> _extractHtmlBlocks(String rawHtml) {
   final body = _extractHtmlBody(rawHtml) ?? rawHtml;
   final blocks = <_HtmlBlock>[];
   final blockPattern = RegExp(
-    r'<(/?)(h[1-3]|p|li|blockquote|div)\b([^>]*)>',
+    r'<(/?)(h[1-3]|p|li|blockquote|div|b|strong)\b([^>]*)>',
     caseSensitive: false,
     dotAll: true,
   );
@@ -905,6 +2112,10 @@ List<_HtmlBlock> _extractHtmlBlocks(String rawHtml) {
     if (_isHiddenHtmlBlock(open.attrs, innerHtml)) continue;
     final text = _cleanHtmlText(innerHtml);
     if (text.isEmpty) continue;
+    if ((tag == 'b' || tag == 'strong') &&
+        _hasInlineContainingBlock(stack, openIndex)) {
+      continue;
+    }
     if (tag.startsWith('h')) {
       blocks.add(
         _HtmlBlock(
@@ -913,8 +2124,29 @@ List<_HtmlBlock> _extractHtmlBlocks(String rawHtml) {
           level: int.tryParse(tag.substring(1)),
         ),
       );
+    } else if (tag == 'b' || tag == 'strong') {
+      blocks.add(_HtmlBlock(kind: 'heading', text: text, level: null));
     } else {
-      blocks.add(_HtmlBlock(kind: 'paragraph', text: text, level: null));
+      if (tag == 'div' &&
+          RegExp(
+            r'<(/?)(h[1-3]|p|li|blockquote|b|strong)\b',
+            caseSensitive: false,
+          ).hasMatch(innerHtml)) {
+        continue;
+      }
+      final splitHeading = _splitLeadingChapterHeading(text);
+      if (splitHeading != null) {
+        blocks.add(
+          _HtmlBlock(kind: 'heading', text: splitHeading.heading, level: null),
+        );
+        if (splitHeading.body.isNotEmpty) {
+          blocks.add(
+            _HtmlBlock(kind: 'paragraph', text: splitHeading.body, level: null),
+          );
+        }
+      } else {
+        blocks.add(_HtmlBlock(kind: 'paragraph', text: text, level: null));
+      }
     }
   }
 
@@ -959,6 +2191,19 @@ bool _isHiddenHtmlBlock(String attrs, String innerHtml) {
       combined.contains("aria-hidden='true'");
 }
 
+bool _hasInlineContainingBlock(List<_OpenBlock> stack, int openIndex) {
+  for (var index = openIndex - 1; index >= 0; index--) {
+    final tag = stack[index].tag;
+    if (tag == 'p' || tag == 'li' || tag == 'blockquote') {
+      return true;
+    }
+    if (tag == 'div' || tag.startsWith('h')) {
+      return false;
+    }
+  }
+  return false;
+}
+
 String _titleCaseFromFileStem(String fileStem) {
   final parts = fileStem
       .replaceAll(RegExp(r'[_\-]+'), ' ')
@@ -985,4 +2230,41 @@ class _OpenBlock {
   final String tag;
   final String attrs;
   final int contentStart;
+}
+
+class _LeadingChapterHeadingSplit {
+  const _LeadingChapterHeadingSplit({
+    required this.heading,
+    required this.body,
+  });
+
+  final String heading;
+  final String body;
+}
+
+_LeadingChapterHeadingSplit? _splitLeadingChapterHeading(String text) {
+  final normalized = _cleanHtmlText(text);
+  if (normalized.isEmpty) return null;
+  if (normalized.contains('pg.') ||
+      RegExp(r'\.{4,}').hasMatch(normalized) ||
+      normalized.contains('....')) {
+    return null;
+  }
+
+  final match = RegExp(
+    r'^(Chapter|Section)\s+(\d+)\s*[\.\-—]\s*(.+?)(?=\s+[A-Z]{2,8}\s+\d+(?:\.\d+)?\b|$)',
+    caseSensitive: false,
+    dotAll: true,
+  ).firstMatch(normalized);
+  if (match == null) return null;
+
+  final label = match.group(1) ?? 'Chapter';
+  final number = match.group(2) ?? '1';
+  final title = _cleanHtmlText(match.group(3));
+  final heading = title.isEmpty
+      ? '${label[0].toUpperCase()}${label.substring(1).toLowerCase()} $number'
+      : '${label[0].toUpperCase()}${label.substring(1).toLowerCase()} $number — $title';
+  final body = _cleanHtmlText(normalized.substring(match.end));
+
+  return _LeadingChapterHeadingSplit(heading: heading, body: body);
 }

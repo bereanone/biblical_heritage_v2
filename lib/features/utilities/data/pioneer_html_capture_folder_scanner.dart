@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
@@ -96,6 +97,7 @@ class EgwHtmlCaptureExtractionResult {
     required this.chapterHeadingCount,
     required this.detectedTitle,
     required this.warnings,
+    this.detectedAuthor,
   });
 
   final String text;
@@ -106,6 +108,7 @@ class EgwHtmlCaptureExtractionResult {
   final List<String> duplicateRefs;
   final int chapterHeadingCount;
   final String? detectedTitle;
+  final String? detectedAuthor;
   final List<String> warnings;
 
   int get duplicateRefCount => duplicateRefs.length;
@@ -119,6 +122,8 @@ class PioneerHtmlCaptureFolderPreview {
     required this.metadata,
     required this.htmlFiles,
     required this.imageFiles,
+    this.availableFileNames = const <String>[],
+    this.sourceFileHash,
     required this.preferredCoverImagePath,
     required this.detectedTitle,
     required this.detectedAuthor,
@@ -128,8 +133,11 @@ class PioneerHtmlCaptureFolderPreview {
     required this.refCount,
     required this.duplicateRefCount,
     required this.chapterHeadingCount,
+    this.firstChapterLabel,
+    this.lastChapterLabel,
     required this.isValid,
     required this.warnings,
+    this.validationReasons = const <String>[],
     required this.importStatus,
     this.catalogWork,
     this.extractedText,
@@ -140,6 +148,8 @@ class PioneerHtmlCaptureFolderPreview {
   final PioneerCaptureFolderMetadata metadata;
   final List<String> htmlFiles;
   final List<String> imageFiles;
+  final List<String> availableFileNames;
+  final String? sourceFileHash;
   final String? preferredCoverImagePath;
   final String? detectedTitle;
   final String? detectedAuthor;
@@ -149,8 +159,11 @@ class PioneerHtmlCaptureFolderPreview {
   final int refCount;
   final int duplicateRefCount;
   final int chapterHeadingCount;
+  final String? firstChapterLabel;
+  final String? lastChapterLabel;
   final bool isValid;
   final List<String> warnings;
+  final List<String> validationReasons;
   final PioneerHtmlCaptureImportStatus importStatus;
   final PioneerSourceWork? catalogWork;
   final String? extractedText;
@@ -161,24 +174,21 @@ class PioneerHtmlCaptureFolderPreview {
 
   bool get hasMetadataIdentity => metadata.hasIdentity;
 
-  PioneerSourceWork get importWork {
-    if (!isValid) {
-      throw StateError('Capture preview is not importable: $folderName');
-    }
+  PioneerSourceWork get bestEffortWork {
     final catalog = catalogWork;
-    final sourceTitle =
-        metadata.title ?? catalog?.title ?? detectedTitle ?? folderName;
+    final sourceTitle = _resolveBestEffortTitle(
+      catalog,
+      folderName: folderName,
+    );
     final sourceAbbreviation =
         metadata.preferredAbbreviation ??
         detectedAbbreviation ??
         catalog?.abbreviation ??
         _abbreviationFromFolder(folderName);
-    final sourceAuthor =
-        metadata.primaryContributorName ??
-        catalog?.authorName ??
-        detectedAuthor ??
-        _authorFromFolderName(folderName) ??
-        'Unknown';
+    final sourceAuthor = _resolveBestEffortAuthor(
+      catalog,
+      folderName: folderName,
+    );
     final workId = metadata.workId?.trim();
     final baseWork =
         catalog ??
@@ -240,9 +250,68 @@ class PioneerHtmlCaptureFolderPreview {
     );
   }
 
+  String _resolveBestEffortTitle(
+    PioneerSourceWork? catalog, {
+    required String folderName,
+  }) {
+    final metadataTitle = metadata.title?.trim() ?? '';
+    final catalogTitle = catalog?.title.trim() ?? '';
+    final detectedTitleValue = detectedTitle?.trim() ?? '';
+    if (catalogTitle.isNotEmpty &&
+        looksLikeCaptureFolderPlaceholderTitle(
+          metadataTitle,
+          folderCode: folderName,
+          abbreviation: metadata.preferredAbbreviation,
+        )) {
+      return catalogTitle;
+    }
+    if (metadataTitle.isNotEmpty) return metadataTitle;
+    if (catalogTitle.isNotEmpty) return catalogTitle;
+    if (detectedTitleValue.isNotEmpty) return detectedTitleValue;
+    return folderName;
+  }
+
+  String _resolveBestEffortAuthor(
+    PioneerSourceWork? catalog, {
+    required String folderName,
+  }) {
+    final metadataAuthor = metadata.primaryContributorName?.trim() ?? '';
+    final catalogAuthor = catalog?.authorName.trim() ?? '';
+    final folderAuthor = _authorFromFolderName(folderName)?.trim() ?? '';
+    final placeholderMetadataAuthor =
+        metadataAuthor.isEmpty ||
+        metadataAuthor.toLowerCase() == 'unknown' ||
+        metadataAuthor.toLowerCase() == 'unknown author' ||
+        looksLikeCaptureFolderPlaceholderTitle(
+          metadataAuthor,
+          folderCode: folderName,
+          abbreviation: metadata.preferredAbbreviation,
+        );
+
+    if (catalogAuthor.isNotEmpty && placeholderMetadataAuthor) {
+      return catalogAuthor;
+    }
+    if (metadataAuthor.isNotEmpty && !placeholderMetadataAuthor) {
+      return metadataAuthor;
+    }
+    if (catalogAuthor.isNotEmpty) return catalogAuthor;
+    if (folderAuthor.isNotEmpty) return folderAuthor;
+    return detectedAuthor?.trim().isNotEmpty == true
+        ? detectedAuthor!.trim()
+        : 'Unknown';
+  }
+
+  PioneerSourceWork get importWork {
+    if (!isValid) {
+      throw StateError('Capture preview is not importable: $folderName');
+    }
+    return bestEffortWork;
+  }
+
   PioneerHtmlCaptureFolderPreview copyWith({
     PioneerHtmlCaptureImportStatus? importStatus,
     List<String>? warnings,
+    List<String>? validationReasons,
     bool? isValid,
   }) {
     return PioneerHtmlCaptureFolderPreview(
@@ -251,6 +320,8 @@ class PioneerHtmlCaptureFolderPreview {
       metadata: metadata,
       htmlFiles: htmlFiles,
       imageFiles: imageFiles,
+      availableFileNames: availableFileNames,
+      sourceFileHash: sourceFileHash,
       preferredCoverImagePath: preferredCoverImagePath,
       detectedTitle: detectedTitle,
       detectedAuthor: detectedAuthor,
@@ -260,8 +331,11 @@ class PioneerHtmlCaptureFolderPreview {
       refCount: refCount,
       duplicateRefCount: duplicateRefCount,
       chapterHeadingCount: chapterHeadingCount,
+      firstChapterLabel: firstChapterLabel,
+      lastChapterLabel: lastChapterLabel,
       isValid: isValid ?? this.isValid,
       warnings: warnings ?? this.warnings,
+      validationReasons: validationReasons ?? this.validationReasons,
       importStatus: importStatus ?? this.importStatus,
       catalogWork: catalogWork,
       extractedText: extractedText,
@@ -282,7 +356,9 @@ class EgwHtmlCaptureExtractor {
     if (readableBlocks.isEmpty) {
       warnings.add('No div.clip.clip-text paragraphs were found.');
     }
-    final allText = _normalizeWhitespace(readableBlocks.join(' '));
+    final allText = _normalizeWhitespace(
+      readableBlocks.map((block) => block.text).join(' '),
+    );
     final abbreviation =
         _detectAbbreviation(allText) ?? fallbackAbbreviation?.trim();
     if (abbreviation == null || abbreviation.isEmpty) {
@@ -309,28 +385,47 @@ class EgwHtmlCaptureExtractor {
         .map((match) => match.group(0)!)
         .toList(growable: false);
     final duplicateRefs = _duplicateRefs(refs);
+    final copiedPrefix = _detectCopiedEgwPrefix(allText);
+    final fallbackTitleIsPlaceholder =
+        fallbackTitle == null ||
+        looksLikeCaptureFolderPlaceholderTitle(
+          fallbackTitle,
+          folderCode: fallbackAbbreviation,
+          abbreviation: normalizedAbbreviation,
+        );
+    if (copiedPrefix != null) {
+      return _extractCopiedEgwCapture(
+        allText: allText,
+        prefix: copiedPrefix,
+        abbreviation: normalizedAbbreviation,
+        refs: refs,
+        duplicateRefs: duplicateRefs,
+        title: fallbackTitleIsPlaceholder
+            ? copiedPrefix.title
+            : fallbackTitle.trim(),
+        initialWarnings: warnings,
+      );
+    }
     final title = fallbackTitle?.trim().isNotEmpty == true
         ? fallbackTitle!.trim()
-        : _detectTitle(readableBlocks, normalizedAbbreviation);
+        : _detectTitle(
+            readableBlocks.map((block) => block.text).toList(growable: false),
+            normalizedAbbreviation,
+          );
     final lines = <String>[];
     var currentPage = -1;
     var emittedHeading = false;
     var chapterHeadingCount = 0;
 
-    if (title != null && title.trim().isNotEmpty) {
-      lines.add('Chapter 0 — ${_normalizeChapterTitle(title)}');
-      emittedHeading = true;
-    }
-
     void ensureFallbackHeading() {
       if (emittedHeading) return;
       final cleanTitle = _normalizeChapterTitle(title ?? 'Captured Text');
-      lines.add('Chapter 0 — $cleanTitle');
+      lines.add('Chapter 1 — $cleanTitle');
       emittedHeading = true;
     }
 
-    for (final rawBlock in readableBlocks) {
-      var block = _normalizeWhitespace(rawBlock);
+    for (final readableBlock in readableBlocks) {
+      var block = _normalizeWhitespace(readableBlock.text);
       if (block.isEmpty) continue;
 
       final chapter = _chapterHeading(block, normalizedAbbreviation);
@@ -339,6 +434,12 @@ class EgwHtmlCaptureExtractor {
         emittedHeading = true;
         chapterHeadingCount += 1;
         block = chapter.remainingText;
+      } else if (readableBlock.isHeadingCandidate &&
+          _looksLikeStandaloneHeadingBlock(block)) {
+        lines.add(block);
+        emittedHeading = true;
+        chapterHeadingCount += 1;
+        continue;
       } else {
         ensureFallbackHeading();
       }
@@ -382,36 +483,206 @@ class EgwHtmlCaptureExtractor {
     );
   }
 
-  List<String> _extractReadableBlocks(String html) {
-    final blocks = <String>[];
-    final clipPattern = RegExp(
-      r'''<div\b(?=[^>]*class\s*=\s*["'][^"']*\bclip-text\b[^"']*["'])[^>]*>(.*?)</div>''',
+  List<_ReadableHtmlBlock> _extractReadableBlocks(String html) {
+    final blocks = <_ReadableHtmlBlock>[];
+    final blockPattern = RegExp(
+      r'<(h[2-6]|p|b|strong)\b[^>]*>(.*?)</\1>',
       caseSensitive: false,
       dotAll: true,
     );
+
+    for (final match in blockPattern.allMatches(html)) {
+      final tag = (match.group(1) ?? '').toLowerCase();
+      final text = _stripHtml(match.group(2) ?? '');
+      if (text.isEmpty) continue;
+      if (tag.startsWith('h') || tag == 'p') {
+        blocks.add(
+          _ReadableHtmlBlock(tag: tag, text: text, isHeadingCandidate: true),
+        );
+        continue;
+      }
+      if ((tag == 'b' || tag == 'strong') && _looksLikeHeadingText(text)) {
+        blocks.add(
+          _ReadableHtmlBlock(tag: tag, text: text, isHeadingCandidate: true),
+        );
+      }
+    }
+    if (blocks.isNotEmpty) {
+      return List<_ReadableHtmlBlock>.unmodifiable(blocks);
+    }
+
     final paragraphPattern = RegExp(
       r'<p\b[^>]*>(.*?)</p>',
       caseSensitive: false,
       dotAll: true,
     );
-
-    for (final clip in clipPattern.allMatches(html)) {
-      final clipHtml = clip.group(1) ?? '';
-      for (final paragraph in paragraphPattern.allMatches(clipHtml)) {
-        final text = _stripHtml(paragraph.group(1) ?? '');
-        if (text.isNotEmpty) blocks.add(text);
-      }
-    }
-    if (blocks.isNotEmpty) {
-      return List<String>.unmodifiable(blocks);
-    }
-
     for (final paragraph in paragraphPattern.allMatches(html)) {
       final text = _stripHtml(paragraph.group(1) ?? '');
-      if (text.isNotEmpty) blocks.add(text);
+      if (text.isNotEmpty) {
+        blocks.add(
+          _ReadableHtmlBlock(tag: 'p', text: text, isHeadingCandidate: false),
+        );
+      }
     }
-    return List<String>.unmodifiable(blocks);
+    return List<_ReadableHtmlBlock>.unmodifiable(blocks);
   }
+
+  /// Detects EGW's "copy with reference" format, where every copied
+  /// paragraph is prefixed with `Title, p. N[.M] (Author)`. Returns null
+  /// when the capture does not repeat such a prefix.
+  _CopiedEgwPrefix? _detectCopiedEgwPrefix(String allText) {
+    final leading = RegExp(
+      r'^(.{1,120}?),\s+p\.\s+\d+(?:\.\d+)?\s+\(([^()]{2,80})\)',
+    ).firstMatch(allText);
+    if (leading == null) return null;
+    final title = _normalizeWhitespace(leading.group(1) ?? '');
+    final author = _normalizeWhitespace(leading.group(2) ?? '');
+    if (title.isEmpty || author.isEmpty) return null;
+    final pattern = RegExp(
+      '${RegExp.escape(title)},\\s+p\\.\\s+(\\d+(?:\\.\\d+)?)\\s+'
+      '\\(${RegExp.escape(author)}\\)',
+    );
+    if (pattern.allMatches(allText).length < 2) return null;
+    return _CopiedEgwPrefix(title: title, author: author, pattern: pattern);
+  }
+
+  /// Normalizes a copied-EGW capture into clean copied-range lines:
+  /// real headings, `ABBR page` markers, paragraph text with the
+  /// `Title, p. N (Author)` prefixes stripped, and trailing ref lines.
+  EgwHtmlCaptureExtractionResult _extractCopiedEgwCapture({
+    required String allText,
+    required _CopiedEgwPrefix prefix,
+    required String abbreviation,
+    required List<String> refs,
+    required List<String> duplicateRefs,
+    required String title,
+    required List<String> initialWarnings,
+  }) {
+    final warnings = <String>[...initialWarnings];
+    final lines = <String>[];
+    var chapterHeadingCount = 0;
+    var currentPage = -1;
+    var lastHeading = '';
+    final matches = prefix.pattern.allMatches(allText).toList(growable: false);
+    final pageMarkerPattern = RegExp(
+      '\\b${RegExp.escape(abbreviation)}\\s+(\\d+)\\b',
+    );
+    final trailingRefPattern = RegExp(
+      '\\{?\\b${RegExp.escape(abbreviation)}\\s+\\d+\\.\\d+\\b\\}?\\s*\$',
+    );
+
+    void emitPageMarker(int? page) {
+      if (page == null || page == currentPage) return;
+      lines.add('$abbreviation $page');
+      currentPage = page;
+    }
+
+    void skipFrontMatter(String text) {
+      final normalized = _normalizeWhitespace(text);
+      if (normalized.isEmpty) return;
+      warnings.add(
+        'Skipped unreferenced front matter: ${_frontMatterSnippet(normalized)}',
+      );
+    }
+
+    for (var index = 0; index < matches.length; index++) {
+      final match = matches[index];
+      final locator = match.group(1) ?? '';
+      final contentEnd = index + 1 < matches.length
+          ? matches[index + 1].start
+          : allText.length;
+      final content = _normalizeWhitespace(
+        allText.substring(match.end, contentEnd),
+      );
+      if (content.isEmpty) continue;
+
+      if (locator.contains('.')) {
+        final refMatch = trailingRefPattern.firstMatch(content);
+        final ref = refMatch == null
+            ? '$abbreviation $locator'
+            : _normalizeCapturedRef(refMatch.group(0)!);
+        final body = refMatch == null
+            ? content
+            : content.substring(0, refMatch.start);
+        final text = _removeInlinePageMarkers(body, abbreviation);
+        if (text.isEmpty) {
+          warnings.add('Skipped empty paragraph text for ref $ref');
+          continue;
+        }
+        emitPageMarker(_pageFromRef(ref));
+        lines.add(text);
+        lines.add(ref);
+        continue;
+      }
+
+      final page = int.tryParse(locator);
+      final markerMatch = pageMarkerPattern.firstMatch(content);
+      final head = _normalizeWhitespace(
+        markerMatch == null ? content : content.substring(0, markerMatch.start),
+      );
+      final remainder = markerMatch == null
+          ? ''
+          : _normalizeWhitespace(content.substring(markerMatch.end));
+      if (head.isNotEmpty) {
+        if (_looksLikeCopiedEgwHeading(head)) {
+          final heading = head.toUpperCase();
+          if (heading != lastHeading) {
+            lines.add(heading);
+            lastHeading = heading;
+            chapterHeadingCount += 1;
+          }
+        } else {
+          skipFrontMatter(head);
+        }
+      }
+      emitPageMarker(page);
+      skipFrontMatter(remainder);
+    }
+
+    final normalizedText = lines.isEmpty ? '' : '${lines.join('\n')}\n';
+    return EgwHtmlCaptureExtractionResult(
+      text: normalizedText,
+      detectedAbbreviation: abbreviation,
+      firstRef: refs.isEmpty ? null : refs.first,
+      lastRef: refs.isEmpty ? null : refs.last,
+      refCount: refs.length,
+      duplicateRefs: duplicateRefs,
+      chapterHeadingCount: chapterHeadingCount,
+      detectedTitle: title,
+      detectedAuthor: prefix.author,
+      warnings: List<String>.unmodifiable([
+        ...warnings,
+        if (duplicateRefs.isNotEmpty)
+          'Duplicate refs detected: ${duplicateRefs.join(', ')}',
+        if (refs.isEmpty) 'No paragraph refs were detected.',
+      ]),
+    );
+  }
+}
+
+@immutable
+class _CopiedEgwPrefix {
+  const _CopiedEgwPrefix({
+    required this.title,
+    required this.author,
+    required this.pattern,
+  });
+
+  final String title;
+  final String author;
+  final RegExp pattern;
+}
+
+bool _looksLikeCopiedEgwHeading(String text) {
+  final normalized = _normalizeWhitespace(text);
+  if (normalized.isEmpty) return false;
+  if (normalized.length > 120) return false;
+  return normalized.split(RegExp(r'\s+')).length <= 16;
+}
+
+String _frontMatterSnippet(String text, {int limit = 80}) {
+  if (text.length <= limit) return text;
+  return '${text.substring(0, limit - 1).trimRight()}…';
 }
 
 class PioneerHtmlCaptureFolderScanner {
@@ -424,6 +695,7 @@ class PioneerHtmlCaptureFolderScanner {
     this.assetManifestKeys,
     this.assetStringLoader,
     this.preferAssetManifest = true,
+    this.ignoredFolderNames = const <String>{},
   });
 
   final String rootPath;
@@ -434,6 +706,7 @@ class PioneerHtmlCaptureFolderScanner {
   final List<String>? assetManifestKeys;
   final PioneerHtmlCaptureAssetStringLoader? assetStringLoader;
   final bool preferAssetManifest;
+  final Set<String> ignoredFolderNames;
 
   Future<List<PioneerHtmlCaptureFolderPreview>> scan({
     PioneerSourceCatalog? catalog,
@@ -679,6 +952,9 @@ class PioneerHtmlCaptureFolderScanner {
     final folderNames = folderKeys.keys.toList(growable: false)..sort();
     final previews = <PioneerHtmlCaptureFolderPreview>[];
     for (final folderName in folderNames) {
+      if (_isIgnoredFolderName(folderName)) {
+        continue;
+      }
       final keys = folderKeys[folderName]!
           .where((key) => !_isIgnoredFile(key))
           .toList(growable: false);
@@ -693,6 +969,7 @@ class PioneerHtmlCaptureFolderScanner {
           folderName: folderName,
           htmlFiles: htmlFiles,
           imageFiles: imageFiles,
+          allFileNames: keys.map((key) => p.basename(key)).toList(),
           catalog: catalog,
           loadHtml: _loadAssetString,
           metadata: await _assetMetadata(keys, folderName: folderName),
@@ -702,24 +979,48 @@ class PioneerHtmlCaptureFolderScanner {
     return List<PioneerHtmlCaptureFolderPreview>.unmodifiable(previews);
   }
 
+  bool _isIgnoredFolderName(String folderName) {
+    final normalized = folderName.trim().toLowerCase();
+    if (normalized.isEmpty) return false;
+    return ignoredFolderNames.any(
+      (value) => value.trim().toLowerCase() == normalized,
+    );
+  }
+
   Future<_CaptureFolderMetadata> _assetMetadata(
     List<String> keys, {
     required String folderName,
   }) async {
-    final assetKey = keys.firstWhere(
-      (key) => p.basename(key) == 'metadata.json',
-      orElse: () => '',
-    );
-    if (assetKey.isEmpty) {
-      return const _CaptureFolderMetadata();
-    }
     try {
-      final metadata = PioneerCaptureFolderMetadata.fromJsonString(
-        await _loadAssetString(assetKey),
-        folderPath: '$_normalizedAssetRoot/$folderName',
-        availableFiles: keys,
+      final folderPath = '$_normalizedAssetRoot/$folderName';
+      final metadataKey = keys.firstWhere(
+        (key) => p.basename(key) == 'metadata.json',
+        orElse: () => '',
       );
-      return _CaptureFolderMetadata(metadata: metadata);
+      final manifestKey = keys.firstWhere(
+        (key) => p.basename(key) == 'manifest.json',
+        orElse: () => '',
+      );
+      if (metadataKey.isEmpty && manifestKey.isEmpty) {
+        return const _CaptureFolderMetadata();
+      }
+      final folderMetadata = metadataKey.isEmpty
+          ? PioneerCaptureFolderMetadata.empty()
+          : PioneerCaptureFolderMetadata.fromJsonString(
+              await _loadAssetString(metadataKey),
+              folderPath: folderPath,
+              availableFiles: keys,
+            );
+      final manifestMetadata = manifestKey.isEmpty
+          ? PioneerCaptureFolderMetadata.empty()
+          : PioneerCaptureFolderMetadata.fromManifestString(
+              await _loadAssetString(manifestKey),
+              folderPath: folderPath,
+              availableFiles: keys,
+            );
+      return _CaptureFolderMetadata(
+        metadata: folderMetadata.mergeWith(manifestMetadata),
+      );
     } catch (_) {
       return const _CaptureFolderMetadata();
     }
@@ -754,6 +1055,9 @@ class PioneerHtmlCaptureFolderScanner {
     var htmlFileCount = 0;
     for (final directory in directories) {
       final folderName = p.basename(directory.path);
+      if (_isIgnoredFolderName(folderName)) {
+        continue;
+      }
       final files = await directory
           .list(recursive: true, followLinks: false)
           .where((entity) => entity is File)
@@ -783,6 +1087,7 @@ class PioneerHtmlCaptureFolderScanner {
           folderName: folderName,
           htmlFiles: htmlFiles,
           imageFiles: imageFiles,
+          allFileNames: files.map((file) => p.basename(file.path)).toList(),
           catalog: catalog,
           initialWarnings: warnings,
           loadHtml: (path) => File(path).readAsString(encoding: utf8),
@@ -806,6 +1111,7 @@ class PioneerHtmlCaptureFolderScanner {
     required List<String> htmlFiles,
     required List<String> imageFiles,
     required Future<String> Function(String path) loadHtml,
+    required List<String> allFileNames,
     PioneerSourceCatalog? catalog,
     _CaptureFolderMetadata metadata = const _CaptureFolderMetadata(),
     List<String> initialWarnings = const <String>[],
@@ -816,9 +1122,12 @@ class PioneerHtmlCaptureFolderScanner {
     }
 
     final extractedParts = <String>[];
+    final htmlHashes = <String>[];
     EgwHtmlCaptureExtractionResult? firstExtraction;
+    EgwCopiedRangeParseResult? parseResult;
     for (final htmlFile in htmlFiles) {
       final html = await loadHtml(htmlFile);
+      htmlHashes.add(sha256.convert(utf8.encode(html)).toString());
       final extraction = extractor.extract(
         html,
         fallbackAbbreviation: _abbreviationFromFolder(folderName),
@@ -832,16 +1141,30 @@ class PioneerHtmlCaptureFolderScanner {
     final extractedText = extractedParts
         .where((part) => part.isNotEmpty)
         .join('\n\n');
-    final parseReport = extractedText.trim().isEmpty
-        ? null
-        : parseEgwCopiedRangeText(
-            extractedText,
-            workAbbreviation:
-                firstExtraction?.detectedAbbreviation ??
-                _abbreviationFromFolder(folderName),
-          ).report;
-    final detectedTitle =
-        metadata.metadata.title ?? firstExtraction?.detectedTitle ?? folderName;
+    if (extractedText.trim().isNotEmpty) {
+      parseResult = parseEgwCopiedRangeText(
+        extractedText,
+        workAbbreviation:
+            firstExtraction?.detectedAbbreviation ??
+            _abbreviationFromFolder(folderName),
+      );
+    }
+    final parseReport = parseResult?.report;
+    final sectionTitles = parseResult?.document.sections
+        .map((section) => section.title.trim())
+        .where((title) => title.isNotEmpty)
+        .toList(growable: false);
+    final metadataTitle = metadata.metadata.title;
+    final metadataTitleIsPlaceholder =
+        metadataTitle == null ||
+        looksLikeCaptureFolderPlaceholderTitle(
+          metadataTitle,
+          folderCode: folderName,
+          abbreviation: metadata.metadata.preferredAbbreviation,
+        );
+    final detectedTitle = !metadataTitleIsPlaceholder
+        ? metadataTitle
+        : firstExtraction?.detectedTitle ?? metadataTitle ?? folderName;
     final detectedAbbreviation =
         metadata.metadata.preferredAbbreviation ??
         firstExtraction?.detectedAbbreviation ??
@@ -857,11 +1180,31 @@ class PioneerHtmlCaptureFolderScanner {
     final detectedAuthor =
         metadata.metadata.primaryContributorName ??
         catalogWork?.authorName ??
-        _authorFromFolderName(folderName);
-    if (catalogWork == null && metadata.metadata.hasIdentity) {
+        _authorFromFolderName(folderName) ??
+        firstExtraction?.detectedAuthor;
+    final inferredWorkId = _inferCaptureWorkId(
+      detectedAbbreviation,
+      detectedAuthor,
+      folderName,
+    );
+    final effectiveMetadata =
+        metadata.metadata.workId?.trim().isNotEmpty == true
+        ? metadata.metadata
+        : PioneerCaptureFolderMetadata(
+            title: metadata.metadata.title,
+            abbreviation: metadata.metadata.abbreviation,
+            displayAbbreviation: metadata.metadata.displayAbbreviation,
+            workId: inferredWorkId,
+            sourceType: metadata.metadata.sourceType,
+            sourceSite: metadata.metadata.sourceSite,
+            sourceUrl: metadata.metadata.sourceUrl,
+            coverImagePath: metadata.metadata.coverImagePath,
+            contributors: metadata.metadata.contributors,
+          );
+    if (catalogWork == null && effectiveMetadata.hasIdentity) {
       warnings.add('No matching Pioneer catalog work was found.');
     }
-    if (!metadata.metadata.hasIdentity && catalogWork != null) {
+    if (!effectiveMetadata.hasIdentity && catalogWork != null) {
       warnings.add('Metadata needed before import.');
     }
     final duplicateRefs =
@@ -870,20 +1213,42 @@ class PioneerHtmlCaptureFolderScanner {
         0;
     final refCount =
         parseReport?.paragraphCount ?? firstExtraction?.refCount ?? 0;
+    final sourceFileHash = htmlHashes.isEmpty
+        ? null
+        : sha256.convert(utf8.encode(htmlHashes.join('|'))).toString();
+    final validationReasons = <String>[];
+    if (htmlFiles.isEmpty) {
+      validationReasons.add('no HTML files found');
+    }
+    if (extractedText.trim().isEmpty) {
+      validationReasons.add('no extracted capture text');
+    }
+    if (refCount <= 0) {
+      validationReasons.add('no ref codes were detected');
+    }
+    if (!effectiveMetadata.hasIdentity && catalogWork == null) {
+      validationReasons.add('missing metadata identity or catalog match');
+    }
     final isValid =
         htmlFiles.isNotEmpty &&
         extractedText.trim().isNotEmpty &&
         refCount > 0 &&
-        (metadata.metadata.hasIdentity || catalogWork == null);
+        (effectiveMetadata.hasIdentity || catalogWork != null);
 
     return PioneerHtmlCaptureFolderPreview(
       folderPath: folderPath,
       folderName: folderName,
-      metadata: metadata.metadata,
+      metadata: effectiveMetadata,
       htmlFiles: List<String>.unmodifiable(htmlFiles),
       imageFiles: List<String>.unmodifiable(imageFiles),
+      availableFileNames: List<String>.unmodifiable(
+        allFileNames.isEmpty
+            ? [...htmlFiles.map(p.basename), ...imageFiles.map(p.basename)]
+            : allFileNames,
+      ),
+      sourceFileHash: sourceFileHash,
       preferredCoverImagePath:
-          metadata.metadata.coverImagePath ?? _preferredCoverImage(imageFiles),
+          effectiveMetadata.coverImagePath ?? _preferredCoverImage(imageFiles),
       detectedTitle: catalogWork?.title ?? detectedTitle,
       detectedAuthor: detectedAuthor,
       detectedAbbreviation: detectedAbbreviation,
@@ -895,8 +1260,15 @@ class PioneerHtmlCaptureFolderScanner {
           parseReport?.headingCount ??
           firstExtraction?.chapterHeadingCount ??
           0,
+      firstChapterLabel: sectionTitles == null || sectionTitles.isEmpty
+          ? null
+          : sectionTitles.first,
+      lastChapterLabel: sectionTitles == null || sectionTitles.isEmpty
+          ? null
+          : sectionTitles.last,
       isValid: isValid,
       warnings: List<String>.unmodifiable(warnings.toSet()),
+      validationReasons: List<String>.unmodifiable(validationReasons),
       importStatus: isValid
           ? PioneerHtmlCaptureImportStatus.newImport
           : PioneerHtmlCaptureImportStatus.invalid,
@@ -962,16 +1334,18 @@ class _CapturedParagraph {
 _LeadingChapter? _chapterHeading(String block, String abbreviation) {
   final searchBlock = block.length > 500 ? block.substring(0, 500) : block;
   final match = RegExp(
-    'Chapter\\s+(\\d+)\\s*[—-]\\s*(.+?)\\s+${RegExp.escape(abbreviation)}\\s+\\d+\\b',
+    '(Chapter|Section)\\s+(\\d+)\\s*[—-]\\s*(.+?)\\s+${RegExp.escape(abbreviation)}\\s+\\d+\\b',
     caseSensitive: false,
     dotAll: true,
   ).firstMatch(searchBlock);
   if (match == null) return null;
-  final number = match.group(1) ?? '0';
-  final title = _normalizeChapterTitle(match.group(2) ?? '');
+  final label = match.group(1) ?? 'Chapter';
+  final number = match.group(2) ?? '1';
+  final title = _normalizeChapterTitle(match.group(3) ?? '');
   final remainingText = _normalizeWhitespace(block.substring(match.end));
   return _LeadingChapter(
-    heading: 'Chapter $number — $title',
+    heading:
+        '${label[0].toUpperCase()}${label.substring(1).toLowerCase()} $number — $title',
     remainingText: remainingText,
   );
 }
@@ -988,7 +1362,7 @@ List<_CapturedParagraph> _paragraphsFromBlock(
       block.substring(cursor, match.start),
       abbreviation,
     );
-    final ref = match.group(0) ?? '';
+    final ref = _normalizeCapturedRef(match.group(0) ?? '');
     if (ref.isNotEmpty) {
       paragraphs.add(_CapturedParagraph(text: text, ref: ref));
     }
@@ -1023,11 +1397,28 @@ String? _detectTitle(List<String> blocks, String abbreviation) {
     final title = match?.group(1)?.trim();
     if (title != null &&
         title.isNotEmpty &&
-        !title.toLowerCase().startsWith('chapter ')) {
+        !_looksLikeSectionOrChapterHeading(title) &&
+        !_looksLikeCaptureSessionTitle(title)) {
       return title;
     }
   }
   return null;
+}
+
+bool _looksLikeSectionOrChapterHeading(String title) {
+  final normalized = title.trim().toLowerCase();
+  return RegExp(r'^(chapter|section)\s+\d+\b').hasMatch(normalized);
+}
+
+bool _looksLikeCaptureSessionTitle(String title) {
+  final normalized = title.trim();
+  if (normalized.isEmpty) return true;
+  if (normalized.contains('_')) return true;
+  if (RegExp(r'\b\d{4}-\d{2}-\d{2}\b').hasMatch(normalized)) return true;
+  if (RegExp(r'^\w+(?:[-_]\w+)+$', caseSensitive: false).hasMatch(normalized)) {
+    return true;
+  }
+  return false;
 }
 
 class _CaptureFolderMetadata {
@@ -1074,16 +1465,8 @@ PioneerSourceWork? _findCatalogWork(
 }
 
 _CaptureFolderMetadata _folderMetadata(Directory directory) {
-  final file = File(p.join(directory.path, 'metadata.json'));
-  if (!file.existsSync()) {
-    return const _CaptureFolderMetadata();
-  }
-  return _CaptureFolderMetadata(
-    metadata: PioneerCaptureFolderMetadata.fromFile(
-      file,
-      folderPath: directory.path,
-    ),
-  );
+  final metadata = PioneerCaptureFolderMetadata.fromFolder(directory);
+  return _CaptureFolderMetadata(metadata: metadata);
 }
 
 String? _authorFromFolderName(String folderName) {
@@ -1148,7 +1531,51 @@ bool _isImageFile(String path) {
 }
 
 String _abbreviationFromFolder(String folderName) {
-  return folderName.trim().toUpperCase();
+  final normalized = folderName.trim();
+  if (normalized.isEmpty) return normalized;
+
+  final upper = normalized.toUpperCase();
+  if (normalized == upper) {
+    final leadingCode = RegExp(r'^[A-Z]{2,12}').firstMatch(upper);
+    if (leadingCode != null) {
+      return leadingCode.group(0)!;
+    }
+  }
+
+  return '';
+}
+
+String _inferCaptureWorkId(
+  String? abbreviation,
+  String? authorName,
+  String folderName,
+) {
+  final normalizedAbbreviation = abbreviation?.trim().toUpperCase() ?? '';
+  if (normalizedAbbreviation.isNotEmpty &&
+      normalizedAbbreviation.contains('_')) {
+    return normalizedAbbreviation;
+  }
+
+  final initials = _authorInitials(authorName);
+  if (normalizedAbbreviation.isNotEmpty && initials.isNotEmpty) {
+    return '${normalizedAbbreviation}_$initials';
+  }
+
+  if (normalizedAbbreviation.isNotEmpty) return normalizedAbbreviation;
+  return folderName.trim().isNotEmpty
+      ? folderName.trim().toUpperCase()
+      : 'UNKNOWN';
+}
+
+String _authorInitials(String? authorName) {
+  final normalized = authorName?.trim() ?? '';
+  if (normalized.isEmpty) return '';
+  final parts = normalized
+      .split(RegExp(r'[^A-Za-z0-9]+'))
+      .where((part) => part.isNotEmpty)
+      .toList(growable: false);
+  if (parts.isEmpty) return '';
+  return parts.map((part) => part[0].toUpperCase()).join();
 }
 
 String _stableCaptureId(String text) {
@@ -1193,7 +1620,16 @@ int? _pageFromRef(String ref) {
 }
 
 RegExp _paragraphRefPattern(String abbreviation) {
-  return RegExp('\\b${RegExp.escape(abbreviation)}\\s+\\d+\\.\\d+\\b');
+  return RegExp(
+    r'\{?\b' + RegExp.escape(abbreviation) + r'\s+\d+\.\d+\b\}?',
+    caseSensitive: false,
+  );
+}
+
+String _normalizeCapturedRef(String ref) {
+  return _normalizeWhitespace(
+    ref.replaceAll(RegExp(r'^[{\[]\s*|\s*[}\]]$'), ''),
+  );
 }
 
 String _stripHtml(String html) {
@@ -1202,6 +1638,44 @@ String _stripHtml(String html) {
         .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
         .replaceAll(RegExp(r'<[^>]+>'), ' '),
   );
+}
+
+bool _looksLikeHeadingText(String text) {
+  final normalized = _normalizeWhitespace(text);
+  if (normalized.isEmpty) return false;
+  if (normalized.length > 140) return false;
+  if (normalized.split(RegExp(r'\s+')).length > 18) return false;
+  return true;
+}
+
+bool _looksLikeStandaloneHeadingBlock(String text) {
+  final normalized = _normalizeWhitespace(text);
+  if (normalized.isEmpty) return false;
+  if (normalized.length > 140) return false;
+  if (normalized.split(RegExp(r'\s+')).length > 18) return false;
+  if (RegExp(
+    r'^(Chapter|Section)\s+\d+\b',
+    caseSensitive: false,
+  ).hasMatch(normalized)) {
+    return true;
+  }
+  if (normalized == normalized.toUpperCase()) {
+    return true;
+  }
+  return false;
+}
+
+@immutable
+class _ReadableHtmlBlock {
+  const _ReadableHtmlBlock({
+    required this.tag,
+    required this.text,
+    required this.isHeadingCandidate,
+  });
+
+  final String tag;
+  final String text;
+  final bool isHeadingCandidate;
 }
 
 String _decodeHtmlEntities(String text) {

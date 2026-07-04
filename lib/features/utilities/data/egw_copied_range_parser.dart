@@ -147,7 +147,6 @@ class EgwBrowserCaptureNormalizer {
     String? fallbackAuthor,
   }) {
     final abbreviation = _normalizeWhitespace(workAbbreviation).toUpperCase();
-    final paragraphRefPattern = _paragraphRefPattern(abbreviation);
     final pageMarkerPattern = _pageMarkerPattern(abbreviation);
     final lines = const LineSplitter()
         .convert(text.replaceAll('\r\n', '\n').replaceAll('\r', '\n'))
@@ -220,7 +219,8 @@ class EgwBrowserCaptureNormalizer {
         }
         continue;
       }
-      if (paragraphRefPattern.hasMatch(line)) {
+      final paragraphRef = _normalizedParagraphRef(line, abbreviation);
+      if (paragraphRef != null) {
         flushBodyForRef(line);
         continue;
       }
@@ -250,8 +250,6 @@ class _BufferedParagraph {
 
   String get text => _normalizeWhitespace(lines.join(' '));
 }
-
-final RegExp _chapterHeadingPattern = RegExp(r'^Chapter\s+\d+\s+—\s+.+$');
 
 String _normalizeWhitespace(String text) {
   return text.replaceAll('\u00a0', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -456,7 +454,21 @@ RegExp _pageMarkerPattern(String abbreviation) {
 }
 
 RegExp _paragraphRefPattern(String abbreviation) {
-  return RegExp('^${RegExp.escape(abbreviation)}\\s+\\d+\\.\\d+\$');
+  return RegExp('^\\{?${RegExp.escape(abbreviation)}\\s+\\d+\\.\\d+\\}?\$');
+}
+
+String? _normalizedParagraphRef(String line, String abbreviation) {
+  final normalized = _normalizeWhitespace(line);
+  if (normalized.isEmpty) return null;
+  final refPattern = RegExp(
+    '^\\{?${RegExp.escape(abbreviation)}\\s+\\d+\\.\\d+\\}?\$',
+  );
+  if (!refPattern.hasMatch(normalized)) {
+    return null;
+  }
+  return _normalizeWhitespace(
+    normalized.replaceAll(RegExp(r'^[{\[]\s*|\s*[}\]]$'), ''),
+  );
 }
 
 EgwCopiedRangeParseResult parseEgwCopiedRangeText(
@@ -465,7 +477,6 @@ EgwCopiedRangeParseResult parseEgwCopiedRangeText(
 }) {
   final abbreviation = _normalizeWhitespace(workAbbreviation).toUpperCase();
   final pageMarkerPattern = _pageMarkerPattern(abbreviation);
-  final paragraphRefPattern = _paragraphRefPattern(abbreviation);
   final sections = <EgwCopiedRangeSection>[];
   EgwCopiedRangeSection? currentSection;
   int? currentPage;
@@ -526,16 +537,6 @@ EgwCopiedRangeParseResult parseEgwCopiedRangeText(
       continue;
     }
 
-    if (_chapterHeadingPattern.hasMatch(line)) {
-      if (buffer.lines.isNotEmpty) {
-        flushBuffer();
-      }
-      ensureSection(line);
-      currentPage = null;
-      buffer = _BufferedParagraph(page: currentPage);
-      continue;
-    }
-
     if (pageMarkerPattern.hasMatch(line)) {
       if (buffer.lines.isNotEmpty) {
         flushBuffer();
@@ -556,23 +557,45 @@ EgwCopiedRangeParseResult parseEgwCopiedRangeText(
       continue;
     }
 
-    if (paragraphRefPattern.hasMatch(line)) {
+    final paragraphRef = _normalizedParagraphRef(line, abbreviation);
+    if (paragraphRef != null) {
       if (buffer.lines.isEmpty) {
         warnings.add('Ref marker without preceding paragraph text: $line');
-        emptyParagraphRefs.add(line);
-        refsInOrder.add(line);
-        if (!seenRefs.add(line)) {
-          duplicateRefs.add(line);
+        emptyParagraphRefs.add(paragraphRef);
+        refsInOrder.add(paragraphRef);
+        if (!seenRefs.add(paragraphRef)) {
+          duplicateRefs.add(paragraphRef);
         }
         if (currentSection == null) {
           ensureSection('Unsectioned text');
         }
         currentSection!.paragraphs.add(
-          EgwCopiedRangeParagraph(ref: line, page: currentPage, text: ''),
+          EgwCopiedRangeParagraph(
+            ref: paragraphRef,
+            page: currentPage,
+            text: '',
+          ),
         );
         continue;
       }
-      flushBuffer(ref: line);
+      flushBuffer(ref: paragraphRef);
+      continue;
+    }
+
+    final normalizedHeading =
+        _normalizeHeadingLine(line) ??
+        (_looksLikeStandaloneHeadingLine(line)
+            ? (_normalizeWhitespace(line).endsWith('.')
+                  ? _normalizeWhitespace(line)
+                  : '${_normalizeWhitespace(line)}.')
+            : null);
+    if (normalizedHeading != null) {
+      if (buffer.lines.isNotEmpty) {
+        flushBuffer();
+      }
+      ensureSection(normalizedHeading);
+      currentPage = null;
+      buffer = _BufferedParagraph(page: currentPage);
       continue;
     }
 
@@ -595,7 +618,7 @@ EgwCopiedRangeParseResult parseEgwCopiedRangeText(
   );
   final validationWarnings = <String>[
     ...warnings,
-    if (sections.isEmpty) 'No chapter headings were detected.',
+    if (sections.isEmpty) 'No chapter or section headings were detected.',
     if (sections.isNotEmpty &&
         sections.every((section) => section.paragraphs.isEmpty))
       'No paragraphs were detected.',
@@ -653,4 +676,28 @@ EgwCopiedRangeParseResult parseEgwCopiedRangeText(
       isValid: isValid,
     ),
   );
+}
+
+String? _normalizeHeadingLine(String line) {
+  final normalized = _normalizeWhitespace(line);
+  final match = RegExp(
+    r'^(Chapter|Section)\s+(\d+)\s*[\.\-—]\s*(.+)$',
+    caseSensitive: false,
+  ).firstMatch(normalized);
+  if (match == null) return null;
+  final label = match.group(1) ?? 'Chapter';
+  final number = match.group(2) ?? '1';
+  final title = match.group(3);
+  if (title == null) return null;
+  return '${label[0].toUpperCase()}${label.substring(1).toLowerCase()} $number — ${_normalizeWhitespace(title).replaceAll(RegExp(r'\.+$'), '').trim()}';
+}
+
+bool _looksLikeStandaloneHeadingLine(String line) {
+  final normalized = _normalizeWhitespace(line).replaceAll(RegExp(r'\.+$'), '');
+  if (normalized.isEmpty) return false;
+  if (RegExp(r'^(CHAPTER|SECTION)\s+([IVXLCDM]+|\d+)\b').hasMatch(normalized)) {
+    return true;
+  }
+  if (normalized.split(RegExp(r'\s+')).length > 16) return false;
+  return normalized == normalized.toUpperCase();
 }

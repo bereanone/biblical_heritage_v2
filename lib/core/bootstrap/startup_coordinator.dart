@@ -10,6 +10,7 @@ import '../database/user_database.dart';
 import 'library_root_service.dart';
 import 'local_settings_store.dart';
 import 'sandbox_bootstrap.dart';
+import '../../features/utilities/data/pioneer_captured_html_import_availability_service.dart';
 
 enum StartupPhase {
   noLegacyFound,
@@ -52,9 +53,7 @@ class StartupCoordinator {
   static const _fromVersion = 'legacy-v1';
   static const _toVersion = 'v2';
 
-  Future<StartupSnapshot> initialize({
-    ValueChanged<String>? onStatus,
-  }) async {
+  Future<StartupSnapshot> initialize({ValueChanged<String>? onStatus}) async {
     onStatus?.call('Checking saved startup state...');
     _ensureDesktopSqlite();
     onStatus?.call('Reading device identity...');
@@ -80,6 +79,7 @@ class StartupCoordinator {
         errorMessage: migrationState['error_message']?.toString(),
         sourceDeviceName: _sourceDeviceName(),
       );
+      await _runConfiguredCaptureFolderImport(onStatus: onStatus);
       return StartupSnapshot(
         phase: StartupPhase.ready,
         message: 'User database ready.',
@@ -114,6 +114,7 @@ class StartupCoordinator {
         'status': 'no_legacy_found',
         'error_message': null,
       });
+      await _runConfiguredCaptureFolderImport(onStatus: onStatus);
       return const StartupSnapshot(
         phase: StartupPhase.noLegacyFound,
         message: 'No legacy user data found.',
@@ -134,12 +135,55 @@ class StartupCoordinator {
       _ => 'Legacy writable user data was found.',
     };
 
+    await _runConfiguredCaptureFolderImport(onStatus: onStatus);
     return StartupSnapshot(
       phase: StartupPhase.legacyFoundWaitingForUser,
       message: promptMessage,
       migrationKey: migrationKey,
       backupPath: backupPath,
     );
+  }
+
+  Future<void> _runConfiguredCaptureFolderImport({
+    ValueChanged<String>? onStatus,
+  }) async {
+    final folderPath = await LocalSettingsStore.instance
+        .loadPioneerCapturedHtmlFolderPath();
+    if (folderPath == null || folderPath.trim().isEmpty) {
+      onStatus?.call(
+        'No CaptureClipper cloud folder configured; skipping detection.',
+      );
+      debugPrint(
+        'CaptureClipper startup detection skipped: no configured folder.',
+      );
+      return;
+    }
+
+    onStatus?.call('Checking CaptureClipper cloud folders...');
+    try {
+      final report = await PioneerCapturedHtmlImportAvailabilityService.instance
+          .refresh();
+      if (!report.hasAvailableImports) {
+        onStatus?.call('CaptureClipper cloud folders checked.');
+        debugPrint(
+          'CaptureClipper startup discovery found no importable folders at '
+          '${report.rootPath}.',
+        );
+        return;
+      }
+      onStatus?.call(
+        'CaptureClipper cloud import available: ${report.availableCount} '
+        'folder${report.availableCount == 1 ? '' : 's'}.',
+      );
+      debugPrint(
+        'CaptureClipper startup discovery found ${report.availableCount} '
+        'importable folder(s) under ${report.rootPath}.',
+      );
+    } catch (error) {
+      debugPrint(
+        'CaptureClipper cloud discovery failed during startup: $error',
+      );
+    }
   }
 
   Future<StartupSnapshot> backUpAndUpgrade() async {

@@ -40,6 +40,43 @@ double libraryTitleScale(double value) => _clampScale(value * 1.15, 0.95, 1.80);
 double libraryCaptionScale(double value) =>
     _clampScale(value * 0.82, 0.75, 1.05);
 
+double libraryContentsPopupTocTextScale(double value) {
+  return _clampScale(0.92 + ((value - 1.0) * 0.35), 0.90, 1.22);
+}
+
+double libraryContentsPopupTocRowVerticalPadding(
+  double value, {
+  required bool isHeading,
+}) {
+  final base = isHeading ? 8.0 : 7.0;
+  final max = isHeading ? 10.5 : 9.5;
+  return _clampScale(base + ((value - 1.0) * 2.5), 6.0, max);
+}
+
+TextStyle libraryContentsPopupTocRowTextStyle(
+  TextStyle? base,
+  double readerFontScale, {
+  required bool isHeading,
+  required bool isSelected,
+  Color? color,
+}) {
+  final resolved = base ?? const TextStyle(fontSize: 14);
+  final resolvedFontSize =
+      ((resolved.fontSize ?? 14) *
+              libraryContentsPopupTocTextScale(readerFontScale))
+          .clamp(14.0, 22.0)
+          .toDouble();
+  return resolved.copyWith(
+    fontSize: resolvedFontSize,
+    color: color ?? resolved.color,
+    fontWeight: isHeading
+        ? (isSelected ? FontWeight.w700 : FontWeight.w600)
+        : (isSelected ? FontWeight.w600 : FontWeight.w500),
+    height: isHeading ? 1.08 : 1.12,
+    letterSpacing: 0.0,
+  );
+}
+
 TextStyle libraryScaledTextStyle(
   TextStyle? base,
   double fontScale, {

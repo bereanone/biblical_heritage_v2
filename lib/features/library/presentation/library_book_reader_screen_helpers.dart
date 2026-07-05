@@ -46,14 +46,17 @@ String libraryReaderDisplaySectionTitle(String value) {
   if (trimmed.isEmpty) return '';
 
   final normalized = _normalizeReaderLabel(trimmed);
-  if (normalized.startsWith('chapter 0') || normalized.startsWith('section 0')) {
-    final stripped = trimmed.replaceFirst(
-      RegExp(
-        r'^(chapter|section)\s+0\s*([—\-:]\s*)?',
-        caseSensitive: false,
-      ),
-      '',
-    ).trim();
+  if (normalized.startsWith('chapter 0') ||
+      normalized.startsWith('section 0')) {
+    final stripped = trimmed
+        .replaceFirst(
+          RegExp(
+            r'^(chapter|section)\s+0\s*([—\-:]\s*)?',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .trim();
     if (stripped.isNotEmpty) {
       return stripped;
     }
@@ -765,4 +768,8 @@ Color _readerSelectedColor(ThemeData theme, bool isNight) {
     theme.colorScheme.primary.withValues(alpha: 0.16),
     base,
   );
+}
+
+Color libraryReaderSelectedColor(ThemeData theme, bool isNight) {
+  return _readerSelectedColor(theme, isNight);
 }

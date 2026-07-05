@@ -469,6 +469,7 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isNight = theme.brightness == Brightness.dark || widget.isNightMode;
+    final readerFontScale = libraryFontScaleOf(context);
     final background = _readerSurfaceHighColor(theme, isNight);
     final borderColor = _readerBorderColor(theme, isNight);
     final sheetTextColor = _readerTextColor(theme, isNight);
@@ -549,9 +550,9 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                   child: widget.entries.isEmpty
                       ? ListView.separated(
                           controller: _scrollController,
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.all(10),
                           itemCount: widget.sections.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 8),
+                          separatorBuilder: (_, _) => const SizedBox(height: 4),
                           itemBuilder: (context, index) {
                             final section = widget.sections[index];
                             final selected =
@@ -560,14 +561,17 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                               key: _keyFor('section:$index'),
                               child: Material(
                                 color: selected
-                                    ? _readerSelectedColor(theme, isNight)
+                                    ? libraryReaderSelectedColor(theme, isNight)
                                     : Colors.transparent,
-                                borderRadius: BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(14),
                                 child: InkWell(
-                                  borderRadius: BorderRadius.circular(16),
+                                  borderRadius: BorderRadius.circular(14),
                                   onTap: () => Navigator.of(context).pop(index),
                                   child: Padding(
-                                    padding: const EdgeInsets.all(12),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 9,
+                                    ),
                                     child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
@@ -576,12 +580,14 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                                           section.title,
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
-                                          style: libraryTitleTextStyle(
-                                            context,
-                                            theme.textTheme.titleMedium,
-                                            fontWeight: FontWeight.w800,
-                                            color: sheetTextColor,
-                                          ),
+                                          style:
+                                              libraryContentsPopupTocRowTextStyle(
+                                                theme.textTheme.bodyLarge,
+                                                readerFontScale,
+                                                isHeading: false,
+                                                isSelected: selected,
+                                                color: sheetTextColor,
+                                              ),
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
@@ -603,7 +609,7 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                       : _isDevotionalContents
                       ? ListView(
                           controller: _scrollController,
-                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                          padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
                           children: [
                             ..._buildDevotionalRowWidgets(
                               context,
@@ -612,6 +618,7 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                               isNight: isNight,
                               sheetTextColor: sheetTextColor,
                               sheetSubduedColor: sheetSubduedColor,
+                              readerFontScale: readerFontScale,
                               selectedPopupItem: selectedPopupItem,
                               selectedMonthId: selectedMonthId,
                               devotionalTree: devotionalTree,
@@ -620,9 +627,9 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                         )
                       : ListView.separated(
                           controller: _scrollController,
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.all(10),
                           itemCount: widget.entries.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 6),
+                          separatorBuilder: (_, _) => const SizedBox(height: 4),
                           itemBuilder: (context, index) {
                             final entry = widget.entries[index];
                             final selected =
@@ -633,24 +640,31 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                                       widget.selectedNavigationIndex;
                             return Padding(
                               padding: EdgeInsets.only(
-                                left: entry.depth * 12.0,
+                                left: entry.depth * 10.0,
                               ),
                               child: KeyedSubtree(
                                 key: _keyFor(entry.item.id),
                                 child: Material(
                                   color: selected
-                                      ? _readerSelectedColor(theme, isNight)
+                                      ? libraryReaderSelectedColor(
+                                          theme,
+                                          isNight,
+                                        )
                                       : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(14),
+                                  borderRadius: BorderRadius.circular(12),
                                   child: InkWell(
-                                    borderRadius: BorderRadius.circular(14),
+                                    borderRadius: BorderRadius.circular(12),
                                     onTap: () => Navigator.of(
                                       context,
                                     ).pop(_tapTargetForEntry(index)),
                                     child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 10,
+                                      padding: EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical:
+                                            libraryContentsPopupTocRowVerticalPadding(
+                                              readerFontScale,
+                                              isHeading: false,
+                                            ),
                                       ),
                                       child: Column(
                                         crossAxisAlignment:
@@ -664,12 +678,14 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                                             ),
                                             maxLines: 2,
                                             overflow: TextOverflow.ellipsis,
-                                            style: libraryTitleTextStyle(
-                                              context,
-                                              theme.textTheme.titleMedium,
-                                              fontWeight: FontWeight.w800,
-                                              color: sheetTextColor,
-                                            ),
+                                            style:
+                                                libraryContentsPopupTocRowTextStyle(
+                                                  theme.textTheme.bodyLarge,
+                                                  readerFontScale,
+                                                  isHeading: false,
+                                                  isSelected: selected,
+                                                  color: sheetTextColor,
+                                                ),
                                           ),
                                         ],
                                       ),
@@ -696,6 +712,7 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     required bool isNight,
     required Color sheetTextColor,
     required Color sheetSubduedColor,
+    required double readerFontScale,
     required LibraryCatalogNavigationItem? selectedPopupItem,
     required String? selectedMonthId,
     required LibraryNavigationTreeResult? devotionalTree,
@@ -709,6 +726,7 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
           isNight: isNight,
           sheetTextColor: sheetTextColor,
           sheetSubduedColor: sheetSubduedColor,
+          readerFontScale: readerFontScale,
           selectedPopupItem: selectedPopupItem,
           selectedMonthId: selectedMonthId,
           devotionalTree: devotionalTree,
@@ -723,6 +741,7 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     required bool isNight,
     required Color sheetTextColor,
     required Color sheetSubduedColor,
+    required double readerFontScale,
     required LibraryCatalogNavigationItem? selectedPopupItem,
     required String? selectedMonthId,
     required LibraryNavigationTreeResult? devotionalTree,
@@ -744,16 +763,16 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     return Padding(
       key: _keyFor(item.id),
       padding: EdgeInsets.only(
-        left: row.depth * 12.0,
-        bottom: row.isMonthHeading ? 4 : 2,
+        left: row.depth * 10.0,
+        bottom: row.isMonthHeading ? 3 : 2,
       ),
       child: Material(
         color: selected
-            ? _readerSelectedColor(theme, isNight)
+            ? libraryReaderSelectedColor(theme, isNight)
             : Colors.transparent,
-        borderRadius: BorderRadius.circular(row.isMonthHeading ? 14 : 12),
+        borderRadius: BorderRadius.circular(row.isMonthHeading ? 13 : 12),
         child: InkWell(
-          borderRadius: BorderRadius.circular(row.isMonthHeading ? 14 : 12),
+          borderRadius: BorderRadius.circular(row.isMonthHeading ? 13 : 12),
           onTap: () {
             if (row.isMonthHeading) {
               setState(() {
@@ -766,8 +785,11 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
           },
           child: Padding(
             padding: EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: row.isMonthHeading ? 9 : 7,
+              horizontal: 10,
+              vertical: libraryContentsPopupTocRowVerticalPadding(
+                readerFontScale,
+                isHeading: row.isMonthHeading,
+              ),
             ),
             child: Row(
               children: [
@@ -779,16 +801,13 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                     ),
                     maxLines: row.isMonthHeading ? 1 : 2,
                     overflow: TextOverflow.ellipsis,
-                    style: libraryScaledTextStyle(
+                    style: libraryContentsPopupTocRowTextStyle(
                       row.isMonthHeading
-                          ? theme.textTheme.titleMedium
-                          : theme.textTheme.bodyLarge,
-                      row.isMonthHeading
-                          ? libraryTitleScale(libraryFontScaleOf(context))
-                          : libraryBodyScale(libraryFontScaleOf(context)),
-                      fontWeight: row.isMonthHeading
-                          ? FontWeight.w800
-                          : FontWeight.w600,
+                          ? theme.textTheme.bodyLarge
+                          : theme.textTheme.bodyMedium,
+                      readerFontScale,
+                      isHeading: row.isMonthHeading,
+                      isSelected: selected,
                       color: sheetTextColor,
                     ),
                   ),

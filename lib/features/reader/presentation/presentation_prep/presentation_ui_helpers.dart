@@ -52,7 +52,7 @@ void showReadableSnackBar(
   required double fontScale,
   bool isRapid = false,
   String dismissLabel = 'Dismiss',
-  Duration duration = const Duration(seconds: 4),
+  Duration duration = const Duration(seconds: 10),
 }) {
   final messenger = ScaffoldMessenger.maybeOf(context);
   if (messenger == null) return;

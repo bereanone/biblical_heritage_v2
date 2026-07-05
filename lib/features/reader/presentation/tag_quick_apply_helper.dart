@@ -403,6 +403,169 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     return normalized.isEmpty ? null : normalized;
   }
 
+  Future<Set<String>> _loadExistingTagNameKeys(
+    DatabaseExecutor executor,
+  ) async {
+    final keys = <String>{};
+    final addKey = (Object? value) {
+      final normalized = normalizeTagName(value?.toString() ?? '');
+      if (normalized.isEmpty) return;
+      keys.add(normalized.toLowerCase());
+    };
+
+    final legacyRows = await executor.query(
+      tableName,
+      columns: const ['tag'],
+      where: "COALESCE(trashed_at_utc, '') = ''",
+    );
+    for (final row in legacyRows) {
+      addKey(row['tag']);
+    }
+
+    if (await _tableExists(await _db(), 'tag_groups')) {
+      final tagKind = _tagKindForTable();
+      final groupRows = await executor.query(
+        'tag_groups',
+        columns: const ['name'],
+        where: '''
+          tag_kind = ?
+          AND COALESCE(deleted_at, '') = ''
+          AND COALESCE(trashed_at, '') = ''
+        ''',
+        whereArgs: [tagKind],
+      );
+      for (final row in groupRows) {
+        addKey(row['name']);
+      }
+    }
+
+    return keys;
+  }
+
+  Future<bool> _tagNameExistsEverywhere(
+    DatabaseExecutor executor,
+    String normalizedTag,
+  ) async {
+    final candidate = normalizedTag.trim();
+    if (candidate.isEmpty) return false;
+    final key = candidate.toLowerCase();
+
+    final legacyRows = await executor.query(
+      tableName,
+      columns: const ['id', 'tag'],
+      where: "COALESCE(trashed_at_utc, '') = ''",
+    );
+    for (final row in legacyRows) {
+      final tag = normalizeTagName(row['tag']?.toString() ?? '');
+      if (tag.toLowerCase() == key) return true;
+    }
+
+    if (await _tableExists(await _db(), 'tag_groups')) {
+      final tagKind = _tagKindForTable();
+      final groupRows = await executor.query(
+        'tag_groups',
+        columns: const ['id', 'name'],
+        where: '''
+          tag_kind = ?
+          AND COALESCE(deleted_at, '') = ''
+          AND COALESCE(trashed_at, '') = ''
+        ''',
+        whereArgs: [tagKind],
+      );
+      for (final row in groupRows) {
+        final tag = normalizeTagName(row['name']?.toString() ?? '');
+        if (tag.toLowerCase() == key) return true;
+      }
+    }
+
+    return false;
+  }
+
+  Future<String> _resolveUniqueImportTagName(
+    DatabaseExecutor executor,
+    String normalizedTag,
+  ) async {
+    final existing = await _loadExistingTagNameKeys(executor);
+    var suffixIndex = 1;
+    while (true) {
+      final candidate = buildTemporaryImportTagName(
+        normalizedTag,
+        suffixIndex: suffixIndex,
+      );
+      if (candidate.isEmpty) return normalizedTag;
+      if (!existing.contains(candidate.toLowerCase())) {
+        return candidate;
+      }
+      suffixIndex += 1;
+    }
+  }
+
+  Future<List<String>> loadDuplicateTagNames() async {
+    await ensureSchema();
+    final db = await _db();
+    final groups = <String, Set<String>>{};
+
+    void addPlacement(String tag, String placement) {
+      final normalizedTag = normalizeTagName(tag);
+      if (normalizedTag.isEmpty) return;
+      groups
+          .putIfAbsent(normalizedTag.toLowerCase(), () => <String>{})
+          .add(placement.trim().isEmpty ? '<none>' : placement.trim());
+    }
+
+    final legacyRows = await db.rawQuery('''
+      SELECT tag, COALESCE(TRIM(category), '') AS category
+      FROM $tableName
+      WHERE COALESCE(trashed_at_utc, '') = ''
+    ''');
+    for (final row in legacyRows) {
+      addPlacement(
+        row['tag']?.toString() ?? '',
+        row['category']?.toString() ?? '',
+      );
+    }
+
+    if (await _tableExists(db, 'tag_groups')) {
+      final tagKind = _tagKindForTable();
+      final normalizedRows = await db.rawQuery(
+        '''
+        SELECT
+          groups.name AS tag,
+          COALESCE(parent.name, '') AS category
+        FROM tag_groups AS groups
+        LEFT JOIN tag_groups AS parent
+          ON parent.id = groups.parent_group_id
+        WHERE groups.tag_kind = ?
+          AND COALESCE(groups.deleted_at, '') = ''
+          AND COALESCE(groups.trashed_at, '') = ''
+        ''',
+        [tagKind],
+      );
+      for (final row in normalizedRows) {
+        addPlacement(
+          row['tag']?.toString() ?? '',
+          row['category']?.toString() ?? '',
+        );
+      }
+    }
+
+    final duplicates =
+        groups.entries
+            .where((entry) => entry.value.length > 1)
+            .map((entry) => entry.key)
+            .toList(growable: false)
+          ..sort();
+    return duplicates;
+  }
+
+  Future<String> debugDuplicateTagReport() async {
+    final duplicates = await loadDuplicateTagNames();
+    if (duplicates.isEmpty) {
+      return 'Duplicate tag report: none found';
+    }
+    return 'Duplicate tag report: ${duplicates.join(', ')}';
+  }
+
   String _legacyCategoryWhereClause(
     String column,
     String? category,
@@ -421,40 +584,20 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     required String normalizedTag,
     String? category,
   }) async {
-    final normalizedCategory = _normalizeCategoryName(category);
     final tagKind = _tagKindForTable();
-    if (normalizedCategory == null) {
-      return executor.query(
-        'tag_groups',
-        columns: ['id', 'parent_group_id'],
-        where: '''
-          tag_kind = ?
-          AND name = ?
-          AND COALESCE(deleted_at, '') = ''
-          AND COALESCE(trashed_at, '') = ''
-          AND COALESCE(trashed_reason, '') = ''
-          AND COALESCE(trash_batch_id, '') = ''
-        ''',
-        whereArgs: [tagKind, normalizedTag],
-        orderBy: 'created_at ASC, id ASC',
-      );
-    }
-    return executor.rawQuery(
-      '''
-      SELECT groups.id, groups.parent_group_id
-      FROM tag_groups AS groups
-      LEFT JOIN tag_groups AS parent
-        ON parent.id = groups.parent_group_id
-      WHERE groups.tag_kind = ?
-        AND groups.name = ?
-        AND COALESCE(groups.deleted_at, '') = ''
-        AND COALESCE(groups.trashed_at, '') = ''
-        AND COALESCE(groups.trashed_reason, '') = ''
-        AND COALESCE(groups.trash_batch_id, '') = ''
-        AND COALESCE(parent.name, '') = ?
-      ORDER BY groups.created_at ASC, groups.id ASC
+    return executor.query(
+      'tag_groups',
+      columns: ['id', 'parent_group_id'],
+      where: '''
+        tag_kind = ?
+        AND name = ?
+        AND COALESCE(deleted_at, '') = ''
+        AND COALESCE(trashed_at, '') = ''
+        AND COALESCE(trashed_reason, '') = ''
+        AND COALESCE(trash_batch_id, '') = ''
       ''',
-      [tagKind, normalizedTag, normalizedCategory],
+      whereArgs: [tagKind, normalizedTag],
+      orderBy: 'created_at ASC, id ASC',
     );
   }
 
@@ -514,45 +657,28 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     required String now,
   }) async {
     final normalizedCategory = _normalizeCategoryName(category);
-    if (normalizedCategory == null) {
-      final groupId = await _ensureNormalizedTagGroup(
-        executor,
-        normalizedTag: normalizedTag,
-        now: now,
-      );
-      if (kDebugMode) {
-        debugPrint(
-          '[TrashRestore] destination group tag=$normalizedTag '
-          'category=<none> groupId=$groupId',
-        );
-      }
-      return groupId;
-    }
     final tagKind = _tagKindForTable();
     final rows = await executor.rawQuery(
       '''
       SELECT groups.id
       FROM tag_groups AS groups
-      LEFT JOIN tag_groups AS parent
-        ON parent.id = groups.parent_group_id
       WHERE groups.tag_kind = ?
         AND groups.name = ?
         AND COALESCE(groups.deleted_at, '') = ''
         AND COALESCE(groups.trashed_at, '') = ''
         AND COALESCE(groups.trashed_reason, '') = ''
         AND COALESCE(groups.trash_batch_id, '') = ''
-        AND COALESCE(parent.name, '') = ?
       ORDER BY groups.created_at ASC, groups.id ASC
       LIMIT 1
       ''',
-      [tagKind, normalizedTag, normalizedCategory],
+      [tagKind, normalizedTag],
     );
     if (rows.isNotEmpty) {
       final groupId = rows.first['id']?.toString() ?? '';
       if (kDebugMode) {
         debugPrint(
           '[TrashRestore] destination group tag=$normalizedTag '
-          'category=$normalizedCategory groupId=$groupId',
+          'category=${normalizedCategory ?? "<none>"} groupId=$groupId',
         );
       }
       return groupId;
@@ -563,7 +689,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       normalizedCategory,
     );
     final groupId =
-        'tag_group_${_slug(normalizedCategory)}_${_slug(normalizedTag)}';
+        'tag_group_${_slug(normalizedCategory ?? '')}_${_slug(normalizedTag)}';
     final sortOrder = await _nextNormalizedTagGroupSortOrder(executor);
     await executor.insert('tag_groups', {
       'id': groupId,
@@ -690,33 +816,20 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final normalizedOld = normalizeTagName(oldTag);
     final normalizedNew = normalizeTagName(newTag);
     if (normalizedOld.isEmpty || normalizedNew.isEmpty) return 0;
-    final normalizedCategory = _normalizeCategoryName(category);
-    // Refuse name-only rename: without knowing the category we cannot safely
-    // scope the UPDATE — same-name tags in other categories would be affected.
-    if (!categoryKnown && normalizedCategory == null) {
-      debugPrint(
-        'renameTag: refused name-only rename for "$normalizedOld" — '
-        'category unknown; pass categoryKnown: true to rename a root-category tag',
-      );
-      return 0;
-    }
     await ensureSchema();
     final db = await _db();
-    final whereArgs = <Object?>[normalizedOld];
-    var where = 'tag = ?';
-    if (normalizedCategory != null) {
-      where += ' AND category = ?';
-      whereArgs.add(normalizedCategory);
-    } else {
-      // categoryKnown=true with null category → root/uncategorized tag.
-      // Use IS NULL so the clause works correctly in SQLite.
-      where += ' AND (category IS NULL OR TRIM(category) = \'\')';
+    if (normalizedNew.toLowerCase() != normalizedOld.toLowerCase() &&
+        await _tagNameExistsEverywhere(db, normalizedNew)) {
+      debugPrint(
+        'renameTag: blocked duplicate target "$normalizedNew" for "$normalizedOld"',
+      );
+      return 0;
     }
     final count = await db.update(
       tableName,
       {'tag': normalizedNew},
-      where: where,
-      whereArgs: whereArgs,
+      where: 'tag = ?',
+      whereArgs: [normalizedOld],
     );
     final oldCategoryKey = '$categorySettingKeyPrefix$normalizedOld';
     final newCategoryKey = '$categorySettingKeyPrefix$normalizedNew';
@@ -887,7 +1000,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   }) async {
     final normalizedTag = normalizeTagName(tag);
     final normalizedCategory = _normalizeCategoryName(category);
-    final normalizedCurrentCategory = _normalizeCategoryName(currentCategory);
     if (normalizedTag.isEmpty) return false;
     try {
       await ensureSchema();
@@ -905,35 +1017,18 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
 
-      final whereArgs = <Object?>[normalizedTag];
-      var where = 'tag = ?';
-      if (currentCategoryKnown) {
-        // Caller knows the current category; scope the UPDATE precisely.
-        // COALESCE handles NULL so this correctly matches root-category rows
-        // when normalizedCurrentCategory is null ('').
-        where += ' AND COALESCE(TRIM(category), \'\') = ?';
-        whereArgs.add(normalizedCurrentCategory ?? '');
-      } else {
-        // Category is unknown: only update rows that currently have no
-        // category.  This is safe for initial category assignments on newly
-        // created tags while preventing cross-category contamination for
-        // same-name tags that already have a category.
-        where += ' AND (category IS NULL OR TRIM(category) = \'\')';
-      }
-
       final values = <String, Object?>{'category': normalizedCategory};
       final updated = await db.update(
         tableName,
         values,
-        where: where,
-        whereArgs: whereArgs,
+        where: 'tag = ?',
+        whereArgs: [normalizedTag],
       );
       if (updated > 0) return true;
 
       final normalizedGroupRows = await _loadNormalizedTagRows(
         db,
         normalizedTag: normalizedTag,
-        category: normalizedCurrentCategory,
       );
       if (normalizedGroupRows.isNotEmpty) {
         final targetCategoryGroupId = await _ensureNormalizedCategoryGroupId(
@@ -1329,17 +1424,10 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     if (normalized.isEmpty) return 0;
     await ensureSchema();
     final db = await _db();
-    final normalizedCategory = _normalizeCategoryName(category);
-    final whereArgs = <Object?>[normalized];
-    var where = 'tag = ?';
-    if (normalizedCategory != null) {
-      where += ' AND category = ?';
-      whereArgs.add(normalizedCategory);
-    }
     final deleted = await db.delete(
       tableName,
-      where: where,
-      whereArgs: whereArgs,
+      where: 'tag = ?',
+      whereArgs: [normalized],
     );
     await db.delete(
       'app_settings',
@@ -1401,7 +1489,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           categoryNames.contains(tag.toLowerCase())) {
         return;
       }
-      final key = '${tag.toLowerCase()}|${category.toLowerCase()}';
+      final key = tag.toLowerCase();
       final existing = merged[key];
       merged[key] = HashTagSummary(
         tag: existing?.tag ?? tag,
@@ -1431,7 +1519,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   }) async {
     final normalized = normalizeTagName(tag);
     if (normalized.isEmpty) return const <HashTagEntry>[];
-    final normalizedCategory = _normalizeCategoryName(category);
     await ensureSchema();
     final db = await _db();
     final tagKind = _tagKindForTable();
@@ -1460,19 +1547,13 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         if (tableName == 'hash_tags') 'note_text',
         if (tableName == 'hash_tags') 'note_format_json',
       ];
-      final whereArgs = <Object?>[normalized];
-      final whereClause = _legacyCategoryWhereClause(
-        'category',
-        normalizedCategory,
-        whereArgs,
-      );
       final rows = await db.query(
         tableName,
         columns: columns,
         where:
-            "tag = ? AND $whereClause AND COALESCE(trashed_at_utc, '') = '' "
+            "tag = ? AND COALESCE(trashed_at_utc, '') = '' "
             "AND COALESCE(trashed_reason, '') = '' AND COALESCE(trash_batch_id, '') = ''",
-        whereArgs: whereArgs,
+        whereArgs: [normalized],
         orderBy: orderBy,
       );
       final entries = rows
@@ -1544,41 +1625,26 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     }
 
     Future<List<HashTagEntry>> loadNormalizedEntries() async {
-      final groupRows = normalizedCategory == null
-          ? await db.query(
-              'tag_groups',
-              columns: ['id', 'parent_group_id'],
-              where: '''
-                tag_kind = ?
-                AND name = ?
-                AND COALESCE(deleted_at, '') = ''
-                AND COALESCE(trashed_at, '') = ''
-                AND COALESCE(trashed_reason, '') = ''
-                AND COALESCE(trash_batch_id, '') = ''
-              ''',
-              whereArgs: [tagKind, normalized],
-              orderBy: 'created_at ASC, id ASC',
-            )
-          : await db.rawQuery(
-              '''
-              SELECT groups.id, groups.parent_group_id
-              FROM tag_groups AS groups
-              LEFT JOIN tag_groups AS parent
-                ON parent.id = groups.parent_group_id
-              WHERE groups.tag_kind = ?
-                AND groups.name = ?
-                AND COALESCE(groups.deleted_at, '') = ''
-                AND COALESCE(groups.trashed_at, '') = ''
-                AND COALESCE(groups.trashed_reason, '') = ''
-                AND COALESCE(groups.trash_batch_id, '') = ''
-                AND COALESCE(parent.name, '') = ?
-              ORDER BY groups.created_at ASC, groups.id ASC
-              ''',
-              [tagKind, normalized, normalizedCategory],
-            );
+      final groupRows = await db.query(
+        'tag_groups',
+        columns: ['id', 'parent_group_id'],
+        where: '''
+          tag_kind = ?
+          AND name = ?
+          AND COALESCE(deleted_at, '') = ''
+          AND COALESCE(trashed_at, '') = ''
+          AND COALESCE(trashed_reason, '') = ''
+          AND COALESCE(trash_batch_id, '') = ''
+        ''',
+        whereArgs: [tagKind, normalized],
+        orderBy: 'created_at ASC, id ASC',
+      );
       if (groupRows.isEmpty) return const <HashTagEntry>[];
-      final groupId = groupRows.first['id']?.toString() ?? '';
-      if (groupId.isEmpty) return const <HashTagEntry>[];
+      final groupIds = [
+        for (final row in groupRows) row['id']?.toString() ?? '',
+      ].where((value) => value.isNotEmpty).toList(growable: false);
+      if (groupIds.isEmpty) return const <HashTagEntry>[];
+      final placeholders = List.filled(groupIds.length, '?').join(', ');
 
       final orderBy = switch (sortMode) {
         HashTagEntrySortMode.slideOrder =>
@@ -1605,9 +1671,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           'legacy_item_id',
         ],
         where:
-            "tag_group_id = ? AND COALESCE(deleted_at, '') = '' AND COALESCE(trashed_at, '') = '' "
+            "tag_group_id IN ($placeholders) AND COALESCE(deleted_at, '') = '' AND COALESCE(trashed_at, '') = '' "
             "AND COALESCE(trashed_reason, '') = '' AND COALESCE(trash_batch_id, '') = ''",
-        whereArgs: [groupId],
+        whereArgs: groupIds,
         orderBy: orderBy,
       );
       final mediaByItemId = await _loadNormalizedMediaRefsForEntries(
@@ -1748,19 +1814,12 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     var skipped = 0;
     final now = DateTime.now().millisecondsSinceEpoch;
     for (final target in targets) {
-      final categoryArgs = <Object?>[];
-      final categoryClause = _legacyCategoryWhereClause(
-        'category',
-        normalizedCategory,
-        categoryArgs,
-      );
       final exists = await db.rawQuery(
         '''
         SELECT 1
         FROM $tableName
         WHERE user_id = ?
           AND tag = ?
-          AND $categoryClause
           AND COALESCE(trashed_at_utc, '') = ''
           AND ((book_number = ? AND chapter_number = ? AND verse_number = ?) OR verse_ref = ?)
         LIMIT 1
@@ -1768,7 +1827,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         [
           userId,
           normalizedTag,
-          ...categoryArgs,
           target.bookNumber,
           target.chapter,
           target.verse,
@@ -1884,7 +1942,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     String? category,
   }) async {
     final normalizedTag = normalizeTagName(tag);
-    final normalizedCategory = _normalizeCategoryName(category);
     if (normalizedTag.isEmpty) {
       return const HashTagSearchQuickApplyResult(
         tag: null,
@@ -1903,19 +1960,11 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       normalizedTag: normalizedTag,
       now: now,
     );
-    final legacyCategoryArgs = <Object?>[];
-    final legacyCategoryClause = _legacyCategoryWhereClause(
-      'category',
-      normalizedCategory,
-      legacyCategoryArgs,
-    );
     final legacyExists = await db.query(
       tableName,
       columns: ['id'],
-      where:
-          '''
+      where: '''
         tag = ?
-        AND $legacyCategoryClause
         AND COALESCE(trashed_at_utc, '') = ''
         AND book_number = ?
         AND chapter_number = ?
@@ -1923,18 +1972,26 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       ''',
       whereArgs: [
         normalizedTag,
-        ...legacyCategoryArgs,
         result.bookNumber,
         result.chapter,
         result.verse,
       ],
       limit: 1,
     );
+    final normalizedGroupRows = await _loadNormalizedTagRows(
+      db,
+      normalizedTag: normalizedTag,
+    );
+    final normalizedGroupIds = [
+      for (final row in normalizedGroupRows) row['id']?.toString() ?? '',
+    ].where((value) => value.isNotEmpty).toList(growable: false);
     final normalizedExists = await db.query(
       'tag_items',
       columns: ['id'],
-      where: '''
-        tag_group_id = ?
+      where: normalizedGroupIds.isEmpty
+          ? '1 = 0'
+          : '''
+        tag_group_id IN (${List.filled(normalizedGroupIds.length, '?').join(', ')})
         AND tag_kind = ?
         AND book_id = ?
         AND chapter = ?
@@ -1942,14 +1999,16 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         AND verse_end = ?
         AND COALESCE(deleted_at, '') = ''
       ''',
-      whereArgs: [
-        groupId,
-        tagKind,
-        result.bookNumber,
-        result.chapter,
-        result.verse,
-        result.verse,
-      ],
+      whereArgs: normalizedGroupIds.isEmpty
+          ? const <Object?>[]
+          : [
+              ...normalizedGroupIds,
+              tagKind,
+              result.bookNumber,
+              result.chapter,
+              result.verse,
+              result.verse,
+            ],
       limit: 1,
     );
     if (legacyExists.isNotEmpty || normalizedExists.isNotEmpty) {
@@ -2009,7 +2068,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     String? category,
   }) async {
     final normalizedTag = normalizeTagName(tag);
-    final normalizedCategory = _normalizeCategoryName(category);
     if (normalizedTag.isEmpty ||
         bookNumber <= 0 ||
         chapter <= 0 ||
@@ -2032,38 +2090,33 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       normalizedTag: normalizedTag,
       now: now,
     );
-    final legacyCategoryArgs = <Object?>[];
-    final legacyCategoryClause = _legacyCategoryWhereClause(
-      'category',
-      normalizedCategory,
-      legacyCategoryArgs,
-    );
     final legacyExists = await db.query(
       tableName,
       columns: ['id'],
-      where:
-          '''
+      where: '''
         tag = ?
-        AND $legacyCategoryClause
         AND COALESCE(trashed_at_utc, '') = ''
         AND book_number = ?
         AND chapter_number = ?
         AND verse_number = ?
       ''',
-      whereArgs: [
-        normalizedTag,
-        ...legacyCategoryArgs,
-        bookNumber,
-        chapter,
-        verseStart,
-      ],
+      whereArgs: [normalizedTag, bookNumber, chapter, verseStart],
       limit: 1,
     );
+    final normalizedGroupRows = await _loadNormalizedTagRows(
+      db,
+      normalizedTag: normalizedTag,
+    );
+    final normalizedGroupIds = [
+      for (final row in normalizedGroupRows) row['id']?.toString() ?? '',
+    ].where((value) => value.isNotEmpty).toList(growable: false);
     final normalizedExists = await db.query(
       'tag_items',
       columns: ['id'],
-      where: '''
-        tag_group_id = ?
+      where: normalizedGroupIds.isEmpty
+          ? '1 = 0'
+          : '''
+        tag_group_id IN (${List.filled(normalizedGroupIds.length, '?').join(', ')})
         AND tag_kind = ?
         AND book_id = ?
         AND chapter = ?
@@ -2071,14 +2124,16 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         AND verse_end = ?
         AND COALESCE(deleted_at, '') = ''
       ''',
-      whereArgs: [
-        groupId,
-        tagKind,
-        bookNumber,
-        chapter,
-        verseStart,
-        normalizedVerseEnd,
-      ],
+      whereArgs: normalizedGroupIds.isEmpty
+          ? const <Object?>[]
+          : [
+              ...normalizedGroupIds,
+              tagKind,
+              bookNumber,
+              chapter,
+              verseStart,
+              normalizedVerseEnd,
+            ],
       limit: 1,
     );
     if (legacyExists.isNotEmpty || normalizedExists.isNotEmpty) {
@@ -2201,24 +2256,16 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       );
     }
 
-    final categoryArgs = <Object?>[];
-    final categoryClause = _legacyCategoryWhereClause(
-      'category',
-      normalizedCategory,
-      categoryArgs,
-    );
     final exists = await db.query(
       tableName,
       columns: ['id'],
-      where:
-          '''
+      where: '''
         user_id = ?
         AND tag = ?
-        AND $categoryClause
         AND COALESCE(trashed_at_utc, '') = ''
         AND verse_ref = ?
       ''',
-      whereArgs: [userId, normalizedTag, ...categoryArgs, cleanStableRef],
+      whereArgs: [userId, normalizedTag, cleanStableRef],
       limit: 1,
     );
     if (exists.isNotEmpty) {
@@ -3092,16 +3139,11 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
 
   Future<bool> _tagExists(String normalizedTag, {String? category}) async {
     final db = await _db();
-    final normalizedCategory = _normalizeCategoryName(category);
     final rows = await db.query(
       tableName,
       columns: ['id'],
-      where: normalizedCategory == null
-          ? "tag = ? AND COALESCE(trashed_at_utc, '') = ''"
-          : "tag = ? AND COALESCE(TRIM(category), '') = ? AND COALESCE(trashed_at_utc, '') = ''",
-      whereArgs: normalizedCategory == null
-          ? [normalizedTag]
-          : [normalizedTag, normalizedCategory],
+      where: "tag = ? AND COALESCE(trashed_at_utc, '') = ''",
+      whereArgs: [normalizedTag],
       limit: 1,
     );
     return rows.isNotEmpty;
@@ -3441,17 +3483,12 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     if (normalized.isEmpty) return false;
     await ensureSchema();
     final db = await _db();
-    final normalizedCategory = _normalizeCategoryName(category);
     return db.transaction((txn) async {
       final rows = await txn.query(
         tableName,
         columns: ['id'],
-        where: normalizedCategory == null
-            ? 'tag = ?'
-            : 'tag = ? AND category = ?',
-        whereArgs: normalizedCategory == null
-            ? [normalized]
-            : [normalized, normalizedCategory],
+        where: 'tag = ?',
+        whereArgs: [normalized],
         orderBy: 'sort_order ASC, created_at ASC, id ASC',
       );
       final ids = rows
@@ -4126,8 +4163,14 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final userId = await ensureUserId();
     final normalizedTag = parsed.tag;
     if (normalizedTag.isEmpty) return null;
-    final normalizedTargetCategory =
+    final baseTargetCategory =
         _normalizeCategoryName(targetCategory) ?? recentImportCategory;
+    var importTag = normalizedTag;
+    var normalizedTargetCategory = baseTargetCategory;
+    if (await _tagNameExistsEverywhere(db, normalizedTag)) {
+      importTag = await _resolveUniqueImportTagName(db, normalizedTag);
+      normalizedTargetCategory = recentImportCategory;
+    }
 
     final failures = <HashTagImportFailure>[];
     var parsedCount = 0;
@@ -4162,22 +4205,16 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         );
         continue;
       }
-      final categoryArgs = <Object?>[];
-      final categoryClause = _legacyCategoryWhereClause(
-        'category',
-        normalizedTargetCategory,
-        categoryArgs,
-      );
       final exists = await db.query(
         tableName,
         columns: ['id'],
-        where: 'user_id = ? AND tag = ? AND $categoryClause AND verse_ref = ?',
-        whereArgs: [userId, normalizedTag, ...categoryArgs, verseRef],
+        where: 'user_id = ? AND tag = ? AND verse_ref = ?',
+        whereArgs: [userId, importTag, verseRef],
         limit: 1,
       );
       final values = <String, Object?>{
         'user_id': userId,
-        'tag': normalizedTag,
+        'tag': importTag,
         'category': normalizedTargetCategory,
         'verse_ref': verseRef,
         'book_number': target?.bookNumber ?? 0,
@@ -4220,13 +4257,13 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     }
 
     await saveTagCategory(
-      normalizedTag,
+      importTag,
       normalizedTargetCategory,
       currentCategory: normalizedTargetCategory,
       currentCategoryKnown: true,
     );
     return HashTagImportResult(
-      tag: normalizedTag,
+      tag: importTag,
       parsedCount: parsedCount,
       insertedCount: inserted,
       updatedExistingCount: updatedExisting,
@@ -4245,8 +4282,14 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final userId = await ensureUserId();
     final normalizedTag = parsed.tag;
     if (normalizedTag.isEmpty) return null;
-    final normalizedTargetCategory =
+    final baseTargetCategory =
         _normalizeCategoryName(targetCategory) ?? recentImportCategory;
+    var importTag = normalizedTag;
+    var normalizedTargetCategory = baseTargetCategory;
+    if (await _tagNameExistsEverywhere(db, normalizedTag)) {
+      importTag = await _resolveUniqueImportTagName(db, normalizedTag);
+      normalizedTargetCategory = recentImportCategory;
+    }
 
     final scriptureSlides = parsed.slides
         .where((slide) => slide.target != null)
@@ -4357,22 +4400,16 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           '[ImportDiag] note slide: first="${slide.contentText.split('\n').first.substring(0, slide.contentText.split('\n').first.length.clamp(0, 60))}" verseRef=$verseRef',
         );
       }
-      final categoryArgs = <Object?>[];
-      final categoryClause = _legacyCategoryWhereClause(
-        'category',
-        normalizedTargetCategory,
-        categoryArgs,
-      );
       final exists = await db.query(
         tableName,
         columns: ['id'],
-        where: 'user_id = ? AND tag = ? AND $categoryClause AND verse_ref = ?',
-        whereArgs: [userId, normalizedTag, ...categoryArgs, verseRef],
+        where: 'user_id = ? AND tag = ? AND verse_ref = ?',
+        whereArgs: [userId, importTag, verseRef],
         limit: 1,
       );
       final values = <String, Object?>{
         'user_id': userId,
-        'tag': normalizedTag,
+        'tag': importTag,
         'category': normalizedTargetCategory,
         'verse_ref': verseRef,
         'book_number': 0,
@@ -4435,22 +4472,16 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           break;
         }
       }
-      final categoryArgs = <Object?>[];
-      final categoryClause = _legacyCategoryWhereClause(
-        'category',
-        normalizedTargetCategory,
-        categoryArgs,
-      );
       final exists = await db.query(
         tableName,
         columns: ['id'],
-        where: 'user_id = ? AND tag = ? AND $categoryClause AND verse_ref = ?',
-        whereArgs: [userId, normalizedTag, ...categoryArgs, target.verseRef],
+        where: 'user_id = ? AND tag = ? AND verse_ref = ?',
+        whereArgs: [userId, importTag, target.verseRef],
         limit: 1,
       );
       final values = <String, Object?>{
         'user_id': userId,
-        'tag': normalizedTag,
+        'tag': importTag,
         'category': normalizedTargetCategory,
         'verse_ref': target.verseRef,
         'book_number': target.bookNumber,
@@ -4556,22 +4587,16 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         continue;
       }
 
-      final categoryArgs = <Object?>[];
-      final categoryClause = _legacyCategoryWhereClause(
-        'category',
-        normalizedTargetCategory,
-        categoryArgs,
-      );
       final exists = await db.query(
         tableName,
         columns: ['id'],
-        where: 'user_id = ? AND tag = ? AND $categoryClause AND verse_ref = ?',
-        whereArgs: [userId, normalizedTag, ...categoryArgs, effectiveStableRef],
+        where: 'user_id = ? AND tag = ? AND verse_ref = ?',
+        whereArgs: [userId, importTag, effectiveStableRef],
         limit: 1,
       );
       final values = <String, Object?>{
         'user_id': userId,
-        'tag': normalizedTag,
+        'tag': importTag,
         'category': normalizedTargetCategory,
         'verse_ref': effectiveStableRef,
         'book_number': 0,
@@ -4608,13 +4633,13 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     }
 
     await saveTagCategory(
-      normalizedTag,
+      importTag,
       normalizedTargetCategory,
       currentCategory: normalizedTargetCategory,
       currentCategoryKnown: true,
     );
     return HashTagImportResult(
-      tag: normalizedTag,
+      tag: importTag,
       parsedCount: parsed.slides.length,
       insertedCount: inserted,
       updatedExistingCount: updatedExisting,
@@ -4747,10 +4772,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         whereClauses.add('tag = ?');
         whereArgs.add(normalizedTag);
       }
-      if (normalizedCategory != null) {
-        whereClauses.add("COALESCE(TRIM(category), '') = ?");
-        whereArgs.add(normalizedCategory);
-      }
       final legacyRows = await db.rawQuery(
         'SELECT id, tag, category, verse_ref, book_number, chapter_number, '
         'verse_number, note_text, note_format_json, trashed_at_utc, trashed_reason '
@@ -4835,10 +4856,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       if (normalizedTag.isNotEmpty) {
         whereClauses.add('tg.name = ?');
         whereArgs.add(normalizedTag);
-      }
-      if (normalizedCategory != null) {
-        whereClauses.add("COALESCE(parent.name, '') = ?");
-        whereArgs.add(normalizedCategory);
       }
 
       final normalizedRows = await db.rawQuery(

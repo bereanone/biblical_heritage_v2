@@ -491,13 +491,17 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     );
     final normalized = widget.repository.normalizeTagName(renamed ?? '');
     if (normalized.isEmpty || normalized == widget.tag) return;
-    await widget.repository.renameTag(
+    final count = await widget.repository.renameTag(
       oldTag: widget.tag,
       newTag: normalized,
       category: _resolvedCategory,
       categoryKnown: true,
     );
     if (!mounted) return;
+    if (count == 0) {
+      _showSnack('$normalized already exists. Choose a different tag name.');
+      return;
+    }
     Navigator.of(context).pop(true);
   }
 
@@ -2372,131 +2376,6 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
       Navigator.of(context).pop();
       return;
     }
-
-    final sourceEntries = await widget.repository.loadEntries(
-      widget.tag,
-      category: current,
-    );
-    final targetEntries = await widget.repository.loadEntries(
-      widget.tag,
-      category: target,
-    );
-    if (!mounted) return;
-    final conflict = targetEntries.isNotEmpty;
-    final branch = conflict ? 'mergeCopyOnlyPrompt' : 'simpleMove';
-    debugPrint(
-      'Move probe for ${widget.tag}: '
-      'sourceRaw=${current.isEmpty ? 'None' : current} '
-      'targetRaw=${target ?? 'None'} '
-      'normalizedSource=${current.isEmpty ? 'None' : current} '
-      'normalizedTarget=${target ?? 'None'} '
-      'sourceRowCount=${sourceEntries.length} '
-      'targetSameNameRowCount=${targetEntries.length} '
-      'targetVisibleItemCount=${targetEntries.length} '
-      'conflict=$conflict '
-      'branch=$branch '
-      'conflictDecision=loadEntries(category: target)',
-    );
-    if (conflict) {
-      final targetLabel = target?.isNotEmpty == true ? target! : 'None';
-      try {
-        final preview = await widget.repository.mergeTagCategory(
-          tag: widget.tag,
-          sourceCategory: current,
-          targetCategory: target ?? '',
-          dryRun: true,
-        );
-        if (!mounted) return;
-        final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Merge copy only?'),
-            content: SizedBox(
-              width: 420,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    '${widget.tag} already exists in $targetLabel. '
-                    'Merge missing cards into the existing ${widget.tag}?',
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Source tag will be left unchanged.',
-                    style: TagDialogStyles.bodyTextStyle(
-                      Theme.of(dialogContext),
-                      widget.fontScale,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Source cards: ${preview.sourceCount}\n'
-                    'Target cards: ${preview.targetCount}\n'
-                    'Will add: ${preview.addedCount}\n'
-                    'Will skip: ${preview.skippedCount}',
-                    style: TagDialogStyles.bodyTextStyle(
-                      Theme.of(dialogContext),
-                      widget.fontScale,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'This will copy only missing cards into the target tag. '
-                    'Duplicates will be skipped.',
-                    style: TagDialogStyles.bodyTextStyle(
-                      Theme.of(dialogContext),
-                      widget.fontScale,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: const Text('Merge Copy Only'),
-              ),
-            ],
-          ),
-        );
-        if (confirmed != true) {
-          return;
-        }
-        final mergeResult = await widget.repository.mergeTagCategory(
-          tag: widget.tag,
-          sourceCategory: current,
-          targetCategory: target ?? '',
-          dryRun: false,
-        );
-        if (!mounted) return;
-        Navigator.of(context).pop(
-          _MoveTagCategoryResult(
-            targetCategory: target,
-            merged: true,
-            addedCount: mergeResult.addedCount,
-            skippedCount: mergeResult.skippedCount,
-            sourceRemoved: false,
-          ),
-        );
-      } catch (error, stackTrace) {
-        debugPrint(
-          'Merge copy only failed for ${widget.tag}: $error\n$stackTrace',
-        );
-        if (!mounted) return;
-        setState(() {
-          _errorText =
-              'Could not merge ${widget.tag} into '
-              '${target ?? 'None'}.';
-        });
-      }
-      return;
-    }
-
     Navigator.of(context).pop(
       _MoveTagCategoryResult(
         targetCategory: target,

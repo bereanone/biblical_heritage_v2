@@ -28,7 +28,8 @@ Future<({Database db, Directory dir})> _openTestDatabase() async {
         CREATE TABLE hash_tags (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           tag TEXT NOT NULL,
-          created_at INTEGER
+          created_at INTEGER,
+          trashed_at_utc TEXT
         )
       ''');
       await db.execute('''
@@ -63,7 +64,8 @@ Future<({Database db, Directory dir})> _openTestDatabase() async {
           note_text TEXT,
           note_format_json TEXT,
           presentation_slide_number INTEGER,
-          presentation_slide_region TEXT
+          presentation_slide_region TEXT,
+          trashed_at_utc TEXT
         )
       ''');
       await db.execute('''
@@ -82,6 +84,7 @@ Future<({Database db, Directory dir})> _openTestDatabase() async {
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           deleted_at TEXT,
+          trashed_at TEXT,
           device_id TEXT NOT NULL,
           revision INTEGER NOT NULL DEFAULT 1,
           sync_status TEXT NOT NULL DEFAULT 'pending',
@@ -112,6 +115,7 @@ Future<({Database db, Directory dir})> _openTestDatabase() async {
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           deleted_at TEXT,
+          trashed_at TEXT,
           device_id TEXT NOT NULL,
           revision INTEGER NOT NULL DEFAULT 1,
           sync_status TEXT NOT NULL DEFAULT 'pending',
@@ -137,6 +141,7 @@ Future<({Database db, Directory dir})> _openTestDatabase() async {
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           deleted_at TEXT,
+          trashed_at TEXT,
           device_id TEXT NOT NULL,
           revision INTEGER NOT NULL DEFAULT 1,
           sync_status TEXT NOT NULL DEFAULT 'pending',

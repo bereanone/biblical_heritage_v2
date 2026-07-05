@@ -776,6 +776,10 @@ class _HashTagDialogState extends State<HashTagDialog>
       categoryKnown: true,
     );
     if (!mounted) return;
+    if (count == 0) {
+      _showSnack('$normalized already exists. Choose a different $_tagName.');
+      return;
+    }
     await _reloadSelectedTag(normalized, category: _tagCategory);
     _showSnack(
       'Renamed $current to $normalized ($count row${count == 1 ? '' : 's'}).',

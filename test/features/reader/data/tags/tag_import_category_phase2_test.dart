@@ -47,7 +47,8 @@ Future<({Database db, Directory dir})> _openTestDatabase() async {
           chapter_number INTEGER NOT NULL DEFAULT 1,
           verse_number INTEGER NOT NULL DEFAULT 1,
           sort_order INTEGER,
-          created_at INTEGER NOT NULL DEFAULT 0
+          created_at INTEGER NOT NULL DEFAULT 0,
+          trashed_at_utc TEXT
         )
       ''');
       await db.execute('''
@@ -62,7 +63,8 @@ Future<({Database db, Directory dir})> _openTestDatabase() async {
           verse_number INTEGER NOT NULL DEFAULT 1,
           content_html TEXT NOT NULL DEFAULT '',
           study_order INTEGER NOT NULL DEFAULT 0,
-          created_at INTEGER NOT NULL DEFAULT 0
+          created_at INTEGER NOT NULL DEFAULT 0,
+          trashed_at_utc TEXT
         )
       ''');
       await db.execute('''
@@ -81,6 +83,7 @@ Future<({Database db, Directory dir})> _openTestDatabase() async {
           created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
           updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
           deleted_at TEXT,
+          trashed_at TEXT,
           device_id TEXT NOT NULL DEFAULT 'test-device',
           revision INTEGER NOT NULL DEFAULT 1,
           sync_status TEXT NOT NULL DEFAULT 'pending',
@@ -111,6 +114,7 @@ Future<({Database db, Directory dir})> _openTestDatabase() async {
           created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
           updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
           deleted_at TEXT,
+          trashed_at TEXT,
           device_id TEXT NOT NULL DEFAULT 'test-device',
           revision INTEGER NOT NULL DEFAULT 1,
           sync_status TEXT NOT NULL DEFAULT 'pending',
@@ -128,6 +132,7 @@ Future<({Database db, Directory dir})> _openTestDatabase() async {
           created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
           updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
           deleted_at TEXT,
+          trashed_at TEXT,
           device_id TEXT NOT NULL DEFAULT 'test-device',
           revision INTEGER NOT NULL DEFAULT 1,
           sync_status TEXT NOT NULL DEFAULT 'pending',

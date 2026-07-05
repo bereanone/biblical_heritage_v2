@@ -34,9 +34,23 @@ class HashTagSummary {
   }
 
   String get identityKey {
-    final categoryLabel = category?.trim().toLowerCase() ?? '';
-    return '${tag.trim().toLowerCase()}|$categoryLabel';
+    return tag.trim().toLowerCase();
   }
+}
+
+String buildTemporaryImportTagName(
+  String normalizedTag, {
+  int suffixIndex = 1,
+}) {
+  final cleaned = normalizedTag.trim();
+  if (cleaned.isEmpty) return '';
+  final stemMatch = RegExp(r'^(.*?)(?:-import(?:-\d+)?)?$').firstMatch(cleaned);
+  final stem = (stemMatch?.group(1) ?? cleaned).trim();
+  if (stem.isEmpty) return '';
+  if (suffixIndex <= 1) {
+    return '$stem-import';
+  }
+  return '$stem-import-$suffixIndex';
 }
 
 class HashTagEntry {

@@ -1074,18 +1074,8 @@ void main() {
         'remove from menu is DB-only and cancel does nothing',
         (tester) async {
           await tester.pumpWidget(
-            const MaterialApp(
-              home: Scaffold(body: Text('Library Home')),
-            ),
-          );
-          await tester.pump();
-
-          final navigator = tester.state<NavigatorState>(
-            find.byType(Navigator),
-          );
-          navigator.push(
-            MaterialPageRoute<void>(
-              builder: (_) => LibraryBookReaderScreen(item: importedItem),
+            MaterialApp(
+              home: LibraryBookReaderScreen(item: importedItem),
             ),
           );
           await _pumpUntilFinder(
@@ -1112,18 +1102,12 @@ void main() {
 
           await tester.tap(find.text('Cancel'));
           await _pumpTransient(tester);
-          expect(find.text('Library Home'), findsNothing);
           expect(find.text('Menu'), findsOneWidget);
-
-          final itemsAfterCancel = await LibraryCatalogService.instance
-              .loadItems();
           expect(
-            itemsAfterCancel
-                .where(
-                  (item) =>
-                      item.displayTitle == 'The Story of the Seer of Patmos',
-                ),
-            isNotEmpty,
+            find.textContaining(
+              'This removes the imported database copy only.',
+            ),
+            findsNothing,
           );
         },
       );

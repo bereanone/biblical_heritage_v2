@@ -1,5 +1,7 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'elibrary_sdp_cleanup.dart';
+
 class ELibrarySchema {
   ELibrarySchema._();
 
@@ -13,6 +15,7 @@ class ELibrarySchema {
       await _createCoreTables(db);
       await _createIndexes(db);
       await _seedInitialMigration(db);
+      await ELibraryBogusSdpCleanupService.instance.run(db);
     });
   }
 
@@ -333,7 +336,8 @@ class ELibrarySchema {
       'to_version': currentVersion,
       'applied_at': now,
       'status': 'completed',
-      'details': 'Added library_contributors and library_item_contributors tables.',
+      'details':
+          'Added library_contributors and library_item_contributors tables.',
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 

@@ -17,7 +17,10 @@ import '../data/elibrary_install_estimate_repository.dart';
 import '../data/elibrary_migration_service.dart';
 import '../data/elibrary_download_service.dart';
 import '../data/elibrary_storage_policy.dart';
+import '../data/pioneer_captured_html_import_availability_service.dart';
 import '../data/pioneer_captured_html_import_folder_service.dart';
+import '../data/pioneer_text_import_service.dart';
+import 'pioneer_captured_html_import_dialogs.dart';
 import 'pioneer_captured_html_import_review_screen.dart';
 import 'library_root_setup_screen.dart';
 
@@ -28,6 +31,77 @@ enum _ELibraryRunCompletionStatus {
   cleanSuccess,
   completedWithWarnings,
   failedOrIncomplete,
+}
+
+class CaptureClipperFolderDetails extends StatelessWidget {
+  const CaptureClipperFolderDetails({
+    super.key,
+    required this.loading,
+    required this.path,
+    required this.access,
+    required this.status,
+  });
+
+  final bool loading;
+  final String? path;
+  final String? access;
+  final String? status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    Widget pathLine(String label, String? value) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: SelectableText('$label: ${value ?? "(not set)"}'),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (loading)
+          const LinearProgressIndicator()
+        else ...[
+          pathLine('Folder path', path),
+          pathLine('Folder access', access),
+          if (status != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              status!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ],
+    );
+  }
+}
+
+class CaptureClipperImportButton extends StatelessWidget {
+  const CaptureClipperImportButton({
+    super.key,
+    required this.label,
+    required this.busy,
+    required this.onPressed,
+  });
+
+  final String? label;
+  final bool busy;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = label;
+    if (text == null) {
+      return const SizedBox.shrink();
+    }
+    return FilledButton(onPressed: busy ? null : onPressed, child: Text(text));
+  }
 }
 
 class ELibrarySetupScreen extends StatefulWidget {
@@ -56,6 +130,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   bool _installPdf = false;
   bool _refreshingEstimateCache = false;
   bool _loadingCaptureFolder = true;
+  bool _loadingCaptureImportAvailability = true;
   bool _captureFolderBusy = false;
   ELibraryStoragePolicy _storagePolicy = ELibraryStoragePolicy.saveSpace;
   Map<String, Map<String, ELibraryInstallEstimateRecord>>
@@ -80,8 +155,9 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   int _manualIndexTotal = 0;
   String? _manualIndexCurrentTitle;
   String? _captureFolderPath;
-  String? _captureFolderBookmark;
+  String? _captureFolderAccess;
   String? _captureFolderStatus;
+  PioneerCapturedHtmlAvailableImportReport? _captureImportReport;
 
   @override
   void initState() {
@@ -166,21 +242,45 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       if (!mounted) return;
       setState(() {
         _captureFolderPath = path;
-        _captureFolderBookmark = bookmark;
+        _captureFolderAccess = path == null
+            ? null
+            : bookmark == null
+            ? 'Not saved'
+            : 'Saved';
         _captureFolderStatus = path == null
             ? 'No CaptureClipper folder configured.'
             : 'CaptureClipper folder ready.';
       });
+      await _loadCaptureImportAvailability();
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _captureFolderPath = null;
-        _captureFolderBookmark = null;
+        _captureFolderAccess = null;
         _captureFolderStatus = 'Failed to load CaptureClipper folder: $error';
+        _captureImportReport = null;
       });
     } finally {
       if (mounted) {
         setState(() => _loadingCaptureFolder = false);
+      }
+    }
+  }
+
+  Future<void> _loadCaptureImportAvailability() async {
+    if (!mounted) return;
+    setState(() => _loadingCaptureImportAvailability = true);
+    try {
+      final report = await PioneerCapturedHtmlImportAvailabilityService.instance
+          .refresh();
+      if (!mounted) return;
+      setState(() => _captureImportReport = report);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _captureImportReport = null);
+    } finally {
+      if (mounted) {
+        setState(() => _loadingCaptureImportAvailability = false);
       }
     }
   }
@@ -224,23 +324,33 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     }
   }
 
-  Future<void> _importCaptureFolder() async {
+  Future<void> _importCaptureFolder({bool repairExistingItems = false}) async {
     if (_captureFolderBusy) return;
     setState(() {
       _captureFolderBusy = true;
-      _captureFolderStatus = 'Scanning CaptureClipper folder...';
+      _captureFolderStatus = repairExistingItems
+          ? 'Repairing CaptureClipper cloud folders...'
+          : 'Scanning CaptureClipper cloud folders...';
     });
     try {
-      final report = await PioneerCapturedHtmlImportFolderService.instance
-          .importConfiguredFolder();
+      final report = repairExistingItems
+          ? await PioneerCapturedHtmlImportFolderService.instance
+                .repairBrokenCaptureClipperItems()
+          : await PioneerCapturedHtmlImportFolderService.instance
+                .importConfiguredCloudFolder(
+                  existingImportPolicy:
+                      PioneerExistingImportPolicy.skipExisting,
+                );
       if (!mounted) return;
-      final summary = report.folderPath.trim().isEmpty
-          ? 'No CaptureClipper folder is configured.'
-          : 'Imported ${report.importedCount}, '
-                'skipped duplicates ${report.skippedDuplicateCount}, '
-                'needs cleanup ${report.needsCleanupCount}, '
-                'failed ${report.failedCount}.';
+      final summary = report.rootPath.trim().isEmpty
+          ? (repairExistingItems
+                ? 'Repair attempted on stored CaptureClipper items.'
+                : 'No CaptureClipper folder is configured.')
+          : 'Imported ${report.importedCount}, repaired ${report.repairedCount}, '
+                'archived ${report.archivedCount}, skipped ${report.healthySkippedCount}, '
+                'invalid ${report.invalidCount}, failed ${report.failedCount}.';
       setState(() => _captureFolderStatus = summary);
+      await _loadCaptureImportAvailability();
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(summary)));
@@ -267,6 +377,61 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     );
     if (!mounted) return;
     await _loadCaptureFolderState();
+  }
+
+  Future<void> _promptCaptureImports() async {
+    final report = _captureImportReport;
+    if (report == null || !report.hasAvailableImports) {
+      return;
+    }
+
+    final selectedImports = await showCaptureClipperImportChooserDialog(
+      context,
+      report,
+    );
+    if (!mounted || selectedImports == null || selectedImports.isEmpty) {
+      return;
+    }
+
+    final result = await PioneerCapturedHtmlImportFolderService.instance
+        .importConfiguredCloudFolder(
+          selectedFolderPaths: selectedImports.map((item) => item.folderPath),
+        );
+    if (!mounted) return;
+    await _loadCaptureFolderState();
+    final imported = result.importedCount;
+    final archived = result.archivedCount;
+    final firstEntry = result.entries.isEmpty ? null : result.entries.first;
+    final entryLabel = firstEntry == null
+        ? 'CaptureClipper'
+        : '${firstEntry.folderName} — ${firstEntry.title}';
+    final reason = firstEntry?.archiveError?.trim().isNotEmpty == true
+        ? firstEntry!.archiveError!.trim()
+        : firstEntry?.reason?.trim().isNotEmpty == true
+        ? firstEntry!.reason!.trim()
+        : null;
+    final message = imported == 0
+        ? reason == null
+              ? 'No CaptureClipper books were imported.'
+              : 'No CaptureClipper books were imported. $entryLabel: $reason'
+        : 'Imported $imported CaptureClipper book${imported == 1 ? '' : 's'}'
+              '${archived > 0 ? ' and archived $archived source folder${archived == 1 ? '' : 's'}' : ''}.';
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String? _captureImportButtonLabel() {
+    final report = _captureImportReport;
+    if (_loadingCaptureImportAvailability ||
+        report == null ||
+        !report.hasAvailableImports) {
+      return null;
+    }
+    if (report.availableCount == 1) {
+      return 'Import 1 Book';
+    }
+    return 'Import Ready';
   }
 
   Future<void> _refreshEstimateCache() async {
@@ -1363,24 +1528,12 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          if (_loadingCaptureFolder)
-                            const LinearProgressIndicator()
-                          else ...[
-                            _pathLine('Folder path', _captureFolderPath),
-                            _pathLine(
-                              'Folder bookmark',
-                              _captureFolderBookmark,
-                            ),
-                            if (_captureFolderStatus != null) ...[
-                              const SizedBox(height: 8),
-                              Text(
-                                _captureFolderStatus!,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ],
+                          CaptureClipperFolderDetails(
+                            loading: _loadingCaptureFolder,
+                            path: _captureFolderPath,
+                            access: _captureFolderAccess,
+                            status: _captureFolderStatus,
+                          ),
                           const SizedBox(height: 12),
                           Wrap(
                             spacing: 12,
@@ -1392,11 +1545,20 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                                     : _chooseCaptureFolder,
                                 child: const Text('Choose Folder'),
                               ),
+                              CaptureClipperImportButton(
+                                label: _captureImportButtonLabel(),
+                                busy: _captureFolderBusy,
+                                onPressed: _promptCaptureImports,
+                              ),
                               OutlinedButton(
                                 onPressed: _captureFolderBusy
                                     ? null
-                                    : _importCaptureFolder,
-                                child: const Text('Import Folder'),
+                                    : () => _importCaptureFolder(
+                                        repairExistingItems: true,
+                                      ),
+                                child: const Text(
+                                  'Repair Broken CaptureClipper Items',
+                                ),
                               ),
                               OutlinedButton(
                                 onPressed: _captureFolderBusy

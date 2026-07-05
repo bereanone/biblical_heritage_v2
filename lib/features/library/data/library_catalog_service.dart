@@ -16,6 +16,7 @@ import 'library_author_resolver.dart';
 import 'library_contributor.dart';
 import 'library_epub_metadata.dart';
 import 'library_item_identity.dart';
+import '../../utilities/data/pioneer_capture_folder_metadata.dart';
 import '../../utilities/data/elibrary_folder_policy.dart';
 
 part 'library_navigation_dedupe.dart';
@@ -151,6 +152,10 @@ class LibraryCatalogService {
       rows,
       database: database,
     );
+    final repairedCaptureCoverPaths = await _warmMissingCaptureCoverPaths(
+      rows,
+      database: database,
+    );
     final warmedTitleValues = await _warmMissingTitleValues(
       rows,
       database: database,
@@ -164,6 +169,7 @@ class LibraryCatalogService {
           final id = row['id']?.toString() ?? '';
           final warmedAuthor = warmedAuthorValues[id];
           final warmedCoverPath = warmedCoverPaths[id];
+          final repairedCaptureCoverPath = repairedCaptureCoverPaths[id];
           final warmedTitle = warmedTitleValues[id];
           final repairedPathValues = repairedManagedPaths[id];
           if ((warmedAuthor == null || warmedAuthor.trim().isEmpty) &&
@@ -180,6 +186,9 @@ class LibraryCatalogService {
               'author': warmedAuthor,
             if (warmedCoverPath != null && warmedCoverPath.trim().isNotEmpty)
               'cover_path': warmedCoverPath,
+            if (repairedCaptureCoverPath != null &&
+                repairedCaptureCoverPath.trim().isNotEmpty)
+              'cover_path': repairedCaptureCoverPath,
             if (warmedTitle != null && warmedTitle.trim().isNotEmpty)
               'title': warmedTitle,
             if (repairedPathValues != null) ...repairedPathValues,
@@ -241,7 +250,7 @@ class LibraryCatalogService {
         final isEpub = ext == '.epub';
         final existingRows = await db.query(
           'library_items',
-          columns: const ['id', 'collection_name'],
+          columns: const ['id', 'collection_name', 'cover_path'],
           where: 'id = ? OR LOWER(relative_path) = ?',
           whereArgs: [itemId, relativePath.toLowerCase()],
           limit: 1,
@@ -250,6 +259,8 @@ class LibraryCatalogService {
         final existingId = existingRow?['id']?.toString().trim() ?? '';
         final existingCollection =
             existingRow?['collection_name']?.toString().trim() ?? '';
+        final existingCoverPath =
+            existingRow?['cover_path']?.toString().trim() ?? '';
         final title = await _resolveManagedTitle(file: entity, isEpub: isEpub);
         final author = await _resolveManagedAuthor(
           file: entity,
@@ -281,7 +292,9 @@ class LibraryCatalogService {
           'id': itemId,
           ...updatePayload,
           'source_url': null,
-          'cover_path': null,
+          'cover_path': existingCoverPath.isNotEmpty
+              ? existingCoverPath
+              : null,
           'date_added': now,
           'last_opened': null,
           'index_status': 'metadata_only',
@@ -959,6 +972,72 @@ class LibraryCatalogService {
     return results;
   }
 
+  Future<Map<String, String>> _warmMissingCaptureCoverPaths(
+    List<Map<String, Object?>> rows, {
+    required Database database,
+  }) async {
+    final results = <String, String>{};
+    final selection = await LibraryRootService.instance.loadSelection();
+    final rootPath =
+        (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
+        selection.path;
+    if (rootPath == null || rootPath.trim().isEmpty) {
+      return results;
+    }
+    final normalizedRootPath = rootPath.trim();
+    if (!Directory(normalizedRootPath).existsSync()) {
+      return results;
+    }
+
+    for (final row in rows) {
+      final id = row['id']?.toString().trim() ?? '';
+      if (id.isEmpty) continue;
+
+      final existingCoverPath = row['cover_path']?.toString().trim() ?? '';
+      if (existingCoverPath.isNotEmpty && File(existingCoverPath).existsSync()) {
+        continue;
+      }
+
+      final relativePath = row['relative_path']?.toString().trim() ?? '';
+      if (relativePath.isEmpty) continue;
+      final normalizedRelativePath = relativePath.replaceAll('\\', '/');
+      if (!normalizedRelativePath.startsWith('assets/scans/')) continue;
+
+      final captureFilePath = p.isAbsolute(normalizedRelativePath)
+          ? normalizedRelativePath
+          : p.join(normalizedRootPath, normalizedRelativePath);
+      final captureFolder = Directory(p.dirname(captureFilePath));
+      if (!captureFolder.existsSync()) continue;
+
+      final resolvedCoverPath = await _resolveCaptureFolderCoverPath(
+        captureFolder: captureFolder,
+      );
+      if (resolvedCoverPath == null || resolvedCoverPath.trim().isEmpty) {
+        continue;
+      }
+
+      final durableCoverPath = await cachePioneerCaptureCoverPath(
+        coverPath: resolvedCoverPath,
+        itemId: id,
+        rootPath: normalizedRootPath,
+      );
+      if (durableCoverPath == null || durableCoverPath.trim().isEmpty) {
+        continue;
+      }
+
+      final now = DateTime.now().toUtc().toIso8601String();
+      await database.update(
+        'library_items',
+        {'cover_path': durableCoverPath, 'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      results[id] = durableCoverPath;
+    }
+
+    return results;
+  }
+
   Future<Map<String, String>> _warmMissingAuthorValues(
     List<Map<String, Object?>> rows, {
     required Database database,
@@ -1551,6 +1630,69 @@ class LibraryCatalogService {
       return mirrorPath;
     }
     return null;
+  }
+
+  Future<String?> _resolveCaptureFolderCoverPath({
+    required Directory captureFolder,
+  }) async {
+    final allFiles = captureFolder
+        .listSync(recursive: true, followLinks: false)
+        .whereType<File>()
+        .map((file) => file.path)
+        .toList(growable: false);
+    final metadata = PioneerCaptureFolderMetadata.fromFolder(
+      captureFolder,
+      availableFiles: allFiles,
+    );
+    final metadataCoverPath = metadata.coverImagePath?.trim() ?? '';
+    if (metadataCoverPath.isNotEmpty && File(metadataCoverPath).existsSync()) {
+      return metadataCoverPath;
+    }
+
+    final folderName = p.basename(captureFolder.path);
+    final candidatePaths = <String>[
+      p.join(captureFolder.path, 'cover.jpg'),
+      p.join(captureFolder.path, 'cover.jpeg'),
+      p.join(captureFolder.path, 'cover.png'),
+      p.join(captureFolder.path, 'cover.webp'),
+      p.join(captureFolder.path, 'thumbnail.jpg'),
+      p.join(captureFolder.path, 'thumbnail.jpeg'),
+      p.join(captureFolder.path, 'thumbnail.png'),
+      p.join(captureFolder.path, 'thumbnail.webp'),
+      p.join(captureFolder.path, 'images', '$folderName.png'),
+      p.join(captureFolder.path, 'images', '$folderName.jpg'),
+      p.join(captureFolder.path, 'images', 'cover.png'),
+      p.join(captureFolder.path, 'images', 'cover.jpg'),
+      p.join(captureFolder.path, 'images', 'thumbnail.png'),
+      p.join(captureFolder.path, 'images', 'thumbnail.jpg'),
+    ];
+    for (final candidate in candidatePaths) {
+      if (File(candidate).existsSync()) {
+        return candidate;
+      }
+    }
+
+    for (final filePath in allFiles) {
+      if (_isImageFile(filePath) && File(filePath).existsSync()) {
+        return filePath;
+      }
+    }
+
+    return null;
+  }
+
+  bool _isImageFile(String pathValue) {
+    switch (p.extension(pathValue).toLowerCase()) {
+      case '.jpg':
+      case '.jpeg':
+      case '.png':
+      case '.webp':
+      case '.gif':
+      case '.bmp':
+        return true;
+      default:
+        return false;
+    }
   }
 
   Future<String?> _cacheEpubCover({

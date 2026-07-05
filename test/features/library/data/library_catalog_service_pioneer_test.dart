@@ -160,8 +160,54 @@ void main() {
             'relative_path': 'TextCaptures/missing.html',
             'cover_path': '/definitely/missing/cover.png',
             'navigation_count': 0,
-          });
+      });
       expect(missingFileCover.coverPath, isNull);
+    },
+  );
+
+  test(
+    'repairs a missing Pioneer capture cover from local folder metadata',
+    () async {
+      final captureDir = Directory(
+        p.join(libraryRootDir.path, 'assets', 'scans', 'LOF_ATJ'),
+      );
+      await captureDir.create(recursive: true);
+      await File(p.join(captureDir.path, 'capture.html')).writeAsString(
+        '<html><body><p>cover repair fixture</p></body></html>',
+      );
+      await File(p.join(captureDir.path, 'metadata.json')).writeAsString(
+        '{"cover_image":"cover.jpg"}',
+      );
+      await File(p.join(captureDir.path, 'cover.jpg')).writeAsString('cover');
+
+      final db = await ELibraryDatabase.instance.database;
+      await db.update(
+        'library_items',
+        {'cover_path': null},
+        where: 'id = ?',
+        whereArgs: ['lessons_on_faith'],
+      );
+
+      final items = await LibraryCatalogService.instance.loadItems();
+      final lessons = items.firstWhere(
+        (item) => item.id == 'lessons_on_faith',
+      );
+      final expectedCoverPath = p.join(
+        libraryRootDir.path,
+        'Graphics',
+        'eLibraryCovers',
+        'lessons_on_faith.jpg',
+      );
+      expect(lessons.coverPath, expectedCoverPath);
+      expect(File(expectedCoverPath).existsSync(), isTrue);
+
+      final repairedRow = await db.query(
+        'library_items',
+        columns: const ['cover_path'],
+        where: 'id = ?',
+        whereArgs: ['lessons_on_faith'],
+      );
+      expect(repairedRow.single['cover_path'], expectedCoverPath);
     },
   );
 

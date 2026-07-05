@@ -1,6 +1,6 @@
 part of 'library_screen.dart';
 
-class _LibraryScreenState extends State<LibraryScreen> {
+class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   static const Set<String> _supportedCollectionFilterValues = <String>{
     'egw_books',
     'egw_devotionals',
@@ -28,18 +28,55 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String? _selectedInitialLetter;
   String? _selectedBookId;
   List<LibraryCatalogItem> _items = const [];
+  PioneerCapturedHtmlAvailableImportReport? _captureImportReport;
+  bool _loadingCaptureImports = false;
+  bool _captureImportDialogVisible = false;
+  PageRoute<dynamic>? _observedRoute;
 
   @override
   void initState() {
     super.initState();
+    final initialReport = widget.initialCapturedImportReport;
+    if (initialReport != null) {
+      _captureImportReport = initialReport;
+      _loading = false;
+      _loadingStatus = 'Library loaded.';
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !initialReport.hasAvailableImports) {
+          return;
+        }
+        unawaited(_showCaptureImportOffer(initialReport));
+      });
+      return;
+    }
     _load();
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute<dynamic> && route != _observedRoute) {
+      if (_observedRoute != null) {
+        appRouteObserver.unsubscribe(this);
+      }
+      _observedRoute = route;
+      appRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
   void dispose() {
+    appRouteObserver.unsubscribe(this);
+    _observedRoute = null;
     _searchFocusNode.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didPopNext() {
+    unawaited(_reloadItems());
   }
 
   Future<void> _load() async {
@@ -75,6 +112,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         _filteredBooks,
         preferExistingSelection: false,
       );
+      await _refreshCaptureImportReport(promptOnDiscovery: true);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -89,10 +127,214 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final items = await _service.loadItems();
     if (!mounted) return;
     setState(() => _items = items);
+    await _refreshCaptureImportReport(promptOnDiscovery: false);
     await _syncSelectionAndNavigation(
       _filteredBooks,
       preferExistingSelection: true,
     );
+  }
+
+  Future<void> _refreshCaptureImportReport({
+    required bool promptOnDiscovery,
+  }) async {
+    if (mounted) {
+      setState(() => _loadingCaptureImports = true);
+    }
+    try {
+      final report = await (widget.capturedImportAvailabilityLoader ??
+          _defaultCapturedImportAvailabilityLoader)();
+      if (!mounted) return;
+      setState(() {
+        _captureImportReport = report;
+        _loadingCaptureImports = false;
+      });
+      if (promptOnDiscovery && report.hasAvailableImports) {
+        await _showCaptureImportOffer(report);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingCaptureImports = false;
+      });
+      debugPrint('CaptureClipper import discovery failed: $error');
+    }
+  }
+
+  void _openCaptureImports() {
+    unawaited(_handleOpenCaptureImports());
+  }
+
+  Future<void> _handleOpenCaptureImports() async {
+    final report = _captureImportReport;
+    if (report == null || !report.hasAvailableImports) {
+      await _refreshCaptureImportReport(promptOnDiscovery: false);
+    }
+    final refreshedReport = _captureImportReport;
+    if (!mounted ||
+        refreshedReport == null ||
+        !refreshedReport.hasAvailableImports) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No CaptureClipper imports are currently available.'),
+        ),
+      );
+      return;
+    }
+    await _showCaptureImportOffer(refreshedReport);
+  }
+
+  Future<void> _showCaptureImportOffer(
+    PioneerCapturedHtmlAvailableImportReport report,
+  ) async {
+    if (_captureImportDialogVisible ||
+        !mounted ||
+        !report.hasAvailableImports) {
+      return;
+    }
+    final availableImports = report.imports;
+    _captureImportDialogVisible = true;
+    List<String>? selectedPaths;
+    try {
+      selectedPaths = await showDialog<List<String>?>(
+        context: context,
+        barrierDismissible: true,
+        builder: (dialogContext) {
+          final selected = <String>{
+            for (final candidate in availableImports) candidate.folderPath,
+          };
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              final title = availableImports.length == 1
+                  ? '1 CaptureClipper book is ready to import'
+                  : '${availableImports.length} CaptureClipper books are ready to import';
+              final subtitle = availableImports.length == 1
+                  ? '${availableImports.first.folderName}. Import now?'
+                  : 'Select one or more books to import.';
+              return AlertDialog(
+                title: Text(title),
+                content: SizedBox(
+                  width: 520,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(subtitle),
+                        const SizedBox(height: 12),
+                        if (availableImports.length > 1)
+                          ...availableImports.map(
+                            (candidate) => CheckboxListTile(
+                              value: selected.contains(candidate.folderPath),
+                              onChanged: (checked) {
+                                setDialogState(() {
+                                  if (checked == true) {
+                                    selected.add(candidate.folderPath);
+                                  } else {
+                                    selected.remove(candidate.folderPath);
+                                  }
+                                });
+                              },
+                              title: Text(candidate.displayLabel),
+                              subtitle: Text(candidate.author),
+                              controlAffinity: ListTileControlAffinity.leading,
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          )
+                        else
+                          Text(
+                            availableImports.single.displayLabel,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'You can import later from the Capture Imports button.',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Not Now'),
+                  ),
+                  FilledButton(
+                    onPressed: selected.isEmpty
+                        ? null
+                        : () => Navigator.of(
+                            dialogContext,
+                          ).pop(selected.toList(growable: false)),
+                    child: const Text('Import'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _captureImportDialogVisible = false);
+      } else {
+        _captureImportDialogVisible = false;
+      }
+    }
+    if (selectedPaths == null || selectedPaths.isEmpty || !mounted) {
+      return;
+    }
+    try {
+      final report = await PioneerCapturedHtmlImportFolderService.instance
+          .importConfiguredCloudFolder(selectedFolderPaths: selectedPaths);
+      if (!mounted) return;
+      final importedCount = report.importedCount + report.repairedCount;
+      final skippedCount = report.skippedCount;
+      PioneerCapturedHtmlCloudFolderImportEntry? failedEntry;
+      PioneerCapturedHtmlCloudFolderImportEntry? skippedEntry;
+      for (final entry in report.entries) {
+        if (failedEntry == null && entry.importStatus?.name == 'failed') {
+          failedEntry = entry;
+        }
+        if (skippedEntry == null &&
+            entry.importStatus?.name == 'skippedExisting') {
+          skippedEntry = entry;
+        }
+      }
+      await _reloadItems();
+      String message;
+      if (importedCount > 0) {
+        message =
+            'Imported $importedCount CaptureClipper book${importedCount == 1 ? '' : 's'}.';
+      } else if (failedEntry != null) {
+        final label = '${failedEntry.folderName} — ${failedEntry.title}';
+        final reason = failedEntry.reason?.trim().isNotEmpty == true
+            ? failedEntry.reason!.trim()
+            : 'Unknown reason';
+        message = 'CaptureClipper import failed for $label: $reason';
+      } else if (skippedEntry != null) {
+        final label = '${skippedEntry.folderName} — ${skippedEntry.title}';
+        final reason = skippedEntry.reason?.trim().isNotEmpty == true
+            ? skippedEntry.reason!.trim()
+            : 'Already imported';
+        message = 'Already imported: $label. $reason';
+      } else if (skippedCount > 0) {
+        message = 'No new CaptureClipper imports were needed.';
+      } else {
+        message = 'No CaptureClipper import folders were selected.';
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('CaptureClipper import failed: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _captureImportDialogVisible = false);
+      }
+      await _refreshCaptureImportReport(promptOnDiscovery: false);
+    }
   }
 
   Future<void> _syncSelectionAndNavigation(
@@ -546,10 +788,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
               children: [
                 _LibraryHeader(
                   selection: selection,
+                  captureImportReport: _captureImportReport,
+                  captureImportLoading: _loadingCaptureImports,
                   onOpenBible: _openBibleApp,
                   onOpenLibraryRootSetup: _openLibraryRootSetup,
                   onOpenELibrarySetup: _openELibrarySetup,
                   onRefresh: _refreshFolders,
+                  onOpenCaptureImports: _openCaptureImports,
                 ),
                 const SizedBox(height: 12),
                 Expanded(

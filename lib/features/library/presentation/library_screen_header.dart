@@ -3,17 +3,23 @@ part of 'library_screen.dart';
 class _LibraryHeader extends StatelessWidget {
   const _LibraryHeader({
     required this.selection,
+    required this.captureImportReport,
+    required this.captureImportLoading,
     required this.onOpenBible,
     required this.onOpenLibraryRootSetup,
     required this.onOpenELibrarySetup,
     required this.onRefresh,
+    required this.onOpenCaptureImports,
   });
 
   final LibraryRootSelection? selection;
+  final PioneerCapturedHtmlAvailableImportReport? captureImportReport;
+  final bool captureImportLoading;
   final VoidCallback onOpenBible;
   final VoidCallback onOpenLibraryRootSetup;
   final VoidCallback onOpenELibrarySetup;
   final VoidCallback onRefresh;
+  final VoidCallback onOpenCaptureImports;
 
   @override
   Widget build(BuildContext context) {
@@ -66,6 +72,14 @@ class _LibraryHeader extends StatelessWidget {
       ),
     );
 
+    final captureImportButton = _CaptureImportButton(
+      availableCount: captureImportReport?.availableCount ?? 0,
+      loading: captureImportLoading,
+      onPressed: onOpenCaptureImports,
+    );
+    final showCaptureImportButton =
+        !captureImportLoading && (captureImportReport?.availableCount ?? 0) > 0;
+
     final actionsMenu = _LibraryActionsMenu(
       onSelected: (value) {
         switch (value) {
@@ -116,6 +130,10 @@ class _LibraryHeader extends StatelessWidget {
             children: [
               statusPill,
               const SizedBox(width: 8),
+              if (showCaptureImportButton) ...[
+                captureImportButton,
+                const SizedBox(width: 8),
+              ],
               actionsMenu,
             ],
           ),
@@ -126,10 +144,7 @@ class _LibraryHeader extends StatelessWidget {
     // Wide layout (iPad / macOS): original single-row layout.
     return Row(
       children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 48),
-          child: bibleButton,
-        ),
+        Padding(padding: const EdgeInsets.only(left: 48), child: bibleButton),
         const SizedBox(width: 12),
         Text(
           'eLibrary',
@@ -143,6 +158,10 @@ class _LibraryHeader extends StatelessWidget {
         const Spacer(),
         statusPill,
         const SizedBox(width: 8),
+        if (showCaptureImportButton) ...[
+          captureImportButton,
+          const SizedBox(width: 8),
+        ],
         actionsMenu,
         const SizedBox(width: 8),
       ],
@@ -198,6 +217,45 @@ class _LibraryActionsMenu extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _CaptureImportButton extends StatelessWidget {
+  const _CaptureImportButton({
+    required this.availableCount,
+    required this.loading,
+    required this.onPressed,
+  });
+
+  final int availableCount;
+  final bool loading;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading || availableCount <= 0) {
+      return const SizedBox.shrink();
+    }
+
+    final label = availableCount == 1
+        ? 'Import Ready'
+        : 'Import $availableCount Ready';
+    return FilledButton.tonalIcon(
+      onPressed: onPressed,
+      icon: const Icon(Icons.download_outlined),
+      label: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: libraryControlTextStyle(
+          context,
+          Theme.of(context).textTheme.labelLarge,
+          color: Theme.of(context).colorScheme.onSurface,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      style: _libraryTonalButtonStyle(context),
     );
   }
 }

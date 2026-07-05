@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/navigation/app_route_observer.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/app_settings_service.dart';
 import '../core/theme/app_theme_mode.dart';
@@ -27,7 +28,9 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
 
   @override
   void dispose() {
-    ThemePreferences.themeModeListenable.removeListener(_handleThemeModeChanged);
+    ThemePreferences.themeModeListenable.removeListener(
+      _handleThemeModeChanged,
+    );
     super.dispose();
   }
 
@@ -67,6 +70,7 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
       title: 'Biblical Heritage StudyBible 2.0',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(_themeMode, settings: _visualSettings),
+      navigatorObservers: [appRouteObserver],
       home: _loadedTheme
           ? EntryScreen(
               themeMode: _themeMode,
@@ -74,9 +78,7 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
                 _setThemeMode(mode);
               },
             )
-          : const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            ),
+          : const Scaffold(body: Center(child: CircularProgressIndicator())),
     );
   }
 }

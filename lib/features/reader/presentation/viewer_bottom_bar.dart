@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme_mode.dart';
+import '../../library/presentation/reader_tilt_autoscroll_controller.dart';
+import '../../library/presentation/reader_tilt_autoscroll_controls.dart';
 
 part 'viewer_bottom_bar_buttons.dart';
 
@@ -17,6 +19,9 @@ class ViewerBottomBar extends StatelessWidget {
     required this.onLibrary,
     required this.onDecreaseFont,
     required this.onIncreaseFont,
+    required this.tiltAutoScrollController,
+    required this.onToggleTiltAutoScroll,
+    required this.onOpenTiltAutoScrollSettings,
     required this.onCommentary,
     required this.canDecreaseFont,
     required this.canIncreaseFont,
@@ -33,6 +38,9 @@ class ViewerBottomBar extends StatelessWidget {
   final VoidCallback onLibrary;
   final VoidCallback onDecreaseFont;
   final VoidCallback onIncreaseFont;
+  final ReaderTiltAutoScrollController tiltAutoScrollController;
+  final VoidCallback onToggleTiltAutoScroll;
+  final VoidCallback onOpenTiltAutoScrollSettings;
   final VoidCallback onCommentary;
   final bool canDecreaseFont;
   final bool canIncreaseFont;
@@ -53,6 +61,94 @@ class ViewerBottomBar extends StatelessWidget {
           final sidePadding = isCompact ? 4.0 : 8.0;
 
           if (!isWide) {
+            if (constraints.maxWidth < 380) {
+              return SafeArea(
+                top: false,
+                child: SizedBox(
+                  height: 56,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: EdgeInsets.symmetric(horizontal: sidePadding),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          tooltip: 'History',
+                          onPressed: onHistory,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 36,
+                            height: 36,
+                          ),
+                          icon: Icon(
+                            Icons.history_rounded,
+                            color: buttonColor,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        _FontScaleButton(
+                          onPressed: canDecreaseFont ? onDecreaseFont : null,
+                          color: buttonColor,
+                          baseSize: 14,
+                          sign: 'A-',
+                          signSize: 10,
+                          compact: true,
+                        ),
+                        const SizedBox(width: 2),
+                        _FontScaleButton(
+                          onPressed: canIncreaseFont ? onIncreaseFont : null,
+                          color: buttonColor,
+                          baseSize: 19,
+                          sign: 'A+',
+                          signSize: 11,
+                          compact: true,
+                        ),
+                        const SizedBox(width: 2),
+                        ReaderTiltAutoScrollIconButton(
+                          controller: tiltAutoScrollController,
+                          onPressed: onToggleTiltAutoScroll,
+                          onLongPress: onOpenTiltAutoScrollSettings,
+                          enabled:
+                              tiltAutoScrollController.motionSource.isSupported,
+                        ),
+                        const SizedBox(width: 2),
+                        _BottomIconButton(
+                          tooltip: 'Commentary',
+                          icon: Icons.menu_book_outlined,
+                          color: buttonColor,
+                          compact: true,
+                          onPressed: onCommentary,
+                        ),
+                        const SizedBox(width: 2),
+                        _LibraryButton(compact: true, onPressed: onLibrary),
+                        const SizedBox(width: 2),
+                        _InterlinearToggleButton(
+                          bookNumber: bookNumber,
+                          interlinearEnabled: interlinearEnabled,
+                          compact: true,
+                          baseColor: buttonColor,
+                          onToggleInterlinear: onToggleInterlinear,
+                        ),
+                        const SizedBox(width: 2),
+                        _ThemeToggleButton(
+                          themeMode: themeMode,
+                          compact: true,
+                          onToggleThemeMode: onToggleThemeMode,
+                        ),
+                        const SizedBox(width: 2),
+                        _BottomIconButton(
+                          tooltip: 'Mode',
+                          icon: Icons.settings_rounded,
+                          color: buttonColor,
+                          compact: true,
+                          onPressed: onMode,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
             // Phone layout: Row with two equal Expanded clusters so
             // Commentary stays geometrically centered regardless of cluster widths.
             // All buttons use compact sizing; theme and eLibrary are icon-only.
@@ -85,7 +181,9 @@ class ViewerBottomBar extends StatelessWidget {
                             ),
                             const SizedBox(width: 2),
                             _FontScaleButton(
-                              onPressed: canDecreaseFont ? onDecreaseFont : null,
+                              onPressed: canDecreaseFont
+                                  ? onDecreaseFont
+                                  : null,
                               color: buttonColor,
                               baseSize: 14,
                               sign: 'A-',
@@ -94,12 +192,23 @@ class ViewerBottomBar extends StatelessWidget {
                             ),
                             const SizedBox(width: 2),
                             _FontScaleButton(
-                              onPressed: canIncreaseFont ? onIncreaseFont : null,
+                              onPressed: canIncreaseFont
+                                  ? onIncreaseFont
+                                  : null,
                               color: buttonColor,
                               baseSize: 19,
                               sign: 'A+',
                               signSize: 11,
                               compact: true,
+                            ),
+                            const SizedBox(width: 2),
+                            ReaderTiltAutoScrollIconButton(
+                              controller: tiltAutoScrollController,
+                              onPressed: onToggleTiltAutoScroll,
+                              onLongPress: onOpenTiltAutoScrollSettings,
+                              enabled: tiltAutoScrollController
+                                  .motionSource
+                                  .isSupported,
                             ),
                           ],
                         ),
@@ -117,10 +226,7 @@ class ViewerBottomBar extends StatelessWidget {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
-                            _LibraryButton(
-                              compact: true,
-                              onPressed: onLibrary,
-                            ),
+                            _LibraryButton(compact: true, onPressed: onLibrary),
                             const SizedBox(width: 2),
                             _InterlinearToggleButton(
                               bookNumber: bookNumber,
@@ -201,6 +307,16 @@ class ViewerBottomBar extends StatelessWidget {
                             baseSize: isCompact ? 19 : 23,
                             sign: 'A+',
                             signSize: isCompact ? 11 : 12,
+                            compact: isCompact,
+                          ),
+                          SizedBox(width: controlGap),
+                          ReaderTiltAutoScrollIconButton(
+                            controller: tiltAutoScrollController,
+                            onPressed: onToggleTiltAutoScroll,
+                            onLongPress: onOpenTiltAutoScrollSettings,
+                            enabled: tiltAutoScrollController
+                                .motionSource
+                                .isSupported,
                             compact: isCompact,
                           ),
                         ],

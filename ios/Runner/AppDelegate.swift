@@ -1,10 +1,12 @@
 import Flutter
+import CoreMotion
 import UIKit
 import UniformTypeIdentifiers
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var libraryRootBridge: LibraryRootFolderBridge?
+  private var readerTiltMotionBridge: ReaderTiltMotionBridge?
 
   override func application(
     _ application: UIApplication,
@@ -20,6 +22,63 @@ import UniformTypeIdentifiers
     ) {
       libraryRootBridge = LibraryRootFolderBridge(registrar: registrar)
     }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ReaderTiltMotionBridge") {
+      readerTiltMotionBridge = ReaderTiltMotionBridge(registrar: registrar)
+    }
+  }
+}
+
+final class ReaderTiltMotionBridge: NSObject, FlutterStreamHandler {
+  private let manager = CMMotionManager()
+  private var sink: FlutterEventSink?
+
+  init(registrar: FlutterPluginRegistrar) {
+    super.init()
+    FlutterEventChannel(
+      name: "studybible/reader_tilt_motion",
+      binaryMessenger: registrar.messenger()
+    ).setStreamHandler(self)
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    guard manager.isDeviceMotionAvailable else {
+      return FlutterError(code: "motion_unavailable", message: "Device motion is unavailable.", details: nil)
+    }
+    sink = events
+    manager.deviceMotionUpdateInterval = 1.0 / 60.0
+    manager.startDeviceMotionUpdates(using: .xArbitraryCorrectedZVertical, to: .main) { [weak self] motion, error in
+      if let error = error {
+        self?.sink?(FlutterError(code: "motion_error", message: error.localizedDescription, details: nil))
+        return
+      }
+      guard let motion = motion else { return }
+      let interfaceOrientation = UIApplication.shared.connectedScenes
+        .compactMap { ($0 as? UIWindowScene)?.interfaceOrientation }
+        .first ?? .portrait
+      let orientation: String
+      switch interfaceOrientation {
+      case .portraitUpsideDown:
+        orientation = "portraitUpsideDown"
+      case .landscapeLeft:
+        orientation = "landscapeLeft"
+      case .landscapeRight:
+        orientation = "landscapeRight"
+      default:
+        orientation = "portrait"
+      }
+      self?.sink?([
+        "attitudePitch": motion.attitude.pitch,
+        "attitudeRoll": motion.attitude.roll,
+        "orientation": orientation,
+      ])
+    }
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    manager.stopDeviceMotionUpdates()
+    sink = nil
+    return nil
   }
 }
 

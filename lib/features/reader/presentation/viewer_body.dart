@@ -16,6 +16,7 @@ import 'viewer_passage_models.dart';
 import 'viewer_range_selection.dart';
 import 'viewer_verse_line.dart';
 import 'text_range_geometry.dart';
+import '../../library/presentation/reader_tilt_autoscroll_controller.dart';
 
 part 'viewer_body_helpers.dart';
 
@@ -40,6 +41,8 @@ class ViewerBody extends StatefulWidget {
     this.rangeSelection = const ViewerRangeSelection(),
     this.highlightRefreshTick = 0,
     this.navigationTick = 0,
+    this.autoScrollTarget,
+    this.onManualScroll,
   });
 
   final int anchorBlockId;
@@ -59,6 +62,8 @@ class ViewerBody extends StatefulWidget {
   final ViewerRangeSelection rangeSelection;
   final int highlightRefreshTick;
   final int navigationTick;
+  final CallbackReaderAutoScrollTarget? autoScrollTarget;
+  final VoidCallback? onManualScroll;
 
   static void _noop() {}
   static void _noopVerseSelection(VerseLine _) {}
@@ -69,6 +74,8 @@ class ViewerBody extends StatefulWidget {
 
 class _ViewerBodyState extends State<ViewerBody> {
   final ItemScrollController _itemScrollController = ItemScrollController();
+  final ScrollOffsetController _scrollOffsetController =
+      ScrollOffsetController();
   final ItemPositionsListener _itemPositionsListener =
       ItemPositionsListener.create();
   final TextRangeGeometryRegistry _geometryRegistry =
@@ -81,8 +88,7 @@ class _ViewerBodyState extends State<ViewerBody> {
       <String, Map<String, VerseHighlightRecord>>{};
   final Map<String, Map<String, List<VerseHighlightRecord>>>
   _tokenHighlightCache = <String, Map<String, List<VerseHighlightRecord>>>{};
-  final Map<String, Set<String>> _verseMarkupCache =
-      <String, Set<String>>{};
+  final Map<String, Set<String>> _verseMarkupCache = <String, Set<String>>{};
 
   final Map<int, GlobalKey> _verseKeys = {};
   Timer? _scrollDebounce;
@@ -100,6 +106,23 @@ class _ViewerBodyState extends State<ViewerBody> {
   void initState() {
     super.initState();
     _itemPositionsListener.itemPositions.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.autoScrollTarget?.attach(_scrollByPixels);
+    });
+  }
+
+  bool _scrollByPixels(double delta) {
+    if (!mounted) return false;
+    unawaited(
+      _scrollOffsetController
+          .animateScroll(
+            offset: delta,
+            duration: const Duration(milliseconds: 16),
+            curve: Curves.linear,
+          )
+          .catchError((_) {}),
+    );
+    return true;
   }
 
   @override
@@ -124,6 +147,7 @@ class _ViewerBodyState extends State<ViewerBody> {
 
   @override
   void dispose() {
+    widget.autoScrollTarget?.detach();
     _scrollDebounce?.cancel();
     _geometryDebounce?.cancel();
     _itemPositionsListener.itemPositions.removeListener(_onScroll);
@@ -158,8 +182,8 @@ class _ViewerBodyState extends State<ViewerBody> {
     if (blockId == null) return;
     final targetLine = widget.data.getBlock(blockId);
     if (targetLine == null) return;
-    final ro = _verseKeys[blockId]?.currentContext?.findRenderObject()
-        as RenderBox?;
+    final ro =
+        _verseKeys[blockId]?.currentContext?.findRenderObject() as RenderBox?;
     if (ro == null || !ro.attached) return;
     final localPos = ro.globalToLocal(details.globalPosition);
     final theme = Theme.of(context);
@@ -343,6 +367,7 @@ class _ViewerBodyState extends State<ViewerBody> {
           onNotification: (notification) {
             if (_suppressUserScroll) return false;
             final isScrolling = notification.direction != ScrollDirection.idle;
+            if (isScrolling) widget.onManualScroll?.call();
             if (_userIsScrolling != isScrolling) {
               _userIsScrolling = isScrolling;
               if (!isScrolling && mounted) {
@@ -356,6 +381,7 @@ class _ViewerBodyState extends State<ViewerBody> {
           child: ScrollablePositionedList.builder(
             itemCount: widget.data.maxBlockId,
             itemScrollController: _itemScrollController,
+            scrollOffsetController: _scrollOffsetController,
             itemPositionsListener: _itemPositionsListener,
             initialScrollIndex: _indexForBlockId(widget.anchorBlockId),
             padding: const EdgeInsets.fromLTRB(22, 4, 22, 14),
@@ -428,7 +454,7 @@ class _ViewerBodyState extends State<ViewerBody> {
                             : 0,
                         highlight:
                             (cachedHighlights ??
-                                const <String, VerseHighlightRecord>{})[verseKey],
+                            const <String, VerseHighlightRecord>{})[verseKey],
                         tokenHighlights:
                             (cachedTokenHighlights ??
                                 const <
@@ -436,9 +462,8 @@ class _ViewerBodyState extends State<ViewerBody> {
                                   List<VerseHighlightRecord>
                                 >{})[verseKey] ??
                             const <VerseHighlightRecord>[],
-                        hasUserMarkup:
-                            (cachedVerseMarkups ??
-                                const <String>{}).contains(numericVerseKey),
+                        hasUserMarkup: (cachedVerseMarkups ?? const <String>{})
+                            .contains(numericVerseKey),
                         showChapterNumber: showChapterNumber,
                         startsInRedLetter:
                             blockContext?.startsInRedLetter ?? false,

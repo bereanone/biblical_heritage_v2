@@ -36,6 +36,10 @@ import '../data/library_catalog_service.dart';
 import 'elibrary_highlight_color_picker.dart';
 import 'library_font_scale.dart';
 import 'library_navigation_tree.dart';
+import 'reader_tilt_autoscroll_controller.dart';
+import 'reader_tilt_autoscroll_controls.dart';
+import 'reader_tilt_motion_source.dart';
+import 'reader_tilt_preferences.dart';
 import '../../reader/presentation/text_range_geometry.dart';
 import '../../utilities/data/pioneer_captured_html_import_folder_service.dart';
 import '../../utilities/data/pioneer_book_package_import_service.dart';
@@ -91,9 +95,13 @@ class LibraryBookReaderScreen extends StatefulWidget {
       _LibraryBookReaderScreenState();
 }
 
-class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
+class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
+    with WidgetsBindingObserver {
   final _service = CommentaryResearchLibraryService.instance;
   final ScrollController _bodyScrollController = ScrollController();
+  late final ReaderTiltAutoScrollController _tiltAutoScroll;
+  final ReaderTiltPreferencesStore _tiltPreferencesStore =
+      const ReaderTiltPreferencesStore();
   final Map<String, GlobalKey> _bodyBlockKeys = <String, GlobalKey>{};
   final Map<String, GlobalKey> _bodyTextKeys = <String, GlobalKey>{};
   final TextRangeGeometryRegistry _geometryRegistry =
@@ -131,6 +139,16 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _tiltAutoScroll = ReaderTiltAutoScrollController(
+      motionSource: IosReaderTiltMotionSource(),
+      scrollTarget: ScrollControllerReaderAutoScrollTarget(
+        _bodyScrollController,
+      ),
+      canChangeChapter: _canChangeChapterFromTilt,
+      onChapterChange: _changeChapterFromTilt,
+    )..addListener(_onTiltAutoScrollChanged);
+    _loadTiltPreferences();
     _nightMode = widget.themeMode == AppThemeMode.night;
     final initialSearchTerm = widget.searchQuery?.trim() ?? '';
     _lastSearchTerm = initialSearchTerm.isNotEmpty ? initialSearchTerm : null;
@@ -140,6 +158,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _tiltAutoScroll
+      ..removeListener(_onTiltAutoScrollChanged)
+      ..dispose();
     _geometryDebounce?.cancel();
     _bodyScrollController.removeListener(_onBodyScroll);
     _bodyScrollController.dispose();
@@ -149,6 +171,97 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   Timer? _geometryDebounce;
 
   void _onBodyScroll() {}
+
+  void _onTiltAutoScrollChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _loadTiltPreferences() async {
+    var preferences = await _tiltPreferencesStore.load();
+    if (!preferences.horizontalChapterTiltAvailabilityMigrated) {
+      preferences = preferences.copyWith(
+        horizontalChapterTiltEnabled: true,
+        horizontalChapterTiltAvailabilityMigrated: true,
+      );
+      await _tiltPreferencesStore.save(preferences);
+    }
+    if (mounted) _tiltAutoScroll.updatePreferences(preferences);
+  }
+
+  Future<void> _saveTiltPreferences(ReaderTiltPreferences preferences) async {
+    _tiltAutoScroll.updatePreferences(preferences);
+    await _tiltPreferencesStore.save(preferences);
+  }
+
+  Future<void> _openTiltSettings() async {
+    await _tiltAutoScroll.stop();
+    if (!mounted) return;
+    await showReaderTiltSettingsSheet(
+      context,
+      preferences: _tiltAutoScroll.preferences,
+      includeChapterTilt: true,
+      onChanged: _saveTiltPreferences,
+      onRecalibrate: () {
+        Navigator.of(context).pop();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _tiltAutoScroll.activate();
+        });
+      },
+    );
+  }
+
+  bool _canChangeChapterFromTilt(ReaderChapterTiltDirection direction) {
+    if (!_bodyScrollController.hasClients || _sections.isEmpty) return false;
+    final position = _bodyScrollController.position;
+    final boundary = readerSectionBoundaryState(
+      pixels: position.pixels,
+      minScrollExtent: position.minScrollExtent,
+      maxScrollExtent: position.maxScrollExtent,
+    );
+    return direction == ReaderChapterTiltDirection.next
+        ? boundary.atBottom
+        : boundary.atTop;
+  }
+
+  void _changeChapterFromTilt(ReaderChapterTiltDirection direction) {
+    final before = _selectedIndex;
+    final target = direction == ReaderChapterTiltDirection.next
+        ? before + 1
+        : before - 1;
+    _selectSection(target);
+    final changed = target >= 0 && target < _sections.length;
+    if (!changed) return;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: const Duration(milliseconds: 900),
+        content: Text(
+          direction == ReaderChapterTiltDirection.next
+              ? 'Next chapter'
+              : 'Previous chapter',
+        ),
+      ),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _tiltAutoScroll.stop();
+  }
+
+  @override
+  void deactivate() {
+    _tiltAutoScroll.removeListener(_onTiltAutoScrollChanged);
+    _tiltAutoScroll.stop();
+    super.deactivate();
+  }
+
+  @override
+  void activate() {
+    super.activate();
+    _tiltAutoScroll.addListener(_onTiltAutoScrollChanged);
+  }
 
   Future<void> _load() async {
     final savedFontScale = await AppSettingsService.instance
@@ -538,6 +651,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
       selection: _rangeSelection,
     );
     if (selectedText.trim().isEmpty) return;
+    await _tiltAutoScroll.stop();
+    if (!mounted) return;
 
     final referenceLabel = _buildLibrarySelectionReferenceLabel(
       item: item,
@@ -1129,6 +1244,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   Future<void> _dropImportedBook() async {
     if (!_canDropImportedBook) return;
 
+    await _tiltAutoScroll.stop();
+    if (!mounted) return;
     final theme = Theme.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1179,6 +1296,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   Future<void> _repairImportedBook() async {
     if (!_canDropImportedBook) return;
 
+    await _tiltAutoScroll.stop();
+    if (!mounted) return;
     final theme = Theme.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1284,6 +1403,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   }
 
   Future<void> _openELibrarySetup() async {
+    await _tiltAutoScroll.stop();
+    if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const ELibrarySetupScreen()),
     );
@@ -2915,6 +3036,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   }
 
   Future<void> _openContentsPopup() async {
+    await _tiltAutoScroll.stop();
+    if (!mounted) return;
     final entries = _navigationDisplayEntries;
     if (entries.isEmpty && _sections.isEmpty) return;
 
@@ -3416,6 +3539,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  if (_tiltAutoScroll.isActive)
+                    ReaderTiltAutoScrollActiveIndicator(
+                      controller: _tiltAutoScroll,
+                    ),
                   Expanded(
                     child: Material(
                       color: cardBackground,
@@ -3461,51 +3588,104 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                                   onTap: _rangeSelection.hasCompletedRange
                                       ? _clearLibraryRangeSelection
                                       : null,
-                                  child: SingleChildScrollView(
-                                    controller: _bodyScrollController,
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        if (showSectionTitle) ...[
-                                          Text(
-                                            () {
-                                              final sectionTitle =
-                                                  libraryReaderDisplaySectionTitle(
-                                                    currentSection?.title ?? '',
-                                                  );
-                                              return sectionTitle.isNotEmpty
-                                                  ? sectionTitle
-                                                  : item.displayTitle;
-                                            }(),
-                                            style: libraryScaledTextStyle(
-                                              theme.textTheme.headlineSmall,
-                                              _fontScale * _zoomScale,
-                                              fontWeight: FontWeight.w800,
-                                              color: textColor,
-                                              fontSize: titleFontSize,
+                                  child: NotificationListener<ScrollNotification>(
+                                    onNotification: (notification) {
+                                      final isManual =
+                                          notification
+                                                  is ScrollStartNotification &&
+                                              notification.dragDetails !=
+                                                  null ||
+                                          notification
+                                                  is ScrollUpdateNotification &&
+                                              notification.dragDetails != null;
+                                      if (isManual) {
+                                        _tiltAutoScroll
+                                            .stopForManualInteraction();
+                                      }
+                                      return false;
+                                    },
+                                    child: SingleChildScrollView(
+                                      controller: _bodyScrollController,
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          if (showSectionTitle) ...[
+                                            Text(
+                                              () {
+                                                final sectionTitle =
+                                                    libraryReaderDisplaySectionTitle(
+                                                      currentSection?.title ??
+                                                          '',
+                                                    );
+                                                return sectionTitle.isNotEmpty
+                                                    ? sectionTitle
+                                                    : item.displayTitle;
+                                              }(),
+                                              style: libraryScaledTextStyle(
+                                                theme.textTheme.headlineSmall,
+                                                _fontScale * _zoomScale,
+                                                fontWeight: FontWeight.w800,
+                                                color: textColor,
+                                                fontSize: titleFontSize,
+                                              ),
                                             ),
-                                          ),
-                                          const SizedBox(height: 12),
-                                        ],
-                                        if (descendantChain != null) ...[
-                                          for (final headingSection
-                                              in uniqueHeadingSections
-                                                  .skip(
-                                                    currentSection == null
-                                                        ? 0
-                                                        : 1,
-                                                  )
-                                                  .take(
-                                                    uniqueHeadingSections
-                                                        .length,
-                                                  )) ...[
+                                            const SizedBox(height: 12),
+                                          ],
+                                          if (descendantChain != null) ...[
+                                            for (final headingSection
+                                                in uniqueHeadingSections
+                                                    .skip(
+                                                      currentSection == null
+                                                          ? 0
+                                                          : 1,
+                                                    )
+                                                    .take(
+                                                      uniqueHeadingSections
+                                                          .length,
+                                                    )) ...[
+                                              if (libraryReaderDisplaySectionTitle(
+                                                headingSection.title,
+                                              ).isNotEmpty) ...[
+                                                Text(
+                                                  libraryReaderDisplaySectionTitle(
+                                                    headingSection.title,
+                                                  ),
+                                                  style: libraryScaledTextStyle(
+                                                    theme
+                                                        .textTheme
+                                                        .headlineSmall,
+                                                    _fontScale * _zoomScale,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: textColor,
+                                                    fontSize: titleFontSize,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 12),
+                                              ],
+                                            ],
                                             if (libraryReaderDisplaySectionTitle(
-                                              headingSection.title,
-                                            ).isNotEmpty) ...[
+                                                      descendantChain
+                                                          .readableSection
+                                                          .title,
+                                                    ).isNotEmpty &&
+                                                (uniqueHeadingSections
+                                                        .isEmpty ||
+                                                    uniqueHeadingSections
+                                                            .last
+                                                            .entryName
+                                                            .trim()
+                                                            .toLowerCase() !=
+                                                        descendantChain
+                                                            .readableSection
+                                                            .entryName
+                                                            .trim()
+                                                            .toLowerCase())) ...[
                                               Text(
                                                 libraryReaderDisplaySectionTitle(
-                                                  headingSection.title,
+                                                  descendantChain
+                                                      .readableSection
+                                                      .title,
                                                 ),
                                                 style: libraryScaledTextStyle(
                                                   theme.textTheme.headlineSmall,
@@ -3518,53 +3698,21 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                                               const SizedBox(height: 12),
                                             ],
                                           ],
-                                          if (libraryReaderDisplaySectionTitle(
-                                                descendantChain
-                                                    .readableSection
-                                                    .title,
-                                              ).isNotEmpty &&
-                                              (uniqueHeadingSections.isEmpty ||
-                                                  uniqueHeadingSections
-                                                          .last
-                                                          .entryName
-                                                          .trim()
-                                                          .toLowerCase() !=
-                                                      descendantChain
-                                                          .readableSection
-                                                          .entryName
-                                                          .trim()
-                                                          .toLowerCase())) ...[
+                                          if (sectionBlocks.isEmpty)
                                             Text(
-                                              libraryReaderDisplaySectionTitle(
-                                                descendantChain
-                                                    .readableSection
-                                                    .title,
-                                              ),
+                                              'No readable text in this section.',
                                               style: libraryScaledTextStyle(
-                                                theme.textTheme.headlineSmall,
+                                                theme.textTheme.bodyLarge,
                                                 _fontScale * _zoomScale,
-                                                fontWeight: FontWeight.w800,
                                                 color: textColor,
-                                                fontSize: titleFontSize,
+                                                fontSize: bodyFontSize,
+                                                height: 1.6,
                                               ),
-                                            ),
-                                            const SizedBox(height: 12),
-                                          ],
+                                            )
+                                          else
+                                            ...sectionBlockWidgets,
                                         ],
-                                        if (sectionBlocks.isEmpty)
-                                          Text(
-                                            'No readable text in this section.',
-                                            style: libraryScaledTextStyle(
-                                              theme.textTheme.bodyLarge,
-                                              _fontScale * _zoomScale,
-                                              color: textColor,
-                                              fontSize: bodyFontSize,
-                                              height: 1.6,
-                                            ),
-                                          )
-                                        else
-                                          ...sectionBlockWidgets,
-                                      ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -3648,6 +3796,22 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                       onZoomIn: _zoomIn,
                     ),
                     const SizedBox(width: 12),
+                    if (_tiltAutoScroll.motionSource.isSupported) ...[
+                      ReaderTiltAutoScrollIconButton(
+                        controller: _tiltAutoScroll,
+                        compact: false,
+                        enabled: _sections.isNotEmpty && !item.isPdf,
+                        onPressed: () {
+                          if (_tiltAutoScroll.isActive) {
+                            _tiltAutoScroll.stop();
+                          } else {
+                            _tiltAutoScroll.activate();
+                          }
+                        },
+                        onLongPress: _openTiltSettings,
+                      ),
+                      const SizedBox(width: 12),
+                    ],
                     _NavCluster(
                       isNightMode: isNight,
                       canGoFirst: _sections.isNotEmpty,

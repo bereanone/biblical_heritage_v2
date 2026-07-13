@@ -7,6 +7,10 @@ import '../../../core/database/study_bible_database.dart';
 import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/app_theme_mode.dart';
 import '../../library/presentation/library_screen.dart';
+import '../../library/presentation/reader_tilt_autoscroll_controller.dart';
+import '../../library/presentation/reader_tilt_autoscroll_controls.dart';
+import '../../library/presentation/reader_tilt_motion_source.dart';
+import '../../library/presentation/reader_tilt_preferences.dart';
 import '../data/highlights_repository.dart';
 import '../data/history_log_service.dart';
 import '../data/navigation_history_service.dart';
@@ -65,7 +69,8 @@ class BibleExplorerScreen extends StatefulWidget {
   State<BibleExplorerScreen> createState() => _BibleExplorerScreenState();
 }
 
-class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
+class _BibleExplorerScreenState extends State<BibleExplorerScreen>
+    with WidgetsBindingObserver {
   String _viewerStatus = 'Loading Bible Explorer...';
   String? _viewerLoadError;
   int _bookNumber = 1;
@@ -87,6 +92,11 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
   int _lastTagTabIndex = 0;
   final RapidTagState _rapidTagState = RapidTagState();
   final ViewerDataController _viewerData = ViewerDataController();
+  final CallbackReaderAutoScrollTarget _tiltScrollTarget =
+      CallbackReaderAutoScrollTarget();
+  late final ReaderTiltAutoScrollController _tiltAutoScroll;
+  final ReaderTiltPreferencesStore _tiltPreferencesStore =
+      const ReaderTiltPreferencesStore();
   bool _isRapidTagApplying = false;
   bool _viewerReady = false;
   int? _anchorBlockId;
@@ -99,6 +109,12 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _tiltAutoScroll = ReaderTiltAutoScrollController(
+      motionSource: IosReaderTiltMotionSource(),
+      scrollTarget: _tiltScrollTarget,
+    )..addListener(_onTiltAutoScrollChanged);
+    _loadTiltPreferences();
     _initializeViewer();
     _loadViewerSettings();
     _loadInterlinearSettings();
@@ -155,9 +171,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
                           SelectableText(
                             _viewerLoadError!,
                             textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: theme.colorScheme.error,
-                            ),
+                            style: TextStyle(color: theme.colorScheme.error),
                           ),
                         ],
                         const SizedBox(height: 16),
@@ -206,18 +220,41 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
               verse: displayVerse,
               fontScale: _fontScale,
               baseBibleFontSize: baseBibleFontSize,
-              onSearch: () => _openSearch(context),
+              onSearch: () {
+                _tiltAutoScroll.stop();
+                _openSearch(context);
+              },
               bibleSearchSession: _activeBibleSearchSession,
               onPreviousBibleSearchHit: () => _navigateBibleSearchHit(-1),
               onNextBibleSearchHit: () => _navigateBibleSearchHit(1),
-              onSavedPresentations: _openSavedPresentations,
-              onStandardTag: _openTagButton,
-              onDollarTag: _openDollarTagButton,
-              onRapidTag: _openRapidTagButton,
+              onSavedPresentations: () {
+                _tiltAutoScroll.stop();
+                _openSavedPresentations();
+              },
+              onStandardTag: () {
+                _tiltAutoScroll.stop();
+                _openTagButton();
+              },
+              onDollarTag: () {
+                _tiltAutoScroll.stop();
+                _openDollarTagButton();
+              },
+              onRapidTag: () {
+                _tiltAutoScroll.stop();
+                _openRapidTagButton();
+              },
               activeFamily: null,
-              onTopics: () => _openTopics(context),
-              onChoosePassage: () => _openReferencePicker(context),
+              onTopics: () {
+                _tiltAutoScroll.stop();
+                _openTopics(context);
+              },
+              onChoosePassage: () {
+                _tiltAutoScroll.stop();
+                _openReferencePicker(context);
+              },
             ),
+            if (_tiltAutoScroll.isActive)
+              ReaderTiltAutoScrollActiveIndicator(controller: _tiltAutoScroll),
             Expanded(
               child: _interlinearEnabled
                   ? ViewerInterlinearBody(
@@ -252,6 +289,8 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
                       rangeSelection: _rangeSelection,
                       highlightRefreshTick: _highlightRefreshTick,
                       navigationTick: _navigationTick,
+                      autoScrollTarget: _tiltScrollTarget,
+                      onManualScroll: _tiltAutoScroll.stopForManualInteraction,
                     ),
             ),
             ViewerBottomBar(
@@ -260,12 +299,27 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
               bookNumber: _bookNumber,
               interlinearEnabled: _interlinearEnabled,
               onToggleInterlinear: _toggleInterlinearMode,
-              onHistory: _openHistory,
-              onLibrary: _openLibrary,
+              onHistory: () {
+                _tiltAutoScroll.stop();
+                _openHistory();
+              },
+              onLibrary: () {
+                _tiltAutoScroll.stop();
+                _openLibrary();
+              },
               onDecreaseFont: _decreaseFont,
               onIncreaseFont: _increaseFont,
-              onCommentary: _openCommentary,
-              onMode: _openMode,
+              tiltAutoScrollController: _tiltAutoScroll,
+              onToggleTiltAutoScroll: _toggleTiltAutoScroll,
+              onOpenTiltAutoScrollSettings: _openTiltSettings,
+              onCommentary: () {
+                _tiltAutoScroll.stop();
+                _openCommentary();
+              },
+              onMode: () {
+                _tiltAutoScroll.stop();
+                _openMode();
+              },
               canDecreaseFont: _fontScale > _minFontScale,
               canIncreaseFont: _fontScale < _maxFontScale,
               backgroundColor:
@@ -300,6 +354,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
   }
 
   void _toggleInterlinearMode() {
+    _tiltAutoScroll.stop();
     final next = !_interlinearEnabled;
     setState(() {
       _interlinearEnabled = next;
@@ -329,8 +384,69 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _tiltAutoScroll
+      ..removeListener(_onTiltAutoScrollChanged)
+      ..dispose();
     _headerPinTimer?.cancel();
     super.dispose();
+  }
+
+  void _onTiltAutoScrollChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _toggleTiltAutoScroll() {
+    if (_tiltAutoScroll.isActive) {
+      _tiltAutoScroll.stop();
+    } else {
+      _tiltAutoScroll.activate();
+    }
+  }
+
+  Future<void> _loadTiltPreferences() async {
+    final preferences = await _tiltPreferencesStore.load();
+    if (mounted) _tiltAutoScroll.updatePreferences(preferences);
+  }
+
+  Future<void> _saveTiltPreferences(ReaderTiltPreferences preferences) async {
+    _tiltAutoScroll.updatePreferences(preferences);
+    await _tiltPreferencesStore.save(preferences);
+  }
+
+  Future<void> _openTiltSettings() async {
+    await _tiltAutoScroll.stop();
+    if (!mounted) return;
+    await showReaderTiltSettingsSheet(
+      context,
+      preferences: _tiltAutoScroll.preferences,
+      includeChapterTilt: false,
+      onChanged: _saveTiltPreferences,
+      onRecalibrate: () {
+        Navigator.of(context).pop();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _tiltAutoScroll.activate();
+        });
+      },
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _tiltAutoScroll.stop();
+  }
+
+  @override
+  void deactivate() {
+    _tiltAutoScroll.removeListener(_onTiltAutoScrollChanged);
+    _tiltAutoScroll.stop();
+    super.deactivate();
+  }
+
+  @override
+  void activate() {
+    super.activate();
+    _tiltAutoScroll.addListener(_onTiltAutoScrollChanged);
   }
 
   Future<void> _openCommentary() async {

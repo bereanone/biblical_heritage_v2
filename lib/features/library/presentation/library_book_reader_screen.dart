@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/bootstrap/library_root_service.dart';
+import '../../../core/bootstrap/library_root_native.dart';
 import '../../../core/database/elibrary_read_resolver.dart';
 import '../../../core/database/user_database.dart';
 import '../../../core/theme/app_theme_mode.dart';
@@ -37,6 +38,7 @@ import 'library_font_scale.dart';
 import 'library_navigation_tree.dart';
 import '../../reader/presentation/text_range_geometry.dart';
 import '../../utilities/data/pioneer_captured_html_import_folder_service.dart';
+import '../../utilities/data/pioneer_book_package_import_service.dart';
 import '../../utilities/data/pioneer_text_import_service.dart';
 import '../../utilities/presentation/elibrary_setup_screen.dart';
 
@@ -1192,10 +1194,11 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Cancel'),
           ),
-          FilledButton.tonal(
+          FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
             style: FilledButton.styleFrom(
-              foregroundColor: theme.colorScheme.primary,
+              backgroundColor: theme.colorScheme.primary,
+              foregroundColor: theme.colorScheme.onPrimary,
             ),
             child: const Text('Repair'),
           ),
@@ -1204,23 +1207,71 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     );
     if (!mounted || confirmed != true) return;
 
-    final report = await PioneerCapturedHtmlImportFolderService.instance
+    var report = await PioneerCapturedHtmlImportFolderService.instance
         .repairImportedCaptureClipperBook(libraryItemId: widget.item.id);
     if (!mounted) return;
     if (report == null || report.entries.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Could not find the original CaptureClipper source for this book.',
+      final selectPackage = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(
+            'Select ${widget.item.sourceWorkId ?? 'book'} .studybook to Repair',
           ),
+          content: const Text(
+            'The preserved local package source is unavailable. Select the '
+            'matching .studybook package. It will be copied into app-managed '
+            'storage before repair; the selected file will not be changed.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Select Package'),
+            ),
+          ],
         ),
       );
-      return;
+      if (!mounted || selectPackage != true) return;
+      try {
+        final selectedPath = await LibraryRootNative.pickStudyBookPackage();
+        if (selectedPath == null || !mounted) return;
+        await PioneerBookPackageImportService.instance.importPackage(
+          selectedPath,
+          setAsConfiguredFolder: false,
+          expectedWorkId: widget.item.sourceWorkId,
+          expectedPackageId: widget.item.sourcePackageId,
+        );
+        report = await PioneerCapturedHtmlImportFolderService.instance
+            .repairImportedCaptureClipperBook(libraryItemId: widget.item.id);
+      } on PioneerBookPackageImportException catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+        return;
+      }
+      if (!mounted) return;
+      if (report == null || report.entries.isEmpty) {
+        final failure =
+            PioneerCapturedHtmlImportFolderService.instance.lastRepairFailure;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              failure ?? 'Repair failed without a diagnostic result.',
+            ),
+          ),
+        );
+        return;
+      }
     }
 
-    final repaired = report.entries.firstWhere(
+    final completedReport = report;
+    final repaired = completedReport.entries.firstWhere(
       (entry) => entry.libraryItemId == widget.item.id,
-      orElse: () => report.entries.first,
+      orElse: () => completedReport.entries.first,
     );
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

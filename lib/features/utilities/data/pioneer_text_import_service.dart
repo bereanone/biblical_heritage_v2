@@ -2726,6 +2726,25 @@ class PioneerTextImportService {
       }
     }
 
+    // Enforce the persisted navigation invariant after all duplicate/conflict
+    // handling has finished. A section can initially look readable, then end
+    // up with no inserted rows because its refs duplicate an earlier section.
+    // Keep honest structural Chapter headings, but never persist any other
+    // zero-body leaf.
+    final readableHrefs = paragraphRows
+        .map((row) => row['epub_href']?.toString().trim().toLowerCase() ?? '')
+        .where((href) => href.isNotEmpty)
+        .toSet();
+    sectionRows.removeWhere((row) {
+      final href = row['href']?.toString().trim().toLowerCase() ?? '';
+      if (href.isNotEmpty && readableHrefs.contains(href)) return false;
+      final label = row['label']?.toString().trim() ?? '';
+      return !RegExp(
+        r'^chapter\s+(?:\d+|[ivxlcdm]+)\b',
+        caseSensitive: false,
+      ).hasMatch(label);
+    });
+
     final insertedParagraphCount = paragraphRows.length;
     final sectionCount = sectionRows.length;
     if (insertedParagraphCount == 0 && conflictRefs.isEmpty && !forceReindex) {

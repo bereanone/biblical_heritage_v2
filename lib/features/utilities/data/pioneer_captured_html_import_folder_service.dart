@@ -467,6 +467,14 @@ class PioneerCapturedHtmlImportFolderService {
   final PioneerTextImportService _importService;
   final LocalSettingsStore _settingsStore;
 
+  String? lastRepairFailure;
+
+  PioneerCapturedHtmlCloudFolderImportReport? _repairFailure(String reason) {
+    lastRepairFailure = reason;
+    debugPrint('CaptureClipper repair FAILED: $reason');
+    return null;
+  }
+
   static const Set<String> _ignoredConfiguredFolderNames = <String>{
     'archive',
     'archives',
@@ -1252,61 +1260,205 @@ class PioneerCapturedHtmlImportFolderService {
     DateTime Function()? nowProvider,
     PioneerSourceCatalog? catalog,
   }) async {
-    final accessibleRootPath = await _resolveAccessibleConfiguredRootPath();
-    if (accessibleRootPath == null) {
-      return null;
-    }
-
-    final previews = await _scanConfiguredPreviews(
-      accessibleRootPath: accessibleRootPath,
-      catalog: catalog,
+    lastRepairFailure = null;
+    debugPrint(
+      'CaptureClipper repair START: libraryItemId=${libraryItemId.trim()}',
     );
-    final db = await ELibraryDatabase.instance.database;
-    final itemRows = await db.query(
-      'library_items',
-      columns: const [
-        'id',
-        'title',
-        'author',
-        'relative_path',
-        'source_url',
-        'file_hash',
-      ],
-      where: 'id = ? AND deleted_at IS NULL',
-      whereArgs: [libraryItemId.trim()],
-      limit: 1,
-    );
-    PioneerHtmlCaptureFolderPreview? matchingPreview;
-    if (itemRows.isNotEmpty) {
-      matchingPreview = await _findPreviewForImportedLibraryItem(
-        previews,
-        itemRows.first,
-        requestedLibraryItemId: libraryItemId.trim(),
+    try {
+      final db = await ELibraryDatabase.instance.database;
+      final itemRows = await db.query(
+        'library_items',
+        columns: const [
+          'id',
+          'title',
+          'author',
+          'relative_path',
+          'source_url',
+          'file_hash',
+          'source_work_id',
+          'source_package_id',
+        ],
+        where: 'id = ? AND deleted_at IS NULL',
+        whereArgs: [libraryItemId.trim()],
+        limit: 1,
       );
-    } else if (previews.length == 1) {
-      matchingPreview = previews.single;
-    } else {
-      matchingPreview = previews.firstWhere(
-        (preview) => preview.folderName.trim().toLowerCase() == 'ssp',
-        orElse: () => previews.isEmpty
-            ? throw StateError('No CaptureClipper preview was available.')
-            : previews.first,
+      if (itemRows.isEmpty) {
+        return _repairFailure(
+          'No active library_items row exists for id "${libraryItemId.trim()}".',
+        );
+      }
+      final itemRow = itemRows.single;
+      final workId = itemRow['source_work_id']?.toString().trim() ?? '';
+      final packageId = itemRow['source_package_id']?.toString().trim() ?? '';
+      if (workId.isEmpty) {
+        return _repairFailure(
+          'The current library item has no source_work_id.',
+        );
+      }
+      if (packageId.isEmpty) {
+        return _repairFailure(
+          'The current library item has no source_package_id.',
+        );
+      }
+      debugPrint(
+        'CaptureClipper repair identity: workId=$workId packageId=$packageId.',
       );
-    }
-    if (matchingPreview == null) {
-      return null;
-    }
 
-    // Refresh in place. Deleting first would detach user-linked records and
-    // would also make an unchanged shared package look permanently consumed.
-    return importConfiguredCloudFolder(
-      selectedFolderPaths: [matchingPreview.folderPath],
-      existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
-      nowProvider: nowProvider,
-      archiveImportedFolders: false,
-      forceReindex: true,
-      catalog: catalog,
-    );
+      // Package-backed imports are repairable offline. Prefer the preserved
+      // Application Support copy and never make iOS depend on a stale Mac or
+      // cloud-provider path.
+      final managedRoot = await managedImportRootPath();
+      final managedPreviews = await _scanPackageRoot(
+        rootPath: managedRoot,
+        catalog: catalog,
+      );
+      debugPrint(
+        'CaptureClipper repair managed scan: root=$managedRoot '
+        'previews=${managedPreviews.length}.',
+      );
+      var matchingPreview = _matchingPackagePreview(
+        managedPreviews,
+        workId: workId,
+        packageId: packageId,
+      );
+      if (matchingPreview == null) {
+        final accessibleRootPath = await _resolveAccessibleConfiguredRootPath();
+        if (accessibleRootPath != null) {
+          debugPrint(
+            'CaptureClipper repair configured scan: root=$accessibleRootPath.',
+          );
+          final configuredPreviews = await _scanConfiguredPreviews(
+            accessibleRootPath: accessibleRootPath,
+            catalog: catalog,
+          );
+          matchingPreview = _matchingPackagePreview(
+            configuredPreviews,
+            workId: workId,
+            packageId: packageId,
+          );
+        }
+      }
+      if (matchingPreview == null) {
+        final managedDetails = managedPreviews
+            .map((preview) {
+              return '${preview.folderPath} '
+                  '(valid=${preview.isValid}, workId=${preview.metadata.workId}, '
+                  'packageId=${preview.metadata.packageId}, html=${preview.htmlFiles.length}, '
+                  'validation=${preview.validationReasons.join('; ')})';
+            })
+            .join(' | ');
+        return _repairFailure(
+          'No valid source matched workId=$workId and packageId=$packageId. '
+          'Managed scan: ${managedDetails.isEmpty ? '(none)' : managedDetails}.',
+        );
+      }
+      debugPrint(
+        'CaptureClipper repair source selected: ${matchingPreview.folderPath} '
+        '(workId=${matchingPreview.metadata.workId}, '
+        'packageId=${matchingPreview.metadata.packageId}, '
+        'html=${matchingPreview.htmlFiles.length}).',
+      );
+
+      // Repair is not discovery. The exact existing item and its validated
+      // package source are already known, so invoke the production importer
+      // directly. Re-scanning configuredRoot/Books would incorrectly apply
+      // new-import inventory rules and may reference an obsolete iOS container.
+      final batch = await _importService.importHtmlCaptureFolders(
+        <PioneerHtmlCaptureFolderPreview>[matchingPreview],
+        existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+        forceReindex: true,
+      );
+      if (batch.workResults.isEmpty) {
+        return _repairFailure('Force reindex returned no work result.');
+      }
+      final result = batch.workResults.single;
+      if (result.status != PioneerImportWorkStatus.imported) {
+        return _repairFailure(
+          'Force reindex failed at ${result.stage}: ${result.reason}',
+        );
+      }
+      if (result.libraryItemId != libraryItemId.trim()) {
+        return _repairFailure(
+          'Force reindex targeted unexpected item "${result.libraryItemId}" '
+          'instead of "${libraryItemId.trim()}".',
+        );
+      }
+      final completedAt = DateTime.now();
+      nowProvider?.call();
+      final report = PioneerCapturedHtmlCloudFolderImportReport(
+        rootPath: matchingPreview.folderPath,
+        entries: <PioneerCapturedHtmlCloudFolderImportEntry>[
+          PioneerCapturedHtmlCloudFolderImportEntry(
+            folderPath: matchingPreview.folderPath,
+            folderName: matchingPreview.folderName,
+            htmlFileCount: matchingPreview.htmlFileCount,
+            title: result.title,
+            author: result.work.authorName,
+            coverImported: result.coverImported,
+            chapterCount:
+                result.parsedSectionCount ??
+                matchingPreview.chapterHeadingCount,
+            firstChapterLabel:
+                result.firstSectionLabel ?? matchingPreview.firstChapterLabel,
+            lastChapterLabel:
+                result.lastSectionLabel ?? matchingPreview.lastChapterLabel,
+            createdNew: result.createdNew,
+            updatedExisting: result.existingItemUpdated,
+            importStatus: result.status,
+            reason: result.reason,
+            libraryItemId: result.libraryItemId,
+            archivePath: null,
+            archiveError: null,
+          ),
+        ],
+        completedAt: completedAt,
+      );
+      debugPrint(
+        'CaptureClipper repair SUCCESS: ${report.entries.length} result(s).',
+      );
+      return report;
+    } catch (error, stackTrace) {
+      debugPrint('CaptureClipper repair EXCEPTION: $error\n$stackTrace');
+      return _repairFailure('Repair threw ${error.runtimeType}: $error');
+    }
+  }
+
+  Future<List<PioneerHtmlCaptureFolderPreview>> _scanPackageRoot({
+    required String rootPath,
+    PioneerSourceCatalog? catalog,
+  }) async {
+    if (!await Directory(rootPath).exists()) {
+      debugPrint('CaptureClipper repair scan: directory missing: $rootPath.');
+      return const <PioneerHtmlCaptureFolderPreview>[];
+    }
+    return PioneerHtmlCaptureFolderScanner(
+      rootPath: rootPath,
+      preferAssetManifest: false,
+      knownDevScanPath: null,
+      ignoredFolderNames: _ignoredConfiguredFolderNames,
+    ).scan(catalog: catalog ?? await _loadConfiguredCatalog());
+  }
+
+  PioneerHtmlCaptureFolderPreview? _matchingPackagePreview(
+    Iterable<PioneerHtmlCaptureFolderPreview> previews, {
+    required String workId,
+    required String packageId,
+  }) {
+    for (final preview in previews) {
+      debugPrint(
+        'CaptureClipper repair candidate: path=${preview.folderPath} '
+        'valid=${preview.isValid} workId=${preview.metadata.workId} '
+        'packageId=${preview.metadata.packageId} html=${preview.htmlFiles.length} '
+        'validation=${preview.validationReasons.join('; ')}.',
+      );
+      if (preview.isValid &&
+          preview.metadata.workId?.trim() == workId &&
+          preview.metadata.packageId?.trim() == packageId &&
+          preview.htmlFiles.isNotEmpty) {
+        return preview;
+      }
+    }
+    return null;
   }
 
   bool _isImportCandidate(PioneerHtmlCaptureFolderPreview preview) {
@@ -1314,140 +1466,6 @@ class PioneerCapturedHtmlImportFolderService {
     final normalizedFolderName = preview.folderName.trim().toLowerCase();
     if (normalizedFolderName.isEmpty) return false;
     return !_ignoredConfiguredFolderNames.contains(normalizedFolderName);
-  }
-
-  Future<String?> _existingImportedItemId(
-    PioneerHtmlCaptureFolderPreview preview,
-  ) async {
-    final work = preview.importWork;
-    final db = await ELibraryDatabase.instance.database;
-
-    final normalizedFileHash = preview.sourceFileHash?.trim() ?? '';
-    if (normalizedFileHash.isNotEmpty) {
-      final hashRows = await db.query(
-        'library_items',
-        columns: const ['id'],
-        where: '''
-          deleted_at IS NULL
-          AND LOWER(COALESCE(file_hash, '')) = ?
-          AND LOWER(COALESCE(file_format, '')) = 'html'
-        ''',
-        whereArgs: [normalizedFileHash.toLowerCase()],
-        limit: 1,
-      );
-      if (hashRows.isNotEmpty) {
-        final id = hashRows.first['id']?.toString().trim() ?? '';
-        if (id.isNotEmpty) {
-          return id;
-        }
-      }
-    }
-
-    final stableId = work.stableLibraryItemId;
-    final stableRows = await db.query(
-      'library_items',
-      columns: const ['id'],
-      where: 'id = ? AND deleted_at IS NULL',
-      whereArgs: [stableId],
-      limit: 1,
-    );
-    if (stableRows.isNotEmpty) {
-      final id = stableRows.first['id']?.toString().trim() ?? '';
-      if (id.isNotEmpty) {
-        return id;
-      }
-    }
-
-    if (preview.htmlFiles.isNotEmpty) {
-      final relativePath = _buildHtmlCaptureRelativePath(
-        work,
-        preview.htmlFiles.first,
-      );
-      final pathRows = await db.query(
-        'library_items',
-        columns: const ['id'],
-        where: '''
-          deleted_at IS NULL
-          AND LOWER(COALESCE(relative_path, '')) = ?
-        ''',
-        whereArgs: [relativePath.toLowerCase()],
-        limit: 1,
-      );
-      if (pathRows.isNotEmpty) {
-        final id = pathRows.first['id']?.toString().trim() ?? '';
-        if (id.isNotEmpty) {
-          return id;
-        }
-      }
-    }
-
-    final sourceUrl = preview.metadata.sourceUrl?.trim() ?? '';
-    if (sourceUrl.isNotEmpty) {
-      final sourceRows = await db.query(
-        'library_items',
-        columns: const ['id'],
-        where: '''
-          deleted_at IS NULL
-          AND LOWER(COALESCE(source_url, '')) = ?
-        ''',
-        whereArgs: [sourceUrl.toLowerCase()],
-        limit: 1,
-      );
-      if (sourceRows.isNotEmpty) {
-        final id = sourceRows.first['id']?.toString().trim() ?? '';
-        if (id.isNotEmpty) {
-          return id;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  Future<PioneerHtmlCaptureFolderPreview?> _findPreviewForImportedLibraryItem(
-    Iterable<PioneerHtmlCaptureFolderPreview> previews,
-    Map<String, Object?> itemRow, {
-    required String requestedLibraryItemId,
-  }) async {
-    final normalizedRequestedId = requestedLibraryItemId.trim().toLowerCase();
-    final storedTitle = itemRow['title']?.toString().trim().toLowerCase() ?? '';
-    final storedAuthor =
-        itemRow['author']?.toString().trim().toLowerCase() ?? '';
-    final storedRelativePath =
-        itemRow['relative_path']?.toString().trim().toLowerCase() ?? '';
-    final storedSourceUrl =
-        itemRow['source_url']?.toString().trim().toLowerCase() ?? '';
-    final storedFolderName = storedRelativePath.isEmpty
-        ? ''
-        : p.basename(p.dirname(storedRelativePath)).trim().toLowerCase();
-
-    PioneerHtmlCaptureFolderPreview? titleMatch;
-    for (final preview in previews) {
-      final existingLibraryItemId = await _existingImportedItemId(preview);
-      if (normalizedRequestedId.isNotEmpty &&
-          existingLibraryItemId?.trim().toLowerCase() ==
-              normalizedRequestedId) {
-        return preview;
-      }
-      if (storedFolderName.isNotEmpty &&
-          preview.folderName.trim().toLowerCase() == storedFolderName) {
-        return preview;
-      }
-      final previewSourceUrl =
-          preview.metadata.sourceUrl?.trim().toLowerCase() ?? '';
-      if (storedSourceUrl.isNotEmpty && previewSourceUrl == storedSourceUrl) {
-        return preview;
-      }
-      final previewWork = preview.importWork;
-      final previewTitle = previewWork.title.trim().toLowerCase();
-      final previewAuthor = previewWork.authorName.trim().toLowerCase();
-      if (storedTitle.isNotEmpty &&
-          previewTitle == storedTitle &&
-          (storedAuthor.isEmpty || previewAuthor == storedAuthor)) {
-        titleMatch ??= preview;
-      }
-    }
-    return titleMatch;
   }
 
   String _buildHtmlCaptureRelativePath(

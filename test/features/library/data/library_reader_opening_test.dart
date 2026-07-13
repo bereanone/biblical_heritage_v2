@@ -129,6 +129,61 @@ void main() {
   databaseFactory = databaseFactoryFfi;
 
   group('libraryReaderInitialSectionIndex', () {
+    test(
+      'ignores a saved href that became a heading-only shell after repair',
+      () {
+        final item = _bookItem(
+          id: 'wor',
+          title: 'Waggoner on Romans',
+          lastOpened: DateTime.utc(2026, 7, 12),
+          epubHref: 'divine-arithmetic.html',
+        );
+        final sections = <LibraryBookSection>[
+          const LibraryBookSection(
+            entryName: 'divine-arithmetic.html',
+            title: 'DIVINE ARITHMETIC.',
+            paragraphs: <String>[],
+            blocks: <LibraryBookBlock>[],
+            spineIndex: 1,
+          ),
+          LibraryBookSection(
+            entryName: 'chapter-1.html',
+            title: 'Chapter 1',
+            paragraphs: const <String>[
+              'This is the readable repaired body text for the first chapter '
+                  'and it contains enough substantive content to be selected.',
+            ],
+            blocks: const <LibraryBookBlock>[],
+            spineIndex: 2,
+          ),
+        ];
+        final navigationItems = <LibraryCatalogNavigationItem>[
+          _navItem(
+            id: 'divine-arithmetic',
+            label: 'DIVINE ARITHMETIC.',
+            href: 'divine-arithmetic.html',
+            sortOrder: 1,
+          ),
+          _navItem(
+            id: 'chapter-1',
+            label: 'Chapter 1',
+            href: 'chapter-1.html',
+            sortOrder: 2,
+          ),
+        ];
+
+        expect(
+          libraryReaderInitialSectionIndex(
+            item: item,
+            sections: sections,
+            navigationItems: navigationItems,
+            devotionalMode: false,
+          ),
+          1,
+        );
+      },
+    );
+
     final sections = [
       _section(
         entryName: 'OPS/introduction.xhtml',

@@ -93,7 +93,10 @@ int libraryReaderInitialSectionIndex({
     final savedHref = _splitReaderHref(item.epubHref).href;
     if (savedHref.isNotEmpty) {
       final savedIndex = _sectionIndexForHref(sections, savedHref);
-      if (savedIndex != null) return savedIndex;
+      if (savedIndex != null &&
+          _hasReadableSavedSectionContent(sections[savedIndex])) {
+        return savedIndex;
+      }
     }
   }
 
@@ -155,6 +158,11 @@ int libraryReaderInitialSectionIndex({
   }
 
   return 0;
+}
+
+bool _hasReadableSavedSectionContent(LibraryBookSection section) {
+  if (section.blocks.isNotEmpty) return true;
+  return section.paragraphs.any((paragraph) => paragraph.trim().isNotEmpty);
 }
 
 int? _sectionIndexForHref(List<LibraryBookSection> sections, String href) {

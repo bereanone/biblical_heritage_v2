@@ -82,6 +82,8 @@ class PioneerBookPackageImportService {
     String packagePath, {
     String? managedRootPath,
     bool setAsConfiguredFolder = true,
+    String? expectedWorkId,
+    String? expectedPackageId,
   }) async {
     final sourcePath = packagePath.trim();
     if (sourcePath.isEmpty) {
@@ -195,6 +197,19 @@ class PioneerBookPackageImportService {
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(metadata.contentHash ?? '')) {
       throw const PioneerBookPackageImportException(
         'Manifest package identity is invalid.',
+      );
+    }
+    if ((expectedWorkId?.trim().isNotEmpty ?? false) &&
+        metadata.workId != expectedWorkId!.trim()) {
+      throw PioneerBookPackageImportException(
+        'The selected package is for ${metadata.workId}, not '
+        '${expectedWorkId.trim()}.',
+      );
+    }
+    if ((expectedPackageId?.trim().isNotEmpty ?? false) &&
+        metadata.packageId != expectedPackageId!.trim()) {
+      throw const PioneerBookPackageImportException(
+        'The selected package does not match this book package identity.',
       );
     }
     final declaredHtml = metadata.htmlFile?.trim() ?? '';

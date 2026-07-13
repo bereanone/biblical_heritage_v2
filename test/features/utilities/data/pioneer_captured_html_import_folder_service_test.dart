@@ -1209,11 +1209,26 @@ void main() {
         folderName: 'SSP',
         title: 'SSP',
         abbreviation: 'SSP',
-        workId: 'ssp_repair_test',
+        workId: 'SSP',
         sourceUrl: 'https://example.invalid/ssp-repair',
         authorName: 'Unknown',
         bodyHtml: _sspImportHtml,
       );
+      await File(p.join(folder.path, 'manifest.json')).writeAsString('''
+{
+  "schemaVersion": 2,
+  "workId": "SSP",
+  "packageId": "captureclipper:SSP",
+  "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "createdAt": "2026-07-01T00:00:00.000Z",
+  "updatedAt": "2026-07-10T00:00:00.000Z",
+  "captureApp": "CaptureClipper",
+  "title": "The Story of the Seer of Patmos",
+  "author": "S. N. Haskell",
+  "shortCode": "SSP",
+  "htmlFile": "capture.html"
+}
+''');
       await File(p.join(folder.path, 'cover.jpg')).writeAsString('cover');
 
       await LocalSettingsStore.instance.savePioneerCapturedHtmlFolder(

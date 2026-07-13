@@ -11,6 +11,7 @@ import 'package:studybible2/core/database/elibrary_database.dart';
 import 'package:studybible2/core/database/user_database.dart';
 import 'package:studybible2/features/library/data/library_catalog_service.dart';
 import 'package:studybible2/features/library/data/library_contributor.dart';
+import 'package:studybible2/features/library/data/library_recent_items.dart';
 import 'package:studybible2/features/reader/data/commentary_research_library_service.dart';
 import 'package:studybible2/features/utilities/data/pioneer_capture_folder_metadata.dart';
 import 'package:studybible2/features/utilities/data/pioneer_captured_html_import_availability_service.dart';
@@ -68,8 +69,12 @@ Future<Directory> _createCaptureFolder({
   required String sourceUrl,
   required String authorName,
   required String bodyHtml,
+  bool underBooksRoot = true,
 }) async {
-  final folder = Directory(p.join(root.path, folderName ?? workId));
+  final booksRoot = !underBooksRoot || p.basename(root.path) == 'Books'
+      ? root
+      : Directory(p.join(root.path, 'Books'));
+  final folder = Directory(p.join(booksRoot.path, folderName ?? workId));
   await folder.create(recursive: true);
   await File(p.join(folder.path, 'metadata.json')).writeAsString('''
 {
@@ -162,7 +167,10 @@ Future<Directory> _createCaptureClipperFolder({
   String? manifestShortCode,
   required String bodyHtml,
 }) async {
-  final folder = Directory(p.join(root.path, folderName));
+  final booksRoot = p.basename(root.path) == 'Books'
+      ? root
+      : Directory(p.join(root.path, 'Books'));
+  final folder = Directory(p.join(booksRoot.path, folderName));
   final imagesDir = Directory(p.join(folder.path, 'images'));
   await imagesDir.create(recursive: true);
   await File(p.join(imagesDir.path, 'image_0001.png')).writeAsString('cover');
@@ -421,11 +429,7 @@ void main() {
         workId: workId,
         sourceUrl: sourceUrl,
         authorName: authorName,
-        bodyHtml: '''
-    <p>First paragraph.</p>
-    <h2>Section 2</h2>
-    <p>Second paragraph.</p>
-''',
+        bodyHtml: _sspImportHtml,
       );
       await File(p.join(folder.path, 'cover.jpg')).writeAsString('cover');
 
@@ -486,7 +490,7 @@ void main() {
           libraryRootDir.path,
           'Graphics',
           'eLibraryCovers',
-          '${firstFile.libraryItemId}.jpg',
+          'library_item_17ea893998eb9c6bc060_sermon.jpg',
         ),
       );
 
@@ -521,7 +525,7 @@ void main() {
           where: 'library_item_id = ?',
           whereArgs: [firstFile.libraryItemId],
         ),
-        2,
+        5,
       );
 
       final duplicateReport = await service.importConfiguredFolder();
@@ -661,6 +665,7 @@ void main() {
           .importConfiguredCloudFolder();
 
       expect(_successfulCloudImportCount(report), 1);
+      expect(report.archivedCount, 0);
       final entry = report.entries.single;
       expect(entry.title, 'The Story of the Seer of Patmos');
       expect(entry.author, 'S. N. Haskell');
@@ -684,7 +689,10 @@ void main() {
       expect(navLabels[0], 'AUTHOR’S PREFACE.');
       expect(navLabels[1], 'CHAPTER I. THE SEER OF PATMOS.');
       expect(navLabels[2], 'CHAPTER II. THE AUTHOR OF THE REVELATION.');
-      expect(navLabels.any((label) => label.contains('Chapter 1 — SSP')), isFalse);
+      expect(
+        navLabels.any((label) => label.contains('Chapter 1 — SSP')),
+        isFalse,
+      );
 
       final textRows = await db.query(
         'library_text_blocks',
@@ -708,16 +716,23 @@ void main() {
       expect(itemRow['title'], 'The Story of the Seer of Patmos');
       expect(itemRow['author'], 'S. N. Haskell');
 
-      expect(entry.archivePath, isNotNull);
-      expect(folder.existsSync(), isFalse);
-      expect(Directory(entry.archivePath!).existsSync(), isTrue);
+      expect(entry.archivePath, isNull);
+      expect(entry.archiveError, isNull);
+      expect(folder.existsSync(), isTrue);
+      expect(File(p.join(folder.path, 'capture.html')).existsSync(), isTrue);
+      expect(File(p.join(folder.path, 'manifest.json')).existsSync(), isTrue);
+      expect(Directory(p.join(folder.path, 'images')).existsSync(), isTrue);
+      expect(
+        Directory(p.join(captureRootDir.path, 'Backup')).existsSync(),
+        isFalse,
+      );
     },
   );
 
   test(
     'resolves FP187 through the catalog instead of importing a copied-range blob',
     () async {
-      await _createCaptureClipperFolder(
+      final folder = await _createCaptureClipperFolder(
         root: captureRootDir,
         folderName: 'FP187',
         manifestTitle: 'FP187',
@@ -733,6 +748,7 @@ void main() {
           .importConfiguredCloudFolder(archiveImportedFolders: false);
 
       expect(_successfulCloudImportCount(report), 1);
+      expect(report.archivedCount, 0);
       final entry = report.entries.single;
       expect(entry.title, 'Fundamental Principles of Seventh-day Adventists');
       expect(entry.author, 'General Conference of SDA');
@@ -747,7 +763,10 @@ void main() {
         where: 'id = ?',
         whereArgs: [itemId],
       )).single;
-      expect(itemRow['title'], 'Fundamental Principles of Seventh-day Adventists');
+      expect(
+        itemRow['title'],
+        'Fundamental Principles of Seventh-day Adventists',
+      );
       expect(itemRow['author'], 'General Conference of SDA');
 
       final navRows = await db.query(
@@ -772,6 +791,8 @@ void main() {
         expect(text, isNot(contains('(General Conference of SDA)')));
         expect(text, isNot(contains('STEAM PRESS')));
       }
+      expect(entry.archivePath, isNull);
+      expect(folder.existsSync(), isTrue);
     },
   );
 
@@ -881,10 +902,310 @@ void main() {
   );
 
   test(
-    'repairs a stale imported SSP book from source without archiving the source folder',
+    'keeps an already-imported shared package hidden on the same device but discovers it again after local state is cleared',
     () async {
+      const title = 'SSP';
+      const abbreviation = 'SSP';
+      const workId = 'shared_device_ssp';
+      const sourceUrl = 'https://example.invalid/shared-device-ssp';
+      const authorName = 'Unknown';
+
       final folder = await _createCaptureFolder(
         root: captureRootDir,
+        title: title,
+        abbreviation: abbreviation,
+        workId: workId,
+        sourceUrl: sourceUrl,
+        authorName: authorName,
+        bodyHtml: _sspImportHtml,
+      );
+      await File(p.join(folder.path, 'cover.jpg')).writeAsString('cover');
+
+      await LocalSettingsStore.instance.savePioneerCapturedHtmlFolder(
+        path: captureRootDir.path,
+      );
+
+      final service = PioneerCapturedHtmlImportFolderService.instance;
+      final importReport = await service.importConfiguredCloudFolder();
+      expect(_successfulCloudImportCount(importReport), 1);
+
+      final sameDeviceDiscovery = await service
+          .discoverConfiguredCloudFolderImports();
+      expect(sameDeviceDiscovery.hasAvailableImports, isFalse);
+      expect(sameDeviceDiscovery.availableCount, 0);
+
+      await _clearCapturedHtmlImportState();
+
+      final secondDeviceDiscovery = await service
+          .discoverConfiguredCloudFolderImports();
+      expect(secondDeviceDiscovery.hasAvailableImports, isTrue);
+      expect(secondDeviceDiscovery.availableCount, 1);
+      expect(
+        secondDeviceDiscovery.imports.single.existingLibraryItemId,
+        isNull,
+      );
+      expect(
+        secondDeviceDiscovery.imports.single.displayLabel,
+        contains('The Story of the Seer of Patmos'),
+      );
+      expect(folder.existsSync(), isTrue);
+      expect(
+        Directory(p.join(captureRootDir.path, 'Backup')).existsSync(),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'detects a changed shared package as updated and refreshes the same local item',
+    () async {
+      const title = 'SSP';
+      const abbreviation = 'SSP';
+      const workId = 'updated_shared_ssp';
+      const sourceUrl = 'https://example.invalid/updated-shared-ssp';
+      const authorName = 'Unknown';
+
+      final folder = await _createCaptureFolder(
+        root: captureRootDir,
+        title: title,
+        abbreviation: abbreviation,
+        workId: workId,
+        sourceUrl: sourceUrl,
+        authorName: authorName,
+        bodyHtml: _sspImportHtml,
+      );
+      await File(p.join(folder.path, 'cover.jpg')).writeAsString('cover');
+
+      await LocalSettingsStore.instance.savePioneerCapturedHtmlFolder(
+        path: captureRootDir.path,
+      );
+
+      final service = PioneerCapturedHtmlImportFolderService.instance;
+      final firstReport = await service.importConfiguredCloudFolder();
+      expect(_successfulCloudImportCount(firstReport), 1);
+      final itemId = firstReport.entries.single.libraryItemId!;
+
+      final db = await ELibraryDatabase.instance.database;
+      final originalHash = (await db.query(
+        'library_items',
+        columns: const <String>['file_hash'],
+        where: 'id = ?',
+        whereArgs: [itemId],
+      )).single['file_hash']?.toString();
+
+      final linkedCreatedAt = DateTime.utc(2026, 7, 9).toIso8601String();
+      await db.update(
+        'library_items',
+        <String, Object?>{
+          'last_opened': linkedCreatedAt,
+          'epub_href': 'chapter_1.xhtml',
+          'anchor_id': 'stable-paragraph',
+          'spine_index': 1,
+          'paragraph_index': 1,
+        },
+        where: 'id = ?',
+        whereArgs: <Object?>[itemId],
+      );
+      for (final type in const <String>['highlight', 'note', 'bookmark']) {
+        await db.insert('elibrary_markups', <String, Object?>{
+          'library_item_id': itemId,
+          'epub_href': 'chapter_1.xhtml',
+          'start_block_index': 0,
+          'start_char_offset': 0,
+          'end_block_index': 0,
+          'end_char_offset': 8,
+          'selected_text_snapshot': '$type snapshot',
+          'markup_type': type,
+          'color': '#F7D87D',
+          'note_text': type == 'note' ? 'Preserved note' : null,
+          'created_at': linkedCreatedAt,
+          'updated_at': linkedCreatedAt,
+          'deleted_at': null,
+        });
+      }
+      await db.insert('library_links', <String, Object?>{
+        'id': 'user-link-preservation',
+        'library_item_id': itemId,
+        'book_id': 1,
+        'chapter': 1,
+        'verse_start': 1,
+        'verse_end': 1,
+        'link_type': 'user',
+        'original_reference_text': 'Genesis 1:1',
+        'created_by': 'user',
+        'created_at': linkedCreatedAt,
+        'updated_at': linkedCreatedAt,
+        'deleted_at': null,
+        'device_id': 'test-device',
+        'revision': 1,
+        'sync_status': 'pending',
+      });
+
+      await File(p.join(folder.path, 'capture.html')).writeAsString('''
+<!doctype html>
+<html>
+  <head>
+    <title>$title</title>
+    <meta name="author" content="$authorName" />
+    <link rel="canonical" href="$sourceUrl" />
+  </head>
+  <body>
+    <h1>$title</h1>
+    <b class="calibre1">CHAPTER 1. THE SEER OF PATMOS.</b>
+    <p>SSP 1.1 First paragraph updated. {SSP 1.1}</p>
+    <h2>Section 2</h2>
+    <p>SSP 2.1 Second paragraph updated. {SSP 2.1}</p>
+  </body>
+</html>
+''');
+
+      final discovery = await service.discoverConfiguredCloudFolderImports();
+      expect(discovery.hasAvailableImports, isTrue);
+      expect(discovery.availableCount, 1);
+      expect(discovery.imports.single.existingLibraryItemId, itemId);
+
+      final secondReport = await service.importConfiguredCloudFolder();
+      expect(secondReport.importedCount, 0);
+      expect(secondReport.repairedCount, 1);
+      expect(secondReport.archivedCount, 0);
+      expect(secondReport.failedCount, 0);
+
+      final entry = secondReport.entries.single;
+      expect(entry.importStatus, PioneerImportWorkStatus.imported);
+      expect(entry.updatedExisting, isTrue);
+      expect(entry.createdNew, isFalse);
+      expect(entry.libraryItemId, itemId);
+      expect(entry.archivePath, isNull);
+      expect(folder.existsSync(), isTrue);
+
+      final updatedItem = await LibraryCatalogService.instance.loadItemById(
+        itemId,
+      );
+      expect(updatedItem, isNotNull);
+      expect(updatedItem!.displayTitle, 'The Story of the Seer of Patmos');
+      expect(updatedItem.displayAuthor, 'S. N. Haskell');
+
+      final updatedHash = (await db.query(
+        'library_items',
+        columns: const <String>['file_hash'],
+        where: 'id = ?',
+        whereArgs: [itemId],
+      )).single['file_hash']?.toString();
+      expect(updatedHash, isNot(equals(originalHash)));
+      final itemRows = await db.query(
+        'library_items',
+        where: 'id = ? AND deleted_at IS NULL',
+        whereArgs: <Object?>[itemId],
+      );
+      expect(itemRows, hasLength(1));
+      expect(itemRows.single['last_opened'], linkedCreatedAt);
+      expect(itemRows.single['epub_href'], 'chapter_1.xhtml');
+      expect(itemRows.single['anchor_id'], 'stable-paragraph');
+      expect(itemRows.single['spine_index'], 1);
+      expect(itemRows.single['paragraph_index'], 1);
+      final markups = await db.query(
+        'elibrary_markups',
+        where: 'library_item_id = ? AND deleted_at IS NULL',
+        whereArgs: <Object?>[itemId],
+      );
+      expect(markups, hasLength(3));
+      expect(markups.map((row) => row['markup_type']).toSet(), <Object?>{
+        'highlight',
+        'note',
+        'bookmark',
+      });
+      expect(
+        markups.singleWhere((row) => row['markup_type'] == 'note')['note_text'],
+        'Preserved note',
+      );
+      expect(
+        await _countRows(
+          db,
+          'library_links',
+          where: 'id = ? AND library_item_id = ? AND deleted_at IS NULL',
+          whereArgs: <Object?>['user-link-preservation', itemId],
+        ),
+        1,
+      );
+      final sameWorkRows = await db.query(
+        'library_items',
+        columns: const <String>['id'],
+        where: 'id = ?',
+        whereArgs: <Object?>[itemId],
+      );
+      expect(sameWorkRows, hasLength(1));
+      expect(
+        selectRecentLibraryItems(<LibraryCatalogItem>[updatedItem]),
+        hasLength(1),
+      );
+      expect(
+        Directory(p.join(captureRootDir.path, 'Backup')).existsSync(),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'removes a local import record and reimports the unchanged shared package',
+    () async {
+      const title = 'SSP';
+      const abbreviation = 'SSP';
+      const workId = 'removal_reimport_ssp';
+      const sourceUrl = 'https://example.invalid/removal-reimport-ssp';
+      const authorName = 'Unknown';
+
+      final folder = await _createCaptureFolder(
+        root: captureRootDir,
+        title: title,
+        abbreviation: abbreviation,
+        workId: workId,
+        sourceUrl: sourceUrl,
+        authorName: authorName,
+        bodyHtml: _sspImportHtml,
+      );
+      await File(p.join(folder.path, 'cover.jpg')).writeAsString('cover');
+
+      await LocalSettingsStore.instance.savePioneerCapturedHtmlFolder(
+        path: captureRootDir.path,
+      );
+
+      final service = PioneerCapturedHtmlImportFolderService.instance;
+      final firstReport = await service.importConfiguredCloudFolder();
+      expect(_successfulCloudImportCount(firstReport), 1);
+      final itemId = firstReport.entries.single.libraryItemId!;
+
+      final removed = await PioneerTextImportService.instance
+          .removeImportedLibraryItem(itemId);
+      expect(removed, isTrue);
+
+      final discovery = await service.discoverConfiguredCloudFolderImports();
+      expect(discovery.hasAvailableImports, isTrue);
+      expect(discovery.availableCount, 1);
+
+      final secondReport = await service.importConfiguredCloudFolder();
+      expect(_successfulCloudImportCount(secondReport), 1);
+      expect(secondReport.repairedCount, 0);
+      expect(secondReport.entries.single.libraryItemId, itemId);
+      expect(secondReport.entries.single.archivePath, isNull);
+      expect(folder.existsSync(), isTrue);
+      expect(
+        Directory(p.join(captureRootDir.path, 'Backup')).existsSync(),
+        isFalse,
+      );
+      expect(
+        await LibraryCatalogService.instance.loadItemById(itemId),
+        isNotNull,
+      );
+    },
+  );
+
+  test(
+    'repairs a stale imported SSP book from source without archiving the source folder',
+    () async {
+      final booksRoot = Directory(p.join(captureRootDir.path, 'Books'));
+      await booksRoot.create();
+      final folder = await _createCaptureFolder(
+        root: booksRoot,
         folderName: 'SSP',
         title: 'SSP',
         abbreviation: 'SSP',
@@ -968,7 +1289,7 @@ void main() {
           where: 'library_item_id = ?',
           whereArgs: [normalizedItemId],
         ),
-        greaterThanOrEqualTo(4),
+        greaterThanOrEqualTo(3),
       );
       expect(
         await _countRows(
@@ -989,7 +1310,7 @@ void main() {
       final navLabels = navRows
           .map((row) => row['label']?.toString() ?? '')
           .toList(growable: false);
-      expect(navLabels.first, 'AUTHORS PREFACE.');
+      expect(navLabels.any((label) => label == 'AUTHORS PREFACE.'), isFalse);
       expect(
         navLabels.any((label) => label.contains('SEER OF PATMOS')),
         isTrue,
@@ -1169,7 +1490,7 @@ void main() {
   );
 
   test(
-    'imports configured cloud root folders and archives the source folder after verification',
+    'imports configured cloud root folders without altering the source',
     () async {
       const title = 'Cloud Import Test Book';
       const abbreviation = 'DAR';
@@ -1207,64 +1528,28 @@ void main() {
           .importConfiguredCloudFolder(
             nowProvider: () => DateTime(2026, 7, 1),
             existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+            archiveImportedFolders: true,
           );
 
       expect(report.rootPath, captureRootDir.path);
-      final cloudStatus = report.entries.single.importStatus;
-      expect(
-        cloudStatus,
-        anyOf(
-          PioneerImportWorkStatus.imported,
-          PioneerImportWorkStatus.skippedExisting,
-        ),
-      );
-      if (cloudStatus == PioneerImportWorkStatus.skippedExisting) {
-        expect(report.archivedCount, 0);
-        expect(folder.existsSync(), isTrue);
-        return;
-      }
-      expect(report.archivedCount, 1);
+      expect(report.archivedCount, 0);
       expect(report.skippedCount, 0);
       expect(report.failedCount, 0);
 
       final entry = report.entries.single;
       expect(entry.imported, isTrue);
-      expect(entry.archived, isTrue);
+      expect(entry.archived, isFalse);
       expect(entry.coverImported, isTrue);
       expect(entry.chapterCount, greaterThanOrEqualTo(2));
       expect(entry.firstChapterLabel, isNotNull);
       expect(entry.lastChapterLabel, isNotNull);
       expect(entry.archiveError, isNull);
+      expect(entry.archivePath, isNull);
+      expect(folder.existsSync(), isTrue);
+      expect(File(p.join(folder.path, 'capture.html')).existsSync(), isTrue);
+      expect(File(p.join(folder.path, 'cover.jpg')).existsSync(), isTrue);
       expect(
-        entry.archivePath,
-        p.join(
-          captureRootDir.path,
-          'Backup',
-          '${p.basename(folder.path)}07-01-2026',
-        ),
-      );
-
-      expect(folder.existsSync(), isFalse);
-      final archivedFolder = Directory(
-        p.join(
-          captureRootDir.path,
-          'Backup',
-          '${p.basename(folder.path)}07-01-2026',
-        ),
-      );
-      expect(archivedFolder.existsSync(), isTrue);
-      expect(
-        File(p.join(archivedFolder.path, 'capture.html')).existsSync(),
-        isTrue,
-      );
-      expect(
-        File(p.join(archivedFolder.path, 'cover.jpg')).existsSync(),
-        isTrue,
-      );
-      expect(
-        File(
-          p.join(archivedFolder.path, 'images', 'image_0001.png'),
-        ).existsSync(),
+        File(p.join(folder.path, 'images', 'image_0001.png')).existsSync(),
         isTrue,
       );
 
@@ -1280,7 +1565,7 @@ void main() {
           libraryRootDir.path,
           'Graphics',
           'eLibraryCovers',
-          '${entry.libraryItemId}.jpg',
+          'library_item_3692395d3434a652bff1_test.jpg',
         ),
       );
     },
@@ -1324,22 +1609,10 @@ $abbreviation 247.2</p>
           .importConfiguredCloudFolder(
             nowProvider: () => DateTime(2026, 7, 1),
             existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+            archiveImportedFolders: true,
           );
 
-      final chapterStatus = report.entries.single.importStatus;
-      expect(
-        chapterStatus,
-        anyOf(
-          PioneerImportWorkStatus.imported,
-          PioneerImportWorkStatus.skippedExisting,
-        ),
-      );
-      if (chapterStatus == PioneerImportWorkStatus.skippedExisting) {
-        expect(report.archivedCount, 0);
-        expect(folder.existsSync(), isTrue);
-        return;
-      }
-      expect(report.archivedCount, 1);
+      expect(report.archivedCount, 0);
       expect(report.failedCount, 0);
 
       final entry = report.entries.single;
@@ -1361,7 +1634,7 @@ $abbreviation 247.2</p>
           libraryRootDir.path,
           'Graphics',
           'eLibraryCovers',
-          '${entry.libraryItemId}.jpg',
+          'library_item_79e14c811d2725d094f3_book.jpg',
         ),
       );
 
@@ -1401,7 +1674,7 @@ $abbreviation 247.2</p>
       expect((refRows[2]['paragraph_index'] as num).toInt(), 2);
       expect((refRows[2]['paragraph_on_page'] as num).toInt(), 2);
 
-      expect(folder.existsSync(), isFalse);
+      expect(folder.existsSync(), isTrue);
       expect(
         Directory(
           p.join(
@@ -1410,7 +1683,7 @@ $abbreviation 247.2</p>
             'cis_test_chapter_3307-01-2026',
           ),
         ).existsSync(),
-        isTrue,
+        isFalse,
       );
       expect(
         File(
@@ -1421,7 +1694,7 @@ $abbreviation 247.2</p>
             'cover.jpg',
           ),
         ).existsSync(),
-        isTrue,
+        isFalse,
       );
     },
   );
@@ -1675,7 +1948,7 @@ CIS 247.2</p>
   );
 
   test(
-    'archive collisions append a numeric suffix and Backup folders are ignored',
+    'archive option is ignored and existing Backup folders remain untouched',
     () async {
       const title = 'Archive Collision Test Book';
       const abbreviation = 'LOF';
@@ -1712,32 +1985,19 @@ CIS 247.2</p>
           .importConfiguredCloudFolder(
             nowProvider: () => DateTime(2026, 7, 1),
             existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+            archiveImportedFolders: true,
           );
 
-      final archiveStatus = report.entries.single.importStatus;
+      expect(report.archivedCount, 0);
+      expect(report.failedCount, 0);
+      expect(report.entries.single.archivePath, isNull);
       expect(
-        archiveStatus,
-        anyOf(
-          PioneerImportWorkStatus.imported,
-          PioneerImportWorkStatus.skippedExisting,
-        ),
-      );
-      if (archiveStatus == PioneerImportWorkStatus.skippedExisting) {
-        expect(report.archivedCount, 0);
-        expect(folder.existsSync(), isTrue);
-      } else {
-        expect(
-          report.entries.single.archivePath,
+        Directory(
           p.join(captureRootDir.path, 'Backup', 'lof_test07-01-2026-2'),
-        );
-        expect(
-          Directory(
-            p.join(captureRootDir.path, 'Backup', 'lof_test07-01-2026-2'),
-          ).existsSync(),
-          isTrue,
-        );
-        expect(folder.existsSync(), isFalse);
-      }
+        ).existsSync(),
+        isFalse,
+      );
+      expect(folder.existsSync(), isTrue);
 
       final secondPass = await PioneerCapturedHtmlImportFolderService.instance
           .importConfiguredCloudFolder(nowProvider: () => DateTime(2026, 7, 1));
@@ -1745,7 +2005,7 @@ CIS 247.2</p>
       expect(secondPass.archivedCount, 0);
       expect(secondPass.skippedCount, 0);
       expect(secondPass.failedCount, 0);
-      expect(secondPass.entries, isEmpty);
+      expect(secondPass.entries, isNotEmpty);
     },
   );
 
@@ -1825,7 +2085,7 @@ CIS 247.2</p>
     );
   });
 
-  test('archive move failures leave the source folder in place', () async {
+  test('archive option never attempts a move', () async {
     const title = 'Archive Failure Test Book';
     const abbreviation = 'ARCHIVE_FAIL';
     const workId = 'archive_fail_test';
@@ -1861,6 +2121,7 @@ CIS 247.2</p>
         .importConfiguredCloudFolder(
           nowProvider: () => DateTime(2026, 7, 1),
           existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+          archiveImportedFolders: true,
         );
 
     expect(
@@ -1872,7 +2133,7 @@ CIS 247.2</p>
     );
     expect(report.archivedCount, 0);
     expect(report.failedCount, 0);
-    expect(report.entries.single.archiveError, isNotNull);
+    expect(report.entries.single.archiveError, isNull);
     expect(folder.existsSync(), isTrue);
     expect(File(p.join(captureRootDir.path, 'Backup')).existsSync(), isTrue);
     expect(
@@ -1960,11 +2221,7 @@ CIS 247.2</p>
         workId: workId,
         sourceUrl: sourceUrl,
         authorName: authorName,
-        bodyHtml: '''
-    <p>First paragraph.</p>
-    <h2>Section 2</h2>
-    <p>Second paragraph.</p>
-''',
+        bodyHtml: _sspImportHtml,
       );
 
       await LocalSettingsStore.instance.savePioneerCapturedHtmlFolder(
@@ -2204,6 +2461,415 @@ CIS 247.2</p>
         isTrue,
       );
       expect(report.rootPath, captureRootDir.path);
+    },
+  );
+
+  test(
+    'failed automatic indexing remains discoverable for retry without changing source',
+    () async {
+      final folder = await _createCaptureFolder(
+        root: captureRootDir,
+        title: 'Index Retry Cloud Book',
+        abbreviation: 'IRC',
+        workId: 'IRC',
+        sourceUrl: 'https://example.invalid/index-retry-cloud',
+        authorName: 'Test Author',
+        bodyHtml: '''
+    <div class="clip clip-text">
+      <p>Chapter 1 — Retry IRC 1 Retryable cloud text. IRC 1.1</p>
+    </div>
+''',
+      );
+      await LocalSettingsStore.instance.savePioneerCapturedHtmlFolder(
+        path: captureRootDir.path,
+      );
+      final sourceBefore = await File(
+        p.join(folder.path, 'capture.html'),
+      ).readAsBytes();
+      final service = PioneerCapturedHtmlImportFolderService(
+        importService: PioneerTextImportService(
+          beforeCapturedHtmlIndexWrite: (_) async {
+            throw StateError('simulated cloud indexing failure');
+          },
+        ),
+      );
+
+      final failed = await service.importConfiguredCloudFolder();
+      expect(failed.failedCount, 1);
+      expect(failed.importedCount, 0);
+      final itemId = failed.entries.single.libraryItemId;
+      expect(itemId, isNotNull);
+
+      final db = await ELibraryDatabase.instance.database;
+      final rows = await db.query(
+        'library_items',
+        columns: const ['index_status'],
+        where: 'id = ?',
+        whereArgs: [itemId],
+      );
+      expect(rows.single['index_status'], 'needs_attention');
+
+      final retryDiscovery = await service
+          .discoverConfiguredCloudFolderImports();
+      expect(retryDiscovery.availableCount, 1);
+      expect(retryDiscovery.imports.single.existingLibraryItemId, itemId);
+      expect(
+        await File(p.join(folder.path, 'capture.html')).readAsBytes(),
+        sourceBefore,
+      );
+    },
+  );
+
+  test(
+    'discovers immediate packages beneath the permanent Books root',
+    () async {
+      final books = Directory(p.join(captureRootDir.path, 'Books'));
+      await books.create();
+      final package = await _createCaptureFolder(
+        root: books,
+        title: 'Permanent Books Test',
+        abbreviation: 'PBT',
+        workId: 'permanent_books_test',
+        sourceUrl: 'https://example.invalid/permanent-books-test',
+        authorName: 'Test Author',
+        bodyHtml: '''
+    <div class="clip clip-text">
+      <p>Chapter 1 — Opening PBT 1 Intro. PBT 1.1 First paragraph.</p>
+    </div>
+''',
+      );
+      final legacyPackage = await _createCaptureFolder(
+        root: captureRootDir,
+        underBooksRoot: false,
+        title: 'Legacy Root Book',
+        abbreviation: 'LRB',
+        workId: 'legacy_root_book',
+        sourceUrl: 'https://example.invalid/legacy-root-book',
+        authorName: 'Test Author',
+        bodyHtml: '''
+    <div class="clip clip-text">
+      <p>Chapter 1 — Legacy LRB 1 Intro. LRB 1.1 First paragraph.</p>
+    </div>
+''',
+      );
+      await Directory(p.join(books.path, '.publish-staging')).create();
+      await Directory(p.join(books.path, 'PBT-rollback')).create();
+      await LocalSettingsStore.instance.savePioneerCapturedHtmlFolder(
+        path: captureRootDir.path,
+      );
+
+      final report = await PioneerCapturedHtmlImportFolderService.instance
+          .discoverConfiguredCloudFolderImports();
+
+      expect(report.imports, hasLength(1));
+      expect(report.imports.single.folderPath, package.path);
+      expect(package.existsSync(), isTrue);
+      expect(legacyPackage.existsSync(), isTrue);
+    },
+  );
+
+  test(
+    'authoritative WOR import produces no zero-body leaf navigation',
+    () async {
+      final source = Directory(
+        '/Users/deanbowen/Library/CloudStorage/OneDrive-Personal/CloudFiles/Books/WOR',
+      );
+      if (!source.existsSync()) return;
+
+      final destination = Directory(
+        p.join(captureRootDir.path, 'Books', 'WOR'),
+      );
+      await destination.create(recursive: true);
+      for (final name in const ['manifest.json', 'capture.html']) {
+        await File(
+          p.join(source.path, name),
+        ).copy(p.join(destination.path, name));
+      }
+      final sourceImage = File(p.join(source.path, 'images', 'image_0001.png'));
+      if (sourceImage.existsSync()) {
+        final destinationImages = Directory(p.join(destination.path, 'images'));
+        await destinationImages.create();
+        await sourceImage.copy(
+          p.join(destinationImages.path, 'image_0001.png'),
+        );
+      }
+      await LocalSettingsStore.instance.savePioneerCapturedHtmlFolder(
+        path: captureRootDir.path,
+      );
+
+      final report = await PioneerCapturedHtmlImportFolderService.instance
+          .importConfiguredCloudFolder(
+            existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+          );
+      expect(report.failedCount, 0);
+      expect(report.entries, hasLength(1));
+
+      final itemId = report.entries.single.libraryItemId!;
+      final db = await ELibraryDatabase.instance.database;
+      final rows = await db.rawQuery(
+        '''
+      SELECT n.label, n.href, n.content_kind,
+             COUNT(b.id) AS block_count
+      FROM library_navigation_items n
+      LEFT JOIN library_text_blocks b
+        ON b.library_item_id = n.library_item_id
+       AND LOWER(b.epub_href) = LOWER(n.href)
+      WHERE n.library_item_id = ? AND n.deleted_at IS NULL
+      GROUP BY n.id
+      ORDER BY n.sort_order
+      ''',
+        [itemId],
+      );
+
+      expect(rows, isNotEmpty);
+      final zeroBodyLeaves = rows.where((row) {
+        final blocks = (row['block_count'] as num?)?.toInt() ?? 0;
+        final label = row['label']?.toString().trim() ?? '';
+        final structuralChapter = RegExp(
+          r'^chapter\s+(?:\d+|[ivxlcdm]+)\b',
+          caseSensitive: false,
+        ).hasMatch(label);
+        return blocks == 0 && !structuralChapter;
+      });
+      expect(zeroBodyLeaves, isEmpty);
+      expect(
+        rows.where((row) => row['label'] == 'OCTOBER 17, 1895.'),
+        isNotEmpty,
+      );
+      expect(
+        rows.where((row) => row['label'] == 'OCTOBER 24, 1895.'),
+        isNotEmpty,
+      );
+    },
+  );
+
+  test(
+    'copies picked files into the app-managed import folder without touching sources',
+    () async {
+      final sourceDir = Directory(p.join(captureRootDir.path, 'OneDriveCopy'));
+      await sourceDir.create(recursive: true);
+      const htmlContent =
+          '<html><body><h1>SSP</h1><img src="images/pic1.png"></body></html>';
+      final htmlFile = File(p.join(sourceDir.path, 'SSP.html'));
+      await htmlFile.writeAsString(htmlContent);
+      final noteFile = File(p.join(sourceDir.path, 'notes.txt'));
+      await noteFile.writeAsString('reader notes');
+
+      final result = await PioneerCapturedHtmlImportFolderService.instance
+          .copyPickedFilesIntoManagedImportFolder([
+            htmlFile.path,
+            noteFile.path,
+          ]);
+
+      final expectedRoot = p.join(supportDir.path, 'ImportedCaptureClipper');
+      expect(result.managedRootPath, expectedRoot);
+      expect(result.destinationFolderPath, p.join(expectedRoot, 'SSP'));
+      expect(result.copiedFilePaths, hasLength(2));
+      expect(result.failedSourcePaths, isEmpty);
+      expect(
+        File(p.join(expectedRoot, 'SSP', 'SSP.html')).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(p.join(expectedRoot, 'SSP', 'notes.txt')).existsSync(),
+        isTrue,
+      );
+
+      // Sources are copy-only: still present, unrenamed, contents unchanged.
+      expect(htmlFile.existsSync(), isTrue);
+      expect(await htmlFile.readAsString(), htmlContent);
+      expect(noteFile.existsSync(), isTrue);
+      expect(await noteFile.readAsString(), 'reader notes');
+
+      // Referenced image was not part of the batch, so it is reported.
+      expect(result.missingAssetReferences, ['images/pic1.png']);
+
+      // The managed root becomes the configured CaptureClipper folder and
+      // the existing scanner sees the copied HTML file.
+      expect(
+        await LocalSettingsStore.instance.loadPioneerCapturedHtmlFolderPath(),
+        expectedRoot,
+      );
+      final scan = await PioneerCapturedHtmlImportFolderService.instance
+          .scanFolder(folderPath: expectedRoot);
+      expect(scan.htmlFileCount, 1);
+      expect(scan.files.single.relativePath, p.join('SSP', 'SSP.html'));
+    },
+  );
+
+  test(
+    'copies a schema-2 package folder recursively without changing source',
+    () async {
+      final books = Directory(p.join(captureRootDir.path, 'Books'));
+      final source = Directory(p.join(books.path, 'CIS'));
+      final images = Directory(p.join(source.path, 'images'));
+      await images.create(recursive: true);
+      final manifest = File(p.join(source.path, 'manifest.json'));
+      final html = File(p.join(source.path, 'capture.html'));
+      final image = File(p.join(images.path, 'page-1.png'));
+      await manifest.writeAsString(
+        '{"schemaVersion":2,"workId":"CIS","packageId":"cis-package","contentHash":"abc","htmlFile":"capture.html"}',
+      );
+      await html.writeAsString('<html><body>CIS fixture</body></html>');
+      await image.writeAsBytes(const [1, 2, 3, 4]);
+      final before = <String, List<int>>{
+        manifest.path: await manifest.readAsBytes(),
+        html.path: await html.readAsBytes(),
+        image.path: await image.readAsBytes(),
+      };
+
+      final managedRoot = p.join(supportDir.path, 'ImportedCaptureClipper');
+      final copied = await PioneerCapturedHtmlImportFolderService.instance
+          .copyPickedBooksParentIntoManagedImportFolder(
+            books.path,
+            managedRootPath: managedRoot,
+            setAsConfiguredFolder: false,
+          );
+
+      expect(copied.copiedFolderPaths, [p.join(managedRoot, 'CIS')]);
+      expect(
+        File(
+          p.join(copied.copiedFolderPaths.single, 'manifest.json'),
+        ).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(
+          p.join(copied.copiedFolderPaths.single, 'capture.html'),
+        ).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(
+          p.join(copied.copiedFolderPaths.single, 'images', 'page-1.png'),
+        ).readAsBytesSync(),
+        [1, 2, 3, 4],
+      );
+      for (final entry in before.entries) {
+        expect(File(entry.key).readAsBytesSync(), entry.value);
+      }
+    },
+  );
+
+  test(
+    'adds a later assets-only batch to the most recent managed book folder',
+    () async {
+      final sourceDir = Directory(p.join(captureRootDir.path, 'OneDriveCopy'));
+      await sourceDir.create(recursive: true);
+      final htmlFile = File(p.join(sourceDir.path, 'DAR.html'));
+      await htmlFile.writeAsString(
+        '<html><body><h1>DAR</h1><img src="pic1.png"></body></html>',
+      );
+      final imageFile = File(p.join(sourceDir.path, 'pic1.png'));
+      await imageFile.writeAsBytes(const [1, 2, 3]);
+
+      final managedRoot = p.join(supportDir.path, 'ImportedCaptureClipper');
+      final firstBatch = await PioneerCapturedHtmlImportFolderService.instance
+          .copyPickedFilesIntoManagedImportFolder([htmlFile.path]);
+      expect(firstBatch.missingAssetReferences, ['pic1.png']);
+
+      final secondBatch = await PioneerCapturedHtmlImportFolderService.instance
+          .copyPickedFilesIntoManagedImportFolder([imageFile.path]);
+
+      expect(secondBatch.destinationFolderPath, p.join(managedRoot, 'DAR'));
+      expect(File(p.join(managedRoot, 'DAR', 'pic1.png')).existsSync(), isTrue);
+      expect(imageFile.existsSync(), isTrue);
+    },
+  );
+
+  test(
+    'rejects an assets-only batch when no managed book folder exists yet',
+    () async {
+      final imageFile = File(p.join(captureRootDir.path, 'pic1.png'));
+      await imageFile.writeAsBytes(const [1, 2, 3]);
+
+      await expectLater(
+        PioneerCapturedHtmlImportFolderService.instance
+            .copyPickedFilesIntoManagedImportFolder([imageFile.path]),
+        throwsA(isA<StateError>()),
+      );
+      expect(imageFile.existsSync(), isTrue);
+    },
+  );
+
+  test('reports missing picked sources without failing the batch', () async {
+    final sourceDir = Directory(p.join(captureRootDir.path, 'OneDriveCopy'));
+    await sourceDir.create(recursive: true);
+    final htmlFile = File(p.join(sourceDir.path, 'FP.html'));
+    await htmlFile.writeAsString('<html><body><h1>FP</h1></body></html>');
+    final missingPath = p.join(sourceDir.path, 'gone.html');
+
+    final result = await PioneerCapturedHtmlImportFolderService.instance
+        .copyPickedFilesIntoManagedImportFolder([htmlFile.path, missingPath]);
+
+    expect(result.copiedFilePaths, hasLength(1));
+    expect(result.failedSourcePaths, [missingPath]);
+    expect(result.copiedAnything, isTrue);
+  });
+
+  test(
+    'Books parent import enumerates packages and ignores administrative folders',
+    () async {
+      final books = Directory(p.join(captureRootDir.path, 'Books'));
+      await books.create(recursive: true);
+      for (final name in const ['CIS', 'FP187', 'SSP']) {
+        final package = Directory(p.join(books.path, name));
+        await package.create();
+        await File(p.join(package.path, 'manifest.json')).writeAsString(
+          '{"schemaVersion":2,"workId":"$name","packageId":"$name-package","contentHash":"$name-hash","htmlFile":"capture.html"}',
+        );
+        await File(
+          p.join(package.path, 'capture.html'),
+        ).writeAsString('<html>$name</html>');
+      }
+      for (final name in const [
+        '.publish-staging',
+        'FP187-rollback',
+        'Archive',
+        'Backup',
+        'Scanned',
+        'Imported',
+      ]) {
+        final ignored = Directory(p.join(books.path, name));
+        await ignored.create();
+        await File(
+          p.join(ignored.path, 'manifest.json'),
+        ).writeAsString('{"htmlFile":"capture.html"}');
+        await File(
+          p.join(ignored.path, 'capture.html'),
+        ).writeAsString('<html>ignored</html>');
+      }
+
+      final managedRoot = p.join(supportDir.path, 'ImportedCaptureClipper');
+      final copied = await PioneerCapturedHtmlImportFolderService.instance
+          .copyPickedBooksParentIntoManagedImportFolder(
+            books.path,
+            managedRootPath: managedRoot,
+            setAsConfiguredFolder: false,
+          );
+
+      expect(copied.copiedFolderPaths.map(p.basename), ['CIS', 'FP187', 'SSP']);
+      expect(Directory(p.join(managedRoot, 'Archive')).existsSync(), isFalse);
+      expect(
+        Directory(p.join(managedRoot, '.publish-staging')).existsSync(),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'rejects an empty picked-file selection instead of claiming success',
+    () async {
+      await expectLater(
+        PioneerCapturedHtmlImportFolderService.instance
+            .copyPickedFilesIntoManagedImportFolder(const ['', '   ']),
+        throwsA(isA<StateError>()),
+      );
+      // A cancelled/empty selection must not set the configured folder.
+      expect(
+        await LocalSettingsStore.instance.loadPioneerCapturedHtmlFolderPath(),
+        isNull,
+      );
     },
   );
 }

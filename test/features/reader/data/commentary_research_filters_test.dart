@@ -35,7 +35,10 @@ void main() {
       buildMatch(
         title: 'Genesis 1',
         relativePath: 'ePubs/Commentaries/EGW_Commentaries/ch1.xhtml',
-        anchor: 'In the beginning God created the heaven and the earth.',
+        anchor:
+            'In the beginning God created the heaven and the earth. This '
+            'opening account establishes the Creator as the source of all '
+            'life and order.',
       ),
     ];
 

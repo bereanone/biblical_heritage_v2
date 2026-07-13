@@ -2,8 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/bootstrap/local_settings_store.dart';
+import '../../library/data/library_catalog_service.dart';
+import '../../reader/data/commentary_research_library_service.dart';
 import '../data/elibrary_download_service.dart';
 import '../data/elibrary_storage_policy.dart';
+import 'library_indexing_prompt_dialogs.dart';
 
 class ELibraryDownloadScreen extends StatefulWidget {
   const ELibraryDownloadScreen({super.key});
@@ -21,6 +24,12 @@ class _ELibraryDownloadScreenState extends State<ELibraryDownloadScreen> {
   ELibraryDownloadReport? _report;
   String? _error;
   ELibraryStoragePolicy _storagePolicy = ELibraryStoragePolicy.saveSpace;
+  int _pendingIndexCount = 0;
+  bool _indexing = false;
+  int _indexCompleted = 0;
+  int _indexTotal = 0;
+  String? _indexCurrentTitle;
+  ({int indexed, int skipped, int failed})? _indexResult;
 
   @override
   void initState() {
@@ -81,6 +90,7 @@ class _ELibraryDownloadScreenState extends State<ELibraryDownloadScreen> {
           ),
         ),
       );
+      await _checkPendingIndexing();
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -97,6 +107,51 @@ class _ELibraryDownloadScreenState extends State<ELibraryDownloadScreen> {
   void _cancelDownload() {
     if (!_running) return;
     setState(() => _cancelRequested = true);
+  }
+
+  Future<void> _checkPendingIndexing() async {
+    final pending = await LibraryCatalogService.instance
+        .countUnindexedManagedItems();
+    if (!mounted) return;
+    setState(() => _pendingIndexCount = pending);
+    if (pending <= 0) return;
+    final action = await showLibraryIndexingPromptDialog(
+      context,
+      pendingCount: pending,
+    );
+    if (!mounted || action != LibraryIndexingPromptAction.indexNow) return;
+    await _runIndexing();
+  }
+
+  Future<void> _runIndexing() async {
+    if (_indexing) return;
+    setState(() {
+      _indexing = true;
+      _indexCompleted = 0;
+      _indexTotal = 0;
+      _indexCurrentTitle = null;
+      _indexResult = null;
+    });
+    final result = await CommentaryResearchLibraryService.instance
+        .indexLocalCatalogedEpubs(
+          onProgress: (completed, total, currentTitle) {
+            if (!mounted) return;
+            setState(() {
+              _indexCompleted = completed;
+              _indexTotal = total;
+              _indexCurrentTitle = currentTitle;
+            });
+          },
+        );
+    if (!mounted) return;
+    final pending = await LibraryCatalogService.instance
+        .countUnindexedManagedItems();
+    if (!mounted) return;
+    setState(() {
+      _indexing = false;
+      _indexResult = result;
+      _pendingIndexCount = pending;
+    });
   }
 
   @override
@@ -245,6 +300,43 @@ class _ELibraryDownloadScreenState extends State<ELibraryDownloadScreen> {
                       Text(
                         'Ready to run again when you tap Run Again.',
                         style: theme.textTheme.bodyMedium,
+                      ),
+                    ],
+                    if (_indexing) ...[
+                      const SizedBox(height: 16),
+                      LinearProgressIndicator(
+                        value: _indexTotal > 0
+                            ? _indexCompleted / _indexTotal
+                            : null,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _indexTotal > 0
+                            ? 'Indexing $_indexCompleted of $_indexTotal'
+                            : 'Indexing new/changed books...',
+                      ),
+                      if (_indexCurrentTitle != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Current: $_indexCurrentTitle',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                    if (!_indexing && _indexResult != null) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        'Indexing complete — ${_indexResult!.indexed} indexed, '
+                        '${_indexResult!.skipped} skipped, ${_indexResult!.failed} failed',
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ],
+                    if (!_indexing) ...[
+                      const SizedBox(height: 16),
+                      LibraryIndexingPendingCard(
+                        pendingCount: _pendingIndexCount,
+                        busy: _indexing,
+                        onIndexNow: _runIndexing,
                       ),
                     ],
                     const SizedBox(height: 16),

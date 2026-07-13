@@ -167,6 +167,29 @@ class LocalSettingsStore {
     await save(settings);
   }
 
+  Future<Map<String, String>> loadPioneerCollectionCheck() async {
+    final settings = await load();
+    final raw = settings['pioneer_collection_last_check'];
+    if (raw is! Map) return const {};
+    return raw.map((key, value) => MapEntry(key.toString(), value.toString()));
+  }
+
+  Future<void> savePioneerCollectionCheck({
+    required String filename,
+    required String collectionId,
+    required String title,
+    required DateTime checkedAt,
+  }) async {
+    final settings = await load();
+    settings['pioneer_collection_last_check'] = {
+      'filename': filename,
+      'collectionId': collectionId,
+      'title': title,
+      'checkedAt': checkedAt.toUtc().toIso8601String(),
+    };
+    await save(settings);
+  }
+
   Future<bool> loadLibraryReaderShowRefCodes() async {
     final settings = await load();
     final value = settings['library_reader_show_ref_codes'];

@@ -99,6 +99,72 @@ bool libraryReaderNavigationItemTargetsSectionStart({
       sectionStartTargetKey;
 }
 
+/// The result of resolving a heading-only TOC node down to the first
+/// readable descendant within its own explicit subtree.
+///
+/// [headingSections] are the intervening heading-only sections strictly
+/// between the selected node and [readableSection], in document order.
+class LibraryReaderDescendantChain {
+  const LibraryReaderDescendantChain({
+    required this.headingSections,
+    required this.readableSection,
+  });
+
+  final List<LibraryBookSection> headingSections;
+  final LibraryBookSection readableSection;
+}
+
+/// Finds the first readable descendant of [navItem] by following only
+/// explicit child links in [tree], never siblings, ancestors, or positional
+/// spine fallbacks. Returns null when no descendant in the subtree has
+/// readable blocks.
+LibraryReaderDescendantChain? libraryReaderFirstReadableDescendant({
+  required LibraryCatalogNavigationItem navItem,
+  required LibraryNavigationTreeResult tree,
+  required List<LibraryBookSection> sections,
+}) {
+  return _firstReadableDescendantChain(navItem, tree, sections, 0);
+}
+
+LibraryReaderDescendantChain? _firstReadableDescendantChain(
+  LibraryCatalogNavigationItem node,
+  LibraryNavigationTreeResult tree,
+  List<LibraryBookSection> sections,
+  int depth,
+) {
+  if (depth > 32) return null;
+  final children = tree.childrenByParent[node.id] ?? const [];
+  for (final child in children) {
+    final sectionIndex = _librarySectionIndexForNavigationItem(
+      sections: sections,
+      navItem: child,
+    );
+    final childSection = sectionIndex == null ? null : sections[sectionIndex];
+    if (childSection != null && childSection.blocks.isNotEmpty) {
+      return LibraryReaderDescendantChain(
+        headingSections: const <LibraryBookSection>[],
+        readableSection: childSection,
+      );
+    }
+    final deeper = _firstReadableDescendantChain(
+      child,
+      tree,
+      sections,
+      depth + 1,
+    );
+    if (deeper != null) {
+      return LibraryReaderDescendantChain(
+        headingSections: <LibraryBookSection>[
+          ?childSection,
+          ...deeper.headingSections,
+        ],
+        readableSection: deeper.readableSection,
+      );
+    }
+  }
+  return null;
+}
+
 String? libraryReaderSectionStartTargetKey(List<LibraryBookBlock> blocks) {
   for (var index = 0; index < blocks.length; index++) {
     final block = blocks[index];
@@ -140,8 +206,9 @@ int? _librarySectionIndexForNavigationItem({
   }
 
   if (navItem.spineIndex != null) {
-    final index = navItem.spineIndex! - 1;
-    if (index >= 0 && index < sections.length) return index;
+    for (var index = 0; index < sections.length; index++) {
+      if (sections[index].spineIndex == navItem.spineIndex) return index;
+    }
   }
 
   return null;
@@ -567,6 +634,112 @@ bool libraryReaderShouldHideDevotionalContentsEntry({
       _isReaderFrontMatterLabel(hrefLabel) ||
       _isReaderMetadataHelpLabel(label) ||
       _isReaderMetadataHelpLabel(hrefLabel);
+}
+
+bool libraryReaderShouldHideEmptyPrefaceContentsEntry({
+  required LibraryCatalogNavigationItem navItem,
+  required List<LibraryBookSection> sections,
+}) {
+  final contentKind = navItem.contentKind?.trim().toLowerCase() ?? '';
+  final normalizedLabel = _normalizeReaderLabel(navItem.label);
+  final isPreface = contentKind == 'preface' || normalizedLabel == 'preface';
+  if (!isPreface) return false;
+
+  final sectionIndex = _librarySectionIndexForNavigationItem(
+    sections: sections,
+    navItem: navItem,
+  );
+  if (sectionIndex == null) return true;
+
+  final section = sections[sectionIndex];
+  return section.blocks.isEmpty;
+}
+
+LibraryCatalogNavigationItem? libraryReaderVisibleContentsNavigationItem({
+  required LibraryCatalogNavigationItem navItem,
+  required LibraryNavigationTreeResult tree,
+  required List<LibraryBookSection> sections,
+}) {
+  final contentKind = navItem.contentKind?.trim().toLowerCase() ?? '';
+  final normalizedLabel = _normalizeReaderLabel(navItem.label);
+  final isPreface = contentKind == 'preface' || normalizedLabel == 'preface';
+  if (isPreface &&
+      libraryReaderShouldHideEmptyPrefaceContentsEntry(
+        navItem: navItem,
+        sections: sections,
+      )) {
+    return null;
+  }
+
+  final sectionIndex = _librarySectionIndexForNavigationItem(
+    sections: sections,
+    navItem: navItem,
+  );
+  final ownsReadableBlocks =
+      sectionIndex != null && sections[sectionIndex].blocks.isNotEmpty;
+  if (ownsReadableBlocks || _isMeaningfulStructuralNavigationItem(navItem)) {
+    return navItem;
+  }
+
+  final descendantReadable = _firstReadableNavigationDescendant(
+    node: navItem,
+    tree: tree,
+    sections: sections,
+    depth: 0,
+  );
+  return descendantReadable ?? navItem;
+}
+
+bool _isMeaningfulStructuralNavigationItem(
+  LibraryCatalogNavigationItem navItem,
+) {
+  final contentKind = navItem.contentKind?.trim().toLowerCase() ?? '';
+  switch (contentKind) {
+    case 'book':
+    case 'part':
+    case 'volume':
+    case 'chapter':
+    case 'section':
+    case 'subsection':
+    case 'series':
+      return true;
+  }
+
+  final normalizedLabel = _normalizeReaderLabel(navItem.label);
+  if (normalizedLabel.startsWith('chapter ')) return true;
+  if (normalizedLabel.startsWith('section ')) return true;
+  if (normalizedLabel.startsWith('part ')) return true;
+  if (normalizedLabel.startsWith('book ')) return true;
+  if (normalizedLabel.startsWith('volume ')) return true;
+  return false;
+}
+
+LibraryCatalogNavigationItem? _firstReadableNavigationDescendant({
+  required LibraryCatalogNavigationItem node,
+  required LibraryNavigationTreeResult tree,
+  required List<LibraryBookSection> sections,
+  required int depth,
+}) {
+  if (depth > 32) return null;
+  final children = tree.childrenByParent[node.id] ?? const [];
+  for (final child in children) {
+    final sectionIndex = _librarySectionIndexForNavigationItem(
+      sections: sections,
+      navItem: child,
+    );
+    final childSection = sectionIndex == null ? null : sections[sectionIndex];
+    if (childSection != null && childSection.blocks.isNotEmpty) {
+      return child;
+    }
+    final deeper = _firstReadableNavigationDescendant(
+      node: child,
+      tree: tree,
+      sections: sections,
+      depth: depth + 1,
+    );
+    if (deeper != null) return deeper;
+  }
+  return null;
 }
 
 bool _looksLikeBibleCitationSubtitle(String value) {

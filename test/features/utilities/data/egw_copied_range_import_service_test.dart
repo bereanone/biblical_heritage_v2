@@ -413,7 +413,44 @@ void main() {
 
     expect(navCount, firstWorkResult.insertedNavigationItems);
     expect(textCount, firstWorkResult.insertedTextBlocks);
-    expect(refCount, firstWorkResult.insertedTextBlocks);
+    expect(refCount, 11);
+    final firstRefRows = await db.query(
+      'elibrary_ref_index',
+      columns: const ['ref_code', 'plain_text'],
+      where: 'library_item_id = ?',
+      whereArgs: [firstWorkResult.libraryItemId],
+      orderBy: 'page_number, paragraph_on_page',
+    );
+    expect(
+      firstRefRows.map((row) => row['ref_code']),
+      containsAll(const [
+        'DAR 24',
+        'DAR 24.1',
+        'DAR 24.2',
+        'DAR 25',
+        'DAR 25.1',
+        'DAR 32',
+        'DAR 32.1',
+        'DAR 32.2',
+        'DAR 33',
+        'DAR 33.1',
+        'DAR 33.2',
+      ]),
+    );
+    expect(firstRefRows.map((row) => row['ref_code']).toSet(), hasLength(11));
+    final firstTextRows = await db.query(
+      'library_text_blocks',
+      columns: const ['plain_text'],
+      where: 'library_item_id = ?',
+      whereArgs: [firstWorkResult.libraryItemId],
+    );
+    expect(firstTextRows, hasLength(firstWorkResult.insertedTextBlocks));
+    expect(
+      firstTextRows.every(
+        (row) => (row['plain_text']?.toString().trim() ?? '').isNotEmpty,
+      ),
+      isTrue,
+    );
     expect(
       await db.query(
         'elibrary_ref_index',
@@ -612,7 +649,7 @@ void main() {
 
     expect(navCount, workResult.insertedNavigationItems);
     expect(textCount, workResult.insertedTextBlocks);
-    expect(refCount, workResult.insertedTextBlocks);
+    expect(refCount, 11);
     expect(linkCount, 0);
     expect(staleStableTextCount, 0);
     expect(staleStableActiveItemCount, 0);
@@ -626,7 +663,7 @@ void main() {
     final firstRefs = await db.query(
       'elibrary_ref_index',
       columns: const ['ref_code', 'plain_text'],
-      where: 'library_item_id = ?',
+      where: "library_item_id = ? AND ref_code LIKE '%.%'",
       whereArgs: [workResult.libraryItemId],
       orderBy: 'paragraph_index ASC',
       limit: 2,

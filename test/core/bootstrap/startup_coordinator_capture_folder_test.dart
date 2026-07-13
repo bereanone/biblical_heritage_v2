@@ -46,7 +46,10 @@ Future<void> _installLibraryRootNativeMock({
             onActivated();
             return activatedPath;
           case 'pickFolder':
-            return <String, Object?>{'path': activatedPath, 'bookmark': ''};
+            return <String, Object?>{
+              'path': activatedPath,
+              'bookmark': 'bookmark-token',
+            };
         }
         return null;
       });
@@ -61,7 +64,10 @@ Future<Directory> _createCaptureFolder({
   required String authorName,
   required String bodyHtml,
 }) async {
-  final folder = Directory(p.join(root.path, workId));
+  final booksRoot = p.basename(root.path) == 'Books'
+      ? root
+      : Directory(p.join(root.path, 'Books'));
+  final folder = Directory(p.join(booksRoot.path, workId));
   await folder.create(recursive: true);
   await File(p.join(folder.path, 'metadata.json')).writeAsString('''
 {
@@ -223,11 +229,13 @@ void main() {
         isFalse,
       );
       expect(
-        Directory(p.join(captureRootDir.path, 'DAR')).existsSync(),
+        Directory(p.join(captureRootDir.path, 'Books', 'DAR')).existsSync(),
         isTrue,
       );
       expect(
-        File(p.join(captureRootDir.path, 'DAR', 'capture.html')).existsSync(),
+        File(
+          p.join(captureRootDir.path, 'Books', 'DAR', 'capture.html'),
+        ).existsSync(),
         isTrue,
       );
     },

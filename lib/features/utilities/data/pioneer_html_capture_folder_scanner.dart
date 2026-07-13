@@ -982,6 +982,14 @@ class PioneerHtmlCaptureFolderScanner {
   bool _isIgnoredFolderName(String folderName) {
     final normalized = folderName.trim().toLowerCase();
     if (normalized.isEmpty) return false;
+    if (normalized.startsWith('.') ||
+        normalized.contains('staging') ||
+        normalized.contains('rollback') ||
+        normalized.endsWith('.tmp') ||
+        normalized.endsWith('-tmp') ||
+        normalized.endsWith('_tmp')) {
+      return true;
+    }
     return ignoredFolderNames.any(
       (value) => value.trim().toLowerCase() == normalized,
     );
@@ -1177,6 +1185,10 @@ class PioneerHtmlCaptureFolderScanner {
             abbreviation: detectedAbbreviation,
             folderName: folderName,
           );
+    final effectiveDetectedAbbreviation =
+        _stableTextKey(folderName) == 'fp187' && catalogWork != null
+        ? catalogWork.abbreviation
+        : detectedAbbreviation;
     final detectedAuthor =
         metadata.metadata.primaryContributorName ??
         catalogWork?.authorName ??
@@ -1213,10 +1225,34 @@ class PioneerHtmlCaptureFolderScanner {
         0;
     final refCount =
         parseReport?.paragraphCount ?? firstExtraction?.refCount ?? 0;
-    final sourceFileHash = htmlHashes.isEmpty
+    final manifestContentHash = effectiveMetadata.contentHash?.trim();
+    final sourceFileHash = manifestContentHash?.isNotEmpty == true
+        ? manifestContentHash
+        : htmlHashes.isEmpty
         ? null
         : sha256.convert(utf8.encode(htmlHashes.join('|'))).toString();
     final validationReasons = <String>[];
+    if (effectiveMetadata.hasManifestError) {
+      validationReasons.add(effectiveMetadata.manifestError!);
+    }
+    final declaredHtmlFile = effectiveMetadata.htmlFile?.trim() ?? '';
+    if (declaredHtmlFile.isNotEmpty) {
+      final declaredPath = p.normalize(p.join(folderPath, declaredHtmlFile));
+      final declaredExists = htmlFiles.any(
+        (path) => p.normalize(path).toLowerCase() == declaredPath.toLowerCase(),
+      );
+      if (!p.isWithin(folderPath, declaredPath) || !declaredExists) {
+        validationReasons.add(
+          'declared htmlFile "$declaredHtmlFile" was not found',
+        );
+      }
+    }
+    final expectedImageCount = effectiveMetadata.imageCount;
+    if (expectedImageCount != null && imageFiles.length < expectedImageCount) {
+      validationReasons.add(
+        'expected $expectedImageCount image(s), found ${imageFiles.length}',
+      );
+    }
     if (htmlFiles.isEmpty) {
       validationReasons.add('no HTML files found');
     }
@@ -1230,6 +1266,7 @@ class PioneerHtmlCaptureFolderScanner {
       validationReasons.add('missing metadata identity or catalog match');
     }
     final isValid =
+        validationReasons.isEmpty &&
         htmlFiles.isNotEmpty &&
         extractedText.trim().isNotEmpty &&
         refCount > 0 &&
@@ -1251,7 +1288,7 @@ class PioneerHtmlCaptureFolderScanner {
           effectiveMetadata.coverImagePath ?? _preferredCoverImage(imageFiles),
       detectedTitle: catalogWork?.title ?? detectedTitle,
       detectedAuthor: detectedAuthor,
-      detectedAbbreviation: detectedAbbreviation,
+      detectedAbbreviation: effectiveDetectedAbbreviation,
       firstRef: parseReport?.firstRef ?? firstExtraction?.firstRef,
       lastRef: parseReport?.lastRef ?? firstExtraction?.lastRef,
       refCount: refCount,
@@ -1451,6 +1488,13 @@ PioneerSourceWork? _findCatalogWork(
     if (normalizedAbbreviation.isNotEmpty &&
         _stableTextKey(work.abbreviation) == normalizedAbbreviation) {
       return work;
+    }
+  }
+  // CaptureClipper historically published this work as FP187 while the
+  // catalog's canonical abbreviation is FP1872.
+  if (normalizedFolder == 'fp187') {
+    for (final work in catalog.works) {
+      if (_stableTextKey(work.abbreviation) == 'fp1872') return work;
     }
   }
   for (final work in catalog.works) {

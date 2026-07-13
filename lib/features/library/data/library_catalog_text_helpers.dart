@@ -17,6 +17,88 @@ String? _canonicalPeriodicalTitle(String title) {
   return null;
 }
 
+const Map<int, String> _manuscriptReleasesVolumeTitles = <int, String>{
+  1: 'Manuscript Releases, vol. 1 [Nos. 19-96]',
+  2: 'Manuscript Releases, vol. 2 [Nos. 97-161]',
+  3: 'Manuscript Releases, vol. 3 [Nos. 162-209]',
+  4: 'Manuscript Releases, vol. 4 [Nos. 210-259]',
+  5: 'Manuscript Releases, vol. 5 [Nos. 260-346]',
+  6: 'Manuscript Releases, vol. 6 [Nos. 347-418]',
+  7: 'Manuscript Releases, vol. 7 [Nos. 419-525]',
+  8: 'Manuscript Releases, vol. 8 [Nos. 526-663]',
+  9: 'Manuscript Releases, vol. 9 [Nos. 664-770]',
+  10: 'Manuscript Releases, vol. 10 [Nos. 771-850]',
+  11: 'Manuscript Releases, vol. 11 [Nos. 851-920]',
+  12: 'Manuscript Releases, vol. 12 [Nos. 921-999]',
+  13: 'Manuscript Releases, vol. 13 [Nos. 1000-1080]',
+  14: 'Manuscript Releases, vol. 14 [Nos. 1081-1135]',
+  15: 'Manuscript Releases, vol. 15 [Nos. 1136-1185]',
+  16: 'Manuscript Releases, vol. 16 [Nos. 1186-1235]',
+  17: 'Manuscript Releases, vol. 17 [Nos. 1236-1300]',
+  18: 'Manuscript Releases, vol. 18 [Nos. 1301-1359]',
+  19: 'Manuscript Releases, vol. 19 [Nos. 1360-1419]',
+  20: 'Manuscript Releases, vol. 20 [Nos. 1420-1500]',
+  21: 'Manuscript Releases, vol. 21 [Nos. 1501-1598]',
+};
+
+String? _manuscriptReleasesVolumeTitleFromCode(String code) {
+  final normalizedCode = code.trim().toUpperCase();
+  final match = RegExp(r'^(\d{1,2})MR$').firstMatch(normalizedCode);
+  if (match == null) return null;
+
+  final volume = int.tryParse(match.group(1) ?? '');
+  if (volume == null) return null;
+
+  return _manuscriptReleasesVolumeTitles[volume];
+}
+
+String _canonicalOfficialDownloadTitle({
+  required String code,
+  required String title,
+}) {
+  final canonicalTitle = _manuscriptReleasesVolumeTitleFromCode(code);
+  if (canonicalTitle != null) {
+    final normalizedTitle = _normalizedLibraryText(title);
+    if (normalizedTitle.contains('manuscript releases')) {
+      return title;
+    }
+    return canonicalTitle;
+  }
+
+  return title;
+}
+
+String? _canonicalManuscriptReleasesDisplayTitle({
+  required String title,
+  String? fileName,
+  String? relativePath,
+}) {
+  final candidates = <String?>[title, fileName, relativePath];
+  for (final candidate in candidates) {
+    final normalized = _manuscriptReleasesVolumeCodeFromValue(candidate);
+    if (normalized == null || normalized.isEmpty) continue;
+    final canonicalTitle = _manuscriptReleasesVolumeTitleFromCode(normalized);
+    if (canonicalTitle != null) {
+      return canonicalTitle;
+    }
+  }
+
+  return null;
+}
+
+String? _manuscriptReleasesVolumeCodeFromValue(String? value) {
+  final trimmed = value?.trim() ?? '';
+  if (trimmed.isEmpty) return null;
+  final basename = p.basenameWithoutExtension(trimmed.replaceAll('\\', '/'));
+  final candidate = basename.replaceFirst(
+    RegExp(r'^(?:[a-z]{2}|[A-Z]{2})[_-]'),
+    '',
+  );
+  final compact = candidate.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '');
+  if (compact.isEmpty) return null;
+  return compact.toUpperCase();
+}
+
 bool _looksLikeFilename(String value) {
   final base = value.trim();
   if (base.isEmpty) {
@@ -98,16 +180,16 @@ String _cleanLibrarySearchText(String value) {
 }
 
 String compactLibrarySearchText(String? value) {
-  return (value?.trim() ?? '')
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  return (value?.trim() ?? '').toLowerCase().replaceAll(
+    RegExp(r'[^a-z0-9]+'),
+    '',
+  );
 }
 
 String _librarySearchInitials(String? value) {
-  final words = _cleanLibrarySearchText(value ?? '')
-      .split(' ')
-      .where((part) => part.isNotEmpty)
-      .toList(growable: false);
+  final words = _cleanLibrarySearchText(
+    value ?? '',
+  ).split(' ').where((part) => part.isNotEmpty).toList(growable: false);
   if (words.isEmpty) return '';
 
   final initials = StringBuffer();

@@ -78,4 +78,26 @@ void main() {
       'The margin of the page was intentionally wide for notes.',
     );
   });
+
+  test('flags intro/preface/foreword labels as front-matter openings', () {
+    expect(libraryIsFrontMatterOpeningLabel('Introduction'), isTrue);
+    expect(libraryIsFrontMatterOpeningLabel('Introduction.'), isTrue);
+    expect(libraryIsFrontMatterOpeningLabel('Preface'), isTrue);
+    expect(libraryIsFrontMatterOpeningLabel('Foreword'), isTrue);
+    expect(libraryIsFrontMatterOpeningLabel("Author's Preface"), isTrue);
+    expect(libraryIsFrontMatterOpeningLabel('A Word to the Reader'), isTrue);
+    expect(libraryIsFrontMatterOpeningLabel('Table of Contents'), isTrue);
+    expect(libraryIsFrontMatterOpeningLabel('intro'), isTrue);
+    expect(libraryIsFrontMatterOpeningLabel('Chapter 1'), isFalse);
+  });
+
+  test('does not flag real chapter labels as front-matter openings', () {
+    expect(
+      libraryIsFrontMatterOpeningLabel('CHAPTER 1. THE EARTHLY SANCTUARY.'),
+      isFalse,
+    );
+    expect(libraryIsFrontMatterOpeningLabel('Chapter I'), isFalse);
+    expect(libraryIsFrontMatterOpeningLabel('The Great Controversy'), isFalse);
+    expect(libraryIsFrontMatterOpeningLabel('An Appeal to Youth'), isFalse);
+  });
 }

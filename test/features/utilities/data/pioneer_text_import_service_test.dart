@@ -285,12 +285,7 @@ Future<Directory> _createCaptureFixtureRoot({
   await File(p.join(imagesDir.path, 'image_0001.png')).writeAsString('cover');
 
   final contributors = <Map<String, Object?>>[
-    {
-      'name': authorName,
-      'role': 'author',
-      'sort_order': 1,
-      'primary': true,
-    },
+    {'name': authorName, 'role': 'author', 'sort_order': 1, 'primary': true},
     for (var index = 0; index < contributorNames.length; index += 1)
       {
         'name': contributorNames[index],
@@ -300,17 +295,19 @@ Future<Directory> _createCaptureFixtureRoot({
       },
   ];
 
-  await File(p.join(folder.path, 'metadata.json')).writeAsString(jsonEncode({
-    'title': title,
-    'abbreviation': abbreviation,
-    'display_abbreviation': abbreviation,
-    'work_id': workId,
-    'source_type': 'pioneer_captured_html',
-    'source_site': 'egwwritings.org',
-    'source_url': 'https://example.invalid/$folderName',
-    'cover_image': 'images/image_0001.png',
-    'contributors': contributors,
-  }));
+  await File(p.join(folder.path, 'metadata.json')).writeAsString(
+    jsonEncode({
+      'title': title,
+      'abbreviation': abbreviation,
+      'display_abbreviation': abbreviation,
+      'work_id': workId,
+      'source_type': 'pioneer_captured_html',
+      'source_site': 'egwwritings.org',
+      'source_url': 'https://example.invalid/$folderName',
+      'cover_image': 'images/image_0001.png',
+      'contributors': contributors,
+    }),
+  );
   await File(p.join(folder.path, 'capture.html')).writeAsString('''
 <!doctype html>
 <html>
@@ -1948,101 +1945,105 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
         final lof = previews.singleWhere(
           (preview) => preview.folderName == 'LOF_ATJ',
         );
-      expect(lof.duplicateRefCount, 0);
-      expect(lof.detectedTitle, 'Lessons on Faith');
-      expect(lof.detectedAuthor, 'A. T. Jones');
-      expect(lof.detectedAbbreviation, 'LOF_ATJ');
+        expect(lof.duplicateRefCount, 0);
+        expect(lof.detectedTitle, 'Lessons on Faith');
+        expect(lof.detectedAuthor, 'A. T. Jones');
+        expect(lof.detectedAbbreviation, 'LOF_ATJ');
 
-      final service = PioneerTextImportService();
-      final result = await service.importHtmlCaptureFolders([
-        lof,
-      ], existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting);
-      expect(result.importedCount, 1);
-      expect(result.failedCount, 0);
+        final service = PioneerTextImportService();
+        final result = await service.importHtmlCaptureFolders([
+          lof,
+        ], existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting);
+        expect(result.importedCount, 1);
+        expect(result.failedCount, 0);
 
-      final db = await ELibraryDatabase.instance.database;
-      final work = lof.importWork;
-      final itemRows = await db.query(
-        'library_items',
-        where: 'id = ?',
-        whereArgs: [work.stableLibraryItemId],
-      );
-      expect(itemRows, hasLength(1));
-      expect(itemRows.single['title'], 'Lessons on Faith');
-      expect(
-        itemRows.single['author'],
-        'A. T. Jones; E. J. Waggoner',
-        reason: 'LOF is a joint work; denormalized author combines both names',
-      );
-      expect(itemRows.single['source_type'], 'egw_html_capture');
-      expect(itemRows.single['source_site'], 'egwwritings.org');
-      expect(
-        itemRows.single['relative_path'],
-        contains('LOF_ATJ/capture.html'),
-      );
-      expect(itemRows.single['relative_path'], isNot(contains('ePubs/')));
-      expect(itemRows.single['relative_path'], isNot(contains('PDFs/')));
-      expect(itemRows.single['source_url'], contains('LOF_ATJ/capture.html'));
-      expect(itemRows.single['source_url'], isNot(contains('.epub')));
-      expect(itemRows.single['source_url'], isNot(contains('.pdf')));
-      expect(
-        itemRows.single['source_site']?.toString().toLowerCase(),
-        isNot(contains('ellenwhiteaudio')),
-      );
-      expect(
-        itemRows.single['source_type']?.toString().toLowerCase(),
-        isNot(contains('ocr')),
-      );
-      expect(
-        itemRows.single['source_type']?.toString().toLowerCase(),
-        isNot(contains('epub')),
-      );
-
-      expect(
-        await _countRows(
-          db,
-          'library_navigation_items',
-          where: 'library_item_id = ? AND label LIKE ?',
-          whereArgs: [work.stableLibraryItemId, 'Chapter%'],
-        ),
-        greaterThanOrEqualTo(2),
-      );
-      expect(
-        await _countRows(
-          db,
-          'library_text_blocks',
-          where: 'library_item_id = ?',
+        final db = await ELibraryDatabase.instance.database;
+        final work = lof.importWork;
+        final itemRows = await db.query(
+          'library_items',
+          where: 'id = ?',
           whereArgs: [work.stableLibraryItemId],
-        ),
-        greaterThanOrEqualTo(2),
-      );
-      expect(
-        await _countRows(
-          db,
-          'elibrary_ref_index',
-          where: 'library_item_id = ?',
-          whereArgs: [work.stableLibraryItemId],
-        ),
-        greaterThanOrEqualTo(2),
-      );
-      expect(
-        await _countRows(
-          db,
-          'elibrary_ref_index',
-          where: 'library_item_id = ? AND ref_code = ?',
-          whereArgs: [work.stableLibraryItemId, 'LOF_ATJ 113.2'],
-        ),
-        0,
-      );
-      expect(
-        await _countRows(
-          db,
-          'library_text_blocks',
-          where: 'library_item_id = ? AND plain_text LIKE ?',
-          whereArgs: [work.stableLibraryItemId, '%Without faith it is impossible to please him.%'],
-        ),
-        0,
-      );
+        );
+        expect(itemRows, hasLength(1));
+        expect(itemRows.single['title'], 'Lessons on Faith');
+        expect(
+          itemRows.single['author'],
+          'A. T. Jones; E. J. Waggoner',
+          reason:
+              'LOF is a joint work; denormalized author combines both names',
+        );
+        expect(itemRows.single['source_type'], 'egw_html_capture');
+        expect(itemRows.single['source_site'], 'egwwritings.org');
+        expect(
+          itemRows.single['relative_path'],
+          contains('LOF_ATJ/capture.html'),
+        );
+        expect(itemRows.single['relative_path'], isNot(contains('ePubs/')));
+        expect(itemRows.single['relative_path'], isNot(contains('PDFs/')));
+        expect(itemRows.single['source_url'], contains('LOF_ATJ/capture.html'));
+        expect(itemRows.single['source_url'], isNot(contains('.epub')));
+        expect(itemRows.single['source_url'], isNot(contains('.pdf')));
+        expect(
+          itemRows.single['source_site']?.toString().toLowerCase(),
+          isNot(contains('ellenwhiteaudio')),
+        );
+        expect(
+          itemRows.single['source_type']?.toString().toLowerCase(),
+          isNot(contains('ocr')),
+        );
+        expect(
+          itemRows.single['source_type']?.toString().toLowerCase(),
+          isNot(contains('epub')),
+        );
+
+        expect(
+          await _countRows(
+            db,
+            'library_navigation_items',
+            where: 'library_item_id = ? AND label LIKE ?',
+            whereArgs: [work.stableLibraryItemId, 'Chapter%'],
+          ),
+          greaterThanOrEqualTo(2),
+        );
+        expect(
+          await _countRows(
+            db,
+            'library_text_blocks',
+            where: 'library_item_id = ?',
+            whereArgs: [work.stableLibraryItemId],
+          ),
+          greaterThanOrEqualTo(2),
+        );
+        expect(
+          await _countRows(
+            db,
+            'elibrary_ref_index',
+            where: 'library_item_id = ?',
+            whereArgs: [work.stableLibraryItemId],
+          ),
+          greaterThanOrEqualTo(2),
+        );
+        expect(
+          await _countRows(
+            db,
+            'elibrary_ref_index',
+            where: 'library_item_id = ? AND ref_code = ?',
+            whereArgs: [work.stableLibraryItemId, 'LOF_ATJ 113.2'],
+          ),
+          0,
+        );
+        expect(
+          await _countRows(
+            db,
+            'library_text_blocks',
+            where: 'library_item_id = ? AND plain_text LIKE ?',
+            whereArgs: [
+              work.stableLibraryItemId,
+              '%Without faith it is impossible to please him.%',
+            ],
+          ),
+          0,
+        );
       } finally {
         await tempDir.delete(recursive: true);
       }
@@ -2174,11 +2175,13 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
 
         final db = await ELibraryDatabase.instance.database;
         await db.insert('library_items', <String, Object?>{
-          'id': 'library_item_research_pioneer_uriah_smith_daniel_and_the_revelation',
+          'id':
+              'library_item_research_pioneer_uriah_smith_daniel_and_the_revelation',
           'title': 'Daniel and the Revelation',
           'author': 'Uriah Smith',
           'file_name': 'DAR.epub',
-          'relative_path': 'ePubs/Research/Pioneer Authors/uriah_smith/DAR.epub',
+          'relative_path':
+              'ePubs/Research/Pioneer Authors/uriah_smith/DAR.epub',
           'file_hash': 'stale-dar-epub-hash',
           'file_size': 3,
           'mime_type': 'application/epub+zip',
@@ -2204,12 +2207,15 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
         final importDocument = PioneerImportDocument(
           title: dar.importWork.title,
           sections: [
-            for (var index = 0; index < parsed.document.sections.length; index++)
+            for (
+              var index = 0;
+              index < parsed.document.sections.length;
+              index++
+            )
               PioneerImportSection(
                 href: 'assets/scans/DAR/capture.html#section_${index + 1}',
                 title: parsed.document.sections[index].title,
-                paragraphs: parsed.document.sections[index]
-                    .paragraphs
+                paragraphs: parsed.document.sections[index].paragraphs
                     .map((paragraph) => paragraph.text)
                     .toList(growable: false),
                 spineIndex: index + 1,
@@ -2340,11 +2346,14 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
           },
         ],
       });
-      final lof = (await PioneerHtmlCaptureFolderScanner(
-        projectRootPath: tempDir.path,
-        currentDirectoryPath: tempDir.path,
-        preferAssetManifest: false,
-      ).scan(catalog: catalog)).singleWhere((preview) => preview.folderName == 'LOF_ATJ');
+      final lof =
+          (await PioneerHtmlCaptureFolderScanner(
+            projectRootPath: tempDir.path,
+            currentDirectoryPath: tempDir.path,
+            preferAssetManifest: false,
+          ).scan(catalog: catalog)).singleWhere(
+            (preview) => preview.folderName == 'LOF_ATJ',
+          );
       final work = lof.importWork;
       final db = await ELibraryDatabase.instance.database;
       await PioneerTextImportService().hardResetWork(work);
@@ -2400,7 +2409,10 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
       expect(itemRows.single['mime_type'], 'text/html');
       expect(itemRows.single['file_format'], 'html');
       expect(itemRows.single['source_site'], 'egwwritings.org');
-      expect(itemRows.single['relative_path'], contains('LOF_ATJ/capture.html'));
+      expect(
+        itemRows.single['relative_path'],
+        contains('LOF_ATJ/capture.html'),
+      );
       expect(itemRows.single['relative_path'], isNot(contains('ePubs/')));
       expect(
         await _countRows(
@@ -2625,9 +2637,7 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
   );
 
   test('HTML capture import stores generated thumbnail cover path', () async {
-    final sourceCover = File(
-      p.join(libraryRootDir.path, 'COVR-source.png'),
-    );
+    final sourceCover = File(p.join(libraryRootDir.path, 'COVR-source.png'));
     await sourceCover.writeAsString('cover');
 
     const syntheticHtml = '''
@@ -2696,7 +2706,7 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
         libraryRootDir.path,
         'Graphics',
         'eLibraryCovers',
-        '${work.stableLibraryItemId}.png',
+        'library_item_b8e9b7c776136591d4db_work.png',
       ),
     );
   });
@@ -2753,7 +2763,9 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
       );
 
       final service = PioneerTextImportService();
-      final firstResult = await service.importHtmlCaptureFolders([firstPreview]);
+      final firstResult = await service.importHtmlCaptureFolders([
+        firstPreview,
+      ]);
       expect(firstResult.importedCount, 1);
 
       final db = await ELibraryDatabase.instance.database;
@@ -2803,10 +2815,9 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
         extractedText: firstExtraction.text,
       );
 
-      final secondResult = await service.importHtmlCaptureFolders(
-        [secondPreview],
-        existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
-      );
+      final secondResult = await service.importHtmlCaptureFolders([
+        secondPreview,
+      ], existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting);
 
       expect(secondResult.importedCount, 1);
       expect(secondResult.workResults.single.createdNew, isFalse);
@@ -2919,4 +2930,296 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
       1,
     );
   });
+
+  test(
+    'schema-2 package lineage persists and rejects a different package',
+    () async {
+      final work = _sourceNeededWork(
+        id: 'lineage_test_work',
+        authorId: 'test_author',
+        authorName: 'Test Author',
+        title: 'Lineage Test Work',
+        abbreviation: 'LTW',
+      );
+      PioneerHtmlCaptureFolderPreview preview(String packageId, String hash) {
+        final extraction = const EgwHtmlCaptureExtractor().extract('''
+<div class="clip clip-text">
+  <p>Chapter 1 — Lineage LTW 1 Lineage text. LTW 1.1</p>
+</div>
+''');
+        return PioneerHtmlCaptureFolderPreview(
+          folderPath: p.join(libraryRootDir.path, 'LTW'),
+          folderName: 'LTW',
+          metadata: PioneerCaptureFolderMetadata(
+            schemaVersion: 2,
+            workId: work.id,
+            packageId: packageId,
+            contentHash: hash,
+          ),
+          htmlFiles: [p.join(libraryRootDir.path, 'LTW', 'capture.html')],
+          imageFiles: const [],
+          preferredCoverImagePath: null,
+          sourceFileHash: hash,
+          detectedTitle: work.title,
+          detectedAuthor: work.authorName,
+          detectedAbbreviation: work.abbreviation,
+          firstRef: 'LTW 1.1',
+          lastRef: 'LTW 1.1',
+          refCount: 1,
+          duplicateRefCount: 0,
+          chapterHeadingCount: 1,
+          isValid: true,
+          warnings: const [],
+          importStatus: PioneerHtmlCaptureImportStatus.newImport,
+          catalogWork: work,
+          extractedText: extraction.text,
+        );
+      }
+
+      final service = PioneerTextImportService();
+      final first = await service.importHtmlCaptureFolders([
+        preview('captureclipper:LTW', 'hash-one'),
+      ]);
+      expect(first.importedCount, 1);
+      final itemId = first.workResults.single.libraryItemId;
+      final db = await ELibraryDatabase.instance.database;
+      var rows = await db.query(
+        'library_items',
+        columns: const [
+          'id',
+          'source_work_id',
+          'source_package_id',
+          'file_hash',
+        ],
+        where: 'id = ?',
+        whereArgs: [itemId],
+      );
+      expect(rows.single['source_work_id'], work.id);
+      expect(rows.single['source_package_id'], 'captureclipper:LTW');
+      expect(rows.single['file_hash'], 'hash-one');
+
+      await ELibraryDatabase.instance.close();
+      final reopened = await ELibraryDatabase.instance.database;
+      rows = await reopened.query(
+        'library_items',
+        columns: const ['source_package_id'],
+        where: 'id = ?',
+        whereArgs: [itemId],
+      );
+      expect(rows.single['source_package_id'], 'captureclipper:LTW');
+
+      final unchanged = await service.importHtmlCaptureFolders([
+        preview('captureclipper:LTW', 'hash-one'),
+      ]);
+      expect(
+        unchanged.workResults.single.status,
+        PioneerImportWorkStatus.skippedExisting,
+      );
+
+      final changed = await service.importHtmlCaptureFolders([
+        preview('captureclipper:LTW', 'hash-two'),
+      ]);
+      expect(changed.importedCount, 1);
+      expect(changed.workResults.single.libraryItemId, itemId);
+      expect(changed.workResults.single.existingItemUpdated, isTrue);
+
+      final conflict = await service.importHtmlCaptureFolders([
+        preview('captureclipper:OTHER', 'hash-three'),
+      ]);
+      expect(
+        conflict.workResults.single.status,
+        PioneerImportWorkStatus.packageLineageConflict,
+      );
+      expect(conflict.workResults.single.insertedLibraryItems, 0);
+      rows = await reopened.query(
+        'library_items',
+        columns: const ['id', 'source_package_id', 'file_hash'],
+        where: 'source_work_id = ?',
+        whereArgs: [work.id],
+      );
+      expect(rows, hasLength(1));
+      expect(rows.single['id'], itemId);
+      expect(rows.single['source_package_id'], 'captureclipper:LTW');
+      expect(rows.single['file_hash'], 'hash-two');
+    },
+  );
+
+  test('legacy item adopts schema-2 package lineage in place', () async {
+    final work = _sourceNeededWork(
+      id: 'legacy_lineage_work',
+      authorId: 'test_author',
+      authorName: 'Test Author',
+      title: 'Legacy Lineage Work',
+      abbreviation: 'LLW',
+    );
+    final db = await ELibraryDatabase.instance.database;
+    await db.insert('library_items', <String, Object?>{
+      'id': work.stableLibraryItemId,
+      'title': work.title,
+      'author': work.authorName,
+      'file_name': 'capture.html',
+      'relative_path': 'TextCaptures/LLW/capture.html',
+      'file_hash': 'legacy-hash',
+      'file_format': 'html',
+      'source_type': 'egw_html_capture',
+      'created_at': '2026-01-01T00:00:00Z',
+      'updated_at': '2026-01-01T00:00:00Z',
+      'device_id': 'device-1',
+    });
+    final extraction = const EgwHtmlCaptureExtractor().extract('''
+<div class="clip clip-text">
+  <p>Chapter 1 — Upgrade LLW 1 Upgraded text. LLW 1.1</p>
+</div>
+''');
+    final preview = PioneerHtmlCaptureFolderPreview(
+      folderPath: p.join(libraryRootDir.path, 'LLW'),
+      folderName: 'LLW',
+      metadata: PioneerCaptureFolderMetadata(
+        schemaVersion: 2,
+        workId: work.id,
+        packageId: 'captureclipper:LLW',
+      ),
+      htmlFiles: [p.join(libraryRootDir.path, 'LLW', 'capture.html')],
+      imageFiles: const [],
+      preferredCoverImagePath: null,
+      sourceFileHash: 'schema-two-hash',
+      detectedTitle: work.title,
+      detectedAuthor: work.authorName,
+      detectedAbbreviation: work.abbreviation,
+      firstRef: 'LLW 1.1',
+      lastRef: 'LLW 1.1',
+      refCount: 1,
+      duplicateRefCount: 0,
+      chapterHeadingCount: 1,
+      isValid: true,
+      warnings: const [],
+      importStatus: PioneerHtmlCaptureImportStatus.overwriteAvailable,
+      catalogWork: work,
+      extractedText: extraction.text,
+    );
+    final result = await PioneerTextImportService().importHtmlCaptureFolders([
+      preview,
+    ]);
+    expect(result.importedCount, 1);
+    expect(result.workResults.single.libraryItemId, work.stableLibraryItemId);
+    expect(result.workResults.single.createdNew, isFalse);
+    final rows = await db.query(
+      'library_items',
+      columns: const ['id', 'source_work_id', 'source_package_id'],
+      where: 'id = ?',
+      whereArgs: [work.stableLibraryItemId],
+    );
+    expect(rows, hasLength(1));
+    expect(rows.single['source_work_id'], work.id);
+    expect(rows.single['source_package_id'], 'captureclipper:LLW');
+  });
+
+  test(
+    'CaptureClipper indexing failure preserves a retryable imported item',
+    () async {
+      final work = _sourceNeededWork(
+        id: 'index_retry_work',
+        authorId: 'test_author',
+        authorName: 'Test Author',
+        title: 'Index Retry Work',
+        abbreviation: 'IRW',
+      );
+      final extraction = const EgwHtmlCaptureExtractor().extract('''
+<div class="clip clip-text">
+  <p>Chapter 1 — Retry IRW 1 Searchable retry text. IRW 1.1</p>
+</div>
+''');
+      final preview = PioneerHtmlCaptureFolderPreview(
+        folderPath: p.join(libraryRootDir.path, 'IRW'),
+        folderName: 'IRW',
+        metadata: PioneerCaptureFolderMetadata(
+          schemaVersion: 2,
+          workId: work.id,
+          packageId: 'captureclipper:IRW',
+          contentHash: 'retry-hash',
+        ),
+        htmlFiles: [p.join(libraryRootDir.path, 'IRW', 'capture.html')],
+        imageFiles: const [],
+        preferredCoverImagePath: null,
+        sourceFileHash: 'retry-hash',
+        detectedTitle: work.title,
+        detectedAuthor: work.authorName,
+        detectedAbbreviation: work.abbreviation,
+        firstRef: 'IRW 1.1',
+        lastRef: 'IRW 1.1',
+        refCount: 1,
+        duplicateRefCount: 0,
+        chapterHeadingCount: 1,
+        isValid: true,
+        warnings: const [],
+        importStatus: PioneerHtmlCaptureImportStatus.newImport,
+        catalogWork: work,
+        extractedText: extraction.text,
+      );
+
+      final failed = await PioneerTextImportService(
+        beforeCapturedHtmlIndexWrite: (_) async {
+          throw StateError('simulated indexing failure');
+        },
+      ).importHtmlCaptureFolders([preview]);
+      expect(failed.failedCount, 1);
+
+      final db = await ELibraryDatabase.instance.database;
+      var itemRows = await db.query(
+        'library_items',
+        columns: const [
+          'id',
+          'source_package_id',
+          'file_hash',
+          'index_status',
+          'index_error',
+        ],
+        where: 'id = ?',
+        whereArgs: [work.stableLibraryItemId],
+      );
+      expect(itemRows, hasLength(1));
+      expect(itemRows.single['source_package_id'], 'captureclipper:IRW');
+      expect(itemRows.single['file_hash'], 'retry-hash');
+      expect(itemRows.single['index_status'], 'needs_attention');
+      expect(
+        itemRows.single['index_error'],
+        contains('simulated indexing failure'),
+      );
+      expect(
+        await _countRows(
+          db,
+          'library_text_blocks',
+          where: 'library_item_id = ?',
+          whereArgs: [work.stableLibraryItemId],
+        ),
+        0,
+      );
+
+      final retried = await PioneerTextImportService().importHtmlCaptureFolders(
+        [preview],
+      );
+      expect(retried.importedCount, 1);
+      expect(
+        retried.workResults.single.libraryItemId,
+        work.stableLibraryItemId,
+      );
+      itemRows = await db.query(
+        'library_items',
+        columns: const ['index_status', 'index_error'],
+        where: 'id = ?',
+        whereArgs: [work.stableLibraryItemId],
+      );
+      expect(itemRows.single['index_status'], 'indexed');
+      expect(itemRows.single['index_error'], isNull);
+      expect(
+        await _countRows(
+          db,
+          'library_text_blocks',
+          where: 'library_item_id = ? AND plain_text LIKE ?',
+          whereArgs: [work.stableLibraryItemId, '%Searchable retry text%'],
+        ),
+        1,
+      );
+    },
+  );
 }

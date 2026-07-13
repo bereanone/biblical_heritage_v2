@@ -57,6 +57,53 @@ bool libraryIsMetadataSectionLabel(String value) {
   return false;
 }
 
+/// Labels that mark introductory front matter (intro/preface/foreword/etc.).
+///
+/// These sections stay visible in navigation and remain readable; the label
+/// check is only used to avoid defaulting to them when a book is opened with
+/// no saved reading position.
+bool libraryIsFrontMatterOpeningLabel(String value) {
+  final normalized = _normalizeLibraryText(value);
+  if (normalized.isEmpty) return false;
+  if (libraryIsMetadataSectionLabel(normalized)) return true;
+
+  const exactMatches = <String>{
+    'intro',
+    'introduction',
+    'preface',
+    'foreword',
+    'front matter',
+    'frontmatter',
+    'a word to the reader',
+    'word to the reader',
+    'to the reader',
+    'about this book',
+    'about the author',
+    'how to use this book',
+    'a note to the reader',
+    'note to the reader',
+  };
+  if (exactMatches.contains(normalized)) return true;
+
+  const prefixes = <String>[
+    'introduction ',
+    'preface ',
+    'foreword ',
+    'front matter ',
+    'authors preface',
+    'author s preface',
+    'publishers preface',
+    'publisher s preface',
+    'translators preface',
+    'translator s preface',
+  ];
+  for (final prefix in prefixes) {
+    if (normalized.startsWith(prefix)) return true;
+  }
+
+  return false;
+}
+
 bool libraryIsMeaningfulReadingSection({
   required String title,
   required String href,

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -31,11 +32,13 @@ class LibraryCatalogService {
   static final Map<String, Future<String?>> _coverWarmJobs = {};
   static final Map<String, Future<String?>> _authorWarmJobs = {};
   static final Map<String, Future<String?>> _titleWarmJobs = {};
+  static Future<Map<String, String>>? _officialDownloadTitlesFuture;
   static final ELibraryReadResolver _readResolver =
       ELibraryReadResolver.instance;
 
   Future<List<LibraryCatalogItem>> loadItems({
     String folderRoot = 'all',
+    bool includeAlternateEditions = false,
   }) async {
     await LibraryRootService.instance.accessibleLibraryRootPath();
     final normalized = folderRoot.trim().toLowerCase();
@@ -96,10 +99,13 @@ class LibraryCatalogService {
         li.source_site,
         li.source_url,
         li.source_type,
+        li.source_work_id,
+        li.source_package_id,
         li.cover_path,
         li.date_added,
         li.last_opened,
         li.index_status,
+        li.index_error,
         li.file_size,
         li.mime_type,
         li.spine_index,
@@ -112,6 +118,19 @@ class LibraryCatalogService {
           WHERE lni.library_item_id = li.id
             AND lni.deleted_at IS NULL
         ) AS navigation_count
+        ,(
+          SELECT COUNT(*) FROM library_text_blocks ltb
+          WHERE ltb.library_item_id = li.id
+        ) AS readable_block_count
+        ,(
+          SELECT COALESCE(SUM(LENGTH(ltb.plain_text)), 0)
+          FROM library_text_blocks ltb WHERE ltb.library_item_id = li.id
+        ) AS extracted_text_length
+        ,(
+          SELECT COALESCE(MAX(lni.depth), 0)
+          FROM library_navigation_items lni
+          WHERE lni.library_item_id = li.id AND lni.deleted_at IS NULL
+        ) AS navigation_max_depth
       FROM library_items li
       WHERE ${where.join(' AND ')}
       ORDER BY
@@ -131,12 +150,13 @@ class LibraryCatalogService {
       database: rowResult.database,
     );
 
-    final items = normalizedRows
-        .map(LibraryCatalogItem.fromRow)
+    final items = normalizedRows.map(LibraryCatalogItem.fromRow).toList();
+    final projected = includeAlternateEditions
+        ? items
+        : selectPreferredLibraryEditions(items);
+    final result = projected
+        .where(_isVisibleLibraryItem)
         .toList(growable: false);
-    final result = _dedupeLibraryItems(
-      items,
-    ).where(_isVisibleLibraryItem).toList(growable: false);
     return result;
   }
 
@@ -292,9 +312,7 @@ class LibraryCatalogService {
           'id': itemId,
           ...updatePayload,
           'source_url': null,
-          'cover_path': existingCoverPath.isNotEmpty
-              ? existingCoverPath
-              : null,
+          'cover_path': existingCoverPath.isNotEmpty ? existingCoverPath : null,
           'date_added': now,
           'last_opened': null,
           'index_status': 'metadata_only',
@@ -350,7 +368,9 @@ class LibraryCatalogService {
   /// (index_status is not 'indexed' or 'indexed_empty').  These items appear
   /// in the Library catalog and can be opened in the reader, but their body
   /// text is absent from the search index until the Commentary/Research panel
-  /// runs an indexing pass.
+  /// runs an indexing pass. Items flagged 'needs_attention' (structurally
+  /// broken source files) are excluded here since re-running the indexer
+  /// cannot fix them — see [countNeedsAttentionManagedItems].
   Future<int> countUnindexedManagedItems() async {
     final result = await _readResolver.readWithFallback<int>(
       read: (db) async {
@@ -360,6 +380,7 @@ class LibraryCatalogService {
       WHERE deleted_at IS NULL
         AND LOWER(COALESCE(file_format, '')) = 'epub'
         AND LOWER(COALESCE(folder_type, '')) IN ('commentary', 'research')
+        AND LOWER(COALESCE(index_status, '')) != 'needs_attention'
         AND (
           LOWER(COALESCE(index_status, '')) NOT IN ('indexed', 'indexed_empty')
           OR NOT EXISTS (
@@ -381,6 +402,7 @@ class LibraryCatalogService {
       where: '''
         LOWER(COALESCE(li.file_format, '')) = 'epub'
         AND LOWER(COALESCE(li.folder_type, '')) IN ('commentary', 'research')
+        AND LOWER(COALESCE(li.index_status, '')) != 'needs_attention'
         AND (
           LOWER(COALESCE(li.index_status, '')) NOT IN ('indexed', 'indexed_empty')
           OR NOT EXISTS (
@@ -388,6 +410,41 @@ class LibraryCatalogService {
             WHERE library_item_id = li.id
           )
         )
+      ''',
+      args: const <Object?>[],
+      limit: limit,
+    );
+  }
+
+  /// Returns the count of managed EPUB items whose source file failed
+  /// structural validation (missing OPF, empty spine, or zero readable
+  /// content) and therefore cannot be indexed until the file is replaced.
+  Future<int> countNeedsAttentionManagedItems() async {
+    final result = await _readResolver.readWithFallback<int>(
+      read: (db) async {
+        final rows = await db.rawQuery('''
+      SELECT COUNT(*) AS cnt
+      FROM library_items
+      WHERE deleted_at IS NULL
+        AND LOWER(COALESCE(file_format, '')) = 'epub'
+        AND LOWER(COALESCE(folder_type, '')) IN ('commentary', 'research')
+        AND LOWER(COALESCE(index_status, '')) = 'needs_attention'
+    ''');
+        return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+      },
+      hasData: (count) => count > 0,
+    );
+    return result.value;
+  }
+
+  Future<List<LibraryCatalogItem>> listNeedsAttentionManagedItems({
+    int limit = 500,
+  }) async {
+    return _queryItems(
+      where: '''
+        LOWER(COALESCE(li.file_format, '')) = 'epub'
+        AND LOWER(COALESCE(li.folder_type, '')) IN ('commentary', 'research')
+        AND LOWER(COALESCE(li.index_status, '')) = 'needs_attention'
       ''',
       args: const <Object?>[],
       limit: limit,
@@ -643,6 +700,8 @@ class LibraryCatalogService {
         li.source_site,
         li.source_url,
         li.source_type,
+        li.source_work_id,
+        li.source_package_id,
         li.cover_path,
         li.date_added,
         li.last_opened,
@@ -695,6 +754,8 @@ class LibraryCatalogService {
                 'source_site': row['source_site'],
                 'source_url': row['source_url'],
                 'source_type': row['source_type'],
+                'source_work_id': row['source_work_id'],
+                'source_package_id': row['source_package_id'],
                 'cover_path': row['cover_path'],
                 'date_added': row['date_added'],
                 'last_opened': row['last_opened'],
@@ -766,7 +827,14 @@ class LibraryCatalogService {
             normalizedCollectionFilter,
           );
         })
-        .toList(growable: false);
+        .toList();
+
+    final preferredResultItemIds = selectPreferredLibraryEditions(
+      filteredResults.map((result) => result.item).toList(growable: false),
+    ).map((item) => item.id).toSet();
+    filteredResults.removeWhere(
+      (result) => !preferredResultItemIds.contains(result.item.id),
+    );
 
     filteredResults.sort((left, right) {
       final scoreCompare = left.score.compareTo(right.score);
@@ -878,7 +946,10 @@ class LibraryCatalogService {
           ),
         )
         .toList(growable: false);
-    return dedupeLibraryNavigationItems(items);
+    final deduped = dedupeLibraryNavigationItems(items);
+    return _isWaggonerOnRomansItemId(libraryItemId)
+        ? _waggonerRomansNavigationHierarchy(deduped)
+        : deduped;
   }
 
   Future<LibraryCatalogItem?> loadItemById(String id) async {
@@ -946,7 +1017,14 @@ class LibraryCatalogService {
       }
 
       final format = row['file_format']?.toString().trim().toLowerCase();
-      if (format != 'epub') continue;
+      // Non-EPUB items (e.g. captured HTML imports) cannot generate a new
+      // cover, but a previously cached cover whose stored absolute path went
+      // stale (iOS relocates the app container between installs) can still
+      // be repaired from the current root's Graphics/eLibraryCovers mirror.
+      if (format != 'epub' &&
+          (existingCoverPath == null || existingCoverPath.isEmpty)) {
+        continue;
+      }
       candidates.add(row);
     }
 
@@ -994,7 +1072,8 @@ class LibraryCatalogService {
       if (id.isEmpty) continue;
 
       final existingCoverPath = row['cover_path']?.toString().trim() ?? '';
-      if (existingCoverPath.isNotEmpty && File(existingCoverPath).existsSync()) {
+      if (existingCoverPath.isNotEmpty &&
+          File(existingCoverPath).existsSync()) {
         continue;
       }
 
@@ -1201,6 +1280,7 @@ class LibraryCatalogService {
         li.date_added,
         li.last_opened,
         li.index_status,
+        li.index_error,
         li.file_size,
         li.mime_type,
         li.spine_index,
@@ -1227,7 +1307,11 @@ class LibraryCatalogService {
           hasData: (rows) => rows.isNotEmpty,
         );
     final rows = rowResult.value;
-    return rows.map(LibraryCatalogItem.fromRow).toList(growable: false);
+    final hydratedRows = await _hydrateCatalogRows(
+      rows,
+      database: rowResult.database,
+    );
+    return hydratedRows.map(LibraryCatalogItem.fromRow).toList(growable: false);
   }
 
   Future<String?> _ensureEpubAuthor({
@@ -1322,6 +1406,18 @@ class LibraryCatalogService {
         return existingTitle;
       }
 
+      final officialTitle = await _resolveOfficialDownloadTitle(row);
+      if (officialTitle != null && officialTitle.trim().isNotEmpty) {
+        final now = DateTime.now().toUtc().toIso8601String();
+        await database.update(
+          'library_items',
+          {'title': officialTitle, 'updated_at': now},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        return officialTitle;
+      }
+
       final selection = await LibraryRootService.instance.loadSelection();
       final rootPath =
           (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
@@ -1357,6 +1453,100 @@ class LibraryCatalogService {
       );
       return title;
     });
+  }
+
+  Future<String?> _resolveOfficialDownloadTitle(
+    Map<String, Object?> row,
+  ) async {
+    final sourceType =
+        row['source_type']?.toString().trim().toLowerCase() ?? '';
+    if (sourceType != 'official_download') return null;
+
+    final titles = await _loadOfficialDownloadTitles();
+    if (titles.isEmpty) return null;
+
+    for (final candidate in _officialDownloadTitleCandidates(row)) {
+      final normalized = _normalizeOfficialDownloadCode(candidate);
+      if (normalized == null || normalized.isEmpty) continue;
+      final manuscriptReleaseTitle = _manuscriptReleasesVolumeTitleFromCode(
+        normalized,
+      );
+      if (manuscriptReleaseTitle != null) {
+        return manuscriptReleaseTitle;
+      }
+      final title = titles[normalized];
+      if (title != null && title.trim().isNotEmpty) {
+        return title.trim();
+      }
+    }
+
+    return null;
+  }
+
+  Future<Map<String, String>> _loadOfficialDownloadTitles() {
+    final existing = _officialDownloadTitlesFuture;
+    if (existing != null) return existing;
+    final future = () async {
+      try {
+        final manifestJson = await rootBundle.loadString(
+          'tool/elibrary_download_manifest.json',
+        );
+        final decoded = jsonDecode(manifestJson);
+        if (decoded is! Map) return <String, String>{};
+        final collections = decoded['collections'];
+        if (collections is! List) return <String, String>{};
+        final titles = <String, String>{};
+        for (final collection in collections) {
+          if (collection is! Map) continue;
+          final rawItems = collection['items'];
+          if (rawItems is! List) continue;
+          for (final item in rawItems) {
+            if (item is! Map) continue;
+            final code = item['code']?.toString().trim() ?? '';
+            final title = item['title']?.toString().trim() ?? '';
+            if (code.isEmpty || title.isEmpty) continue;
+            titles[code.toLowerCase()] = _canonicalOfficialDownloadTitle(
+              code: code,
+              title: title,
+            );
+          }
+        }
+        return titles;
+      } catch (_) {
+        return <String, String>{};
+      }
+    }();
+    _officialDownloadTitlesFuture = future;
+    return future;
+  }
+
+  Iterable<String> _officialDownloadTitleCandidates(
+    Map<String, Object?> row,
+  ) sync* {
+    final values = <String?>[
+      row['title']?.toString(),
+      row['file_name']?.toString(),
+      row['relative_path']?.toString(),
+    ];
+    for (final value in values) {
+      final normalized = _normalizeOfficialDownloadCode(value);
+      if (normalized != null && normalized.isNotEmpty) {
+        yield normalized;
+      }
+    }
+  }
+
+  String? _normalizeOfficialDownloadCode(String? value) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return null;
+    final basename = p.basenameWithoutExtension(trimmed.replaceAll('\\', '/'));
+    final candidate = basename.replaceFirst(
+      RegExp(r'^(?:[a-z]{2}|[A-Z]{2})[_-]'),
+      '',
+    );
+    final compact = candidate.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '');
+    if (compact.isEmpty) return null;
+    return compact.toLowerCase();
   }
 
   Future<Map<String, Map<String, Object?>>> _repairMissingManagedPaths(
@@ -1585,6 +1775,13 @@ class LibraryCatalogService {
           whereArgs: [id],
         );
         return mirroredCoverPath;
+      }
+
+      final format = row['file_format']?.toString().trim().toLowerCase();
+      if (format != 'epub') {
+        // Mirror repair missed; only EPUBs can regenerate a cover from the
+        // source file.
+        return null;
       }
 
       final epubPath = await LibraryRootService.instance.resolveRelativePath(
@@ -1990,6 +2187,7 @@ class LibraryCatalogItem {
     required this.dateAdded,
     required this.lastOpened,
     required this.indexStatus,
+    this.indexError,
     required this.fileSize,
     required this.mimeType,
     required this.spineIndex,
@@ -1997,6 +2195,11 @@ class LibraryCatalogItem {
     required this.epubHref,
     required this.paragraphIndex,
     required this.navigationCount,
+    this.sourceWorkId,
+    this.sourcePackageId,
+    this.readableBlockCount = 0,
+    this.extractedTextLength = 0,
+    this.navigationMaxDepth = 0,
     this.contributors = const [],
   });
 
@@ -2027,6 +2230,7 @@ class LibraryCatalogItem {
       dateAdded: _parseDate(row['date_added']?.toString()),
       lastOpened: _parseDate(row['last_opened']?.toString()),
       indexStatus: row['index_status']?.toString(),
+      indexError: row['index_error']?.toString(),
       fileSize: (row['file_size'] as num?)?.toInt(),
       mimeType: row['mime_type']?.toString(),
       spineIndex: (row['spine_index'] as num?)?.toInt(),
@@ -2034,6 +2238,11 @@ class LibraryCatalogItem {
       epubHref: row['epub_href']?.toString(),
       paragraphIndex: (row['paragraph_index'] as num?)?.toInt(),
       navigationCount: (row['navigation_count'] as num?)?.toInt() ?? 0,
+      sourceWorkId: row['source_work_id']?.toString(),
+      sourcePackageId: row['source_package_id']?.toString(),
+      readableBlockCount: (row['readable_block_count'] as num?)?.toInt() ?? 0,
+      extractedTextLength: (row['extracted_text_length'] as num?)?.toInt() ?? 0,
+      navigationMaxDepth: (row['navigation_max_depth'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -2054,6 +2263,7 @@ class LibraryCatalogItem {
   final DateTime? dateAdded;
   final DateTime? lastOpened;
   final String? indexStatus;
+  final String? indexError;
   final int? fileSize;
   final String? mimeType;
   final int? spineIndex;
@@ -2061,6 +2271,11 @@ class LibraryCatalogItem {
   final String? epubHref;
   final int? paragraphIndex;
   final int navigationCount;
+  final String? sourceWorkId;
+  final String? sourcePackageId;
+  final int readableBlockCount;
+  final int extractedTextLength;
+  final int navigationMaxDepth;
   final List<LibraryItemContributor> contributors;
 
   bool get isEpub {
@@ -2112,6 +2327,7 @@ class LibraryCatalogItem {
     DateTime? dateAdded,
     DateTime? lastOpened,
     String? indexStatus,
+    String? indexError,
     int? fileSize,
     String? mimeType,
     int? spineIndex,
@@ -2139,6 +2355,7 @@ class LibraryCatalogItem {
       dateAdded: dateAdded ?? this.dateAdded,
       lastOpened: lastOpened ?? this.lastOpened,
       indexStatus: indexStatus ?? this.indexStatus,
+      indexError: indexError ?? this.indexError,
       fileSize: fileSize ?? this.fileSize,
       mimeType: mimeType ?? this.mimeType,
       spineIndex: spineIndex ?? this.spineIndex,
@@ -2163,8 +2380,18 @@ class LibraryCatalogItem {
 
   String get displayTitle {
     final trimmed = title.trim();
+    if (_isWaggonerOnRomansEdition(this)) return 'Waggoner on Romans';
     if (trimmed.isEmpty) {
       return _humanizeFileName(fileName);
+    }
+    final canonicalManuscriptReleaseTitle =
+        _canonicalManuscriptReleasesDisplayTitle(
+          title: trimmed,
+          fileName: fileName,
+          relativePath: relativePath,
+        );
+    if (canonicalManuscriptReleaseTitle != null) {
+      return canonicalManuscriptReleaseTitle;
     }
     if (_looksLikeFilename(trimmed)) {
       return _humanizeFileName(trimmed);
@@ -2177,9 +2404,7 @@ class LibraryCatalogItem {
   }
 
   String get subtitle {
-    final authorPart = contributors.isNotEmpty
-        ? displayAuthorsFromContributors(contributors)
-        : (author ?? '').trim();
+    final authorPart = displayAuthors;
     final parts = <String>[
       if (authorPart.isNotEmpty) authorPart,
       if ((collectionName ?? '').trim().isNotEmpty) collectionName!.trim(),
@@ -2189,6 +2414,7 @@ class LibraryCatalogItem {
   }
 
   String get displayAuthor {
+    if (_isWaggonerOnRomansEdition(this)) return 'E. J. Waggoner';
     final normalizedAuthor = normalizeLibraryAuthor(author);
     if (normalizedAuthor != null) return normalizedAuthor;
     final resolved = resolveLibraryAuthor(
@@ -2200,10 +2426,20 @@ class LibraryCatalogItem {
     return resolved ?? 'Unknown author';
   }
 
+  /// Human-readable provenance for editions that otherwise look identical.
+  String? get editionLabel {
+    if (!_isWaggonerOnRomansEdition(this)) return null;
+    if (id == 'library_item_research_pioneer_e_j_waggoner_WOR') {
+      return 'CaptureClipper edition';
+    }
+    return 'Official EPUB edition';
+  }
+
   /// All contributor display names joined with "; ".
   /// e.g. "A. T. Jones; E. J. Waggoner"
   /// Falls back to [displayAuthor] when no contributors are loaded.
   String get displayAuthors {
+    if (_isWaggonerOnRomansEdition(this)) return displayAuthor;
     if (contributors.isNotEmpty) {
       return displayAuthorsFromContributors(contributors);
     }
@@ -2603,133 +2839,163 @@ String _librarySearchLikePattern(String normalizedTerm) {
   return '%${words.join('%')}%';
 }
 
-List<LibraryCatalogItem> _dedupeLibraryItems(List<LibraryCatalogItem> items) {
-  if (items.length < 2) return items;
+String? canonicalLibraryWorkId(LibraryCatalogItem item) {
+  const explicitItemMappings = <String, String>{
+    'library_item_research_pioneer_s_n_haskell_SSP_SNH': 'SSP',
+    'library_item_research_pioneer_stephen_nelson_haskell_SSP': 'SSP',
+    'library_item_research_epubs_egw_egw_pamphlets_en_spta02b_epub':
+        'EGW:PAMPHLET:SPTA02B',
+    'library_item_research_epubs_egw_egw_pamphlets_en_ph133_epub':
+        'EGW:PAMPHLET:SPTA02B',
+  };
+  final explicit = explicitItemMappings[item.id];
+  if (explicit != null) return explicit;
+  final raw = item.sourceWorkId?.trim().toUpperCase() ?? '';
+  if (raw.isEmpty) return null;
+  // The official Pioneer catalog historically used WOR_EJW while the
+  // CaptureClipper package uses WOR for the same stable catalog work.
+  if (raw == 'WOR_EJW') return 'WOR';
+  return raw;
+}
 
-  final chosenByKey = <String, LibraryCatalogItem>{};
-  for (final item in items) {
-    final key = _libraryItemDedupKey(item);
-    final existing = chosenByKey[key];
-    if (existing == null) {
-      chosenByKey[key] = item;
+int libraryEditionQualityScore(LibraryCatalogItem item) {
+  var score = 0;
+  score += (item.extractedTextLength ~/ 1000).clamp(0, 1000);
+  score += item.readableBlockCount.clamp(0, 1000);
+  score += item.navigationCount.clamp(0, 500) * 2;
+  score += item.navigationMaxDepth.clamp(0, 10) * 20;
+  if ((item.indexStatus ?? '').toLowerCase() == 'indexed') score += 100;
+  if (item.title.trim().isNotEmpty && !_looksLikeFilename(item.title)) {
+    score += 20;
+  }
+  if (normalizeLibraryAuthor(item.author) != null) score += 20;
+  if ((item.coverPath ?? '').trim().isNotEmpty) score += 20;
+  if ((item.indexError ?? '').trim().isNotEmpty) score -= 200;
+  return score;
+}
+
+class LibraryEditionSelectionDecision {
+  const LibraryEditionSelectionDecision({
+    required this.workId,
+    required this.editions,
+    required this.preferredEdition,
+    required this.preferredQualityScore,
+    required this.preferredSourcePriority,
+    required this.reason,
+  });
+
+  final String? workId;
+  final List<LibraryCatalogItem> editions;
+  final LibraryCatalogItem preferredEdition;
+  final int preferredQualityScore;
+  final int preferredSourcePriority;
+  final String reason;
+}
+
+LibraryEditionSelectionDecision describePreferredLibraryEdition(
+  Iterable<LibraryCatalogItem> editions,
+) {
+  final ranked = editions.toList(growable: false)
+    ..sort((left, right) {
+      final score = libraryEditionQualityScore(
+        right,
+      ).compareTo(libraryEditionQualityScore(left));
+      if (score != 0) return score;
+      final source = _libraryItemSourcePriority(
+        right,
+      ).compareTo(_libraryItemSourcePriority(left));
+      if (source != 0) return source;
+      final package = _packageBackedSourcePriority(
+        right,
+      ).compareTo(_packageBackedSourcePriority(left));
+      if (package != 0) return package;
+      return left.id.compareTo(right.id);
+    });
+  if (ranked.isEmpty) {
+    throw ArgumentError.value(editions, 'editions', 'must not be empty');
+  }
+
+  final preferred = ranked.first;
+  final preferredScore = libraryEditionQualityScore(preferred);
+  final preferredSourcePriority = _libraryItemSourcePriority(preferred);
+  final workId = canonicalLibraryWorkId(preferred);
+  final reasons = <String>[];
+  for (final candidate in ranked.skip(1)) {
+    final candidateScore = libraryEditionQualityScore(candidate);
+    if (preferredScore != candidateScore) {
+      reasons.add(
+        preferredScore > candidateScore
+            ? 'higher quality score than ${candidate.id}'
+            : 'lower quality score than ${candidate.id}',
+      );
       continue;
     }
-    chosenByKey[key] = _preferLibraryCatalogItem(existing, item);
+
+    final candidateSourcePriority = _libraryItemSourcePriority(candidate);
+    if (preferredSourcePriority != candidateSourcePriority) {
+      reasons.add(
+        preferredSourcePriority > candidateSourcePriority
+            ? 'preferred source tier over ${candidate.id}'
+            : 'lower source tier than ${candidate.id}',
+      );
+      continue;
+    }
+
+    final candidatePackageId = candidate.sourcePackageId ?? '';
+    final preferredPackageId = preferred.sourcePackageId ?? '';
+    if (preferredPackageId != candidatePackageId) {
+      reasons.add('deterministic package-id tie-break');
+      continue;
+    }
+
+    if (preferred.id != candidate.id) {
+      reasons.add('deterministic item-id tie-break');
+    }
   }
 
-  final deduped = chosenByKey.values.toList(growable: false);
-  deduped.sort(_compareLibraryCatalogItems);
-  return deduped;
+  return LibraryEditionSelectionDecision(
+    workId: workId,
+    editions: ranked,
+    preferredEdition: preferred,
+    preferredQualityScore: preferredScore,
+    preferredSourcePriority: preferredSourcePriority,
+    reason: reasons.isEmpty ? 'single edition' : reasons.join('; '),
+  );
 }
 
-String _libraryItemDedupKey(LibraryCatalogItem item) {
-  if (item.collectionGroupKey == 'adventist_pioneer_library') {
-    final normalizedTitle = _normalizedLibraryText(item.displayTitle);
-    final normalizedAuthor = _normalizedLibraryText(item.displayAuthor);
-    final parts = <String>['pioneer'];
-    if (normalizedTitle.isNotEmpty) {
-      parts.add('title:$normalizedTitle');
-    }
-    if (normalizedAuthor.isNotEmpty) {
-      parts.add('author:$normalizedAuthor');
-    }
-    if (parts.length > 1) {
-      return parts.join('|');
-    }
-  }
-
-  final sourceUrl = item.sourceUrl?.trim() ?? '';
-  if (sourceUrl.isNotEmpty) {
-    return 'source:${sourceUrl.toLowerCase()}';
-  }
-
-  final canonicalTitle = _normalizedLibraryText(item.displayTitle);
-  if (canonicalTitle.isNotEmpty) {
-    final canonicalAuthor = _normalizedLibraryText(item.displayAuthor);
-    final format = (item.fileFormat ?? '').trim().toLowerCase();
-    final parts = <String>['title:$canonicalTitle'];
-    if (canonicalAuthor.isNotEmpty) {
-      parts.add('author:$canonicalAuthor');
-    }
-    if (format.isNotEmpty) {
-      parts.add('format:$format');
-    }
-    return parts.join('|');
-  }
-
-  final fileHash = item.fileHash?.trim() ?? '';
-  if (fileHash.isNotEmpty) {
-    return 'hash:$fileHash';
-  }
-
-  final normalizedPath = item.relativePath
-      .replaceAll('\\', '/')
-      .trim()
-      .toLowerCase();
-  if (normalizedPath.isNotEmpty) {
-    return 'path:$normalizedPath';
-  }
-
-  return 'id:${item.id}';
+int _packageBackedSourcePriority(LibraryCatalogItem item) {
+  final sourceType = item.sourceType?.trim().toLowerCase() ?? '';
+  final isHtmlCapture =
+      sourceType == 'egw_html_capture' || sourceType == 'pioneer_captured_html';
+  if (!isHtmlCapture) return 0;
+  return (item.sourcePackageId ?? '').trim().isEmpty ? 0 : 1;
 }
 
-LibraryCatalogItem _preferLibraryCatalogItem(
-  LibraryCatalogItem left,
-  LibraryCatalogItem right,
+LibraryCatalogItem preferredLibraryEdition(
+  Iterable<LibraryCatalogItem> editions,
 ) {
-  final leftSourcePriority = _libraryItemSourcePriority(left);
-  final rightSourcePriority = _libraryItemSourcePriority(right);
-  if (leftSourcePriority != rightSourcePriority) {
-    return rightSourcePriority > leftSourcePriority ? right : left;
-  }
-
-  final leftScore = _libraryItemQualityScore(left);
-  final rightScore = _libraryItemQualityScore(right);
-  if (leftScore != rightScore) {
-    return rightScore > leftScore ? right : left;
-  }
-
-  final leftStamp =
-      left.lastOpened ??
-      left.dateAdded ??
-      DateTime.fromMillisecondsSinceEpoch(0);
-  final rightStamp =
-      right.lastOpened ??
-      right.dateAdded ??
-      DateTime.fromMillisecondsSinceEpoch(0);
-  if (leftStamp != rightStamp) {
-    return rightStamp.isAfter(leftStamp) ? right : left;
-  }
-
-  final leftTitle = left.displayTitle.toLowerCase();
-  final rightTitle = right.displayTitle.toLowerCase();
-  final titleCompare = leftTitle.compareTo(rightTitle);
-  if (titleCompare != 0) {
-    return titleCompare > 0 ? right : left;
-  }
-
-  return left.fileName.toLowerCase().compareTo(right.fileName.toLowerCase()) <=
-          0
-      ? left
-      : right;
+  return describePreferredLibraryEdition(editions).preferredEdition;
 }
 
-int _libraryItemQualityScore(LibraryCatalogItem item) {
-  var score = 0;
-  final title = item.title.trim();
-  if (title.isNotEmpty && !_looksLikeFilename(title)) {
-    score += 4;
+List<LibraryCatalogItem> selectPreferredLibraryEditions(
+  List<LibraryCatalogItem> items,
+) {
+  final editionsByWork = <String, List<LibraryCatalogItem>>{};
+  final ungrouped = <LibraryCatalogItem>[];
+  for (final item in items) {
+    final workId = canonicalLibraryWorkId(item);
+    if (workId == null) {
+      ungrouped.add(item);
+    } else {
+      (editionsByWork[workId] ??= <LibraryCatalogItem>[]).add(item);
+    }
   }
-  if (normalizeLibraryAuthor(item.author) != null) {
-    score += 1;
-  }
-  if ((item.coverPath ?? '').trim().isNotEmpty) {
-    score += 1;
-  }
-  if ((item.sourceUrl ?? '').trim().isNotEmpty) {
-    score += 1;
-  }
-  return score;
+  final visible = <LibraryCatalogItem>[
+    ...ungrouped,
+    for (final editions in editionsByWork.values)
+      preferredLibraryEdition(editions),
+  ]..sort(_compareLibraryCatalogItems);
+  return List<LibraryCatalogItem>.unmodifiable(visible);
 }
 
 int _libraryItemSourcePriority(LibraryCatalogItem item) {
@@ -2753,6 +3019,76 @@ int _libraryItemSourcePriority(LibraryCatalogItem item) {
 
 bool _isVisibleLibraryItem(LibraryCatalogItem item) {
   return true;
+}
+
+bool _isWaggonerOnRomansEdition(LibraryCatalogItem item) {
+  return _isWaggonerOnRomansItemId(item.id);
+}
+
+bool _isWaggonerOnRomansItemId(String id) =>
+    id == 'library_item_research_pioneer_e_j_waggoner_WOR' ||
+    id == 'library_item_research_pioneer_ellet_joseph_waggoner_WOR_EJW';
+
+List<LibraryCatalogNavigationItem> _waggonerRomansNavigationHierarchy(
+  List<LibraryCatalogNavigationItem> items,
+) {
+  String? titleId;
+  String? chapterId;
+  String? studiesId;
+  String? dateId;
+  final result = <LibraryCatalogNavigationItem>[];
+  for (final item in items) {
+    final label = item.label.trim().toUpperCase();
+    var depth = 4;
+    var contentKind = item.contentKind;
+    var isFrontMatter = item.isFrontMatter;
+    String? parentId = dateId ?? studiesId ?? chapterId ?? titleId;
+    if (label == 'WAGGONER ON ROMANS.') {
+      depth = 0;
+      parentId = null;
+      titleId = item.id;
+    } else if (label == 'PREFACE.') {
+      depth = 1;
+      parentId = titleId;
+      contentKind = 'preface';
+      isFrontMatter = true;
+    } else if (RegExp(r'^CHAPTER\s+\d+\.?$').hasMatch(label)) {
+      depth = 1;
+      parentId = titleId;
+      chapterId = item.id;
+      studiesId = null;
+      dateId = null;
+    } else if (label == 'STUDIES IN ROMANS.') {
+      depth = 2;
+      parentId = chapterId ?? titleId;
+      studiesId = item.id;
+      dateId = null;
+    } else if (RegExp(
+      r'^(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+\d{1,2},\s+\d{4}\.?$',
+    ).hasMatch(label)) {
+      depth = 3;
+      parentId = studiesId ?? chapterId ?? titleId;
+      dateId = item.id;
+    }
+    result.add(
+      LibraryCatalogNavigationItem(
+        id: item.id,
+        parentId: parentId,
+        label: item.label,
+        href: item.href,
+        anchorId: item.anchorId,
+        spineIndex: item.spineIndex,
+        sortOrder: item.sortOrder,
+        depth: depth,
+        navType: item.navType,
+        contentKind: contentKind,
+        isFrontMatter: isFrontMatter,
+        isBodyStart: item.isBodyStart,
+        bodyOrder: item.bodyOrder,
+      ),
+    );
+  }
+  return result;
 }
 
 bool _isFlutterAssetPath(String path) {

@@ -103,6 +103,41 @@ class LibraryRootService {
 
   static const defaultAppLibraryFolderName = 'Biblical Heritage Library';
 
+  /// iOS relocates the app data container (new UUID) on every reinstall, so
+  /// a stored absolute root path with no security-scoped bookmark can go
+  /// stale while the library itself is still present under the new
+  /// container. Such selections must fall back to implicit root detection
+  /// instead of stranding the root behind a reconnect prompt. Bookmarked
+  /// selections (external folders) are excluded: silently swapping their
+  /// root would hide a genuine reconnect condition.
+  static bool shouldFallBackToImplicitRoot({
+    required bool isIOS,
+    required String? storedPath,
+    required String? bookmark,
+    required bool pathExists,
+  }) {
+    if (!isIOS) return false;
+    if (storedPath == null || storedPath.trim().isEmpty) return false;
+    if (bookmark != null && bookmark.trim().isNotEmpty) return false;
+    return !pathExists;
+  }
+
+  static bool isDefaultAppDocumentsPath({
+    required String candidatePath,
+    required String defaultAppRootPath,
+  }) {
+    final candidate = candidatePath.trim();
+    final defaultRoot = defaultAppRootPath.trim();
+    if (candidate.isEmpty || defaultRoot.isEmpty) {
+      return false;
+    }
+    final normalizedCandidate = p.normalize(candidate);
+    final normalizedDefault = p.normalize(defaultRoot);
+    return normalizedCandidate.isNotEmpty &&
+        normalizedDefault.isNotEmpty &&
+        normalizedCandidate == normalizedDefault;
+  }
+
   static const libraryFolders = <String>[
     'Databases',
     'Tags',
@@ -154,7 +189,9 @@ class LibraryRootService {
     );
 
     if (resolvedPath != null && resolvedPath.trim().isNotEmpty) {
-      if (Platform.isMacOS && bookmark != null && bookmark.trim().isNotEmpty) {
+      if ((Platform.isMacOS || Platform.isIOS) &&
+          bookmark != null &&
+          bookmark.trim().isNotEmpty) {
         final activated = await LibraryRootNative.activateBookmark(bookmark);
         final activatedPath = activated?.trim() ?? '';
         if (activatedPath.isNotEmpty) {
@@ -162,17 +199,25 @@ class LibraryRootService {
         }
       }
       final exists = Directory(resolvedPath).existsSync();
-      final selection = LibraryRootSelection(
-        path: resolvedPath,
-        exists: exists,
-        needsReconnect: source == LibraryRootSource.userSelected
-            ? bookmark == null || !exists
-            : !exists,
-        source: source,
+      final fallBackToImplicit = shouldFallBackToImplicitRoot(
+        isIOS: Platform.isIOS,
+        storedPath: resolvedPath,
         bookmark: bookmark,
+        pathExists: exists,
       );
-      _cachedSelection = selection;
-      return selection;
+      if (!fallBackToImplicit) {
+        final selection = LibraryRootSelection(
+          path: resolvedPath,
+          exists: exists,
+          needsReconnect: source == LibraryRootSource.userSelected
+              ? bookmark == null || !exists
+              : !exists,
+          source: source,
+          bookmark: bookmark,
+        );
+        _cachedSelection = selection;
+        return selection;
+      }
     }
 
     if (Platform.isIOS) {
@@ -183,16 +228,37 @@ class LibraryRootService {
           await _legacyDocumentsRootPath(),
         ],
       );
-      final implicitPath = detected?.path ?? defaultAppRoot;
-      final implicitSource =
-          detected?.source ?? LibraryRootSource.defaultAppFolder;
-      final exists = Directory(implicitPath).existsSync();
-      final selection = LibraryRootSelection(
-        path: implicitPath,
-        exists: exists,
-        needsReconnect: !exists,
-        source: implicitSource,
-        bookmark: null,
+      if (detected != null) {
+        final exists = Directory(detected.path).existsSync();
+        final selection = LibraryRootSelection(
+          path: detected.path,
+          exists: exists,
+          needsReconnect: !exists,
+          source: detected.source,
+          bookmark: null,
+        );
+        _cachedSelection = selection;
+        return selection;
+      }
+
+      if (resolvedPath != null && resolvedPath.trim().isNotEmpty) {
+        // Stale stored path and nothing detected: keep the reconnect prompt.
+        final selection = LibraryRootSelection(
+          path: resolvedPath,
+          exists: false,
+          needsReconnect: true,
+          source: source,
+          bookmark: bookmark,
+        );
+        _cachedSelection = selection;
+        return selection;
+      }
+
+      final selection = const LibraryRootSelection(
+        path: null,
+        exists: false,
+        needsReconnect: false,
+        source: LibraryRootSource.unknown,
       );
       _cachedSelection = selection;
       return selection;
@@ -213,16 +279,11 @@ class LibraryRootService {
     String? bookmark,
     LibraryRootSource source = LibraryRootSource.userSelected,
   }) async {
-    if (Platform.isIOS) {
-      source = LibraryRootSource.defaultAppFolder;
-      bookmark = null;
-      path = await defaultAppLibraryRootPath();
-    }
     var normalized = p.normalize(path.trim());
     if (normalized.isEmpty) return;
 
     final bookmarkValue = bookmark?.trim() ?? '';
-    if (bookmarkValue.isNotEmpty && Platform.isMacOS) {
+    if (bookmarkValue.isNotEmpty && (Platform.isMacOS || Platform.isIOS)) {
       final activated = await LibraryRootNative.activateBookmark(bookmarkValue);
       final activatedPath = activated?.trim() ?? '';
       if (activatedPath.isEmpty) {
@@ -260,7 +321,7 @@ class LibraryRootService {
     var rootToUse = root;
     if (selection.isUserSelected &&
         selection.bookmark != null &&
-        Platform.isMacOS) {
+        (Platform.isMacOS || Platform.isIOS)) {
       final activated = await LibraryRootNative.activateBookmark(
         selection.bookmark!,
       );
@@ -305,7 +366,7 @@ class LibraryRootService {
       if (selection.exists &&
           selection.isUserSelected &&
           selection.bookmark != null &&
-          Platform.isMacOS) {
+          (Platform.isMacOS || Platform.isIOS)) {
         final activated = await LibraryRootNative.activateBookmark(
           selection.bookmark!,
         );
@@ -459,7 +520,9 @@ class LibraryRootService {
       final normalizedPath = p.normalize(path.trim());
       final normalizedDefaultAppRoot = p.normalize(defaultAppRoot.trim());
       if (normalizedPath == normalizedDefaultAppRoot) {
-        return LibraryRootSource.defaultAppFolder;
+        return Platform.isIOS
+            ? LibraryRootSource.legacyImplicit
+            : LibraryRootSource.defaultAppFolder;
       }
       return LibraryRootSource.legacyImplicit;
     }
@@ -472,13 +535,7 @@ class LibraryRootService {
       final normalized = candidate.trim();
       if (normalized.isEmpty) continue;
       if (await _looksLikeLibraryRoot(normalized)) {
-        final source =
-            Platform.isIOS &&
-                p.normalize(normalized) ==
-                    p.normalize(await defaultAppLibraryRootPath())
-            ? LibraryRootSource.defaultAppFolder
-            : LibraryRootSource.legacyImplicit;
-        return (path: normalized, source: source);
+        return (path: normalized, source: LibraryRootSource.legacyImplicit);
       }
     }
     return null;

@@ -481,6 +481,16 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            Text(
+                              item.subtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: libraryCaptionTextStyle(
+                                context,
+                                theme.textTheme.bodySmall,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
                             if (hasLocation)
                               Text(
                                 locationText,

@@ -18,6 +18,8 @@ import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/theme_preferences.dart';
 import '../data/elibrary_markup_repository.dart';
 import '../data/library_citation_display_helper.dart';
+import '../data/library_reader_opening.dart';
+import '../data/library_reader_state_writer.dart';
 import '../data/library_section_heuristics.dart';
 import '../../reader/data/commentary_research_library_service.dart';
 import '../../reader/presentation/highlight_render.dart';
@@ -170,7 +172,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
 
     final filePath = p.join(rootPath, widget.item.relativePath);
     try {
-      final sections = widget.item.isPdf
+      final loadedSections = widget.item.isPdf
           ? const <LibraryBookSection>[]
           : await _service.loadBookSections(
               filePath: filePath,
@@ -182,31 +184,74 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
           : await LibraryCatalogService.instance.loadNavigationItems(
               widget.item.id,
             );
+      final sections = widget.item.isPdf
+          ? loadedSections
+          : libraryReaderSectionsWithHeadingOnlyNavigation(
+              sections: loadedSections,
+              navigationItems: navigationItems,
+            );
       final devotionalMode =
           widget.item.isDevotional || isDevotionalNavigation(navigationItems);
+      final navigationTree = widget.item.isPdf
+          ? const LibraryNavigationTreeResult(
+              items: <LibraryCatalogNavigationItem>[],
+              childrenByParent: <String?, List<LibraryCatalogNavigationItem>>{},
+            )
+          : buildLibraryNavigationTree(
+              navigationItems,
+              devotionalMode: devotionalMode,
+              periodicalMode: widget.item.isPeriodical,
+            );
       final initialIndex = widget.item.isPdf
           ? 0
-          : _initialSectionIndex(
+          : libraryReaderInitialSectionIndex(
+              item: widget.item,
               sections: sections,
               navigationItems: navigationItems,
               devotionalMode: devotionalMode,
+              initialHref: widget.initialHref,
+              initialSpineIndex: widget.initialSpineIndex,
             );
-      final initialNavigationIndex = widget.item.isPdf
+      var initialNavigationIndex = widget.item.isPdf
           ? 0
           : _navigationIndexForSectionIndex(initialIndex) ?? 0;
-      // Periodicals generate ref codes inline (libraryReaderPeriodicalRefCode);
-      // skipping the DB scan avoids ~1,900 serial async queries on RH open.
+      var resolvedInitialIndex = initialIndex;
+      if (navigationItems.isNotEmpty) {
+        final selectedNavItem =
+            navigationItems[initialNavigationIndex.clamp(
+              0,
+              navigationItems.length - 1,
+            )];
+        final normalizedNavItem = libraryReaderVisibleContentsNavigationItem(
+          navItem: selectedNavItem,
+          tree: navigationTree,
+          sections: sections,
+        );
+        if (normalizedNavItem != null &&
+            normalizedNavItem.id != selectedNavItem.id) {
+          final normalizedNavIndex = navigationItems.indexWhere(
+            (nav) => nav.id == normalizedNavItem.id,
+          );
+          final normalizedSectionIndex =
+              _sectionIndexForNavigationItemInSections(
+                sections,
+                normalizedNavItem,
+              ) ??
+              resolvedInitialIndex;
+          if (normalizedNavIndex >= 0) {
+            initialNavigationIndex = normalizedNavIndex;
+            resolvedInitialIndex = normalizedSectionIndex;
+          }
+        }
+      }
+      // Periodicals generate ref codes inline (libraryReaderPeriodicalRefCode)
+      // and books load codes in the background after first paint; skipping
+      // the DB scan here avoids ~1,900 serial async queries on RH open.
       final paragraphReferenceCodeLoadResult =
-          !widget.item.isPdf && !widget.item.isPeriodical && savedShowRefCodes
-          ? await _loadParagraphReferenceCodes(
-              sections: sections,
-              libraryItemId: widget.item.id,
-              rootPath: rootPath,
-            )
-          : const _ParagraphReferenceCodeLoadResult(
-              bySection: <String, Map<int, String>>{},
-              byLocation: <String, String>{},
-            );
+          const _ParagraphReferenceCodeLoadResult(
+            bySection: <String, Map<int, String>>{},
+            byLocation: <String, String>{},
+          );
       final elibraryMarkupsByHref = await _loadElibraryMarkups(widget.item.id);
       if (!mounted) return;
       setState(() {
@@ -214,10 +259,11 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         _zoomScale = savedZoomScale;
         _sections = sections;
         _navigationItems = navigationItems;
-        _selectedIndex = initialIndex;
+        _selectedIndex = resolvedInitialIndex;
         _selectedNavigationIndex = initialNavigationIndex;
         _showRefCodes = savedShowRefCodes;
-        _refCodesLoaded = savedShowRefCodes && !widget.item.isPdf;
+        // Codes are loaded lazily; the maps above are still empty here.
+        _refCodesLoaded = false;
         _refCodeByLocation = paragraphReferenceCodeLoadResult.byLocation;
         _paragraphReferenceCodesBySection =
             paragraphReferenceCodeLoadResult.bySection;
@@ -229,6 +275,12 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
         if (!mounted) return;
         _scrollToTarget(targetKey);
       });
+      unawaited(
+        LibraryReaderStateWriter.instance.stampLastOpened(widget.item.id),
+      );
+      if (savedShowRefCodes) {
+        unawaited(_ensureParagraphReferenceCodesLoaded());
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -1284,25 +1336,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     final savedParagraphIndex = currentNavigationItem?.parentId != null
         ? currentNavigationItem?.bodyOrder
         : null;
-    final now = DateTime.now().toUtc().toIso8601String();
-    final db = await UserDatabase.instance.database;
-    await db.update(
-      'library_items',
-      {
-        'last_opened': now,
-        'epub_href': savedHref != null && savedHref.isNotEmpty
-            ? savedHref
-            : currentSection.entryName,
-        'epub_cfi': null,
-        'anchor_id': savedAnchorId != null && savedAnchorId.isNotEmpty
-            ? savedAnchorId
-            : null,
-        'spine_index': currentSection.spineIndex,
-        'paragraph_index': savedParagraphIndex ?? 1,
-        'updated_at': now,
-      },
-      where: 'id = ?',
-      whereArgs: [widget.item.id],
+    await LibraryReaderStateWriter.instance.saveCurrentLocation(
+      libraryItemId: widget.item.id,
+      currentSectionEntryName: currentSection.entryName,
+      currentSectionSpineIndex: currentSection.spineIndex,
+      savedHref: savedHref,
+      savedAnchorId: savedAnchorId,
+      savedParagraphIndex: savedParagraphIndex,
     );
   }
 
@@ -1339,6 +1379,26 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     return navigationItems[_selectedNavigationIndex];
   }
 
+  /// Resolves the first readable descendant within the currently selected
+  /// TOC node's own subtree, for composing a useful display when that node
+  /// is heading-only. Returns null when the node has readable content of
+  /// its own, or no readable descendant exists in its subtree.
+  LibraryReaderDescendantChain? get _currentSectionReadableDescendantChain {
+    if (_navigationItems.isEmpty) return null;
+    final navItem = _selectedNavigationItem;
+    if (navItem == null) return null;
+    final tree = buildLibraryNavigationTree(
+      _navigationItems,
+      devotionalMode: _isDevotionalNavigationBook,
+      periodicalMode: widget.item.isPeriodical,
+    );
+    return libraryReaderFirstReadableDescendant(
+      navItem: navItem,
+      tree: tree,
+      sections: _sections,
+    );
+  }
+
   bool get _isDevotionalNavigationBook {
     return widget.item.isDevotional || isDevotionalNavigation(_navigationItems);
   }
@@ -1357,77 +1417,14 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     required List<LibraryCatalogNavigationItem> navigationItems,
     required bool devotionalMode,
   }) {
-    if (sections.isEmpty) return 0;
-
-    final initialHref = _splitReaderHref(widget.initialHref).href;
-    if (initialHref.isNotEmpty) {
-      final initialIndex = _readableSectionIndexForHref(sections, initialHref);
-      if (initialIndex != null) return initialIndex;
-    }
-
-    final initialSpineIndex = widget.initialSpineIndex;
-    if (initialSpineIndex != null && initialSpineIndex > 0) {
-      final initialIndex = _readableSectionIndexForSpineIndex(
-        sections: sections,
-        navigationItems: navigationItems,
-        spineIndex: initialSpineIndex,
-      );
-      if (initialIndex != null) return initialIndex;
-    }
-
-    if (!widget.item.isPeriodical) {
-      final savedHref = _splitReaderHref(widget.item.epubHref).href;
-      if (savedHref.isNotEmpty) {
-        final savedIndex = _readableSectionIndexForHref(sections, savedHref);
-        if (savedIndex != null) return savedIndex;
-      }
-    }
-
-    if (devotionalMode) {
-      final devotionalInitialHref = _devotionalInitialNavigationHref(
-        navigationItems,
-      );
-      if (devotionalInitialHref != null) {
-        final devotionalIndex = _sectionIndexForHref(
-          sections,
-          devotionalInitialHref,
-        );
-        if (devotionalIndex != null) return devotionalIndex;
-      }
-    }
-
-    final firstRealContentHref = _firstRealContentNavigationHref(
-      navigationItems,
+    return libraryReaderInitialSectionIndex(
+      item: widget.item,
+      sections: sections,
+      navigationItems: navigationItems,
+      devotionalMode: devotionalMode,
+      initialHref: widget.initialHref,
+      initialSpineIndex: widget.initialSpineIndex,
     );
-    if (firstRealContentHref != null) {
-      final firstRealContentIndex = _sectionIndexForHref(
-        sections,
-        firstRealContentHref,
-      );
-      if (firstRealContentIndex != null &&
-          _isRealContentSection(sections[firstRealContentIndex])) {
-        return firstRealContentIndex;
-      }
-    }
-
-    final firstContentIndex = _firstRealContentSectionIndex(sections);
-    if (firstContentIndex != null) return firstContentIndex;
-
-    final savedParagraph = widget.item.paragraphIndex;
-    if (savedParagraph != null &&
-        widget.item.spineIndex != null &&
-        widget.item.spineIndex! > 0) {
-      final navIndex = _navigationIndexForSavedState(
-        sections: sections,
-        navigationItems: navigationItems,
-        spineIndex: widget.item.spineIndex!,
-      );
-      if (navIndex != null && _isRealContentSection(sections[navIndex])) {
-        return navIndex;
-      }
-    }
-
-    return 0;
   }
 
   int? _readableSectionIndexForHref(
@@ -1512,17 +1509,27 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   }
 
   int? _firstRealContentSectionIndex(List<LibraryBookSection> sections) {
+    int? firstMeaningfulIndex;
     for (var index = 0; index < sections.length; index++) {
       final section = sections[index];
-      if (libraryIsMeaningfulReadingSection(
+      if (!libraryIsMeaningfulReadingSection(
         title: section.title,
         href: section.entryName,
         paragraphs: section.paragraphs,
         bookTitle: widget.item.displayTitle,
       )) {
-        return index;
+        continue;
       }
+      firstMeaningfulIndex ??= index;
+      if (libraryIsFrontMatterOpeningLabel(section.title) ||
+          libraryIsFrontMatterOpeningLabel(
+            p.basenameWithoutExtension(section.entryName),
+          )) {
+        continue;
+      }
+      return index;
     }
+    if (firstMeaningfulIndex != null) return firstMeaningfulIndex;
     return sections.isEmpty ? null : 0;
   }
 
@@ -1602,8 +1609,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     }
 
     if (item.spineIndex != null) {
-      final index = item.spineIndex! - 1;
-      if (index >= 0 && index < _sections.length) return index;
+      for (var index = 0; index < _sections.length; index++) {
+        if (_sections[index].spineIndex == item.spineIndex) return index;
+      }
     }
 
     return null;
@@ -1625,8 +1633,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     }
 
     if (item.spineIndex != null) {
-      final index = item.spineIndex! - 1;
-      if (index >= 0 && index < sections.length) return index;
+      for (var index = 0; index < sections.length; index++) {
+        if (sections[index].spineIndex == item.spineIndex) return index;
+      }
     }
 
     return null;
@@ -1637,22 +1646,24 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   ) {
     if (navigationItems.isEmpty) return null;
 
+    // Imports can mark an intro/preface as the body start when it carries
+    // enough text, so a body-start flag alone is not trusted; the label must
+    // not look like front matter either.
+    bool looksLikeFrontMatter(LibraryCatalogNavigationItem item, String href) {
+      return item.isFrontMatter ||
+          libraryIsFrontMatterOpeningLabel(item.label) ||
+          libraryIsFrontMatterOpeningLabel(p.basenameWithoutExtension(href));
+    }
+
     for (final item in navigationItems) {
       final href = _cleanNavigationHref(item.href);
       if (href == null) continue;
-      if (item.isBodyStart ||
-          (item.contentKind?.trim().toLowerCase() == 'body' &&
-              !item.isFrontMatter)) {
-        return href;
-      }
-      if (_isReaderMetadataHelpLabel(item.label) ||
-          _isReaderMetadataHelpLabel(p.basenameWithoutExtension(href)) ||
-          item.isFrontMatter) {
-        continue;
-      }
+      if (looksLikeFrontMatter(item, href)) continue;
       return href;
     }
 
+    // Every navigation item looks like front matter; fall back to the first
+    // one that is at least not pure metadata (cover/TOC/copyright).
     for (final item in navigationItems) {
       final href = _cleanNavigationHref(item.href);
       if (href == null) continue;
@@ -1794,37 +1805,56 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
   void _selectNavigationItem(LibraryCatalogNavigationItem navItem) {
     final navigationItems = _orderedNavigationItems;
     final navIndex = navigationItems.indexWhere((nav) => nav.id == navItem.id);
-    final sectionIndex = _sectionIndexForNavigationItem(navItem);
+    final tree = buildLibraryNavigationTree(
+      navigationItems,
+      devotionalMode: _isDevotionalNavigationBook,
+      periodicalMode: widget.item.isPeriodical,
+    );
+    final normalizedNavItem = libraryReaderVisibleContentsNavigationItem(
+      navItem: navItem,
+      tree: tree,
+      sections: _sections,
+    );
+    final effectiveNavItem = normalizedNavItem ?? navItem;
+    final effectiveNavIndex = normalizedNavItem == null
+        ? navIndex
+        : navigationItems.indexWhere((nav) => nav.id == normalizedNavItem.id);
+    final effectiveSectionIndex = _sectionIndexForNavigationItem(
+      effectiveNavItem,
+    );
     final targetSection =
-        sectionIndex != null &&
-            sectionIndex >= 0 &&
-            sectionIndex < _sections.length
-        ? _sections[sectionIndex]
+        effectiveSectionIndex != null &&
+            effectiveSectionIndex >= 0 &&
+            effectiveSectionIndex < _sections.length
+        ? _sections[effectiveSectionIndex]
         : _currentSection;
     final targetKey =
         libraryReaderContentsTargetKeyForNavigationItem(
-          navItem: navItem,
+          navItem: effectiveNavItem,
           sections: _sections,
         ) ??
-        _fallbackTargetKeyForNavigationItem(navItem, section: targetSection);
+        _fallbackTargetKeyForNavigationItem(
+          effectiveNavItem,
+          section: targetSection,
+        );
     final shouldJumpToSectionStart =
         libraryReaderNavigationItemTargetsSectionStart(
-          navItem: navItem,
+          navItem: effectiveNavItem,
           sections: _sections,
         );
     setState(() {
-      if (navIndex >= 0) {
-        _selectedNavigationIndex = navIndex;
+      if (effectiveNavIndex >= 0) {
+        _selectedNavigationIndex = effectiveNavIndex;
       }
-      if (sectionIndex != null) {
-        _selectedIndex = sectionIndex;
+      if (effectiveSectionIndex != null) {
+        _selectedIndex = effectiveSectionIndex;
       }
       _pendingBodyScrollTargetKey = targetKey;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        if (shouldJumpToSectionStart && sectionIndex != null) {
-          _selectSection(sectionIndex);
+        if (shouldJumpToSectionStart && effectiveSectionIndex != null) {
+          _selectSection(effectiveSectionIndex);
           return;
         }
         _scrollToTarget(targetKey);
@@ -2014,7 +2044,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
       return _explicitInitialScrollTargetKey();
     }
 
-    final savedTargetKey = _savedLocationTargetKey();
+    final savedTargetKey = _isDevotionalNavigationBook
+        ? null
+        : _savedLocationTargetKey();
     if (savedTargetKey != null) return savedTargetKey;
 
     final headingTargets = _headingTargetsForCurrentSection();
@@ -2108,13 +2140,6 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     for (var index = 0; index < currentSection.blocks.length; index++) {
       final block = currentSection.blocks[index];
       if (!block.isHeading) continue;
-      final blockLabel = _normalizeReaderLabel(block.text);
-      if (normalizedNavLabel.isNotEmpty && blockLabel == normalizedNavLabel) {
-        return _blockTargetKey(block, index);
-      }
-      if (normalizedRawLabel.isNotEmpty && blockLabel == normalizedRawLabel) {
-        return _blockTargetKey(block, index);
-      }
     }
 
     if (isChapterOneNavigation) {
@@ -2369,14 +2394,24 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
 
     final result = <_NavigationDisplayEntry>[];
     final visited = <String>{};
+    final visibleTargetIds = <String>{};
 
     void visit(LibraryCatalogNavigationItem item, int depth) {
       if (!visited.add(item.id)) return;
-      final shouldDisplay = !_isMeaninglessNumericNavigationLabel(item);
+      final visibleItem = libraryReaderVisibleContentsNavigationItem(
+        navItem: item,
+        tree: tree,
+        sections: _sections,
+      );
+      final shouldDisplay =
+          visibleItem != null && !_isMeaninglessNumericNavigationLabel(item);
       if (shouldDisplay) {
+        if (!visibleTargetIds.add(visibleItem.id)) {
+          return;
+        }
         result.add(
           _NavigationDisplayEntry(
-            item: item,
+            item: visibleItem,
             depth: depth,
             displayIndex: result.length,
           ),
@@ -2841,6 +2876,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
           scale: _fontScale,
           child: _ContentsPopupSheet(
             itemTitle: widget.item.displayTitle,
+            itemSubtitle: '',
             entries: entries,
             sections: _sections,
             currentSectionEntryName: _currentSection?.entryName,
@@ -2881,22 +2917,48 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
     final currentSection = _sections.isEmpty
         ? null
         : _sections[_selectedIndex.clamp(0, _sections.length - 1)];
-    final sectionBlocks = currentSection?.blocks ?? const <LibraryBookBlock>[];
-    final sectionReferenceCodes = currentSection == null
+    // A heading-only structural node (e.g. Chapter 1) keeps its own heading
+    // as section context but renders the first readable descendant's own
+    // heading and body, following only explicit child links. The selected
+    // TOC identity stays the structural node; only the displayed content
+    // (ref codes, markups, tap/highlight targets) is sourced from the
+    // readable descendant.
+    final descendantChain =
+        (currentSection != null && currentSection.blocks.isEmpty)
+        ? _currentSectionReadableDescendantChain
+        : null;
+    final contentSection = descendantChain?.readableSection ?? currentSection;
+    final headingSections = <LibraryBookSection>[];
+    if (currentSection != null) {
+      headingSections.add(currentSection);
+    }
+    if (descendantChain != null) {
+      headingSections.addAll(descendantChain.headingSections);
+      headingSections.add(descendantChain.readableSection);
+    }
+    final uniqueHeadingSections = <LibraryBookSection>[];
+    final seenHeadingSectionKeys = <String>{};
+    for (final section in headingSections) {
+      final key = section.entryName.trim().toLowerCase();
+      if (!seenHeadingSectionKeys.add(key)) continue;
+      uniqueHeadingSections.add(section);
+    }
+    final sectionBlocks = contentSection?.blocks ?? const <LibraryBookBlock>[];
+    final sectionReferenceCodes = contentSection == null
         ? const <int, String>{}
         : item.isDevotional
         ? const <int, String>{}
         : _paragraphReferenceCodesBySection[_sectionKey(
-                currentSection.entryName,
+                contentSection.entryName,
               )] ??
               const <int, String>{};
     final showSectionTitle = _shouldShowSectionTitle(
       sectionBlocks,
       libraryReaderDisplaySectionTitle(currentSection?.title ?? ''),
     );
-    final sectionMarkups = currentSection == null
+    final sectionMarkups = contentSection == null
         ? const <ElibraryMarkupRecord>[]
-        : _elibraryMarkupsByHref[currentSection.entryName] ??
+        : _elibraryMarkupsByHref[contentSection.entryName] ??
               const <ElibraryMarkupRecord>[];
     final sectionHasUserMarkup = sectionMarkups.isNotEmpty;
     final geometryScopeId = _geometryScopeId;
@@ -2929,7 +2991,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                   ? libraryReaderDevotionalFallbackRefCodeForBlock(
                       item: item,
                       sectionTitle: libraryReaderDisplaySectionTitle(
-                        currentSection?.title ?? '',
+                        contentSection?.title ?? '',
                       ),
                       block: block,
                       fallbackParagraphCount: devotionalFallbackParagraphCount,
@@ -2938,13 +3000,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                   ? libraryReaderPeriodicalRefCode(
                       item: item,
                       sectionTitle: libraryReaderDisplaySectionTitle(
-                        currentSection?.title ?? '',
+                        contentSection?.title ?? '',
                       ),
                       paragraphIndex: paragraphIndex,
                     )
                   : _refCodeByLocation[_refCodeLocationKey(
                           libraryItemId: item.id,
-                          href: currentSection?.entryName ?? '',
+                          href: contentSection?.entryName ?? '',
                           paragraphIndex: paragraphIndex,
                         )] ??
                         sectionReferenceCodes[paragraphIndex] ??
@@ -2964,9 +3026,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
             geometryScopeId: geometryScopeId,
             geometryRevision: _enableTextRangeGeometry ? _geometryTick : 0,
             sectionTitle: libraryReaderDisplaySectionTitle(
-              currentSection?.title ?? '',
+              contentSection?.title ?? '',
             ),
-            sectionEntryName: currentSection?.entryName ?? '',
+            sectionEntryName: contentSection?.entryName ?? '',
             paragraphIndex: isParagraph ? paragraphIndex : null,
             textColor: textColor,
             subduedColor: subduedColor,
@@ -2987,7 +3049,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                     _rangeSelection.containsBlock(blockIndex)
                 ? () => _showLibrarySelectionActionsMenu(
                     item: item,
-                    section: currentSection,
+                    section: contentSection,
                     sectionBlocks: sectionBlocks,
                   )
                 : null,
@@ -3030,7 +3092,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                   )) {
                 _showLibrarySelectionActionsMenu(
                   item: item,
-                  section: currentSection,
+                  section: contentSection,
                   sectionBlocks: sectionBlocks,
                 );
                 return;
@@ -3374,6 +3436,69 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen> {
                                             ),
                                           ),
                                           const SizedBox(height: 12),
+                                        ],
+                                        if (descendantChain != null) ...[
+                                          for (final headingSection
+                                              in uniqueHeadingSections
+                                                  .skip(
+                                                    currentSection == null
+                                                        ? 0
+                                                        : 1,
+                                                  )
+                                                  .take(
+                                                    uniqueHeadingSections
+                                                        .length,
+                                                  )) ...[
+                                            if (libraryReaderDisplaySectionTitle(
+                                              headingSection.title,
+                                            ).isNotEmpty) ...[
+                                              Text(
+                                                libraryReaderDisplaySectionTitle(
+                                                  headingSection.title,
+                                                ),
+                                                style: libraryScaledTextStyle(
+                                                  theme.textTheme.headlineSmall,
+                                                  _fontScale * _zoomScale,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: textColor,
+                                                  fontSize: titleFontSize,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 12),
+                                            ],
+                                          ],
+                                          if (libraryReaderDisplaySectionTitle(
+                                                descendantChain
+                                                    .readableSection
+                                                    .title,
+                                              ).isNotEmpty &&
+                                              (uniqueHeadingSections.isEmpty ||
+                                                  uniqueHeadingSections
+                                                          .last
+                                                          .entryName
+                                                          .trim()
+                                                          .toLowerCase() !=
+                                                      descendantChain
+                                                          .readableSection
+                                                          .entryName
+                                                          .trim()
+                                                          .toLowerCase())) ...[
+                                            Text(
+                                              libraryReaderDisplaySectionTitle(
+                                                descendantChain
+                                                    .readableSection
+                                                    .title,
+                                              ),
+                                              style: libraryScaledTextStyle(
+                                                theme.textTheme.headlineSmall,
+                                                _fontScale * _zoomScale,
+                                                fontWeight: FontWeight.w800,
+                                                color: textColor,
+                                                fontSize: titleFontSize,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 12),
+                                          ],
                                         ],
                                         if (sectionBlocks.isEmpty)
                                           Text(

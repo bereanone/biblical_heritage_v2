@@ -1071,12 +1071,18 @@ class _EpubSectionDecision {
 
 class _EpubPackageInfo {
   const _EpubPackageInfo({
+    this.containerFound = false,
+    this.opfPath,
+    this.opfFound = false,
     this.coverImagePath,
     this.spinePaths = const <String>{},
     this.spineOrderedPaths = const <String>[],
     this.navigationPaths = const <String>{},
   });
 
+  final bool containerFound;
+  final String? opfPath;
+  final bool opfFound;
   final String? coverImagePath;
   final Set<String> spinePaths;
   final List<String> spineOrderedPaths;
@@ -1121,6 +1127,23 @@ class _EpubPackageInfo {
     }
     return 'navigation';
   }
+}
+
+/// Result of validating that an EPUB has the minimum structure required to
+/// index: a container.xml pointing at an OPF package document, a non-empty
+/// spine, and at least one spine-referenced content document present in the
+/// archive. Distinguishes genuinely broken/incomplete source files from
+/// EPUBs that simply contain no scripture references.
+class _EpubStructuralValidation {
+  const _EpubStructuralValidation._({required this.isValid, this.reason});
+
+  const _EpubStructuralValidation.valid() : this._(isValid: true);
+
+  const _EpubStructuralValidation.invalid(String reason)
+    : this._(isValid: false, reason: reason);
+
+  final bool isValid;
+  final String? reason;
 }
 
 class _EpubSectionView {

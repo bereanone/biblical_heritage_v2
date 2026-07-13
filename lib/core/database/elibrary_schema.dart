@@ -5,14 +5,16 @@ import 'elibrary_sdp_cleanup.dart';
 class ELibrarySchema {
   ELibrarySchema._();
 
-  static const currentVersion = 1;
+  static const currentVersion = 2;
   static const initialMigrationKey = 'phase_1_initial_schema';
   static const contributorsMigrationKey = 'phase_2_contributors';
+  static const packageLineageMigrationKey = 'phase_3_package_lineage';
 
   static Future<void> ensure(Database db) async {
     await _retryOnLocked(() async {
       await _createMigrationTable(db);
       await _createCoreTables(db);
+      await _ensurePackageLineageColumns(db);
       await _createIndexes(db);
       await _seedInitialMigration(db);
       await ELibraryBogusSdpCleanupService.instance.run(db);
@@ -99,6 +101,8 @@ class ELibrarySchema {
         file_name TEXT NOT NULL,
         relative_path TEXT NOT NULL,
         file_hash TEXT,
+        source_work_id TEXT,
+        source_package_id TEXT,
         file_size INTEGER,
         modified_at TEXT,
         mime_type TEXT,
@@ -320,6 +324,24 @@ class ELibrarySchema {
     ''');
   }
 
+  static Future<void> _ensurePackageLineageColumns(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(library_items)');
+    final names = columns
+        .map((row) => row['name']?.toString().toLowerCase())
+        .whereType<String>()
+        .toSet();
+    if (!names.contains('source_work_id')) {
+      await db.execute(
+        'ALTER TABLE library_items ADD COLUMN source_work_id TEXT',
+      );
+    }
+    if (!names.contains('source_package_id')) {
+      await db.execute(
+        'ALTER TABLE library_items ADD COLUMN source_package_id TEXT',
+      );
+    }
+  }
+
   static Future<void> _seedInitialMigration(Database db) async {
     final now = _utcNow();
     await db.insert('elibrary_schema_migrations', {
@@ -338,6 +360,15 @@ class ELibrarySchema {
       'status': 'completed',
       'details':
           'Added library_contributors and library_item_contributors tables.',
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.insert('elibrary_schema_migrations', {
+      'migration_key': packageLineageMigrationKey,
+      'from_version': 1,
+      'to_version': currentVersion,
+      'applied_at': now,
+      'status': 'completed',
+      'details':
+          'Added nullable source_work_id and source_package_id to library_items.',
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 

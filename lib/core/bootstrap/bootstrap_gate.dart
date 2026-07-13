@@ -72,8 +72,9 @@ class _BootstrapGateState extends State<BootstrapGate> {
       });
     });
     try {
-      final snapshot =
-          await StartupCoordinator.instance.initialize(onStatus: _updateStatus);
+      final snapshot = await StartupCoordinator.instance.initialize(
+        onStatus: _updateStatus,
+      );
       _startupWatchdog?.cancel();
       if (!mounted || attempt != _bootstrapAttempt) return;
       setState(() {
@@ -191,9 +192,7 @@ class _BootstrapGateState extends State<BootstrapGate> {
   Future<void> _openLibraryRootSetup() async {
     if (!mounted) return;
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const LibraryRootSetupScreen(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => const LibraryRootSetupScreen()),
     );
   }
 

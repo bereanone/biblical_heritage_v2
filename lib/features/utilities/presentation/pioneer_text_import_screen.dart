@@ -7,6 +7,7 @@ import '../data/pioneer_html_capture_folder_scanner.dart';
 import '../data/pioneer_text_import_service.dart';
 import '../data/pioneer_source_catalog.dart';
 import 'egw_copied_range_import_dialog.dart';
+
 typedef PioneerExistingCapturedImportInspector =
     Future<PioneerExistingCapturedImportSummary> Function(
       PioneerSourceWork work,
@@ -1809,6 +1810,7 @@ class _ImportResultLine extends StatelessWidget {
     final color = switch (result.status) {
       PioneerImportWorkStatus.imported => scheme.primary,
       PioneerImportWorkStatus.skippedExisting => scheme.secondary,
+      PioneerImportWorkStatus.packageLineageConflict => scheme.error,
       PioneerImportWorkStatus.skippedNotImportable ||
       PioneerImportWorkStatus.skippedUnsupportedSource => scheme.error,
       PioneerImportWorkStatus.failed =>
@@ -1817,6 +1819,8 @@ class _ImportResultLine extends StatelessWidget {
     final statusLabel = switch (result.status) {
       PioneerImportWorkStatus.imported => 'Imported',
       PioneerImportWorkStatus.skippedExisting => 'Skipped existing',
+      PioneerImportWorkStatus.packageLineageConflict =>
+        'Package lineage conflict',
       PioneerImportWorkStatus.skippedNotImportable => 'Blocked',
       PioneerImportWorkStatus.skippedUnsupportedSource => 'Unsupported',
       PioneerImportWorkStatus.failed =>

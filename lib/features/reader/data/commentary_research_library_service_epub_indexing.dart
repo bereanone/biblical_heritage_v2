@@ -33,6 +33,9 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     final now = DateTime.now().toUtc().toIso8601String();
     final ext = p.extension(file.path).toLowerCase();
     final isEpub = ext == '.epub';
+    final structuralValidation = isEpub
+        ? await _validateEpubStructure(file)
+        : null;
     final title = isEpub
         ? await _readTitle(file) ?? p.basenameWithoutExtension(file.path)
         : p.basenameWithoutExtension(file.path);
@@ -97,8 +100,12 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
       'last_opened': null,
       'source_type': metadata.sourceType,
       'indexed_at': isEpub ? null : now,
-      'index_status': isEpub ? 'pending' : 'metadata_only',
-      'index_error': null,
+      'index_status': !isEpub
+          ? 'metadata_only'
+          : (structuralValidation!.isValid ? 'pending' : 'needs_attention'),
+      'index_error': isEpub && !structuralValidation!.isValid
+          ? structuralValidation.reason
+          : null,
       'epub_href': null,
       'epub_cfi': null,
       'anchor_id': null,
@@ -114,6 +121,24 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
       'last_synced_at': null,
       'change_id': null,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+    if (isEpub && !structuralValidation!.isValid) {
+      final reason = structuralValidation.reason ?? 'Invalid EPUB structure.';
+      stats.indexingErrors.add('${file.path}: $reason');
+      return _FileIndexResult(
+        fileItem: CommentaryResearchFileItem(
+          id: itemId,
+          title: title,
+          fileName: p.basename(file.path),
+          relativePath: relativePath,
+          fileSize: stat.size,
+          indexed: false,
+        ),
+        indexedLinks: 0,
+        matches: const [],
+        warnings: [reason],
+      );
+    }
 
     if (isEpub) {
       final coverPath = await _cacheEpubCover(
@@ -204,7 +229,7 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
         where: 'library_item_id = ?',
         whereArgs: [itemId],
       );
-      await _storeLibraryTextBlocks(
+      final textBlockCount = await _storeLibraryTextBlocks(
         db: db,
         file: file,
         libraryItemId: itemId,
@@ -266,12 +291,17 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
         );
       }
 
+      final hasReadableContent = textBlockCount > 0;
       await db.update(
         'library_items',
         {
           'indexed_at': now,
-          'index_status': inserted > 0 ? 'indexed' : 'indexed_empty',
-          'index_error': null,
+          'index_status': !hasReadableContent
+              ? 'needs_attention'
+              : (inserted > 0 ? 'indexed' : 'indexed_empty'),
+          'index_error': hasReadableContent
+              ? null
+              : 'No readable text content found after parsing.',
           'updated_at': now,
         },
         where: 'id = ?',
@@ -311,7 +341,12 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
         ),
         indexedLinks: inserted,
         matches: matches,
-        warnings: extracted.warnings,
+        warnings: hasReadableContent
+            ? extracted.warnings
+            : [
+                ...extracted.warnings,
+                'No readable text content found after parsing.',
+              ],
       );
     } catch (error) {
       stats.indexingErrors.add(error.toString());
@@ -340,6 +375,57 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
         warnings: [error.toString()],
       );
     }
+  }
+
+  /// Validates that [file] is a structurally complete EPUB before any
+  /// content is extracted: the ZIP must open, reference an OPF package
+  /// document via container.xml, that OPF must declare a non-empty spine,
+  /// and at least one spine-referenced content document must actually exist
+  /// in the archive. Catches incomplete source-side stubs (valid ZIP, no
+  /// package document) so they are never reported as successfully indexed.
+  Future<_EpubStructuralValidation> _validateEpubStructure(File file) async {
+    Archive archive;
+    try {
+      final bytes = await file.readAsBytes();
+      archive = ZipDecoder().decodeBytes(bytes, verify: false);
+    } catch (error) {
+      return _EpubStructuralValidation.invalid(
+        'Not a valid ZIP/EPUB container: $error',
+      );
+    }
+
+    final packageInfo = _readEpubPackageInfo(archive);
+    if (!packageInfo.containerFound) {
+      return const _EpubStructuralValidation.invalid(
+        'Missing META-INF/container.xml.',
+      );
+    }
+    if (packageInfo.opfPath == null || packageInfo.opfPath!.trim().isEmpty) {
+      return const _EpubStructuralValidation.invalid(
+        'container.xml does not reference an OPF package document.',
+      );
+    }
+    if (!packageInfo.opfFound) {
+      return _EpubStructuralValidation.invalid(
+        'Referenced OPF package document "${packageInfo.opfPath}" is '
+        'missing from the archive.',
+      );
+    }
+    if (packageInfo.spineOrderedPaths.isEmpty) {
+      return const _EpubStructuralValidation.invalid(
+        'OPF package document has no readable spine.',
+      );
+    }
+    final hasSpineContent = packageInfo.spineOrderedPaths.any(
+      (spinePath) => packageInfo.findArchiveEntry(archive, spinePath) != null,
+    );
+    if (!hasSpineContent) {
+      return const _EpubStructuralValidation.invalid(
+        'None of the spine-referenced content documents exist in the '
+        'archive.',
+      );
+    }
+    return const _EpubStructuralValidation.valid();
   }
 
   String? _managedEgwReferenceBookAbbreviation({
@@ -515,7 +601,7 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     return _ReferenceExtractionResult(hits: hits, warnings: warnings);
   }
 
-  Future<void> _storeLibraryTextBlocks({
+  Future<int> _storeLibraryTextBlocks({
     required Database db,
     required File file,
     required String libraryItemId,
@@ -542,23 +628,20 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
         if (text.isEmpty) continue;
         globalParagraphIndex += 1;
         paragraphOnSection += 1;
-        await db.insert(
-          'library_text_blocks',
-          {
-            'library_item_id': libraryItemId,
-            'epub_href': section.entryName,
-            'spine_index': section.spineIndex,
-            'paragraph_index': globalParagraphIndex,
-            'paragraph_on_section': paragraphOnSection,
-            'section_title': sectionTitle,
-            'plain_text': text,
-            'created_at': now,
-            'updated_at': now,
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        await db.insert('library_text_blocks', {
+          'library_item_id': libraryItemId,
+          'epub_href': section.entryName,
+          'spine_index': section.spineIndex,
+          'paragraph_index': globalParagraphIndex,
+          'paragraph_on_section': paragraphOnSection,
+          'section_title': sectionTitle,
+          'plain_text': text,
+          'created_at': now,
+          'updated_at': now,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
     }
+    return globalParagraphIndex;
   }
 
   Future<void> _storeNavigationMetadata({
@@ -997,11 +1080,12 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     required bool isEpub,
   }) =>
       (this as dynamic)._inferLibraryFileMetadata(
-        relativePath: relativePath,
-        folderType: folderType,
-        file: file,
-        isEpub: isEpub,
-      ) as _LibraryFileMetadata;
+            relativePath: relativePath,
+            folderType: folderType,
+            file: file,
+            isEpub: isEpub,
+          )
+          as _LibraryFileMetadata;
 
   Future<String?> _resolveLibraryAuthor({
     required File file,
@@ -1009,10 +1093,11 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     required String relativePath,
   }) =>
       (this as dynamic)._resolveLibraryAuthor(
-        file: file,
-        metadata: metadata,
-        relativePath: relativePath,
-      ) as Future<String?>;
+            file: file,
+            metadata: metadata,
+            relativePath: relativePath,
+          )
+          as Future<String?>;
 
   Future<String?> _cacheEpubCover({
     required File file,
@@ -1020,10 +1105,11 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     required String itemId,
   }) =>
       (this as dynamic)._cacheEpubCover(
-        file: file,
-        rootPath: rootPath,
-        itemId: itemId,
-      ) as Future<String?>;
+            file: file,
+            rootPath: rootPath,
+            itemId: itemId,
+          )
+          as Future<String?>;
 
   Future<int> _countLinks(Database db, String itemId, String folderType) =>
       (this as dynamic)._countLinks(db, itemId, folderType) as Future<int>;
@@ -1036,12 +1122,13 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     bool preserveHeadingBlocks = false,
   }) =>
       (this as dynamic)._readBodySections(
-        file: file,
-        libraryItemId: libraryItemId,
-        stats: stats,
-        includeFrontMatter: includeFrontMatter,
-        preserveHeadingBlocks: preserveHeadingBlocks,
-      ) as Future<List<_EpubSectionChunk>>;
+            file: file,
+            libraryItemId: libraryItemId,
+            stats: stats,
+            includeFrontMatter: includeFrontMatter,
+            preserveHeadingBlocks: preserveHeadingBlocks,
+          )
+          as Future<List<_EpubSectionChunk>>;
 
   String _cleanCommentaryParagraph(
     String text, {
@@ -1049,13 +1136,15 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     required String bookTitle,
   }) =>
       (this as dynamic)._cleanCommentaryParagraph(
-        text,
-        sectionTitle: sectionTitle,
-        bookTitle: bookTitle,
-      ) as String;
+            text,
+            sectionTitle: sectionTitle,
+            bookTitle: bookTitle,
+          )
+          as String;
 
   String _expandParagraphContext(List<String> paragraphs, int startIndex) =>
-      (this as dynamic)._expandParagraphContext(paragraphs, startIndex) as String;
+      (this as dynamic)._expandParagraphContext(paragraphs, startIndex)
+          as String;
 
   String _stripHtml(String text) =>
       (this as dynamic)._stripHtml(text) as String;
@@ -1073,14 +1162,15 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     required String updatedAt,
   }) =>
       (this as dynamic)._extractNavigationEntriesFromDocument(
-        raw: raw,
-        basePath: basePath,
-        libraryItemId: libraryItemId,
-        navType: navType,
-        deviceId: deviceId,
-        createdAt: createdAt,
-        updatedAt: updatedAt,
-      ) as List<_NavigationEntryDraft>;
+            raw: raw,
+            basePath: basePath,
+            libraryItemId: libraryItemId,
+            navType: navType,
+            deviceId: deviceId,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+          )
+          as List<_NavigationEntryDraft>;
 
   String _navigationEntryKey(String label, String? href, String? anchorId) =>
       (this as dynamic)._navigationEntryKey(label, href, anchorId) as String;
@@ -1098,17 +1188,16 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     required bool includeHeadingBlocks,
   }) =>
       (this as dynamic)._extractBodyBlocks(
-        raw: raw,
-        chapterPath: chapterPath,
-        sectionTitle: sectionTitle,
-        includeHeadingBlocks: includeHeadingBlocks,
-      ) as List<LibraryBookBlock>;
+            raw: raw,
+            chapterPath: chapterPath,
+            sectionTitle: sectionTitle,
+            includeHeadingBlocks: includeHeadingBlocks,
+          )
+          as List<LibraryBookBlock>;
 
   bool _isChapterTitleBlock(String text, {required String sectionTitle}) =>
-      (this as dynamic)._isChapterTitleBlock(
-        text,
-        sectionTitle: sectionTitle,
-      ) as bool;
+      (this as dynamic)._isChapterTitleBlock(text, sectionTitle: sectionTitle)
+          as bool;
 
   String _generatedHeadingAnchor({
     required String chapterPath,
@@ -1117,17 +1206,17 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     String? explicitAnchorId,
   }) =>
       (this as dynamic)._generatedHeadingAnchor(
-        chapterPath: chapterPath,
-        headingIndex: headingIndex,
-        headingText: headingText,
-        explicitAnchorId: explicitAnchorId,
-      ) as String;
+            chapterPath: chapterPath,
+            headingIndex: headingIndex,
+            headingText: headingText,
+            explicitAnchorId: explicitAnchorId,
+          )
+          as String;
 
   String _slug(String input) => (this as dynamic)._slug(input) as String;
 
   int _compareNavigationDrafts(
     _NavigationEntryDraft a,
     _NavigationEntryDraft b,
-  ) =>
-      (this as dynamic)._compareNavigationDrafts(a, b) as int;
+  ) => (this as dynamic)._compareNavigationDrafts(a, b) as int;
 }

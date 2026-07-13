@@ -204,8 +204,8 @@ void main() {
       ]),
     );
 
-    expect(await ELibrarySchema.currentAppliedVersion(db), 1);
-    expect(await ELibrarySchema.schemaStatus(db), 'ready (version 1)');
+    expect(await ELibrarySchema.currentAppliedVersion(db), 2);
+    expect(await ELibrarySchema.schemaStatus(db), 'ready (version 2)');
   });
 
   test(

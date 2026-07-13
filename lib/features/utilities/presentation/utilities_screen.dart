@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -470,7 +472,6 @@ class UtilitiesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -490,142 +491,366 @@ class UtilitiesScreen extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [
-                colorScheme.surface,
-                colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
-                colorScheme.surface,
-              ],
+              colors: _utilitiesBackgroundGradient(theme.colorScheme),
             ),
           ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
-                children: [
-                  Text(
-                    'Setup and sharing tools for Biblical Heritage #StudyBible.',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyLarge,
-                  ),
-                  const SizedBox(height: 20),
-                  _UtilityActionButton(
-                    label: 'Church AutoMute',
-                    icon: Icons.phone_android,
-                    filled: true,
-                    onPressed: () => _showChurchAutoMuteDialog(context),
-                  ),
-                  const SizedBox(height: 12),
-                  _UtilityActionButton(
-                    label: 'Backup User Data',
-                    icon: Icons.cloud,
-                    filled: true,
-                    onPressed: () => _showBackupUserDataDialog(context),
-                  ),
-                  const SizedBox(height: 12),
-                  _UtilityActionButton(
-                    label: 'Restore Backup',
-                    icon: Icons.restore,
-                    filled: false,
-                    onPressed: () => _showRestoreBackupDialog(context),
-                  ),
-                  const SizedBox(height: 12),
-                  _UtilityActionButton(
-                    label: 'Storage and Index Report',
-                    icon: Icons.storage_rounded,
-                    filled: false,
-                    onPressed: () => _showStorageAndIndexReport(context),
-                  ),
-                  const SizedBox(height: 12),
-                  _UtilityActionButton(
-                    label: 'Library Root Setup',
-                    icon: Icons.library_books_outlined,
-                    filled: true,
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const LibraryRootSetupScreen(),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isTwoColumn =
+                  constraints.maxWidth >= _wideUtilitiesBreakpoint;
+              final horizontalPadding = isTwoColumn ? 32.0 : 20.0;
+              final contentWidth = isTwoColumn
+                  ? math.min(constraints.maxWidth, _wideUtilitiesMaxWidth)
+                  : constraints.maxWidth;
+
+              return SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(
+                  horizontalPadding,
+                  14,
+                  horizontalPadding,
+                  28,
+                ),
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: SizedBox(
+                    width: contentWidth,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Setup and sharing tools for Biblical Heritage #StudyBible.',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyLarge,
                         ),
-                      );
-                    },
+                        const SizedBox(height: 20),
+                        if (isTwoColumn)
+                          _UtilitiesTwoColumnDashboard(
+                            leftSections: [
+                              _UtilitiesSectionCard(
+                                key: const Key('utilities-section-app-tools'),
+                                title: 'App Tools',
+                                helperText:
+                                    'Manage common app settings and protect your personal data.',
+                                actions: [
+                                  _UtilityActionButton(
+                                    label: 'Church AutoMute',
+                                    icon: Icons.phone_android,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _showChurchAutoMuteDialog(context),
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Backup User Data',
+                                    icon: Icons.cloud,
+                                    filled: true,
+                                    onPressed: () =>
+                                        _showBackupUserDataDialog(context),
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Restore Backup',
+                                    icon: Icons.restore,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _showRestoreBackupDialog(context),
+                                  ),
+                                ],
+                              ),
+                              _UtilitiesSectionCard(
+                                key: const Key('utilities-section-elibrary'),
+                                title: 'eLibrary',
+                                helperText:
+                                    'Manage book storage, downloads, imports, and indexing.',
+                                actions: [
+                                  _UtilityActionButton(
+                                    label: 'eLibrary Setup',
+                                    icon: Icons.library_books_outlined,
+                                    filled: true,
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) =>
+                                              const ELibrarySetupScreen(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Download Books',
+                                    icon: Icons.download_rounded,
+                                    filled: false,
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) =>
+                                              const ELibraryDownloadScreen(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Import Pioneer Books',
+                                    icon: Icons.menu_book_outlined,
+                                    filled: false,
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) =>
+                                              const PioneerTextImportScreen(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Library Storage',
+                                    icon: Icons.library_books_outlined,
+                                    filled: false,
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) =>
+                                              const LibraryRootSetupScreen(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Storage & Index Report',
+                                    icon: Icons.storage_rounded,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _showStorageAndIndexReport(context),
+                                  ),
+                                ],
+                              ),
+                            ],
+                            rightSections: [
+                              _UtilitiesSectionCard(
+                                key: const Key(
+                                  'utilities-section-commentary-sharing',
+                                ),
+                                title: 'Commentary & Sharing',
+                                helperText:
+                                    'Learn how commentary blocks work and share them with others.',
+                                actions: [
+                                  _UtilityActionButton(
+                                    label: 'Commentary Instructions',
+                                    icon: Icons.help_outline,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _showCommentaryInstructionsDialog(
+                                          context,
+                                        ),
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Commentary Block Sharing',
+                                    icon: Icons.import_export,
+                                    filled: true,
+                                    onPressed: () =>
+                                        _showCommentaryBlockSharingDialog(
+                                          context,
+                                        ),
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Community Links',
+                                    icon: Icons.public,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _showCommunityLinksDialog(context),
+                                  ),
+                                ],
+                              ),
+                              _UtilitiesSectionCard(
+                                key: const Key('utilities-section-support'),
+                                title: 'Support & More',
+                                helperText:
+                                    'Support the project and open additional study tools.',
+                                actions: [
+                                  _UtilityActionButton(
+                                    label: 'Support Biblical Heritage',
+                                    icon: Icons.volunteer_activism_outlined,
+                                    filled: true,
+                                    onPressed: () =>
+                                        _showSupportDialog(context),
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Open Bible Explorer',
+                                    icon: Icons.menu_book,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _openBibleExplorer(context),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          )
+                        else
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _UtilitiesSectionCard(
+                                key: const Key('utilities-section-app-tools'),
+                                title: 'App Tools',
+                                helperText:
+                                    'Manage common app settings and protect your personal data.',
+                                actions: [
+                                  _UtilityActionButton(
+                                    label: 'Church AutoMute',
+                                    icon: Icons.phone_android,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _showChurchAutoMuteDialog(context),
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Backup User Data',
+                                    icon: Icons.cloud,
+                                    filled: true,
+                                    onPressed: () =>
+                                        _showBackupUserDataDialog(context),
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Restore Backup',
+                                    icon: Icons.restore,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _showRestoreBackupDialog(context),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              _UtilitiesSectionCard(
+                                key: const Key('utilities-section-elibrary'),
+                                title: 'eLibrary',
+                                helperText:
+                                    'Manage book storage, downloads, imports, and indexing.',
+                                actions: [
+                                  _UtilityActionButton(
+                                    label: 'eLibrary Setup',
+                                    icon: Icons.library_books_outlined,
+                                    filled: true,
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) =>
+                                              const ELibrarySetupScreen(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Download Books',
+                                    icon: Icons.download_rounded,
+                                    filled: false,
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) =>
+                                              const ELibraryDownloadScreen(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Import Pioneer Books',
+                                    icon: Icons.menu_book_outlined,
+                                    filled: false,
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) =>
+                                              const PioneerTextImportScreen(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Library Storage',
+                                    icon: Icons.library_books_outlined,
+                                    filled: false,
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) =>
+                                              const LibraryRootSetupScreen(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Storage & Index Report',
+                                    icon: Icons.storage_rounded,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _showStorageAndIndexReport(context),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              _UtilitiesSectionCard(
+                                key: const Key(
+                                  'utilities-section-commentary-sharing',
+                                ),
+                                title: 'Commentary & Sharing',
+                                helperText:
+                                    'Learn how commentary blocks work and share them with others.',
+                                actions: [
+                                  _UtilityActionButton(
+                                    label: 'Commentary Instructions',
+                                    icon: Icons.help_outline,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _showCommentaryInstructionsDialog(
+                                          context,
+                                        ),
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Commentary Block Sharing',
+                                    icon: Icons.import_export,
+                                    filled: true,
+                                    onPressed: () =>
+                                        _showCommentaryBlockSharingDialog(
+                                          context,
+                                        ),
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Community Links',
+                                    icon: Icons.public,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _showCommunityLinksDialog(context),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              _UtilitiesSectionCard(
+                                key: const Key('utilities-section-support'),
+                                title: 'Support & More',
+                                helperText:
+                                    'Support the project and open additional study tools.',
+                                actions: [
+                                  _UtilityActionButton(
+                                    label: 'Support Biblical Heritage',
+                                    icon: Icons.volunteer_activism_outlined,
+                                    filled: true,
+                                    onPressed: () =>
+                                        _showSupportDialog(context),
+                                  ),
+                                  _UtilityActionButton(
+                                    label: 'Open Bible Explorer',
+                                    icon: Icons.menu_book,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _openBibleExplorer(context),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 12),
-                  _UtilityActionButton(
-                    label: 'eLibrary Downloads',
-                    icon: Icons.download_rounded,
-                    filled: true,
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const ELibraryDownloadScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  _UtilityActionButton(
-                    label: 'eLibrary Setup',
-                    icon: Icons.library_books_outlined,
-                    filled: true,
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const ELibrarySetupScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  _UtilityActionButton(
-                    label: 'Pioneer Library Import',
-                    icon: Icons.menu_book_outlined,
-                    filled: false,
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const PioneerTextImportScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  _UtilityActionButton(
-                    label: 'Commentary Instructions',
-                    icon: Icons.help_outline,
-                    filled: false,
-                    onPressed: () => _showCommentaryInstructionsDialog(context),
-                  ),
-                  const SizedBox(height: 12),
-                  _UtilityActionButton(
-                    label: 'Commentary Block Sharing',
-                    icon: Icons.import_export,
-                    filled: true,
-                    onPressed: () => _showCommentaryBlockSharingDialog(context),
-                  ),
-                  const SizedBox(height: 12),
-                  _UtilityActionButton(
-                    label: 'Community Links',
-                    icon: Icons.public,
-                    filled: false,
-                    onPressed: () => _showCommunityLinksDialog(context),
-                  ),
-                  const SizedBox(height: 12),
-                  _UtilityActionButton(
-                    label: 'Support Biblical Heritage',
-                    icon: Icons.volunteer_activism_outlined,
-                    filled: true,
-                    onPressed: () => _showSupportDialog(context),
-                  ),
-                  const SizedBox(height: 12),
-                  _UtilityActionButton(
-                    label: 'Open Bible Explorer',
-                    icon: Icons.menu_book,
-                    filled: false,
-                    onPressed: () => _openBibleExplorer(context),
-                  ),
-                ],
-              ),
-            ),
+                ),
+              );
+            },
           ),
         ),
       ),
@@ -750,13 +975,17 @@ class _UtilityActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final borderRadius = BorderRadius.circular(999);
+    final buttonFill = Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFFD97706);
     final style = filled
         ? FilledButton.styleFrom(
-            backgroundColor: colorScheme.primary,
-            foregroundColor: colorScheme.onPrimary,
+            backgroundColor: buttonFill,
+            foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             shape: RoundedRectangleBorder(borderRadius: borderRadius),
             textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            alignment: Alignment.centerLeft,
           )
         : OutlinedButton.styleFrom(
             foregroundColor: colorScheme.primary,
@@ -764,22 +993,170 @@ class _UtilityActionButton extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             shape: RoundedRectangleBorder(borderRadius: borderRadius),
             textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            alignment: Alignment.centerLeft,
           );
 
-    return filled
-        ? FilledButton.icon(
-            onPressed: onPressed,
-            style: style,
-            icon: Icon(icon, size: 18),
-            label: Text(label),
-          )
-        : OutlinedButton.icon(
-            onPressed: onPressed,
-            style: style,
-            icon: Icon(icon, size: 18),
-            label: Text(label),
-          );
+    return SizedBox(
+      width: double.infinity,
+      child: filled
+          ? FilledButton.icon(
+              onPressed: onPressed,
+              style: style,
+              icon: Icon(icon, size: 18),
+              label: Text(label, maxLines: 2),
+            )
+          : OutlinedButton.icon(
+              onPressed: onPressed,
+              style: style,
+              icon: Icon(icon, size: 18),
+              label: Text(label, maxLines: 2),
+            ),
+    );
   }
+}
+
+class _UtilitiesSectionCard extends StatelessWidget {
+  const _UtilitiesSectionCard({
+    super.key,
+    required this.title,
+    required this.helperText,
+    required this.actions,
+  });
+
+  final String title;
+  final String helperText;
+  final List<_UtilityActionButton> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              helperText,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 16),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final useTwoColumns =
+                    constraints.maxWidth >= _buttonGridBreakpoint;
+                final buttonSpacing = 12.0;
+                final columns = useTwoColumns ? 2 : 1;
+                final buttonWidth = useTwoColumns
+                    ? (constraints.maxWidth - buttonSpacing) / 2
+                    : constraints.maxWidth;
+
+                if (columns == 1) {
+                  return Column(
+                    children: [
+                      for (var i = 0; i < actions.length; i++) ...[
+                        SizedBox(width: buttonWidth, child: actions[i]),
+                        if (i != actions.length - 1) const SizedBox(height: 12),
+                      ],
+                    ],
+                  );
+                }
+
+                final rows = <Widget>[];
+                for (var i = 0; i < actions.length; i += 2) {
+                  final first = actions[i];
+                  final second = i + 1 < actions.length ? actions[i + 1] : null;
+                  rows.add(
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(width: buttonWidth, child: first),
+                        if (second != null) ...[
+                          const SizedBox(width: 12),
+                          SizedBox(width: buttonWidth, child: second),
+                        ],
+                      ],
+                    ),
+                  );
+                  if (i + 2 < actions.length) {
+                    rows.add(const SizedBox(height: 12));
+                  }
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: rows,
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UtilitiesTwoColumnDashboard extends StatelessWidget {
+  const _UtilitiesTwoColumnDashboard({
+    required this.leftSections,
+    required this.rightSections,
+  });
+
+  final List<Widget> leftSections;
+  final List<Widget> rightSections;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < leftSections.length; i++) ...[
+                leftSections[i],
+                if (i != leftSections.length - 1) const SizedBox(height: 12),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < rightSections.length; i++) ...[
+                rightSections[i],
+                if (i != rightSections.length - 1) const SizedBox(height: 12),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+const double _wideUtilitiesBreakpoint = 900;
+const double _wideUtilitiesMaxWidth = 1280;
+const double _buttonGridBreakpoint = 520;
+
+List<Color> _utilitiesBackgroundGradient(ColorScheme colorScheme) {
+  return [
+    colorScheme.surface,
+    colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+    colorScheme.surface,
+  ];
 }
 
 class _SetupActionTile extends StatelessWidget {

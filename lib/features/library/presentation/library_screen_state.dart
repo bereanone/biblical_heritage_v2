@@ -141,8 +141,9 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
       setState(() => _loadingCaptureImports = true);
     }
     try {
-      final report = await (widget.capturedImportAvailabilityLoader ??
-          _defaultCapturedImportAvailabilityLoader)();
+      final report =
+          await (widget.capturedImportAvailabilityLoader ??
+              _defaultCapturedImportAvailabilityLoader)();
       if (!mounted) return;
       setState(() {
         _captureImportReport = report;
@@ -459,6 +460,10 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
 
   String? _initialBookHref(LibraryCatalogItem item) {
     if (item.isPeriodical) return null;
+    // Only a position saved by an actual open counts; a stray epub_href on a
+    // never-opened item must not override the reader's first-open defaults
+    // (devotional current-date entry, front-matter skipping).
+    if (item.lastOpened == null) return null;
     final savedHref = item.epubHref?.trim() ?? '';
     if (savedHref.isNotEmpty) return savedHref;
 
@@ -595,32 +600,14 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   }
 
   List<LibraryCatalogItem> get _recentBooks {
-    final query = compactLibrarySearchText(_searchQuery);
-    final initial = query.isEmpty
-        ? _selectedInitialLetter?.trim().toUpperCase()
-        : null;
-    final sortByAuthorFirst =
-        _collectionFilter.trim().toLowerCase() == 'adventist_pioneer_library';
-    final filtered = _items.where((item) {
-      if (!_matchesFileTypeFilter(item, _fileTypeFilter)) return false;
-      if (!libraryItemMatchesCollectionFilter(item, _collectionFilter)) {
-        return false;
-      }
-      if (!_matchesInitialLetter(item, initial)) return false;
-      if (query.isEmpty) return true;
-      final haystack = libraryCatalogSearchTextForItem(item);
-      return haystack.contains(query);
-    }).toList();
-    filtered.sort((a, b) {
-      final left =
-          b.lastOpened ?? b.dateAdded ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final right =
-          a.lastOpened ?? a.dateAdded ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final compare = left.compareTo(right);
-      if (compare != 0) return compare;
-      return _compareBooksForShelf(a, b, sortByAuthorFirst: sortByAuthorFirst);
-    });
-    return filtered;
+    return selectRecentLibraryItems(_items, searchQuery: _searchQuery);
+  }
+
+  String _recentEmptyMessage() {
+    if (_searchQuery.trim().isNotEmpty) {
+      return 'No recently opened items match "${_searchQuery.trim()}".';
+    }
+    return 'No recently opened items yet. Books you open will appear here.';
   }
 
   bool _matchesInitialLetter(
@@ -960,7 +947,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
                                             selectedBookId: _selectedBookId,
                                             onSelectBook: _selectBook,
                                             isEmptyMessage:
-                                                _booksEmptyMessage(),
+                                                _recentEmptyMessage(),
                                           ),
                                         },
                                       ),

@@ -286,11 +286,11 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
     ).firstMatch(containerXml);
     final opfPath = opfPathMatch?.group(1);
     if (opfPath == null || opfPath.trim().isEmpty) {
-      return const _EpubPackageInfo();
+      return const _EpubPackageInfo(containerFound: true);
     }
     final opfEntry = archive.findFile(opfPath);
     if (opfEntry == null) {
-      return const _EpubPackageInfo();
+      return _EpubPackageInfo(containerFound: true, opfPath: opfPath);
     }
     final opfXml = utf8.decode(
       opfEntry.content as List<int>,
@@ -347,6 +347,9 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
     }
 
     return _EpubPackageInfo(
+      containerFound: true,
+      opfPath: opfPath,
+      opfFound: true,
       coverImagePath: coverImagePath,
       spinePaths: spinePaths.toSet(),
       spineOrderedPaths: List<String>.unmodifiable(

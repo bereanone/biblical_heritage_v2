@@ -887,7 +887,7 @@ class _BookCoverCard extends StatelessWidget {
               ),
               Text(
                 subtitle,
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: libraryCaptionTextStyle(
                   context,
@@ -1070,7 +1070,7 @@ class _RecentStamp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final stamp = item.lastOpened ?? item.dateAdded;
+    final stamp = item.lastOpened;
     if (stamp == null) return const SizedBox.shrink();
     return Text(
       _stamp(stamp),

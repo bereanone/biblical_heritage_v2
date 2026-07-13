@@ -8,6 +8,7 @@ import '../../../core/navigation/app_route_observer.dart';
 import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/app_theme_mode.dart';
 import '../data/library_catalog_service.dart';
+import '../data/library_recent_items.dart';
 import '../data/library_section_heuristics.dart';
 import '../../utilities/data/pioneer_captured_html_import_availability_service.dart';
 import '../../utilities/data/pioneer_captured_html_import_folder_service.dart';
@@ -50,8 +51,7 @@ class LibraryScreen extends StatefulWidget {
   final AppThemeMode? themeMode;
   final ValueChanged<AppThemeMode>? onThemeChanged;
   final CapturedImportAvailabilityLoader? capturedImportAvailabilityLoader;
-  final PioneerCapturedHtmlAvailableImportReport?
-  initialCapturedImportReport;
+  final PioneerCapturedHtmlAvailableImportReport? initialCapturedImportReport;
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();

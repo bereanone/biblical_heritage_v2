@@ -10,6 +10,7 @@ import 'package:studybible2/core/bootstrap/library_root_service.dart';
 import 'package:studybible2/core/database/elibrary_database.dart';
 import 'package:studybible2/core/database/user_database.dart';
 import 'package:studybible2/features/library/data/library_catalog_service.dart';
+import 'package:studybible2/features/library/data/library_reader_opening.dart';
 import 'package:studybible2/features/library/presentation/library_book_reader_screen.dart';
 import 'package:studybible2/features/library/presentation/library_navigation_tree.dart';
 import 'package:studybible2/features/reader/data/commentary_research_library_service.dart';
@@ -137,7 +138,10 @@ Future<Directory> _createCaptureFolder({
   required String authorName,
   required String bodyHtml,
 }) async {
-  final folder = Directory(p.join(root.path, folderName));
+  final booksRoot = p.basename(root.path) == 'Books'
+      ? root
+      : Directory(p.join(root.path, 'Books'));
+  final folder = Directory(p.join(booksRoot.path, folderName));
   await folder.create(recursive: true);
   await File(p.join(folder.path, 'metadata.json')).writeAsString('''
 {
@@ -721,6 +725,209 @@ void main() {
     );
   });
 
+  test(
+    'empty Preface contents entry is hidden while readable Preface stays',
+    () {
+      final emptyPreface = LibraryBookSection(
+        entryName: 'preface.xhtml',
+        title: 'PREFACE.',
+        paragraphs: const <String>[],
+        blocks: const <LibraryBookBlock>[],
+        spineIndex: 1,
+      );
+      final readablePreface = LibraryBookSection(
+        entryName: 'preface-readable.xhtml',
+        title: 'PREFACE.',
+        paragraphs: const <String>['This preface introduces the book.'],
+        blocks: const <LibraryBookBlock>[
+          LibraryBookBlock(
+            html: '<p>This preface introduces the book.</p>',
+            text: 'This preface introduces the book.',
+            kind: 'paragraph',
+            bodyOrder: 1,
+          ),
+        ],
+        spineIndex: 1,
+      );
+      final prefaceNav = LibraryCatalogNavigationItem(
+        id: 'preface',
+        parentId: null,
+        label: 'PREFACE.',
+        href: 'preface.xhtml',
+        anchorId: null,
+        spineIndex: 1,
+        sortOrder: 1,
+        depth: 0,
+        navType: 'toc',
+        contentKind: 'preface',
+        isFrontMatter: true,
+        isBodyStart: false,
+        bodyOrder: 1,
+      );
+
+      expect(
+        libraryReaderShouldHideEmptyPrefaceContentsEntry(
+          navItem: prefaceNav,
+          sections: [emptyPreface],
+        ),
+        isTrue,
+      );
+      expect(
+        libraryReaderShouldHideEmptyPrefaceContentsEntry(
+          navItem: prefaceNav,
+          sections: [readablePreface],
+        ),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'an empty leaf shell normalizes to the readable descendant in the same branch',
+    () {
+      final shell = LibraryCatalogNavigationItem(
+        id: 'shell',
+        parentId: null,
+        label: 'OCTOBER 17, 1895.',
+        href: 'shell.xhtml',
+        anchorId: null,
+        spineIndex: 1,
+        sortOrder: 1,
+        depth: 0,
+        navType: 'toc',
+        contentKind: null,
+        isFrontMatter: false,
+        isBodyStart: false,
+        bodyOrder: 1,
+      );
+      final studies = LibraryCatalogNavigationItem(
+        id: 'studies',
+        parentId: 'shell',
+        label: 'STUDIES IN ROMANS.',
+        href: 'studies.xhtml',
+        anchorId: null,
+        spineIndex: 2,
+        sortOrder: 2,
+        depth: 1,
+        navType: 'toc',
+        contentKind: null,
+        isFrontMatter: false,
+        isBodyStart: false,
+        bodyOrder: 2,
+      );
+      final readable = LibraryCatalogNavigationItem(
+        id: 'october17_readable',
+        parentId: 'studies',
+        label: 'OCTOBER 17, 1895.',
+        href: 'october17.xhtml',
+        anchorId: null,
+        spineIndex: 3,
+        sortOrder: 3,
+        depth: 2,
+        navType: 'toc',
+        contentKind: null,
+        isFrontMatter: false,
+        isBodyStart: false,
+        bodyOrder: 3,
+      );
+      final sections = <LibraryBookSection>[
+        const LibraryBookSection(
+          entryName: 'shell.xhtml',
+          title: 'OCTOBER 17, 1895.',
+          paragraphs: <String>[],
+          blocks: <LibraryBookBlock>[],
+          spineIndex: 1,
+        ),
+        const LibraryBookSection(
+          entryName: 'studies.xhtml',
+          title: 'STUDIES IN ROMANS.',
+          paragraphs: <String>[],
+          blocks: <LibraryBookBlock>[],
+          spineIndex: 2,
+        ),
+        const LibraryBookSection(
+          entryName: 'october17.xhtml',
+          title: 'OCTOBER 17, 1895.',
+          paragraphs: <String>['Under this heading it is proposed to conduct'],
+          blocks: <LibraryBookBlock>[
+            LibraryBookBlock(
+              html: '<p>Under this heading it is proposed to conduct</p>',
+              text: 'Under this heading it is proposed to conduct',
+              kind: 'paragraph',
+            ),
+          ],
+          spineIndex: 3,
+        ),
+      ];
+      final tree = buildLibraryNavigationTree([shell, studies, readable]);
+
+      final normalized = libraryReaderVisibleContentsNavigationItem(
+        navItem: shell,
+        tree: tree,
+        sections: sections,
+      );
+      expect(normalized?.id, readable.id);
+      expect(normalized?.href, 'october17.xhtml');
+    },
+  );
+
+  test('Chapter 1 structural navigation stays visible as its own identity', () {
+    final chapter1 = LibraryCatalogNavigationItem(
+      id: 'chapter1',
+      parentId: null,
+      label: 'CHAPTER 1.',
+      href: 'chapter1.xhtml',
+      anchorId: null,
+      spineIndex: 1,
+      sortOrder: 1,
+      depth: 0,
+      navType: 'toc',
+      contentKind: 'chapter',
+      isFrontMatter: false,
+      isBodyStart: false,
+      bodyOrder: 1,
+    );
+    final studies = LibraryCatalogNavigationItem(
+      id: 'studies',
+      parentId: 'chapter1',
+      label: 'STUDIES IN ROMANS.',
+      href: 'studies.xhtml',
+      anchorId: null,
+      spineIndex: 2,
+      sortOrder: 2,
+      depth: 1,
+      navType: 'toc',
+      contentKind: null,
+      isFrontMatter: false,
+      isBodyStart: false,
+      bodyOrder: 2,
+    );
+    final sections = <LibraryBookSection>[
+      const LibraryBookSection(
+        entryName: 'chapter1.xhtml',
+        title: 'CHAPTER 1.',
+        paragraphs: <String>[],
+        blocks: <LibraryBookBlock>[],
+        spineIndex: 1,
+      ),
+      const LibraryBookSection(
+        entryName: 'studies.xhtml',
+        title: 'STUDIES IN ROMANS.',
+        paragraphs: <String>[],
+        blocks: <LibraryBookBlock>[],
+        spineIndex: 2,
+      ),
+    ];
+    final tree = buildLibraryNavigationTree([chapter1, studies]);
+
+    final normalized = libraryReaderVisibleContentsNavigationItem(
+      navItem: chapter1,
+      tree: tree,
+      sections: sections,
+    );
+    expect(normalized?.id, chapter1.id);
+  });
+
   test('Contents and heading navigation keep the same cleaned ordering', () {
     final items = <LibraryCatalogNavigationItem>[
       LibraryCatalogNavigationItem(
@@ -776,6 +983,345 @@ void main() {
       'chapter1',
       'chapter2',
     ]);
+  });
+
+  group('libraryReaderFirstReadableDescendant', () {
+    // WOR-shaped hierarchy:
+    // Waggoner on Romans
+    //   Preface (heading-only, no descendant)
+    //   Chapter 1 (heading-only)
+    //     Studies in Romans (heading-only)
+    //       October 17, 1895 (readable)
+    //   Chapter 2 (readable, sibling of Chapter 1)
+    LibraryBookSection headingOnlySection(
+      String entryName,
+      String title,
+      int spineIndex,
+    ) {
+      return LibraryBookSection(
+        entryName: entryName,
+        title: title,
+        paragraphs: const <String>[],
+        blocks: const <LibraryBookBlock>[],
+        spineIndex: spineIndex,
+      );
+    }
+
+    LibraryBookSection readableSection(
+      String entryName,
+      String title,
+      String bodyText,
+      int spineIndex,
+    ) {
+      return LibraryBookSection(
+        entryName: entryName,
+        title: title,
+        paragraphs: <String>[bodyText],
+        blocks: <LibraryBookBlock>[
+          LibraryBookBlock(
+            html: '<p>$bodyText</p>',
+            text: bodyText,
+            kind: 'paragraph',
+          ),
+        ],
+        spineIndex: spineIndex,
+      );
+    }
+
+    LibraryCatalogNavigationItem navItem({
+      required String id,
+      String? parentId,
+      required String label,
+      required String href,
+      required int sortOrder,
+      int depth = 0,
+    }) {
+      return LibraryCatalogNavigationItem(
+        id: id,
+        parentId: parentId,
+        label: label,
+        href: href,
+        anchorId: null,
+        spineIndex: sortOrder,
+        sortOrder: sortOrder,
+        depth: depth,
+        navType: 'toc',
+        contentKind: null,
+        isFrontMatter: label == 'PREFACE.',
+        isBodyStart: false,
+        bodyOrder: sortOrder,
+      );
+    }
+
+    final preface = headingOnlySection('preface.html', 'PREFACE.', 1);
+    final chapter1 = headingOnlySection('chapter1.html', 'CHAPTER 1.', 2);
+    final studies = headingOnlySection('studies.html', 'STUDIES IN ROMANS.', 3);
+    final october17 = readableSection(
+      'october17.html',
+      'OCTOBER 17, 1895.',
+      'The Salutation opens the study of Romans.',
+      4,
+    );
+    final chapter2 = readableSection(
+      'chapter2.html',
+      'CHAPTER 2.',
+      'Chapter two body text.',
+      5,
+    );
+
+    final sections = <LibraryBookSection>[
+      preface,
+      chapter1,
+      studies,
+      october17,
+      chapter2,
+    ];
+
+    final navPreface = navItem(
+      id: 'preface',
+      label: 'PREFACE.',
+      href: 'preface.html',
+      sortOrder: 1,
+    );
+    final navChapter1 = navItem(
+      id: 'chapter1',
+      label: 'CHAPTER 1.',
+      href: 'chapter1.html',
+      sortOrder: 2,
+    );
+    final navStudies = navItem(
+      id: 'studies',
+      parentId: 'chapter1',
+      label: 'STUDIES IN ROMANS.',
+      href: 'studies.html',
+      sortOrder: 3,
+      depth: 1,
+    );
+    final navOctober17 = navItem(
+      id: 'october17',
+      parentId: 'studies',
+      label: 'OCTOBER 17, 1895.',
+      href: 'october17.html',
+      sortOrder: 4,
+      depth: 2,
+    );
+    final navChapter2 = navItem(
+      id: 'chapter2',
+      label: 'CHAPTER 2.',
+      href: 'chapter2.html',
+      sortOrder: 5,
+    );
+
+    final navigationItems = <LibraryCatalogNavigationItem>[
+      navPreface,
+      navChapter1,
+      navStudies,
+      navOctober17,
+      navChapter2,
+    ];
+
+    final tree = buildLibraryNavigationTree(navigationItems);
+
+    test('a heading-only Chapter node with a readable descendant resolves '
+        'through the intervening structural heading to the first readable '
+        'section', () {
+      final chain = libraryReaderFirstReadableDescendant(
+        navItem: navChapter1,
+        tree: tree,
+        sections: sections,
+      );
+
+      expect(chain, isNotNull);
+      expect(chain!.headingSections.map((s) => s.entryName), <String>[
+        'studies.html',
+      ]);
+      expect(chain.readableSection.entryName, 'october17.html');
+      expect(chain.readableSection.blocks, isNotEmpty);
+    });
+
+    test('selecting Studies in Romans directly resolves the same October 17 '
+        'descendant with no intervening headings', () {
+      final chain = libraryReaderFirstReadableDescendant(
+        navItem: navStudies,
+        tree: tree,
+        sections: sections,
+      );
+
+      expect(chain, isNotNull);
+      expect(chain!.headingSections, isEmpty);
+      expect(chain.readableSection.entryName, 'october17.html');
+    });
+
+    test('Preface with no readable subtree resolves to null and does not '
+        'redirect to Chapter 1 or any other content', () {
+      final chain = libraryReaderFirstReadableDescendant(
+        navItem: navPreface,
+        tree: tree,
+        sections: sections,
+      );
+
+      expect(chain, isNull);
+    });
+
+    test('a heading-only node never borrows a sibling chapter\'s content when '
+        'its own subtree has no readable descendant', () {
+      // Studies in Romans' only child (October 17) is temporarily removed
+      // from the section list so Chapter 1's subtree has no readable
+      // section at all; Chapter 2 (a sibling, readable) must never be used.
+      final sectionsWithoutOctober = <LibraryBookSection>[
+        preface,
+        chapter1,
+        studies,
+        chapter2,
+      ];
+
+      final chain = libraryReaderFirstReadableDescendant(
+        navItem: navChapter1,
+        tree: tree,
+        sections: sectionsWithoutOctober,
+      );
+
+      expect(chain, isNull);
+    });
+
+    test(
+      'a heading-only node never crosses into the next chapter\'s subtree',
+      () {
+        final chain = libraryReaderFirstReadableDescendant(
+          navItem: navChapter1,
+          tree: tree,
+          sections: sections,
+        );
+
+        expect(chain, isNotNull);
+        expect(chain!.readableSection.entryName, isNot('chapter2.html'));
+        expect(
+          chain.headingSections.map((s) => s.entryName),
+          isNot(contains('chapter2.html')),
+        );
+      },
+    );
+
+    test('first open at Chapter 1 composes into a useful readable section '
+        'rather than staying blank', () {
+      final structuralSections = libraryReaderSectionsWithHeadingOnlyNavigation(
+        sections: sections,
+        navigationItems: navigationItems,
+      );
+      final item = LibraryCatalogItem.fromRow(const <String, Object?>{
+        'id': 'wor-test',
+        'title': 'Waggoner on Romans',
+        'file_name': 'wor.epub',
+        'relative_path': 'Books/wor.epub',
+      });
+
+      final initialIndex = libraryReaderInitialSectionIndex(
+        item: item,
+        sections: structuralSections,
+        navigationItems: navigationItems,
+        devotionalMode: false,
+      );
+      final selectedSection = structuralSections[initialIndex];
+      expect(selectedSection.title, 'CHAPTER 1.');
+      expect(selectedSection.blocks, isEmpty);
+
+      final chain = libraryReaderFirstReadableDescendant(
+        navItem: navChapter1,
+        tree: tree,
+        sections: structuralSections,
+      );
+      expect(chain, isNotNull);
+      expect(chain!.readableSection.entryName, 'october17.html');
+    });
+
+    test('genuine saved progress on an already-readable section resumes '
+        'exactly and never engages descendant composition', () {
+      final item = LibraryCatalogItem.fromRow(const <String, Object?>{
+        'id': 'wor-test-resume',
+        'title': 'Waggoner on Romans',
+        'file_name': 'wor.epub',
+        'relative_path': 'Books/wor.epub',
+        'last_opened': '2026-07-08T00:00:00.000Z',
+        'epub_href': 'october17.html',
+        'spine_index': 4,
+        'paragraph_index': 1,
+      });
+
+      final resumedIndex = libraryReaderInitialSectionIndex(
+        item: item,
+        sections: sections,
+        navigationItems: navigationItems,
+        devotionalMode: false,
+      );
+
+      expect(sections[resumedIndex].entryName, 'october17.html');
+      // The resumed section already has readable blocks, so the reader
+      // never needs to resolve a descendant chain for it.
+      expect(sections[resumedIndex].blocks, isNotEmpty);
+    });
+
+    test('a readable leaf keeps its own body and a sibling leaf keeps its own '
+        'body too', () {
+      final debtor = readableSection(
+        'debtor.html',
+        'DEBTOR TO ALL.',
+        'Debtor to All owns this paragraph.',
+        4,
+      );
+      final questioning = readableSection(
+        'questioning.html',
+        'QUESTIONING THE TEXT.',
+        'Questioning the Text owns its own paragraph.',
+        5,
+      );
+      final leafSections = <LibraryBookSection>[
+        preface,
+        chapter1,
+        studies,
+        debtor,
+        questioning,
+      ];
+      final leafDebtor = navItem(
+        id: 'debtor',
+        parentId: 'studies',
+        label: 'DEBTOR TO ALL.',
+        href: 'debtor.html',
+        sortOrder: 4,
+        depth: 2,
+      );
+      final leafQuestioning = navItem(
+        id: 'questioning',
+        parentId: 'studies',
+        label: 'QUESTIONING THE TEXT.',
+        href: 'questioning.html',
+        sortOrder: 5,
+        depth: 2,
+      );
+      final leafTree = buildLibraryNavigationTree([
+        navPreface,
+        navChapter1,
+        navStudies,
+        leafDebtor,
+        leafQuestioning,
+      ]);
+
+      expect(
+        libraryReaderFirstReadableDescendant(
+          navItem: leafDebtor,
+          tree: leafTree,
+          sections: leafSections,
+        ),
+        isNull,
+      );
+      expect(
+        libraryReaderFirstReadableDescendant(
+          navItem: leafQuestioning,
+          tree: leafTree,
+          sections: leafSections,
+        ),
+        isNull,
+      );
+    });
   });
 
   group('section reference codes', () {
@@ -978,7 +1524,8 @@ void main() {
           path: captureRootDir.path,
         );
 
-        final importReport = await PioneerCapturedHtmlImportFolderService.instance
+        final importReport = await PioneerCapturedHtmlImportFolderService
+            .instance
             .importConfiguredCloudFolder(
               selectedFolderPaths: [sourceFolder.path],
               archiveImportedFolders: false,
@@ -1018,9 +1565,7 @@ void main() {
         'reader page hides inline maintenance buttons and exposes them in the menu',
         (tester) async {
           await tester.pumpWidget(
-            const MaterialApp(
-              home: Scaffold(body: Text('Library Home')),
-            ),
+            const MaterialApp(home: Scaffold(body: Text('Library Home'))),
           );
           await tester.pump();
 
@@ -1046,14 +1591,8 @@ void main() {
 
           expect(find.text('Open eLibrary Setup'), findsOneWidget);
           expect(find.text('Maintenance'), findsOneWidget);
-          expect(
-            find.text('Remove Current Book from Library'),
-            findsOneWidget,
-          );
-          expect(
-            find.text('Repair Current Imported Book'),
-            findsOneWidget,
-          );
+          expect(find.text('Remove Current Book from Library'), findsOneWidget);
+          expect(find.text('Repair Current Imported Book'), findsOneWidget);
         },
       );
 
@@ -1070,47 +1609,38 @@ void main() {
         expect(libraryReaderCanManageImportedBook(normalBook), isFalse);
       });
 
-      testWidgets(
-        'remove from menu is DB-only and cancel does nothing',
-        (tester) async {
-          await tester.pumpWidget(
-            MaterialApp(
-              home: LibraryBookReaderScreen(item: importedItem),
-            ),
-          );
-          await _pumpUntilFinder(
-            tester,
-            find.text('The Story of the Seer of Patmos'),
-          );
+      testWidgets('remove from menu is DB-only and cancel does nothing', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          MaterialApp(home: LibraryBookReaderScreen(item: importedItem)),
+        );
+        await _pumpUntilFinder(
+          tester,
+          find.text('The Story of the Seer of Patmos'),
+        );
 
-          await tester.tap(find.text('Menu'));
-          await _pumpTransient(tester);
-          await tester.tap(find.text('Remove Current Book from Library'));
-          await _pumpUntilFinder(
-            tester,
-            find.textContaining(
-              'This removes the imported database copy only.',
-            ),
-          );
+        await tester.tap(find.text('Menu'));
+        await _pumpTransient(tester);
+        await tester.tap(find.text('Remove Current Book from Library'));
+        await _pumpUntilFinder(
+          tester,
+          find.textContaining('This removes the imported database copy only.'),
+        );
 
-          expect(
-            find.textContaining(
-              'This removes the imported database copy only.',
-            ),
-            findsOneWidget,
-          );
+        expect(
+          find.textContaining('This removes the imported database copy only.'),
+          findsOneWidget,
+        );
 
-          await tester.tap(find.text('Cancel'));
-          await _pumpTransient(tester);
-          expect(find.text('Menu'), findsOneWidget);
-          expect(
-            find.textContaining(
-              'This removes the imported database copy only.',
-            ),
-            findsNothing,
-          );
-        },
-      );
+        await tester.tap(find.text('Cancel'));
+        await _pumpTransient(tester);
+        expect(find.text('Menu'), findsOneWidget);
+        expect(
+          find.textContaining('This removes the imported database copy only.'),
+          findsNothing,
+        );
+      });
 
       test(
         'remove path deletes only the database copy and keeps the source folder',
@@ -1123,11 +1653,9 @@ void main() {
           final itemsAfterRemove = await LibraryCatalogService.instance
               .loadItems();
           expect(
-            itemsAfterRemove
-                .where(
-                  (item) =>
-                      item.displayTitle == 'The Story of the Seer of Patmos',
-                ),
+            itemsAfterRemove.where(
+              (item) => item.displayTitle == 'The Story of the Seer of Patmos',
+            ),
             isEmpty,
           );
         },
@@ -1139,20 +1667,16 @@ void main() {
           await sourceFolder.delete(recursive: true);
 
           final report = await PioneerCapturedHtmlImportFolderService.instance
-              .repairImportedCaptureClipperBook(
-                libraryItemId: importedItem.id,
-              );
+              .repairImportedCaptureClipperBook(libraryItemId: importedItem.id);
 
           expect(report, isNull);
 
           final itemsAfterRepair = await LibraryCatalogService.instance
               .loadItems();
           expect(
-            itemsAfterRepair
-                .where(
-                  (item) =>
-                      item.displayTitle == 'The Story of the Seer of Patmos',
-                ),
+            itemsAfterRepair.where(
+              (item) => item.displayTitle == 'The Story of the Seer of Patmos',
+            ),
             isNotEmpty,
           );
         },

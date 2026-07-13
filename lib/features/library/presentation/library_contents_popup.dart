@@ -27,6 +27,7 @@ class _ContentsPopupRow {
 class _ContentsPopupSheet extends StatefulWidget {
   const _ContentsPopupSheet({
     required this.itemTitle,
+    required this.itemSubtitle,
     required this.entries,
     required this.sections,
     required this.currentSectionEntryName,
@@ -41,6 +42,7 @@ class _ContentsPopupSheet extends StatefulWidget {
   });
 
   final String itemTitle;
+  final String itemSubtitle;
   final List<_NavigationDisplayEntry> entries;
   final List<LibraryBookSection> sections;
   final String? currentSectionEntryName;
@@ -143,6 +145,15 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
     if (_isPeriodicalDateEntry(item)) {
       return true;
     }
+    final isPreface =
+        contentKind == 'preface' ||
+        _normalizeReaderLabel(item.label) == 'preface';
+    if (isPreface) {
+      return !libraryReaderShouldHideEmptyPrefaceContentsEntry(
+        navItem: item,
+        sections: widget.sections,
+      );
+    }
     if (item.isFrontMatter) {
       return false;
     }
@@ -162,7 +173,6 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
       case 'about':
       case 'copyright':
       case 'foreword':
-      case 'preface':
       case 'introduction':
         return true;
       default:
@@ -534,15 +544,27 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                  child: Text(
-                    widget.itemTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: libraryBodyTextStyle(
-                      context,
-                      theme.textTheme.bodyMedium,
-                      color: sheetSubduedColor,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.itemTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: libraryBodyTextStyle(
+                          context,
+                          theme.textTheme.bodyMedium,
+                          color: sheetTextColor,
+                        ),
+                      ),
+                      if (widget.itemSubtitle.isNotEmpty)
+                        Text(
+                          widget.itemSubtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: sheetSubduedColor),
+                        ),
+                    ],
                   ),
                 ),
                 Divider(height: 1, color: borderColor),

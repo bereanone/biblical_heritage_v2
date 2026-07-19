@@ -5,7 +5,7 @@ import 'elibrary_sdp_cleanup.dart';
 class ELibrarySchema {
   ELibrarySchema._();
 
-  static const currentVersion = 2;
+  static const currentVersion = 3;
   static const initialMigrationKey = 'phase_1_initial_schema';
   static const contributorsMigrationKey = 'phase_2_contributors';
   static const packageLineageMigrationKey = 'phase_3_package_lineage';
@@ -14,11 +14,63 @@ class ELibrarySchema {
     await _retryOnLocked(() async {
       await _createMigrationTable(db);
       await _createCoreTables(db);
+      await _createCanonicalDocumentTables(db);
       await _ensurePackageLineageColumns(db);
       await _createIndexes(db);
       await _seedInitialMigration(db);
       await ELibraryBogusSdpCleanupService.instance.run(db);
     });
+  }
+
+  static Future<void> _createCanonicalDocumentTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_document_conversion (
+        library_item_id TEXT PRIMARY KEY,
+        canonicalizer_version INTEGER NOT NULL,
+        source_hash TEXT,
+        status TEXT NOT NULL CHECK(status IN ('pending','converting','complete','failed')),
+        completed_at TEXT,
+        error_message TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_document_sections (
+        id TEXT PRIMARY KEY,
+        library_item_id TEXT NOT NULL,
+        display_order INTEGER NOT NULL,
+        title TEXT,
+        source_href TEXT,
+        content_hash TEXT,
+        UNIQUE(library_item_id, display_order)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_document_blocks (
+        id TEXT PRIMARY KEY,
+        library_item_id TEXT NOT NULL,
+        section_id TEXT NOT NULL,
+        display_order INTEGER NOT NULL,
+        block_type TEXT NOT NULL,
+        plain_text TEXT,
+        formatted_content TEXT,
+        source_refcode TEXT,
+        source_href TEXT,
+        source_anchor TEXT,
+        content_hash TEXT,
+        UNIQUE(library_item_id, display_order)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_block_source_map (
+        library_item_id TEXT NOT NULL,
+        block_id TEXT NOT NULL,
+        source_href TEXT,
+        legacy_block_index INTEGER,
+        legacy_paragraph_index INTEGER,
+        source_anchor TEXT,
+        PRIMARY KEY(library_item_id, block_id)
+      )
+    ''');
   }
 
   static Future<int?> currentAppliedVersion(Database db) async {
@@ -322,6 +374,24 @@ class ELibrarySchema {
       CREATE INDEX IF NOT EXISTS idx_library_item_contributors_contributor
       ON library_item_contributors (contributor_id)
     ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_document_sections_item_order ON library_document_sections(library_item_id, display_order)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_document_blocks_item_order ON library_document_blocks(library_item_id, display_order)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_document_blocks_section_order ON library_document_blocks(section_id, display_order)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_document_blocks_source_href ON library_document_blocks(source_href)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_document_blocks_refcode ON library_document_blocks(source_refcode)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_block_source_map_block ON library_block_source_map(block_id)',
+    );
   }
 
   static Future<void> _ensurePackageLineageColumns(Database db) async {

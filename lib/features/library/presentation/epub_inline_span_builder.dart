@@ -7,8 +7,9 @@ List<InlineSpan> _buildEpubInlineSpans({
   String? highlightQuery,
   List<String> highlightTerms = const [],
 }) {
-  final innerHtml = _epubBlockInnerHtml(html);
-  final semanticBaseStyle = _epubSemanticStyleFromHtml(html, baseStyle);
+  final flowHtml = normalizeEpubInlineTextFlow(html);
+  final innerHtml = _epubBlockInnerHtml(flowHtml);
+  final semanticBaseStyle = _epubSemanticStyleFromHtml(flowHtml, baseStyle);
   if (innerHtml.trim().isEmpty) {
     return _buildHighlightedEpubTextSpans(
       fallbackText,

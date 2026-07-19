@@ -124,6 +124,53 @@ Future<void> _insertLibraryItem(Database db, String itemId) async {
 }
 
 void main() {
+  group('automatic adjacent readable section', () {
+    test('skips empty structural nodes in both directions', () {
+      const readable = <bool>[true, false, false, true, false, true];
+
+      expect(
+        libraryReaderAdjacentReadableSectionIndex(
+          currentIndex: 0,
+          sectionCount: readable.length,
+          forward: true,
+          isReadable: (index) => readable[index],
+        ),
+        3,
+      );
+      expect(
+        libraryReaderAdjacentReadableSectionIndex(
+          currentIndex: 5,
+          sectionCount: readable.length,
+          forward: false,
+          isReadable: (index) => readable[index],
+        ),
+        3,
+      );
+    });
+
+    test('returns null only at the true readable book boundary', () {
+      const readable = <bool>[true, false, true];
+      expect(
+        libraryReaderAdjacentReadableSectionIndex(
+          currentIndex: 2,
+          sectionCount: readable.length,
+          forward: true,
+          isReadable: (index) => readable[index],
+        ),
+        isNull,
+      );
+      expect(
+        libraryReaderAdjacentReadableSectionIndex(
+          currentIndex: 0,
+          sectionCount: readable.length,
+          forward: false,
+          isReadable: (index) => readable[index],
+        ),
+        isNull,
+      );
+    });
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
@@ -260,6 +307,84 @@ void main() {
         );
       },
     );
+
+    test('fresh SSP open recognizes Roman-numeral Chapter I', () {
+      final item = _bookItem(
+        id: 'ssp',
+        title: 'The Story of the Seer of Patmos',
+      );
+      final romanSections = <LibraryBookSection>[
+        _section(
+          entryName: 'author-preface.html',
+          title: 'AUTHOR’S PREFACE.',
+          paragraphs: const ['A valid readable preface.'],
+          spineIndex: 1,
+        ),
+        _section(
+          entryName: 'chapter-i.html',
+          title: 'CHAPTER I. THE SEER OF PATMOS.',
+          paragraphs: const ['The first chapter body.'],
+          spineIndex: 4,
+        ),
+      ];
+      final romanNavigation = <LibraryCatalogNavigationItem>[
+        _navItem(
+          id: 'preface',
+          label: 'AUTHOR’S PREFACE.',
+          href: 'author-preface.html',
+          sortOrder: 1,
+        ),
+        _navItem(
+          id: 'chapter-i',
+          label: 'CHAPTER I. THE SEER OF PATMOS.',
+          href: 'chapter-i.html',
+          sortOrder: 4,
+        ),
+      ];
+
+      expect(
+        libraryReaderInitialSectionIndex(
+          item: item,
+          sections: romanSections,
+          navigationItems: romanNavigation,
+          devotionalMode: false,
+        ),
+        1,
+      );
+    });
+
+    test('valid saved SSP Preface still restores Preface', () {
+      final item = _bookItem(
+        id: 'ssp-saved',
+        title: 'The Story of the Seer of Patmos',
+        lastOpened: DateTime.utc(2026, 7, 14),
+        epubHref: 'author-preface.html',
+      );
+      final savedSections = <LibraryBookSection>[
+        _section(
+          entryName: 'author-preface.html',
+          title: 'AUTHOR’S PREFACE.',
+          paragraphs: const ['A valid readable preface.'],
+          spineIndex: 1,
+        ),
+        _section(
+          entryName: 'chapter-i.html',
+          title: 'CHAPTER I. THE SEER OF PATMOS.',
+          paragraphs: const ['The first chapter body.'],
+          spineIndex: 4,
+        ),
+      ];
+
+      expect(
+        libraryReaderInitialSectionIndex(
+          item: item,
+          sections: savedSections,
+          navigationItems: const <LibraryCatalogNavigationItem>[],
+          devotionalMode: false,
+        ),
+        0,
+      );
+    });
 
     test(
       'heading-only Preface stays separate and first open selects Chapter 1',
@@ -698,5 +823,82 @@ void main() {
       expect(elibraryRows.single['updated_at'], isNotNull);
       expect(userRows.single['updated_at'], isNotNull);
     });
+
+    test(
+      'repeated progress updates retain one Recent row and latest position',
+      () async {
+        const itemId = 'reader-state-repeated-progress';
+        final elibraryDb = await ELibraryDatabase.instance.database;
+        final userDb = await UserDatabase.instance.database;
+        await _insertLibraryItem(elibraryDb, itemId);
+        await _insertLibraryItem(userDb, itemId);
+
+        for (var chapter = 1; chapter <= 6; chapter++) {
+          await LibraryReaderStateWriter.instance.saveCurrentLocation(
+            libraryItemId: itemId,
+            currentSectionEntryName: 'chapter-$chapter.xhtml',
+            currentSectionSpineIndex: chapter,
+            savedHref: null,
+            savedAnchorId: null,
+            savedParagraphIndex: chapter * 10,
+          );
+        }
+
+        for (final db in [elibraryDb, userDb]) {
+          final rows = await db.query(
+            'library_items',
+            columns: const ['epub_href', 'spine_index', 'paragraph_index'],
+            where: 'id = ?',
+            whereArgs: [itemId],
+          );
+          expect(rows, hasLength(1));
+          expect(rows.single['epub_href'], 'chapter-6.xhtml');
+          expect(rows.single['spine_index'], 6);
+          expect(rows.single['paragraph_index'], 60);
+        }
+      },
+    );
+
+    test(
+      'clearing location preserves item and history but removes resume data',
+      () async {
+        const itemId = 'reader-state-clear-location';
+        final elibraryDb = await ELibraryDatabase.instance.database;
+        final userDb = await UserDatabase.instance.database;
+        await _insertLibraryItem(elibraryDb, itemId);
+        await _insertLibraryItem(userDb, itemId);
+        await LibraryReaderStateWriter.instance.saveCurrentLocation(
+          libraryItemId: itemId,
+          currentSectionEntryName: 'author-preface.html',
+          currentSectionSpineIndex: 1,
+          savedHref: 'author-preface.html',
+          savedAnchorId: 'preface',
+          savedParagraphIndex: 7,
+        );
+
+        await LibraryReaderStateWriter.instance.clearSavedLocation(itemId);
+
+        for (final db in [elibraryDb, userDb]) {
+          final rows = await db.query(
+            'library_items',
+            columns: const [
+              'last_opened',
+              'epub_href',
+              'anchor_id',
+              'spine_index',
+              'paragraph_index',
+            ],
+            where: 'id = ?',
+            whereArgs: [itemId],
+          );
+          expect(rows, hasLength(1));
+          expect(rows.single['last_opened'], isNotNull);
+          expect(rows.single['epub_href'], isNull);
+          expect(rows.single['anchor_id'], isNull);
+          expect(rows.single['spine_index'], isNull);
+          expect(rows.single['paragraph_index'], isNull);
+        }
+      },
+    );
   });
 }

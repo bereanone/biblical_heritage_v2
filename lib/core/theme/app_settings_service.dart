@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../database/user_database.dart';
+import '../../features/library/presentation/mac_reader_autoscroll_controller.dart';
 import 'app_theme_mode.dart';
 import '../../features/reader/data/presentation/presentation_models.dart';
 import '../../features/reader/presentation/viewer_interlinear_settings.dart';
@@ -82,6 +83,27 @@ class AppSettingsService {
   static const _lastElibrarySearchKey = 'search.last_elibrary_search';
   static const _lastElibrarySearchSessionKey =
       'search.last_elibrary_search_session';
+  static const _elibraryMediaFilterKey = 'library.media_filter';
+
+  Future<String?> loadElibraryMediaFilter() async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_elibraryMediaFilterKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['value']?.toString();
+  }
+
+  Future<void> saveElibraryMediaFilter(String value) async {
+    await (await UserDatabase.instance.database).insert('app_settings', {
+      'key': _elibraryMediaFilterKey,
+      'value': value,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
 
   Future<AppVisualSettings> loadVisualSettings(AppThemeMode mode) async {
     final db = await UserDatabase.instance.database;
@@ -170,6 +192,53 @@ class AppSettingsService {
       }
     }
     return presetForMode(AppThemeMode.sepia).viewerFontScale;
+  }
+
+  static const _macAutoscrollBaseSpeedKey = 'mac_autoscroll_base_speed';
+  static const _macAutoscrollLastStepKey = 'mac_autoscroll_last_nonzero_step';
+  static const _macAutoscrollMaximumStepKey = 'mac_autoscroll_maximum_step';
+
+  Future<MacAutoscrollPreferences> loadMacAutoscrollPreferences() async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      columns: const ['key', 'value'],
+      where: 'key IN (?, ?, ?)',
+      whereArgs: const [
+        _macAutoscrollBaseSpeedKey,
+        _macAutoscrollLastStepKey,
+        _macAutoscrollMaximumStepKey,
+      ],
+    );
+    final values = <String, String>{
+      for (final row in rows)
+        row['key'].toString(): row['value']?.toString() ?? '',
+    };
+    return MacAutoscrollPreferences.fromStoredValues(
+      baseSpeed: values[_macAutoscrollBaseSpeedKey],
+      lastNonzeroStep: values[_macAutoscrollLastStepKey],
+      maximumStep: values[_macAutoscrollMaximumStepKey],
+    );
+  }
+
+  Future<void> saveMacAutoscrollPreferences(
+    MacAutoscrollPreferences preferences,
+  ) async {
+    final db = await UserDatabase.instance.database;
+    final batch = db.batch();
+    batch.insert('app_settings', {
+      'key': _macAutoscrollBaseSpeedKey,
+      'value': preferences.baseSpeed.toStringAsFixed(1),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    batch.insert('app_settings', {
+      'key': _macAutoscrollLastStepKey,
+      'value': preferences.lastNonzeroStep.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    batch.insert('app_settings', {
+      'key': _macAutoscrollMaximumStepKey,
+      'value': preferences.maximumStep.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await batch.commit(noResult: true);
   }
 
   Future<void> saveElibraryZoomScale(double value) async {

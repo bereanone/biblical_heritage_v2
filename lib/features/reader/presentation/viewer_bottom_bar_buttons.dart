@@ -10,8 +10,7 @@ class _LibraryButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final iconColor = const Color(0xFF2E6FD6);
     // Show the text label only on wide screens (iPad / macOS).
-    final showLabel =
-        !compact && MediaQuery.sizeOf(context).width >= 700;
+    final showLabel = !compact && MediaQuery.sizeOf(context).width >= 700;
 
     return Tooltip(
       message: 'eLibrary',
@@ -73,8 +72,7 @@ class _ThemeToggleButton extends StatelessWidget {
     final label = isNight ? 'Sepia' : 'Night';
     final icon = isNight ? Icons.wb_sunny_outlined : Icons.nightlight_round;
     // Show the text label only on wide screens (iPad / macOS).
-    final showLabel =
-        !compact && MediaQuery.sizeOf(context).width >= 700;
+    final showLabel = !compact && MediaQuery.sizeOf(context).width >= 700;
 
     return Tooltip(
       message: 'Switch to $label mode',
@@ -191,10 +189,7 @@ class _BottomIconButton extends StatelessWidget {
       child: IconButton(
         onPressed: onPressed,
         padding: EdgeInsets.zero,
-        constraints: BoxConstraints.tightFor(
-          width: compact ? 38 : 44,
-          height: compact ? 38 : 44,
-        ),
+        constraints: BoxConstraints.tightFor(width: 44, height: 44),
         icon: Icon(icon, color: color, size: compact ? 20 : 24),
       ),
     );

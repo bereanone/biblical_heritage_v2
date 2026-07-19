@@ -1,0 +1,1518 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+
+import '../../../core/database/elibrary_database.dart';
+import '../../../core/bootstrap/local_settings_store.dart';
+import '../../../core/bootstrap/library_root_service.dart';
+import '../../../core/theme/app_theme_mode.dart';
+import '../../../core/theme/app_settings_service.dart';
+import '../data/library_catalog_service.dart';
+import '../data/library_document_canonicalizer.dart';
+import '../data/library_document_models.dart';
+import '../data/library_document_repository.dart';
+import '../data/elibrary_markup_repository.dart';
+import '../data/library_reader_state_writer.dart';
+import 'canonical_local_image.dart';
+import 'canonical_scroll_diagnostics.dart';
+import 'elibrary_highlight_color_picker.dart';
+import 'library_document_controller.dart';
+import 'reader_tilt_autoscroll_controller.dart';
+import 'reader_tilt_autoscroll_controls.dart';
+import 'reader_tilt_motion_source.dart';
+import 'mac_reader_autoscroll_controller.dart';
+import 'mac_reader_autoscroll_controls.dart';
+
+const bool useCanonicalCaptureClipperReader = bool.fromEnvironment(
+  'USE_CANONICAL_CAPTURECLIPPER_READER',
+  defaultValue: false,
+);
+
+// Retained for proof-harness compatibility. Production routing uses the
+// narrower CaptureClipper-only flag above.
+const bool useCanonicalLibraryReader = useCanonicalCaptureClipperReader;
+
+enum LibraryReaderImplementation { legacy, canonical }
+
+LibraryReaderImplementation selectLibraryReaderImplementation({
+  required bool featureEnabled,
+  required bool canonicalComplete,
+}) => featureEnabled && canonicalComplete
+    ? LibraryReaderImplementation.canonical
+    : LibraryReaderImplementation.legacy;
+
+bool supportsCanonicalCaptureClipperReader(LibraryCatalogItem item) {
+  if ((item.fileFormat ?? '').trim().toLowerCase() != 'html') return false;
+  final sourceType = (item.sourceType ?? '').trim().toLowerCase();
+  return sourceType.contains('captured_html') ||
+      sourceType.contains('html_capture') ||
+      sourceType.contains('pioneer_captured_html');
+}
+
+bool shouldUseMacReaderAutoscroll({
+  required bool isMacOS,
+  required bool isProofHarness,
+  bool? override,
+}) => override ?? (isMacOS && !isProofHarness);
+
+String? canonicalVisibleReaderSubtitle(LibraryDocumentLocation? location) {
+  final heading = location?.heading?.plainText.trim() ?? '';
+  if (heading.isNotEmpty) return heading;
+  final sectionTitle = location?.sectionTitle?.trim() ?? '';
+  if (sectionTitle.isEmpty) return null;
+  final normalized = sectionTitle.toLowerCase().replaceAll(
+    RegExp(r'[^a-z]'),
+    '',
+  );
+  const hiddenProvenance = <String>{
+    'capture',
+    'capturedhtml',
+    'captureclipper',
+    'importedhtml',
+    'html',
+  };
+  return hiddenProvenance.contains(normalized) ? null : sectionTitle;
+}
+
+({Color background, Color foreground}) canonicalReaderPalette(
+  ThemeData theme,
+  AppThemeMode mode,
+) => mode == AppThemeMode.night
+    ? (background: const Color(0xFF0B0D11), foreground: const Color(0xFFF7F1E5))
+    : (
+        background: theme.scaffoldBackgroundColor,
+        foreground: theme.colorScheme.onSurface,
+      );
+
+String? canonicalInlineReferenceCode(
+  LibraryDocumentBlock block, {
+  required bool visible,
+}) {
+  if (!visible ||
+      block.isHeading ||
+      block.blockType == LibraryDocumentBlockType.image ||
+      block.blockType == LibraryDocumentBlockType.horizontalRule) {
+    return null;
+  }
+  final code = block.sourceRefcode?.trim() ?? '';
+  if (code.isEmpty || block.plainText.contains(code)) return null;
+  return code;
+}
+
+List<InlineSpan> canonicalInlineTextSpans({
+  required LibraryDocumentBlock block,
+  required LibraryFormattedContent formatted,
+  required TextStyle bodyStyle,
+  required TextStyle referenceStyle,
+  required bool showReferenceCode,
+}) => <InlineSpan>[
+  ...formatted.nodes.map((node) {
+    if (node['type'] == 'line_break') return const TextSpan(text: '\n');
+    final marks = (node['marks'] as List<Object?>? ?? const <Object?>[])
+        .map((value) => value.toString())
+        .toSet();
+    return TextSpan(
+      text: node['text']?.toString() ?? '',
+      style: bodyStyle.copyWith(
+        fontWeight: marks.contains('bold') ? FontWeight.w700 : null,
+        fontStyle: marks.contains('italic') ? FontStyle.italic : null,
+        decoration: marks.contains('underline')
+            ? TextDecoration.underline
+            : null,
+        fontFeatures: marks.contains('superscript')
+            ? const <FontFeature>[FontFeature.superscripts()]
+            : marks.contains('subscript')
+            ? const <FontFeature>[FontFeature.subscripts()]
+            : null,
+      ),
+    );
+  }),
+  if (canonicalInlineReferenceCode(block, visible: showReferenceCode)
+      case final code?)
+    TextSpan(text: ' $code', style: referenceStyle),
+];
+
+class CanonicalReaderPreparation {
+  const CanonicalReaderPreparation({
+    required this.repository,
+    required this.sourceRoot,
+  });
+
+  final LibraryDocumentRepository repository;
+  final Directory sourceRoot;
+}
+
+typedef CanonicalReaderPrepare =
+    Future<CanonicalReaderPreparation?> Function(LibraryCatalogItem item);
+
+Future<CanonicalReaderPreparation?> prepareCanonicalCaptureClipperReader(
+  LibraryCatalogItem item,
+) async {
+  if (!supportsCanonicalCaptureClipperReader(item)) return null;
+  final relativePath = item.relativePath.trim();
+  if (relativePath.isEmpty) return null;
+  final rootPath =
+      (await LibraryRootService.instance.accessibleLibraryRootPath())?.trim();
+  if (rootPath == null || rootPath.isEmpty) return null;
+  final resolvedPath = await LibraryRootService.instance.resolveRelativePath(
+    relativePath: relativePath,
+    rootPath: rootPath,
+  );
+  final source = File(resolvedPath);
+  if (!await source.exists()) return null;
+
+  final db = await ELibraryDatabase.instance.database;
+  await const LibraryDocumentCanonicalizer().canonicalize(
+    db: db,
+    libraryItemId: item.id,
+    source: source,
+  );
+  final repository = LibraryDocumentRepository(db);
+  if (!await repository.isCurrentComplete(
+    item.id,
+    canonicalizerVersion: LibraryDocumentCanonicalizer.version,
+  )) {
+    return null;
+  }
+  return CanonicalReaderPreparation(
+    repository: repository,
+    sourceRoot: source.parent,
+  );
+}
+
+class CanonicalLibraryReaderGate extends StatefulWidget {
+  const CanonicalLibraryReaderGate({
+    super.key,
+    required this.item,
+    required this.legacyBuilder,
+    this.themeMode,
+    this.prepare = prepareCanonicalCaptureClipperReader,
+    this.onThemeChanged,
+    this.actionsBuilder,
+    this.macosAutoscroll,
+    this.onBack,
+    this.onSearch,
+    this.onLibrary,
+  });
+
+  final LibraryCatalogItem item;
+  final WidgetBuilder legacyBuilder;
+  final AppThemeMode? themeMode;
+  final CanonicalReaderPrepare prepare;
+  final ValueChanged<AppThemeMode>? onThemeChanged;
+  final List<Widget> Function(BuildContext context)? actionsBuilder;
+  final bool? macosAutoscroll;
+  final VoidCallback? onBack;
+  final VoidCallback? onSearch;
+  final VoidCallback? onLibrary;
+
+  @override
+  State<CanonicalLibraryReaderGate> createState() =>
+      _CanonicalLibraryReaderGateState();
+}
+
+class _CanonicalLibraryReaderGateState
+    extends State<CanonicalLibraryReaderGate> {
+  late final Future<CanonicalReaderPreparation?> _preparation;
+
+  @override
+  void initState() {
+    super.initState();
+    _preparation = widget.prepare(widget.item).catchError((
+      Object error,
+      StackTrace stackTrace,
+    ) {
+      debugPrint('Canonical reader preparation failed; using legacy: $error');
+      return null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      FutureBuilder<CanonicalReaderPreparation?>(
+        future: _preparation,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final preparation = snapshot.data;
+          if (preparation == null) return widget.legacyBuilder(context);
+          return CanonicalLibraryReaderScreen(
+            item: widget.item,
+            repository: preparation.repository,
+            themeMode: widget.themeMode,
+            sourceRoot: preparation.sourceRoot,
+            onThemeChanged: widget.onThemeChanged,
+            actionsBuilder: widget.actionsBuilder,
+            macosAutoscroll: widget.macosAutoscroll,
+            onBack: widget.onBack,
+            onSearch: widget.onSearch,
+            onLibrary: widget.onLibrary,
+          );
+        },
+      );
+}
+
+class CanonicalLibraryReaderScreen extends StatefulWidget {
+  const CanonicalLibraryReaderScreen({
+    super.key,
+    required this.item,
+    required this.repository,
+    this.themeMode,
+    this.motionSource,
+    this.sourceRoot,
+    this.proofLabel,
+    this.diagnostics,
+    this.onThemeChanged,
+    this.actionsBuilder,
+    this.macosAutoscroll,
+    this.onBack,
+    this.onSearch,
+    this.onLibrary,
+  });
+  final LibraryCatalogItem item;
+  final LibraryDocumentRepository repository;
+  final AppThemeMode? themeMode;
+  final ReaderTiltMotionSource? motionSource;
+  final Directory? sourceRoot;
+  final String? proofLabel;
+  final CanonicalScrollDiagnostics? diagnostics;
+  final ValueChanged<AppThemeMode>? onThemeChanged;
+  final List<Widget> Function(BuildContext context)? actionsBuilder;
+  final bool? macosAutoscroll;
+  final VoidCallback? onBack;
+  final VoidCallback? onSearch;
+  final VoidCallback? onLibrary;
+
+  @override
+  State<CanonicalLibraryReaderScreen> createState() =>
+      _CanonicalLibraryReaderScreenState();
+}
+
+/// Development/test-only entry point. Its repository and source root must be
+/// injected, so it cannot accidentally open the installed library database.
+class CanonicalSspProofHarness extends StatelessWidget {
+  const CanonicalSspProofHarness({
+    super.key,
+    required this.item,
+    required this.repository,
+    required this.sourceRoot,
+    this.motionSource,
+    this.diagnostics,
+  });
+
+  final LibraryCatalogItem item;
+  final LibraryDocumentRepository repository;
+  final Directory sourceRoot;
+  final ReaderTiltMotionSource? motionSource;
+  final CanonicalScrollDiagnostics? diagnostics;
+
+  @override
+  Widget build(BuildContext context) => CanonicalLibraryReaderScreen(
+    item: item,
+    repository: repository,
+    sourceRoot: sourceRoot,
+    proofLabel: 'CANONICAL SSP PROOF',
+    motionSource: motionSource,
+    diagnostics: diagnostics,
+  );
+}
+
+class _CanonicalLibraryReaderScreenState
+    extends State<CanonicalLibraryReaderScreen> {
+  late final LibraryDocumentController _controller;
+  final CallbackReaderAutoScrollTarget _scrollTarget =
+      CallbackReaderAutoScrollTarget();
+  late final ReaderTiltAutoScrollController _autoScroll;
+  MacReaderAutoScrollController? _macAutoScroll;
+  late final bool _usesMacAutoscroll;
+  final FocusNode _readerFocusNode = FocusNode(
+    debugLabel: 'canonical-reader-keyboard-focus',
+  );
+  bool _readerShortcutsSuspended = false;
+  String? _macStatus;
+  Timer? _macStatusTimer;
+  int _lastMacStatusRevision = 0;
+  LibraryDocumentLocation? _location;
+  Timer? _visibleThrottle;
+  double _fontScale = 1;
+  bool _showRefCodes = false;
+  List<LibraryDocumentBlock> _searchResults = const <LibraryDocumentBlock>[];
+  int _searchResultIndex = -1;
+  String? _activeSearchBlockId;
+  LibraryDocumentBlock? _selectedMarkupBlock;
+  TextSelection? _selectedMarkupRange;
+  Map<String, List<ElibraryMarkupRecord>> _canonicalHighlights =
+      const <String, List<ElibraryMarkupRecord>>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = LibraryDocumentController(
+      libraryItemId: widget.item.id,
+      repository: widget.repository,
+    )..addListener(_changed);
+    _autoScroll = ReaderTiltAutoScrollController(
+      motionSource: widget.motionSource ?? IosReaderTiltMotionSource(),
+      scrollTarget: _scrollTarget,
+    );
+    _usesMacAutoscroll = shouldUseMacReaderAutoscroll(
+      isMacOS: Platform.isMacOS,
+      isProofHarness: widget.proofLabel != null,
+      override: widget.macosAutoscroll,
+    );
+    if (_usesMacAutoscroll) {
+      _macAutoScroll = MacReaderAutoScrollController(
+        scrollTarget: _scrollTarget,
+      )..addListener(_macAutoscrollChanged);
+      AppSettingsService.instance.loadMacAutoscrollPreferences().then((value) {
+        if (mounted) _macAutoScroll?.updatePreferences(value);
+      });
+    }
+    _controller.initialize();
+    LocalSettingsStore.instance
+        .loadLibraryReaderShowRefCodes()
+        .then((value) {
+          if (mounted) setState(() => _showRefCodes = value);
+        })
+        .catchError((Object _) {});
+    _loadCanonicalHighlights();
+    AppSettingsService.instance.loadViewerFontScale().then((value) {
+      if (mounted) setState(() => _fontScale = value.clamp(.75, 2.0));
+    });
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
+
+  void _visible(int order) {
+    _controller.ensureWindow(order);
+    if (_visibleThrottle != null) return;
+    _visibleThrottle = Timer(const Duration(milliseconds: 120), () async {
+      _visibleThrottle = null;
+      final location = await widget.repository.resolveLocation(
+        widget.item.id,
+        order,
+      );
+      if (mounted && location != null) setState(() => _location = location);
+    });
+  }
+
+  @override
+  void dispose() {
+    unawaited(_saveCurrentLocation());
+    _visibleThrottle?.cancel();
+    _macStatusTimer?.cancel();
+    _macAutoScroll
+      ?..removeListener(_macAutoscrollChanged)
+      ..dispose();
+    _autoScroll.dispose();
+    _readerFocusNode.dispose();
+    _scrollTarget.detach();
+    _controller.removeListener(_changed);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveCurrentLocation() async {
+    final block = _location?.block;
+    if (block == null) return;
+    await LibraryReaderStateWriter.instance.saveCurrentLocation(
+      libraryItemId: widget.item.id,
+      currentSectionEntryName: block.sourceHref ?? block.sectionId,
+      currentSectionSpineIndex: null,
+      savedHref: block.sourceHref,
+      savedAnchorId: block.sourceAnchor,
+      savedParagraphIndex: block.displayOrder,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isNight = widget.themeMode == AppThemeMode.night;
+    final theme = Theme.of(context);
+    final palette = canonicalReaderPalette(
+      theme,
+      isNight ? AppThemeMode.night : AppThemeMode.sepia,
+    );
+    final background = palette.background;
+    final foreground = palette.foreground;
+    final subtitle = canonicalVisibleReaderSubtitle(_location);
+    final scaffold = Scaffold(
+      backgroundColor: background,
+      appBar: widget.proofLabel == null
+          ? null
+          : AppBar(
+              title: Text(widget.proofLabel ?? widget.item.displayTitle),
+              backgroundColor: background,
+              foregroundColor: foreground,
+              actions: null,
+            ),
+      body: Stack(
+        children: <Widget>[
+          Column(
+            children: <Widget>[
+              if (widget.proofLabel == null)
+                _CanonicalProductionHeader(
+                  item: widget.item,
+                  foreground: foreground,
+                  background: background,
+                  onBack: widget.onBack ?? () => Navigator.of(context).pop(),
+                  onSearch: _openCanonicalSearch,
+                  searchCounter: _searchResults.isEmpty
+                      ? null
+                      : '${_searchResultIndex + 1}/${_searchResults.length}',
+                  onPreviousSearch: _searchResultIndex > 0
+                      ? () => _moveSearchResult(-1)
+                      : null,
+                  onNextSearch:
+                      _searchResultIndex >= 0 &&
+                          _searchResultIndex < _searchResults.length - 1
+                      ? () => _moveSearchResult(1)
+                      : null,
+                  onLibrary: widget.onLibrary,
+                  menu: widget.actionsBuilder?.call(context).firstOrNull,
+                ),
+              if (subtitle != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 8, 22, 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      subtitle,
+                      key: const ValueKey('canonical-visible-heading'),
+                      style: TextStyle(
+                        color: foreground.withValues(alpha: .72),
+                      ),
+                    ),
+                  ),
+                ),
+              Expanded(
+                child: CanonicalLibraryDocumentBody(
+                  controller: _controller,
+                  autoScrollTarget: _scrollTarget,
+                  onVisibleOrderChanged: _visible,
+                  textColor: foreground,
+                  onManualScroll: _usesMacAutoscroll
+                      ? _macAutoScroll!.stopForManualInteraction
+                      : _autoScroll.stopForManualInteraction,
+                  onReaderInteraction: _readerFocusNode.requestFocus,
+                  sourceRoot: widget.sourceRoot,
+                  diagnostics: widget.diagnostics,
+                  proofCommands: _commands,
+                  fontScale: _fontScale,
+                  showRefCodes: _showRefCodes,
+                  activeSearchBlockId: _activeSearchBlockId,
+                  highlightedBlockIds: _canonicalHighlights.keys
+                      .map((key) => key.substring('canonical:'.length))
+                      .toSet(),
+                  onSelectionChanged: (block, selection) {
+                    if (!selection.isCollapsed) {
+                      _selectedMarkupBlock = block;
+                      _selectedMarkupRange = selection;
+                    }
+                  },
+                  onOpenSelectionMenu: _openCanonicalSelectionMenu,
+                ),
+              ),
+              if (widget.proofLabel == null)
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          _CanonicalToolbarButton(
+                            icon: Icons.list_alt_outlined,
+                            label: 'Contents',
+                            onPressed: _openContents,
+                          ),
+                          const SizedBox(width: 12),
+                          _CanonicalToolbarButton(
+                            icon: Icons.library_books_outlined,
+                            label: 'Library',
+                            onPressed: widget.onLibrary,
+                          ),
+                          const SizedBox(width: 12),
+                          _CanonicalToolbarButton(
+                            key: const ValueKey('canonical-theme-toggle'),
+                            icon: isNight
+                                ? Icons.wb_sunny_outlined
+                                : Icons.nightlight_round,
+                            label: isNight ? 'Day' : 'Night',
+                            onPressed: widget.onThemeChanged == null
+                                ? null
+                                : () => widget.onThemeChanged!(
+                                    isNight
+                                        ? AppThemeMode.sepia
+                                        : AppThemeMode.night,
+                                  ),
+                          ),
+                          const SizedBox(width: 12),
+                          _CanonicalToolbarButton(
+                            icon: _showRefCodes
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                            label: _showRefCodes
+                                ? 'Hide Ref Codes'
+                                : 'Show Ref Codes',
+                            onPressed: _toggleRefCodes,
+                          ),
+                          const SizedBox(width: 12),
+                          _CanonicalZoomCluster(
+                            valueLabel: '${(_fontScale * 100).round()}%',
+                            onZoomOut: () => _setFontScale(_fontScale - .1),
+                            onZoomIn: () => _setFontScale(_fontScale + .1),
+                          ),
+                          const SizedBox(width: 12),
+                          _usesMacAutoscroll
+                              ? MacReaderAutoScrollButton(
+                                  controller: _macAutoScroll!,
+                                  onPressed: () {
+                                    _macAutoScroll!.toggle();
+                                    _readerFocusNode.requestFocus();
+                                  },
+                                  onLongPress: _openMacAutoscrollSettings,
+                                )
+                              : ReaderTiltAutoScrollIconButton(
+                                  controller: _autoScroll,
+                                  onPressed: () {
+                                    if (_autoScroll.isActive) {
+                                      _autoScroll.stop();
+                                    } else {
+                                      _autoScroll.activate();
+                                    }
+                                  },
+                                ),
+                          const SizedBox(width: 12),
+                          _CanonicalNavCluster(
+                            onPreviousHeading: () => _jumpHeading(false),
+                            onPageUp: () => _scrollTarget.scrollBy(-500),
+                            onPageDown: () => _scrollTarget.scrollBy(500),
+                            onNextHeading: () => _jumpHeading(true),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          MacReaderAutoscrollStatusOverlay(
+            status: _macStatus,
+            foregroundColor: foreground,
+            backgroundColor: background,
+          ),
+        ],
+      ),
+    );
+    if (!_usesMacAutoscroll) return scaffold;
+    return Focus(
+      focusNode: _readerFocusNode,
+      autofocus: true,
+      onKeyEvent: (node, event) => handleMacReaderAutoscrollKeyEvent(
+        event: event,
+        readerFocusNode: node,
+        controller: _macAutoScroll!,
+        suspended: _readerShortcutsSuspended,
+      ),
+      child: scaffold,
+    );
+  }
+
+  void _macAutoscrollChanged() {
+    final controller = _macAutoScroll;
+    if (!mounted || controller == null) return;
+    if (controller.statusRevision != _lastMacStatusRevision) {
+      _lastMacStatusRevision = controller.statusRevision;
+      _macStatusTimer?.cancel();
+      setState(() => _macStatus = controller.statusLabel);
+      _macStatusTimer = Timer(const Duration(seconds: 1), () {
+        if (mounted) setState(() => _macStatus = null);
+      });
+      unawaited(
+        AppSettingsService.instance.saveMacAutoscrollPreferences(
+          MacAutoscrollPreferences(
+            baseSpeed: controller.baseSpeed,
+            lastNonzeroStep: controller.lastNonzeroStep,
+            maximumStep: controller.maximumStep,
+          ),
+        ),
+      );
+    } else {
+      setState(() {});
+    }
+  }
+
+  Future<void> _openMacAutoscrollSettings() async {
+    final controller = _macAutoScroll!;
+    _readerShortcutsSuspended = true;
+    final result = await showMacAutoscrollSettingsDialog(
+      context: context,
+      initial: MacAutoscrollPreferences(
+        baseSpeed: controller.baseSpeed,
+        lastNonzeroStep: controller.lastNonzeroStep,
+        maximumStep: controller.maximumStep,
+      ),
+    );
+    if (!mounted) return;
+    _readerShortcutsSuspended = false;
+    if (result != null) {
+      controller.updatePreferences(result);
+      await AppSettingsService.instance.saveMacAutoscrollPreferences(result);
+    }
+    _readerFocusNode.requestFocus();
+  }
+
+  void _setFontScale(double value) {
+    final next = value.clamp(.75, 2.0);
+    setState(() => _fontScale = next);
+    unawaited(AppSettingsService.instance.saveViewerFontScale(next));
+  }
+
+  Future<void> _toggleRefCodes() async {
+    final next = !_showRefCodes;
+    setState(() => _showRefCodes = next);
+    await LocalSettingsStore.instance.saveLibraryReaderShowRefCodes(next);
+  }
+
+  Future<void> _openContents() async {
+    final headings = await widget.repository.loadHeadings(widget.item.id);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Contents'),
+        content: SizedBox(
+          width: 420,
+          child: ListView(
+            shrinkWrap: true,
+            children: headings
+                .map(
+                  (heading) => ListTile(
+                    title: Text(heading.plainText),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      unawaited(_jumpToBlock(heading));
+                    },
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        ),
+      ),
+    );
+  }
+
+  final CanonicalLibraryProofCommands _commands =
+      CanonicalLibraryProofCommands();
+
+  Future<void> _jumpToBlock(LibraryDocumentBlock block) async {
+    await _controller.ensureWindow(block.displayOrder);
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _commands.jumpToOrder(block.displayOrder);
+    });
+  }
+
+  Future<void> _jumpHeading(bool forward) async {
+    final current = _location?.block.displayOrder ?? 0;
+    final headings = (await widget.repository.loadHeadings(widget.item.id))
+        .where(
+          (block) => forward
+              ? block.displayOrder > current
+              : block.displayOrder < current,
+        )
+        .toList(growable: false);
+    if (headings.isEmpty) return;
+    await _jumpToBlock(forward ? headings.first : headings.last);
+  }
+
+  Future<void> _openCanonicalSearch() async {
+    final queryController = TextEditingController();
+    final query = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Search this book'),
+        content: TextField(
+          key: const ValueKey('canonical-search-field'),
+          controller: queryController,
+          autofocus: true,
+          textInputAction: TextInputAction.search,
+          onSubmitted: (value) => Navigator.of(context).pop(value),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(queryController.text),
+            child: const Text('Search'),
+          ),
+        ],
+      ),
+    );
+    queryController.dispose();
+    if (!mounted || query == null || query.trim().isEmpty) return;
+    final results = await widget.repository.searchCurrentBook(
+      widget.item.id,
+      query,
+    );
+    if (!mounted) return;
+    setState(() {
+      _searchResults = results;
+      _searchResultIndex = results.isEmpty ? -1 : 0;
+      _activeSearchBlockId = results.isEmpty ? null : results.first.id;
+    });
+    if (results.isNotEmpty) await _jumpToBlock(results.first);
+  }
+
+  Future<void> _moveSearchResult(int delta) async {
+    if (_searchResults.isEmpty) return;
+    final next = (_searchResultIndex + delta).clamp(
+      0,
+      _searchResults.length - 1,
+    );
+    setState(() {
+      _searchResultIndex = next;
+      _activeSearchBlockId = _searchResults[next].id;
+    });
+    await _jumpToBlock(_searchResults[next]);
+  }
+
+  Future<void> _loadCanonicalHighlights() async {
+    Map<String, List<ElibraryMarkupRecord>> byLocation;
+    try {
+      byLocation = await ElibraryMarkupRepository().loadMarkupsBySectionForItem(
+        widget.item.id,
+      );
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _canonicalHighlights = <String, List<ElibraryMarkupRecord>>{
+        for (final entry in byLocation.entries)
+          if (entry.key.startsWith('canonical:')) entry.key: entry.value,
+      };
+    });
+  }
+
+  Future<void> _highlightCanonicalSelection() async {
+    final block = _selectedMarkupBlock;
+    final range = _selectedMarkupRange;
+    if (block == null || range == null || range.isCollapsed) return;
+    final start = range.start.clamp(0, block.plainText.length);
+    final end = range.end.clamp(start, block.plainText.length);
+    if (end <= start) return;
+    final color = await showElibraryHighlightColorPicker(context);
+    if (!mounted || color == null) return;
+    await ElibraryMarkupRepository().saveHighlight(
+      libraryItemId: widget.item.id,
+      epubHref: 'canonical:${block.id}',
+      startBlockIndex: 0,
+      startCharOffset: start,
+      endBlockIndex: 0,
+      endCharOffset: end,
+      refStart: block.sourceRefcode ?? widget.item.displayTitle,
+      refEnd: block.sourceRefcode ?? widget.item.displayTitle,
+      compactRef: block.sourceRefcode ?? widget.item.displayTitle,
+      selectedTextSnapshot: block.plainText.substring(start, end),
+      color: color,
+    );
+    await _loadCanonicalHighlights();
+  }
+
+  Future<void> _openCanonicalSelectionMenu() async {
+    final block = _selectedMarkupBlock;
+    final range = _selectedMarkupRange;
+    if (block == null || range == null || range.isCollapsed) return;
+    final start = range.start.clamp(0, block.plainText.length);
+    final end = range.end.clamp(start, block.plainText.length);
+    if (end <= start) return;
+    final selectedText = block.plainText.substring(start, end);
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Range Actions',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 8),
+              Text(block.sourceRefcode ?? widget.item.displayTitle),
+              const SizedBox(height: 8),
+              Text(selectedText),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  FilledButton.tonalIcon(
+                    onPressed: () => Navigator.of(context).pop('copy'),
+                    icon: const Icon(Icons.copy_outlined),
+                    label: const Text('Copy No Citation'),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: () => Navigator.of(context).pop('highlight'),
+                    icon: const Icon(Icons.format_paint_outlined),
+                    label: const Text('Highlight'),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed:
+                        _canonicalHighlights['canonical:${block.id}']
+                                ?.isNotEmpty ==
+                            true
+                        ? () => Navigator.of(context).pop('clear')
+                        : null,
+                    icon: const Icon(Icons.layers_clear_outlined),
+                    label: const Text('Clear Markup'),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: () => Navigator.of(context).pop('reset'),
+                    icon: const Icon(Icons.close_rounded),
+                    label: const Text('Reset Range'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'copy':
+        await Clipboard.setData(ClipboardData(text: selectedText));
+        return;
+      case 'highlight':
+        await _highlightCanonicalSelection();
+        return;
+      case 'clear':
+        await ElibraryMarkupRepository().clearHighlightsOverlappingSelection(
+          libraryItemId: widget.item.id,
+          epubHref: 'canonical:${block.id}',
+          startBlockIndex: 0,
+          startCharOffset: start,
+          endBlockIndex: 0,
+          endCharOffset: end,
+        );
+        await _loadCanonicalHighlights();
+        return;
+      case 'reset':
+        _selectedMarkupBlock = null;
+        _selectedMarkupRange = null;
+        return;
+    }
+  }
+}
+
+class _CanonicalProductionHeader extends StatelessWidget {
+  const _CanonicalProductionHeader({
+    required this.item,
+    required this.foreground,
+    required this.background,
+    required this.onBack,
+    required this.onSearch,
+    required this.searchCounter,
+    required this.onPreviousSearch,
+    required this.onNextSearch,
+    required this.onLibrary,
+    required this.menu,
+  });
+
+  final LibraryCatalogItem item;
+  final Color foreground;
+  final Color background;
+  final VoidCallback onBack;
+  final VoidCallback? onSearch;
+  final String? searchCounter;
+  final VoidCallback? onPreviousSearch;
+  final VoidCallback? onNextSearch;
+  final VoidCallback? onLibrary;
+  final Widget? menu;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget button(IconData icon, String label, VoidCallback? onPressed) =>
+        FilledButton.tonalIcon(
+          onPressed: onPressed,
+          icon: Icon(icon),
+          label: Text(label),
+        );
+    final back = button(Icons.arrow_back, 'Back to Bible', onBack);
+    final title = Text(
+      'eLibrary',
+      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+        color: foreground,
+        fontWeight: FontWeight.w800,
+      ),
+    );
+    final actions = <Widget>[
+      button(Icons.search, 'Search', onSearch),
+      if (searchCounter != null)
+        DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border.all(color: Theme.of(context).colorScheme.outline),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              IconButton(
+                tooltip: 'Previous search result',
+                onPressed: onPreviousSearch,
+                icon: const Icon(Icons.chevron_left),
+              ),
+              Text(searchCounter!),
+              IconButton(
+                tooltip: 'Next search result',
+                onPressed: onNextSearch,
+                icon: const Icon(Icons.chevron_right),
+              ),
+            ],
+          ),
+        ),
+      button(Icons.library_books_outlined, 'Library', onLibrary),
+      ?menu,
+    ];
+    return Padding(
+      key: const ValueKey('canonical-production-header'),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth < 900) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        back,
+                        const SizedBox(width: 12),
+                        title,
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 10, runSpacing: 10, children: actions),
+                  ],
+                );
+              }
+              return Row(
+                children: <Widget>[
+                  back,
+                  const SizedBox(width: 12),
+                  title,
+                  const Spacer(),
+                  ...actions.expand(
+                    (action) => <Widget>[action, const SizedBox(width: 12)],
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          Material(
+            color: Theme.of(context).colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(18),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    item.displayTitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: foreground,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if ((item.author ?? '').trim().isNotEmpty)
+                    Text(
+                      item.author!.trim(),
+                      style: TextStyle(color: foreground),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CanonicalToolbarButton extends StatelessWidget {
+  const _CanonicalToolbarButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => FilledButton.tonalIcon(
+    onPressed: onPressed,
+    icon: Icon(icon, size: 18),
+    label: Text(label),
+  );
+}
+
+class _CanonicalZoomCluster extends StatelessWidget {
+  const _CanonicalZoomCluster({
+    required this.valueLabel,
+    required this.onZoomOut,
+    required this.onZoomIn,
+  });
+  final String valueLabel;
+  final VoidCallback onZoomOut;
+  final VoidCallback onZoomIn;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        IconButton(
+          key: const ValueKey('canonical-font-decrease'),
+          tooltip: 'Zoom out',
+          onPressed: onZoomOut,
+          icon: const Icon(Icons.zoom_out),
+        ),
+        Text(valueLabel),
+        IconButton(
+          key: const ValueKey('canonical-font-increase'),
+          tooltip: 'Zoom in',
+          onPressed: onZoomIn,
+          icon: const Icon(Icons.zoom_in),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CanonicalNavCluster extends StatelessWidget {
+  const _CanonicalNavCluster({
+    required this.onPreviousHeading,
+    required this.onPageUp,
+    required this.onPageDown,
+    required this.onNextHeading,
+  });
+  final VoidCallback onPreviousHeading;
+  final VoidCallback onPageUp;
+  final VoidCallback onPageDown;
+  final VoidCallback onNextHeading;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: <Widget>[
+      IconButton(
+        tooltip: 'Previous section heading',
+        onPressed: onPreviousHeading,
+        icon: const Icon(Icons.keyboard_double_arrow_left),
+      ),
+      IconButton(
+        tooltip: 'Page up',
+        onPressed: onPageUp,
+        icon: const Icon(Icons.chevron_left),
+      ),
+      IconButton(
+        tooltip: 'Page down',
+        onPressed: onPageDown,
+        icon: const Icon(Icons.chevron_right),
+      ),
+      IconButton(
+        tooltip: 'Next section heading',
+        onPressed: onNextHeading,
+        icon: const Icon(Icons.keyboard_double_arrow_right),
+      ),
+    ],
+  );
+}
+
+class CanonicalLibraryDocumentBody extends StatefulWidget {
+  const CanonicalLibraryDocumentBody({
+    super.key,
+    required this.controller,
+    required this.autoScrollTarget,
+    required this.onVisibleOrderChanged,
+    required this.textColor,
+    this.onManualScroll,
+    this.sourceRoot,
+    this.diagnostics,
+    this.proofCommands,
+    this.fontScale = 1,
+    this.onReaderInteraction,
+    this.showRefCodes = false,
+    this.activeSearchBlockId,
+    this.highlightedBlockIds = const <String>{},
+    this.onSelectionChanged,
+    this.onOpenSelectionMenu,
+  });
+  final LibraryDocumentController controller;
+  final CallbackReaderAutoScrollTarget autoScrollTarget;
+  final ValueChanged<int> onVisibleOrderChanged;
+  final Color textColor;
+  final VoidCallback? onManualScroll;
+  final Directory? sourceRoot;
+  final CanonicalScrollDiagnostics? diagnostics;
+  final CanonicalLibraryProofCommands? proofCommands;
+  final double fontScale;
+  final VoidCallback? onReaderInteraction;
+  final bool showRefCodes;
+  final String? activeSearchBlockId;
+  final Set<String> highlightedBlockIds;
+  final void Function(LibraryDocumentBlock block, TextSelection selection)?
+  onSelectionChanged;
+  final VoidCallback? onOpenSelectionMenu;
+
+  @override
+  State<CanonicalLibraryDocumentBody> createState() =>
+      _CanonicalLibraryDocumentBodyState();
+}
+
+class _CanonicalLibraryDocumentBodyState
+    extends State<CanonicalLibraryDocumentBody> {
+  final ItemScrollController _itemController = ItemScrollController();
+  final ItemPositionsListener _positions = ItemPositionsListener.create();
+  final GlobalKey _visibleListKey = GlobalKey(
+    debugLabel: 'canonical-visible-scroll-list',
+  );
+  ScrollPosition? _position;
+  int _firstVisibleOrder = 0;
+
+  void _captureVisiblePosition() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      void inspect(Element element) {
+        if (element is StatefulElement && element.state is ScrollableState) {
+          final position = (element.state as ScrollableState).position;
+          if (position.hasPixels) _position = position;
+          return;
+        }
+        element.visitChildElements(inspect);
+      }
+
+      (_visibleListKey.currentContext as Element?)?.visitChildElements(inspect);
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _positions.itemPositions.addListener(_onPositions);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.autoScrollTarget.attach(_scrollByPixels);
+      widget.proofCommands?._attach(_jumpToOrder);
+    });
+    _captureVisiblePosition();
+  }
+
+  void _jumpToOrder(int order) {
+    if (!_itemController.isAttached || widget.controller.blockCount == 0) {
+      return;
+    }
+    _itemController.jumpTo(
+      index: order.clamp(0, widget.controller.blockCount - 1),
+    );
+  }
+
+  bool _scrollByPixels(double delta) {
+    final position = _position;
+    if (position == null || !position.hasPixels) {
+      return false;
+    }
+    final target = (position.pixels + delta).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if ((target - position.pixels).abs() <= .01) {
+      return false;
+    }
+    final before = position.pixels;
+    position.jumpTo(target);
+    final appliedDelta = position.pixels - before;
+    final block = widget.controller.blockAt(_firstVisibleOrder);
+    final heading = widget.controller.headingAtOrBefore(_firstVisibleOrder);
+    widget.diagnostics?.record(
+      CanonicalScrollDiagnosticSample(
+        timestamp: DateTime.now().toUtc(),
+        requestedDelta: delta,
+        appliedDelta: appliedDelta,
+        firstVisibleBlockId: block?.id,
+        firstVisibleDisplayOrder: _firstVisibleOrder,
+        headingBlockId: heading?.id,
+        headingTitle: heading?.plainText,
+        direction: delta < 0 ? 'backward' : 'forward',
+        programmaticItemJump: false,
+        controllerIdentity: identityHashCode(widget.controller),
+        chapterNavigationFired: false,
+      ),
+    );
+    return appliedDelta.abs() > .01;
+  }
+
+  void _onPositions() {
+    final samples = _positions.itemPositions.value.map(
+      (item) => (
+        index: item.index,
+        leading: item.itemLeadingEdge,
+        trailing: item.itemTrailingEdge,
+      ),
+    );
+    final order = firstMeaningfullyVisibleCanonicalOrder(samples);
+    if (order >= 0) {
+      _firstVisibleOrder = order;
+      widget.onVisibleOrderChanged(order);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.autoScrollTarget.detach();
+    widget.proofCommands?._detach();
+    _positions.itemPositions.removeListener(_onPositions);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          final notificationContext = notification.context;
+          if (notificationContext != null) {
+            _position = Scrollable.maybeOf(notificationContext)?.position;
+          }
+          if (readerScrollNotificationIsManual(notification)) {
+            widget.onManualScroll?.call();
+          }
+          return false;
+        },
+        child: Listener(
+          onPointerDown: (_) => widget.onReaderInteraction?.call(),
+          child: KeyedSubtree(
+            key: const ValueKey('canonical-flat-list'),
+            child: ScrollablePositionedList.builder(
+              key: _visibleListKey,
+              itemCount: widget.controller.blockCount,
+              itemScrollController: _itemController,
+              itemPositionsListener: _positions,
+              padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
+              itemBuilder: (context, order) {
+                _position ??= Scrollable.maybeOf(context)?.position;
+                if (_position == null || !_position!.hasPixels) {
+                  _captureVisiblePosition();
+                }
+                final block = widget.controller.blockAt(order);
+                if (block == null) {
+                  widget.controller.ensureWindow(order);
+                  return const SizedBox(height: 42);
+                }
+                return KeyedSubtree(
+                  key: ValueKey(block.id),
+                  child: _CanonicalBlockView(
+                    block: block,
+                    color: widget.textColor,
+                    sourceRoot: widget.sourceRoot,
+                    fontScale: widget.fontScale,
+                    showRefCode: widget.showRefCodes,
+                    searchActive: widget.activeSearchBlockId == block.id,
+                    highlighted: widget.highlightedBlockIds.contains(block.id),
+                    onSelectionChanged: (selection) =>
+                        widget.onSelectionChanged?.call(block, selection),
+                    onOpenSelectionMenu: widget.onOpenSelectionMenu,
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+}
+
+class _CanonicalBlockView extends StatelessWidget {
+  const _CanonicalBlockView({
+    required this.block,
+    required this.color,
+    required this.sourceRoot,
+    required this.fontScale,
+    required this.showRefCode,
+    required this.searchActive,
+    required this.highlighted,
+    required this.onSelectionChanged,
+    required this.onOpenSelectionMenu,
+  });
+  final LibraryDocumentBlock block;
+  final Color color;
+  final Directory? sourceRoot;
+  final double fontScale;
+  final bool showRefCode;
+  final bool searchActive;
+  final bool highlighted;
+  final ValueChanged<TextSelection>? onSelectionChanged;
+  final VoidCallback? onOpenSelectionMenu;
+
+  @override
+  Widget build(BuildContext context) {
+    if (block.blockType == LibraryDocumentBlockType.horizontalRule) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Divider(),
+      );
+    }
+    final formatted = LibraryFormattedContent.fromJson(block.formattedContent);
+    if (block.blockType == LibraryDocumentBlockType.image) {
+      Map<String, Object?>? imageNode;
+      for (final node in formatted.nodes) {
+        if (node['type'] == 'image') {
+          imageNode = node;
+          break;
+        }
+      }
+      final source = imageNode?['source']?.toString() ?? '';
+      final resolution = sourceRoot == null
+          ? const CanonicalLocalImageResolution(
+              status: CanonicalLocalImageStatus.rejected,
+            )
+          : resolveCanonicalLocalImage(sourceRoot: sourceRoot!, source: source);
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: resolution.status == CanonicalLocalImageStatus.resolved
+            ? Image.file(
+                resolution.file!,
+                key: const ValueKey('canonical-local-image'),
+                fit: BoxFit.contain,
+                errorBuilder: (_, _, _) =>
+                    _CanonicalImageFallback(color: color, alt: block.plainText),
+              )
+            : _CanonicalImageFallback(color: color, alt: block.plainText),
+      );
+    }
+    final heading = block.blockType == LibraryDocumentBlockType.heading;
+    final quotation = block.blockType == LibraryDocumentBlockType.quotation;
+    final poem = block.blockType == LibraryDocumentBlockType.poem;
+    final base = TextStyle(
+      color: color,
+      fontSize: (heading ? 24 : 18) * fontScale,
+      height: heading ? 1.3 : 1.6,
+      fontWeight: heading ? FontWeight.w800 : FontWeight.w400,
+      fontStyle: quotation ? FontStyle.italic : null,
+    );
+    final align = switch (formatted.alignment) {
+      'center' => TextAlign.center,
+      'right' => TextAlign.right,
+      'justify' => TextAlign.justify,
+      _ => TextAlign.start,
+    };
+    return Padding(
+      padding: EdgeInsets.only(
+        top: heading ? 20 : 6,
+        bottom: heading ? 12 : 14,
+        left: quotation ? 12 : 0,
+      ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: searchActive
+              ? Colors.amber.withValues(alpha: .22)
+              : highlighted
+              ? Colors.amber.withValues(alpha: .35)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            SelectableText.rich(
+              TextSpan(
+                style: base,
+                children: canonicalInlineTextSpans(
+                  block: block,
+                  formatted: formatted,
+                  bodyStyle: base,
+                  referenceStyle: base.copyWith(
+                    fontSize: (heading ? 24 : 18) * fontScale * .72,
+                    color: color.withValues(alpha: .65),
+                    fontWeight: FontWeight.w500,
+                  ),
+                  showReferenceCode: showRefCode,
+                ),
+              ),
+              textAlign: align,
+              style: poem ? base.copyWith(fontFamily: 'monospace') : base,
+              onSelectionChanged: (selection, _) =>
+                  onSelectionChanged?.call(selection),
+              onTap: onOpenSelectionMenu,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Development-only command seam for explicit proof controls. Ordinary pixel
+/// autoscroll never calls this object, so diagnostic jump counts can distinguish
+/// a user-requested reposition from continuous scrolling.
+class CanonicalLibraryProofCommands {
+  void Function(int order)? _jump;
+  int explicitJumpCount = 0;
+
+  bool get isAttached => _jump != null;
+
+  void jumpToOrder(int order) {
+    final callback = _jump;
+    if (callback == null) return;
+    explicitJumpCount++;
+    callback(order);
+  }
+
+  void _attach(void Function(int order) callback) => _jump = callback;
+  void _detach() => _jump = null;
+}
+
+class _CanonicalImageFallback extends StatelessWidget {
+  const _CanonicalImageFallback({required this.color, required this.alt});
+  final Color color;
+  final String alt;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    image: true,
+    label: alt,
+    child: Column(
+      key: const ValueKey('canonical-image-fallback'),
+      children: <Widget>[
+        Icon(Icons.broken_image_outlined, color: color),
+        if (alt.isNotEmpty) Text(alt, style: TextStyle(color: color)),
+      ],
+    ),
+  );
+}

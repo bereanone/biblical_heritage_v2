@@ -49,6 +49,7 @@ class _ToolbarPillButton extends StatelessWidget {
 
 class _ZoomCluster extends StatelessWidget {
   const _ZoomCluster({
+    super.key,
     required this.isNightMode,
     required this.valueLabel,
     required this.onZoomOut,

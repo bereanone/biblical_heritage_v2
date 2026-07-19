@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme_mode.dart';
+import '../../library/presentation/mac_reader_autoscroll_controller.dart';
+import '../../library/presentation/mac_reader_autoscroll_controls.dart';
 import '../../library/presentation/reader_tilt_autoscroll_controller.dart';
 import '../../library/presentation/reader_tilt_autoscroll_controls.dart';
 
@@ -26,6 +28,9 @@ class ViewerBottomBar extends StatelessWidget {
     required this.canDecreaseFont,
     required this.canIncreaseFont,
     required this.backgroundColor,
+    this.macAutoScrollController,
+    this.onToggleMacAutoScroll,
+    this.onOpenMacAutoScrollSettings,
   });
 
   final AppThemeMode themeMode;
@@ -45,6 +50,28 @@ class ViewerBottomBar extends StatelessWidget {
   final bool canDecreaseFont;
   final bool canIncreaseFont;
   final Color backgroundColor;
+  final MacReaderAutoScrollController? macAutoScrollController;
+  final VoidCallback? onToggleMacAutoScroll;
+  final VoidCallback? onOpenMacAutoScrollSettings;
+
+  Widget _autoScrollButton({bool compact = false}) {
+    final macController = macAutoScrollController;
+    if (macController != null) {
+      return MacReaderAutoScrollButton(
+        controller: macController,
+        onPressed: onToggleMacAutoScroll!,
+        onLongPress: onOpenMacAutoScrollSettings!,
+        enabled: !interlinearEnabled,
+      );
+    }
+    return ReaderTiltAutoScrollIconButton(
+      controller: tiltAutoScrollController,
+      onPressed: onToggleTiltAutoScroll,
+      onLongPress: onOpenTiltAutoScrollSettings,
+      enabled: tiltAutoScrollController.motionSource.isSupported,
+      compact: compact,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,87 +88,108 @@ class ViewerBottomBar extends StatelessWidget {
           final sidePadding = isCompact ? 4.0 : 8.0;
 
           if (!isWide) {
-            if (constraints.maxWidth < 380) {
+            // Below this width the complete set of minimum-size hit targets
+            // cannot fit without compression. Keep every action full-size and
+            // let the toolbar scroll horizontally instead.
+            if (constraints.maxWidth < 440) {
               return SafeArea(
                 top: false,
                 child: SizedBox(
                   height: 56,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    padding: EdgeInsets.symmetric(horizontal: sidePadding),
+                  child: Padding(
+                    padding: EdgeInsets.only(left: sidePadding),
                     child: Row(
                       children: [
-                        IconButton(
-                          tooltip: 'History',
-                          onPressed: onHistory,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints.tightFor(
-                            width: 36,
-                            height: 36,
+                        // Priority controls stay fixed and fully on-screen.
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'History',
+                              onPressed: onHistory,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints.tightFor(
+                                width: 36,
+                                height: 36,
+                              ),
+                              icon: Icon(
+                                Icons.history_rounded,
+                                color: buttonColor,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(width: 2),
+                            _FontScaleButton(
+                              onPressed: canDecreaseFont
+                                  ? onDecreaseFont
+                                  : null,
+                              color: buttonColor,
+                              baseSize: 14,
+                              sign: 'A-',
+                              signSize: 10,
+                              compact: true,
+                            ),
+                            const SizedBox(width: 2),
+                            _FontScaleButton(
+                              onPressed: canIncreaseFont
+                                  ? onIncreaseFont
+                                  : null,
+                              color: buttonColor,
+                              baseSize: 19,
+                              sign: 'A+',
+                              signSize: 11,
+                              compact: true,
+                            ),
+                            const SizedBox(width: 2),
+                            _autoScrollButton(),
+                            const SizedBox(width: 10),
+                          ],
+                        ),
+                        // Lower-priority controls scroll independently; moving
+                        // them can never move Tilt Auto-scroll off-screen.
+                        Expanded(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            padding: EdgeInsets.only(right: sidePadding),
+                            child: Row(
+                              children: [
+                                _BottomIconButton(
+                                  tooltip: 'Commentary',
+                                  icon: Icons.menu_book_outlined,
+                                  color: buttonColor,
+                                  compact: true,
+                                  onPressed: onCommentary,
+                                ),
+                                const SizedBox(width: 2),
+                                _LibraryButton(
+                                  compact: true,
+                                  onPressed: onLibrary,
+                                ),
+                                const SizedBox(width: 2),
+                                _InterlinearToggleButton(
+                                  bookNumber: bookNumber,
+                                  interlinearEnabled: interlinearEnabled,
+                                  compact: true,
+                                  baseColor: buttonColor,
+                                  onToggleInterlinear: onToggleInterlinear,
+                                ),
+                                const SizedBox(width: 2),
+                                _ThemeToggleButton(
+                                  themeMode: themeMode,
+                                  compact: true,
+                                  onToggleThemeMode: onToggleThemeMode,
+                                ),
+                                const SizedBox(width: 2),
+                                _BottomIconButton(
+                                  tooltip: 'Mode',
+                                  icon: Icons.settings_rounded,
+                                  color: buttonColor,
+                                  compact: true,
+                                  onPressed: onMode,
+                                ),
+                              ],
+                            ),
                           ),
-                          icon: Icon(
-                            Icons.history_rounded,
-                            color: buttonColor,
-                            size: 22,
-                          ),
-                        ),
-                        const SizedBox(width: 2),
-                        _FontScaleButton(
-                          onPressed: canDecreaseFont ? onDecreaseFont : null,
-                          color: buttonColor,
-                          baseSize: 14,
-                          sign: 'A-',
-                          signSize: 10,
-                          compact: true,
-                        ),
-                        const SizedBox(width: 2),
-                        _FontScaleButton(
-                          onPressed: canIncreaseFont ? onIncreaseFont : null,
-                          color: buttonColor,
-                          baseSize: 19,
-                          sign: 'A+',
-                          signSize: 11,
-                          compact: true,
-                        ),
-                        const SizedBox(width: 2),
-                        ReaderTiltAutoScrollIconButton(
-                          controller: tiltAutoScrollController,
-                          onPressed: onToggleTiltAutoScroll,
-                          onLongPress: onOpenTiltAutoScrollSettings,
-                          enabled:
-                              tiltAutoScrollController.motionSource.isSupported,
-                        ),
-                        const SizedBox(width: 2),
-                        _BottomIconButton(
-                          tooltip: 'Commentary',
-                          icon: Icons.menu_book_outlined,
-                          color: buttonColor,
-                          compact: true,
-                          onPressed: onCommentary,
-                        ),
-                        const SizedBox(width: 2),
-                        _LibraryButton(compact: true, onPressed: onLibrary),
-                        const SizedBox(width: 2),
-                        _InterlinearToggleButton(
-                          bookNumber: bookNumber,
-                          interlinearEnabled: interlinearEnabled,
-                          compact: true,
-                          baseColor: buttonColor,
-                          onToggleInterlinear: onToggleInterlinear,
-                        ),
-                        const SizedBox(width: 2),
-                        _ThemeToggleButton(
-                          themeMode: themeMode,
-                          compact: true,
-                          onToggleThemeMode: onToggleThemeMode,
-                        ),
-                        const SizedBox(width: 2),
-                        _BottomIconButton(
-                          tooltip: 'Mode',
-                          icon: Icons.settings_rounded,
-                          color: buttonColor,
-                          compact: true,
-                          onPressed: onMode,
                         ),
                       ],
                     ),
@@ -202,17 +250,11 @@ class ViewerBottomBar extends StatelessWidget {
                               compact: true,
                             ),
                             const SizedBox(width: 2),
-                            ReaderTiltAutoScrollIconButton(
-                              controller: tiltAutoScrollController,
-                              onPressed: onToggleTiltAutoScroll,
-                              onLongPress: onOpenTiltAutoScrollSettings,
-                              enabled: tiltAutoScrollController
-                                  .motionSource
-                                  .isSupported,
-                            ),
+                            _autoScrollButton(),
                           ],
                         ),
                       ),
+                      const SizedBox(width: 10),
                       // Commentary — permanently centered between the two Expanded clusters
                       _BottomIconButton(
                         tooltip: 'Commentary',
@@ -310,15 +352,7 @@ class ViewerBottomBar extends StatelessWidget {
                             compact: isCompact,
                           ),
                           SizedBox(width: controlGap),
-                          ReaderTiltAutoScrollIconButton(
-                            controller: tiltAutoScrollController,
-                            onPressed: onToggleTiltAutoScroll,
-                            onLongPress: onOpenTiltAutoScrollSettings,
-                            enabled: tiltAutoScrollController
-                                .motionSource
-                                .isSupported,
-                            compact: isCompact,
-                          ),
+                          _autoScrollButton(compact: isCompact),
                         ],
                       ),
                     ),

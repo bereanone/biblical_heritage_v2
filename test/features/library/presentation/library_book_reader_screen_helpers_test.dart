@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -1152,6 +1153,141 @@ void main() {
       expect(chain.readableSection.entryName, 'october17.html');
     });
 
+    test('automatic readable-leaf transition preserves its structural heading '
+        'path in document order', () {
+      final headings = libraryReaderComposedHeadingSections(
+        navItem: navOctober17,
+        tree: tree,
+        sections: sections,
+      );
+
+      expect(headings.map((section) => section.title), <String>[
+        'CHAPTER 1.',
+        'STUDIES IN ROMANS.',
+        'OCTOBER 17, 1895.',
+      ]);
+    });
+
+    test('automatic transition into Chapter 2 shows Chapter 2 before body', () {
+      final chapter2Heading = headingOnlySection(
+        'chapter2-heading.html',
+        'CHAPTER 2.',
+        20,
+      );
+      final chapter2Body = readableSection(
+        'chapter2-body.html',
+        'THE SEVEN CHURCHES',
+        'Chapter two body text.',
+        21,
+      );
+      final chapter2HeadingNav = navItem(
+        id: 'chapter2-heading',
+        label: 'CHAPTER 2.',
+        href: 'chapter2-heading.html',
+        sortOrder: 20,
+      );
+      final chapter2BodyNav = navItem(
+        id: 'chapter2-body',
+        parentId: 'chapter2-heading',
+        label: 'THE SEVEN CHURCHES',
+        href: 'chapter2-body.html',
+        sortOrder: 21,
+        depth: 1,
+      );
+      final chapter2Tree = buildLibraryNavigationTree([
+        chapter2HeadingNav,
+        chapter2BodyNav,
+      ]);
+
+      final headings = libraryReaderComposedHeadingSections(
+        navItem: chapter2BodyNav,
+        tree: chapter2Tree,
+        sections: [chapter2Heading, chapter2Body],
+      );
+      expect(headings.map((section) => section.title), <String>[
+        'CHAPTER 2.',
+        'THE SEVEN CHURCHES',
+      ]);
+      expect(headings.last.paragraphs.single, 'Chapter two body text.');
+    });
+
+    test('structural heading and readable descendant are composed once', () {
+      final chain = libraryReaderFirstReadableDescendant(
+        navItem: navChapter1,
+        tree: tree,
+        sections: sections,
+      );
+      final headings = libraryReaderComposedHeadingSections(
+        navItem: navChapter1,
+        tree: tree,
+        sections: sections,
+        descendantChain: chain,
+      );
+
+      expect(headings.map((section) => section.entryName), <String>[
+        'chapter1.html',
+        'studies.html',
+        'october17.html',
+      ]);
+      expect(
+        headings.where((section) => section.entryName == 'october17.html'),
+        hasLength(1),
+      );
+    });
+
+    test('manual direct selection and automatic continuation have the same '
+        'visible heading path', () {
+      final manual = libraryReaderComposedHeadingSections(
+        navItem: navOctober17,
+        tree: tree,
+        sections: sections,
+      );
+      final automatic = libraryReaderComposedHeadingSections(
+        navItem: tree.items.firstWhere((item) => item.id == 'october17'),
+        tree: tree,
+        sections: sections,
+      );
+      expect(
+        automatic.map((section) => section.entryName),
+        manual.map((section) => section.entryName),
+      );
+    });
+
+    test('genuinely distinct repeated headings remain distinct by href', () {
+      final repeatedSections = <LibraryBookSection>[
+        headingOnlySection('part-a.html', 'INTRODUCTION', 10),
+        readableSection('part-b.html', 'INTRODUCTION', 'Second body', 11),
+      ];
+      final repeatedParent = navItem(
+        id: 'part-a',
+        label: 'INTRODUCTION',
+        href: 'part-a.html',
+        sortOrder: 10,
+      );
+      final repeatedChild = navItem(
+        id: 'part-b',
+        parentId: 'part-a',
+        label: 'INTRODUCTION',
+        href: 'part-b.html',
+        sortOrder: 11,
+        depth: 1,
+      );
+      final repeatedTree = buildLibraryNavigationTree([
+        repeatedParent,
+        repeatedChild,
+      ]);
+
+      final headings = libraryReaderComposedHeadingSections(
+        navItem: repeatedChild,
+        tree: repeatedTree,
+        sections: repeatedSections,
+      );
+      expect(headings.map((section) => section.entryName), <String>[
+        'part-a.html',
+        'part-b.html',
+      ]);
+    });
+
     test('Preface with no readable subtree resolves to null and does not '
         'redirect to Chapter 1 or any other content', () {
       final chain = libraryReaderFirstReadableDescendant(
@@ -1595,6 +1731,98 @@ void main() {
           expect(find.text('Repair Current Imported Book'), findsOneWidget);
         },
       );
+
+      testWidgets('reader body does not install per-word recognizers', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          MaterialApp(home: LibraryBookReaderScreen(item: importedItem)),
+        );
+        await _pumpUntilFinder(
+          tester,
+          find.text('The Story of the Seer of Patmos'),
+        );
+
+        var recognizerCount = 0;
+        void visit(InlineSpan span) {
+          if (span is! TextSpan) return;
+          if (span.recognizer != null) recognizerCount += 1;
+          for (final child in span.children ?? const <InlineSpan>[]) {
+            visit(child);
+          }
+        }
+
+        for (final richText in tester.widgetList<RichText>(
+          find.byType(RichText),
+        )) {
+          visit(richText.text);
+        }
+        expect(recognizerCount, 0);
+      });
+
+      for (final width in [300.0, 390.0, 800.0]) {
+        testWidgets(
+          'eLibrary restores approved scrollable toolbar order at $width px',
+          (tester) async {
+            debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+            addTearDown(() {
+              debugDefaultTargetPlatformOverride = null;
+            });
+            await tester.binding.setSurfaceSize(Size(width, 700));
+            addTearDown(() => tester.binding.setSurfaceSize(null));
+            await tester.pumpWidget(
+              MaterialApp(home: LibraryBookReaderScreen(item: importedItem)),
+            );
+            await _pumpUntilFinder(
+              tester,
+              find.text('The Story of the Seer of Patmos'),
+            );
+
+            final safeArea = tester.getRect(
+              find.byKey(const ValueKey('elibrary-toolbar-safe-area')),
+            );
+            final toolbar = tester.getRect(
+              find.byKey(const ValueKey('elibrary-bottom-toolbar')),
+            );
+            final contents = tester.getRect(find.text('Contents'));
+            final library = tester.getRect(find.text('Library').last);
+            final theme = tester.getRect(find.byIcon(Icons.nightlight_round));
+            final refs = tester.getRect(find.text('Show Ref Codes'));
+            final font = tester.getRect(
+              find.byKey(const ValueKey('elibrary-font-size-control')),
+            );
+            final tilt = tester.getRect(
+              find.byKey(const ValueKey('elibrary-tilt-auto-scroll')),
+            );
+
+            expect(tilt.width, greaterThanOrEqualTo(44));
+            expect(tilt.height, greaterThanOrEqualTo(44));
+            expect(contents.left, lessThan(library.left));
+            expect(library.left, lessThan(theme.left));
+            expect(theme.left, lessThan(refs.left));
+            expect(refs.left, lessThan(font.left));
+            expect(tilt.left - font.right, inInclusiveRange(0, 12));
+            expect(font.overlaps(tilt), isFalse);
+            expect(toolbar.left, greaterThanOrEqualTo(safeArea.left));
+            expect(toolbar.right, lessThanOrEqualTo(safeArea.right));
+
+            final before = tilt;
+            await tester.drag(
+              find.byKey(const ValueKey('elibrary-secondary-toolbar-scroll')),
+              const Offset(-260, 0),
+            );
+            await tester.pump(const Duration(milliseconds: 500));
+            expect(
+              tester.getRect(
+                find.byKey(const ValueKey('elibrary-tilt-auto-scroll')),
+              ),
+              isNot(before),
+            );
+            debugDefaultTargetPlatformOverride = null;
+            expect(tester.takeException(), isNull);
+          },
+        );
+      }
 
       test('maintenance eligibility skips non-imported books', () {
         final normalBook = _catalogItem(

@@ -35,6 +35,7 @@ void main() {
     expect(defaults.reverseHorizontalDirection, isFalse);
     expect(defaults.horizontalSensitivity, 0.5);
     expect(defaults.horizontalChapterTiltAvailabilityMigrated, isFalse);
+    expect(defaults.statusBannerMode, ReaderTiltStatusBannerMode.autoHide);
   });
 
   test('JSON round trip preserves every preference', () {
@@ -46,6 +47,7 @@ void main() {
       reverseHorizontalDirection: true,
       horizontalSensitivity: 0.8,
       horizontalChapterTiltAvailabilityMigrated: true,
+      statusBannerMode: ReaderTiltStatusBannerMode.alwaysHidden,
     );
     final restored = ReaderTiltPreferences.fromJson(original.toJson());
     expect(restored.reverseVerticalDirection, isTrue);
@@ -55,6 +57,7 @@ void main() {
     expect(restored.reverseHorizontalDirection, isTrue);
     expect(restored.horizontalSensitivity, 0.8);
     expect(restored.horizontalChapterTiltAvailabilityMigrated, isTrue);
+    expect(restored.statusBannerMode, ReaderTiltStatusBannerMode.alwaysHidden);
   });
 
   test('preferences persist across store reopen', () async {
@@ -66,6 +69,7 @@ void main() {
       horizontalChapterTiltEnabled: true,
       reverseHorizontalDirection: true,
       horizontalSensitivity: 0.25,
+      statusBannerMode: ReaderTiltStatusBannerMode.alwaysVisible,
     );
     await store.save(saved);
     final reopened = await const ReaderTiltPreferencesStore().load();

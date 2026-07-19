@@ -5,6 +5,25 @@ import 'library_catalog_service.dart';
 import 'library_section_heuristics.dart';
 import '../presentation/library_navigation_tree.dart';
 
+/// Finds the next readable section without treating structural or empty
+/// entries as chapter boundaries of their own.
+int? libraryReaderAdjacentReadableSectionIndex({
+  required int currentIndex,
+  required int sectionCount,
+  required bool forward,
+  required bool Function(int index) isReadable,
+}) {
+  final step = forward ? 1 : -1;
+  for (
+    var index = currentIndex + step;
+    index >= 0 && index < sectionCount;
+    index += step
+  ) {
+    if (isReadable(index)) return index;
+  }
+  return null;
+}
+
 /// Preserves structural TOC nodes whose source contains a heading but no body.
 /// No descendant text is copied into these sections.
 List<LibraryBookSection> libraryReaderSectionsWithHeadingOnlyNavigation({
@@ -110,11 +129,7 @@ int libraryReaderInitialSectionIndex({
           .toLowerCase()
           .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
           .trim();
-      if (normalizedLabel == 'preface' &&
-          _isRealContentSection(sections[index], item)) {
-        return index;
-      }
-      if (normalizedLabel == 'chapter 1') {
+      if (_isChapterOneLabel(normalizedLabel)) {
         chapterOneIndex ??= index;
       }
     }
@@ -158,6 +173,10 @@ int libraryReaderInitialSectionIndex({
   }
 
   return 0;
+}
+
+bool _isChapterOneLabel(String normalizedLabel) {
+  return RegExp(r'^chapter (?:1|i|one)(?: |$)').hasMatch(normalizedLabel);
 }
 
 bool _hasReadableSavedSectionContent(LibraryBookSection section) {

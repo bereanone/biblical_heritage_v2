@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +8,8 @@ import '../../../core/database/study_bible_database.dart';
 import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/app_theme_mode.dart';
 import '../../library/presentation/library_screen.dart';
+import '../../library/presentation/mac_reader_autoscroll_controller.dart';
+import '../../library/presentation/mac_reader_autoscroll_controls.dart';
 import '../../library/presentation/reader_tilt_autoscroll_controller.dart';
 import '../../library/presentation/reader_tilt_autoscroll_controls.dart';
 import '../../library/presentation/reader_tilt_motion_source.dart';
@@ -16,6 +19,7 @@ import '../data/history_log_service.dart';
 import '../data/navigation_history_service.dart';
 import '../data/bible_memory_repository.dart';
 import 'bible_memory_screen.dart';
+import 'bible_visible_location_controller.dart';
 import 'highlight_popup.dart';
 import 'viewer_body.dart';
 import 'viewer_bottom_bar.dart';
@@ -95,6 +99,15 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   final CallbackReaderAutoScrollTarget _tiltScrollTarget =
       CallbackReaderAutoScrollTarget();
   late final ReaderTiltAutoScrollController _tiltAutoScroll;
+  MacReaderAutoScrollController? _macAutoScroll;
+  late final bool _usesMacAutoscroll;
+  final FocusNode _readerFocusNode = FocusNode(
+    debugLabel: 'bible-reader-keyboard-focus',
+  );
+  bool _readerShortcutsSuspended = false;
+  String? _macAutoscrollStatus;
+  Timer? _macAutoscrollStatusTimer;
+  int _lastMacAutoscrollStatusRevision = 0;
   final ReaderTiltPreferencesStore _tiltPreferencesStore =
       const ReaderTiltPreferencesStore();
   bool _isRapidTagApplying = false;
@@ -105,15 +118,36 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   int? _headerPinnedBlockId;
   Timer? _headerPinTimer;
   final Map<int, String> _bookNames = <int, String>{};
+  final BibleLiveReferenceController _liveVisibleLocation =
+      BibleLiveReferenceController();
+  late final BibleLocationPersistenceCoordinator _locationPersistence;
+  bool _wasTiltAutoScrollActive = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _locationPersistence = BibleLocationPersistenceCoordinator(
+      writer: (location) => NavigationHistoryService.instance.saveSelection(
+        blockId: location.blockId,
+        book: location.bookNumber,
+        chapter: location.chapter,
+        verse: location.verse,
+      ),
+    );
     _tiltAutoScroll = ReaderTiltAutoScrollController(
       motionSource: IosReaderTiltMotionSource(),
       scrollTarget: _tiltScrollTarget,
     )..addListener(_onTiltAutoScrollChanged);
+    _usesMacAutoscroll = Platform.isMacOS;
+    if (_usesMacAutoscroll) {
+      _macAutoScroll = MacReaderAutoScrollController(
+        scrollTarget: _tiltScrollTarget,
+      )..addListener(_onMacAutoscrollChanged);
+      AppSettingsService.instance.loadMacAutoscrollPreferences().then((value) {
+        if (mounted) _macAutoScroll?.updatePreferences(value);
+      });
+    }
     _loadTiltPreferences();
     _initializeViewer();
     _loadViewerSettings();
@@ -202,133 +236,191 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     }
 
     final passage = _buildCurrentPassage();
-    final displayLine = _displayHeaderLine();
-    final displayBookNumber = displayLine?.bookNumber ?? _bookNumber;
-    final displayBookName = _bookNames[displayBookNumber] ?? 'Bible Explorer';
-    final displayChapter = displayLine?.chapter ?? _chapter;
-    final displayVerse = displayLine?.verse ?? _verse;
     final baseBibleFontSize =
         (theme.textTheme.bodyLarge?.fontSize ?? 16) * _fontScale;
 
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            ViewerTopBar(
-              bookName: displayBookName,
-              chapter: displayChapter,
-              verse: displayVerse,
-              fontScale: _fontScale,
-              baseBibleFontSize: baseBibleFontSize,
-              onSearch: () {
-                _tiltAutoScroll.stop();
-                _openSearch(context);
-              },
-              bibleSearchSession: _activeBibleSearchSession,
-              onPreviousBibleSearchHit: () => _navigateBibleSearchHit(-1),
-              onNextBibleSearchHit: () => _navigateBibleSearchHit(1),
-              onSavedPresentations: () {
-                _tiltAutoScroll.stop();
-                _openSavedPresentations();
-              },
-              onStandardTag: () {
-                _tiltAutoScroll.stop();
-                _openTagButton();
-              },
-              onDollarTag: () {
-                _tiltAutoScroll.stop();
-                _openDollarTagButton();
-              },
-              onRapidTag: () {
-                _tiltAutoScroll.stop();
-                _openRapidTagButton();
-              },
-              activeFamily: null,
-              onTopics: () {
-                _tiltAutoScroll.stop();
-                _openTopics(context);
-              },
-              onChoosePassage: () {
-                _tiltAutoScroll.stop();
-                _openReferencePicker(context);
-              },
-            ),
-            if (_tiltAutoScroll.isActive)
-              ReaderTiltAutoScrollActiveIndicator(controller: _tiltAutoScroll),
-            Expanded(
-              child: _interlinearEnabled
-                  ? ViewerInterlinearBody(
-                      passage: passage,
-                      selectedBookNumber: _bookNumber,
-                      selectedChapter: _chapter,
-                      selectedVerse: _verse,
-                      fontScale: _fontScale,
-                      settings: _interlinearSettings,
-                      onSelectVerse: _selectLine,
-                      onSelectBlockId: _openBlockId,
-                      onTapSelectedRange: _openRangeActions,
-                      rangeSelection: _rangeSelection,
-                      highlightRefreshTick: _highlightRefreshTick,
-                      navigationTick: _navigationTick,
-                    )
-                  : ViewerBody(
-                      anchorBlockId: _anchorBlockId!,
-                      data: _viewerData,
-                      bookNamesByNumber: _bookNames,
-                      selectedBlockId: _selectedBlockId,
-                      fontScale: _fontScale,
-                      onVisibleIdChanged: _handleVisibleBlockChanged,
-                      onSelectionVisibilityChanged:
-                          _handleSelectedVisibilityChanged,
-                      onSelectVerse: _selectLine,
-                      onSelectVerseNumber: _selectMarkupAnchor,
-                      onSelectVerseNumberLongPressMove: _dragVerseAnchor,
-                      onSelectTokenLongPress: _selectTokenAnchor,
-                      onSelectTokenLongPressMove: _dragTokenAnchor,
-                      onTapSelectedRange: _openRangeActions,
-                      rangeSelection: _rangeSelection,
-                      highlightRefreshTick: _highlightRefreshTick,
-                      navigationTick: _navigationTick,
-                      autoScrollTarget: _tiltScrollTarget,
-                      onManualScroll: _tiltAutoScroll.stopForManualInteraction,
+    final reader = PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          unawaited(_locationPersistence.resumeAndFlush());
+        }
+      },
+      child: Scaffold(
+        body: Stack(
+          children: <Widget>[
+            SafeArea(
+              child: Column(
+                children: [
+                  ValueListenableBuilder<BibleVisibleLocation?>(
+                    valueListenable: _liveVisibleLocation,
+                    builder: (context, liveLocation, _) {
+                      final pinnedLine = _displayHeaderLine();
+                      final displayBookNumber =
+                          pinnedLine?.bookNumber ??
+                          liveLocation?.bookNumber ??
+                          _bookNumber;
+                      return ViewerTopBar(
+                        bookName:
+                            _bookNames[displayBookNumber] ?? 'Bible Explorer',
+                        chapter:
+                            pinnedLine?.chapter ??
+                            liveLocation?.chapter ??
+                            _chapter,
+                        verse:
+                            pinnedLine?.verse ?? liveLocation?.verse ?? _verse,
+                        fontScale: _fontScale,
+                        baseBibleFontSize: baseBibleFontSize,
+                        onSearch: () {
+                          _stopReaderAutoscroll();
+                          _openSearch(context);
+                        },
+                        bibleSearchSession: _activeBibleSearchSession,
+                        onPreviousBibleSearchHit: () =>
+                            _navigateBibleSearchHit(-1),
+                        onNextBibleSearchHit: () => _navigateBibleSearchHit(1),
+                        onSavedPresentations: () {
+                          _stopReaderAutoscroll();
+                          _openSavedPresentations();
+                        },
+                        onStandardTag: () {
+                          _stopReaderAutoscroll();
+                          _openTagButton();
+                        },
+                        onDollarTag: () {
+                          _stopReaderAutoscroll();
+                          _openDollarTagButton();
+                        },
+                        onRapidTag: () {
+                          _stopReaderAutoscroll();
+                          _openRapidTagButton();
+                        },
+                        activeFamily: null,
+                        onTopics: () {
+                          _stopReaderAutoscroll();
+                          _openTopics(context);
+                        },
+                        onChoosePassage: () {
+                          _stopReaderAutoscroll();
+                          _openReferencePicker(context);
+                        },
+                      );
+                    },
+                  ),
+                  ReaderTiltAutoScrollActiveIndicator(
+                    controller: _tiltAutoScroll,
+                  ),
+                  Expanded(
+                    child: Listener(
+                      behavior: HitTestBehavior.translucent,
+                      onPointerDown: (_) {
+                        if (_usesMacAutoscroll) {
+                          _readerFocusNode.requestFocus();
+                        }
+                        if (_tiltAutoScroll.isActive) {
+                          _tiltAutoScroll.showStatusBanner();
+                        }
+                      },
+                      child: _interlinearEnabled
+                          ? ViewerInterlinearBody(
+                              passage: passage,
+                              selectedBookNumber: _bookNumber,
+                              selectedChapter: _chapter,
+                              selectedVerse: _verse,
+                              fontScale: _fontScale,
+                              settings: _interlinearSettings,
+                              onSelectVerse: _selectLine,
+                              onSelectBlockId: _openBlockId,
+                              onTapSelectedRange: _openRangeActions,
+                              rangeSelection: _rangeSelection,
+                              highlightRefreshTick: _highlightRefreshTick,
+                              navigationTick: _navigationTick,
+                            )
+                          : ViewerBody(
+                              anchorBlockId: _anchorBlockId!,
+                              data: _viewerData,
+                              bookNamesByNumber: _bookNames,
+                              selectedBlockId: _selectedBlockId,
+                              fontScale: _fontScale,
+                              onVisibleIdChanged: _handleVisibleBlockChanged,
+                              onSelectionVisibilityChanged:
+                                  _handleSelectedVisibilityChanged,
+                              onSelectVerse: _selectLine,
+                              onSelectVerseNumber: _selectMarkupAnchor,
+                              onSelectVerseNumberLongPressMove:
+                                  _dragVerseAnchor,
+                              onSelectTokenLongPress: _selectTokenAnchor,
+                              onSelectTokenLongPressMove: _dragTokenAnchor,
+                              onTapSelectedRange: _openRangeActions,
+                              rangeSelection: _rangeSelection,
+                              highlightRefreshTick: _highlightRefreshTick,
+                              navigationTick: _navigationTick,
+                              autoScrollTarget: _tiltScrollTarget,
+                              onManualScroll: _usesMacAutoscroll
+                                  ? _macAutoScroll!.stopForManualInteraction
+                                  : _tiltAutoScroll.stopForManualInteraction,
+                            ),
                     ),
+                  ),
+                  ViewerBottomBar(
+                    themeMode: widget.themeMode,
+                    onToggleThemeMode: _toggleThemeMode,
+                    bookNumber: _bookNumber,
+                    interlinearEnabled: _interlinearEnabled,
+                    onToggleInterlinear: _toggleInterlinearMode,
+                    onHistory: () {
+                      _stopReaderAutoscroll();
+                      _openHistory();
+                    },
+                    onLibrary: () {
+                      _stopReaderAutoscroll();
+                      _openLibrary();
+                    },
+                    onDecreaseFont: _decreaseFont,
+                    onIncreaseFont: _increaseFont,
+                    tiltAutoScrollController: _tiltAutoScroll,
+                    onToggleTiltAutoScroll: _toggleTiltAutoScroll,
+                    onOpenTiltAutoScrollSettings: _openTiltSettings,
+                    macAutoScrollController: _macAutoScroll,
+                    onToggleMacAutoScroll: _toggleMacAutoscroll,
+                    onOpenMacAutoScrollSettings: _openMacAutoscrollSettings,
+                    onCommentary: () {
+                      _stopReaderAutoscroll();
+                      _openCommentary();
+                    },
+                    onMode: () {
+                      _stopReaderAutoscroll();
+                      _openMode();
+                    },
+                    canDecreaseFont: _fontScale > _minFontScale,
+                    canIncreaseFont: _fontScale < _maxFontScale,
+                    backgroundColor:
+                        Theme.of(context).bottomAppBarTheme.color ??
+                        Theme.of(context).colorScheme.surface,
+                  ),
+                ],
+              ),
             ),
-            ViewerBottomBar(
-              themeMode: widget.themeMode,
-              onToggleThemeMode: _toggleThemeMode,
-              bookNumber: _bookNumber,
-              interlinearEnabled: _interlinearEnabled,
-              onToggleInterlinear: _toggleInterlinearMode,
-              onHistory: () {
-                _tiltAutoScroll.stop();
-                _openHistory();
-              },
-              onLibrary: () {
-                _tiltAutoScroll.stop();
-                _openLibrary();
-              },
-              onDecreaseFont: _decreaseFont,
-              onIncreaseFont: _increaseFont,
-              tiltAutoScrollController: _tiltAutoScroll,
-              onToggleTiltAutoScroll: _toggleTiltAutoScroll,
-              onOpenTiltAutoScrollSettings: _openTiltSettings,
-              onCommentary: () {
-                _tiltAutoScroll.stop();
-                _openCommentary();
-              },
-              onMode: () {
-                _tiltAutoScroll.stop();
-                _openMode();
-              },
-              canDecreaseFont: _fontScale > _minFontScale,
-              canIncreaseFont: _fontScale < _maxFontScale,
-              backgroundColor:
-                  Theme.of(context).bottomAppBarTheme.color ??
-                  Theme.of(context).colorScheme.surface,
+            MacReaderAutoscrollStatusOverlay(
+              status: _macAutoscrollStatus,
+              foregroundColor: theme.colorScheme.onSurface,
+              backgroundColor: theme.colorScheme.surface,
             ),
           ],
         ),
       ),
+    );
+    if (!_usesMacAutoscroll) return reader;
+    return Focus(
+      focusNode: _readerFocusNode,
+      autofocus: true,
+      onKeyEvent: (node, event) => handleMacReaderAutoscrollKeyEvent(
+        event: event,
+        readerFocusNode: node,
+        controller: _macAutoScroll!,
+        suspended: _readerShortcutsSuspended || _interlinearEnabled,
+      ),
+      child: reader,
     );
   }
 
@@ -354,7 +446,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   }
 
   void _toggleInterlinearMode() {
-    _tiltAutoScroll.stop();
+    _stopReaderAutoscroll();
     final next = !_interlinearEnabled;
     setState(() {
       _interlinearEnabled = next;
@@ -385,15 +477,91 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _macAutoscrollStatusTimer?.cancel();
+    _macAutoScroll
+      ?..removeListener(_onMacAutoscrollChanged)
+      ..dispose();
     _tiltAutoScroll
       ..removeListener(_onTiltAutoScrollChanged)
       ..dispose();
     _headerPinTimer?.cancel();
+    _readerFocusNode.dispose();
+    _liveVisibleLocation.dispose();
+    _locationPersistence.dispose();
     super.dispose();
   }
 
   void _onTiltAutoScrollChanged() {
-    if (mounted) setState(() {});
+    _updateAutoscrollPersistenceSuspension();
+  }
+
+  void _updateAutoscrollPersistenceSuspension() {
+    final active =
+        _tiltAutoScroll.isActive || (_macAutoScroll?.isActive ?? false);
+    if (active == _wasTiltAutoScrollActive) return;
+    _wasTiltAutoScrollActive = active;
+    _locationPersistence.setSuspended(active);
+    if (!active) {
+      unawaited(_locationPersistence.resumeAndFlush());
+    }
+  }
+
+  void _onMacAutoscrollChanged() {
+    final controller = _macAutoScroll;
+    if (!mounted || controller == null) return;
+    _updateAutoscrollPersistenceSuspension();
+    if (controller.statusRevision == _lastMacAutoscrollStatusRevision) {
+      setState(() {});
+      return;
+    }
+    _lastMacAutoscrollStatusRevision = controller.statusRevision;
+    _macAutoscrollStatusTimer?.cancel();
+    setState(() => _macAutoscrollStatus = controller.statusLabel);
+    _macAutoscrollStatusTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted) setState(() => _macAutoscrollStatus = null);
+    });
+    unawaited(
+      AppSettingsService.instance.saveMacAutoscrollPreferences(
+        MacAutoscrollPreferences(
+          baseSpeed: controller.baseSpeed,
+          lastNonzeroStep: controller.lastNonzeroStep,
+          maximumStep: controller.maximumStep,
+        ),
+      ),
+    );
+  }
+
+  void _toggleMacAutoscroll() {
+    _macAutoScroll!.toggle();
+    _readerFocusNode.requestFocus();
+  }
+
+  Future<void> _openMacAutoscrollSettings() async {
+    final controller = _macAutoScroll!;
+    _readerShortcutsSuspended = true;
+    final result = await showMacAutoscrollSettingsDialog(
+      context: context,
+      initial: MacAutoscrollPreferences(
+        baseSpeed: controller.baseSpeed,
+        lastNonzeroStep: controller.lastNonzeroStep,
+        maximumStep: controller.maximumStep,
+      ),
+    );
+    if (!mounted) return;
+    _readerShortcutsSuspended = false;
+    if (result != null) {
+      controller.updatePreferences(result);
+      await AppSettingsService.instance.saveMacAutoscrollPreferences(result);
+    }
+    _readerFocusNode.requestFocus();
+  }
+
+  void _stopReaderAutoscroll() {
+    if (_usesMacAutoscroll) {
+      _macAutoScroll?.stopForManualInteraction();
+    } else {
+      _tiltAutoScroll.stop();
+    }
   }
 
   void _toggleTiltAutoScroll() {
@@ -406,7 +574,9 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
 
   Future<void> _loadTiltPreferences() async {
     final preferences = await _tiltPreferencesStore.load();
-    if (mounted) _tiltAutoScroll.updatePreferences(preferences);
+    if (mounted) {
+      _tiltAutoScroll.updatePreferences(preferences, showBanner: false);
+    }
   }
 
   Future<void> _saveTiltPreferences(ReaderTiltPreferences preferences) async {
@@ -433,13 +603,20 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) _tiltAutoScroll.stop();
+    if (state != AppLifecycleState.resumed) {
+      _stopReaderAutoscroll();
+      unawaited(_locationPersistence.resumeAndFlush());
+    }
   }
 
   @override
   void deactivate() {
+    if (_macAutoScroll?.isActive ?? false) {
+      _macAutoScroll?.stopWithoutNotification();
+      _updateAutoscrollPersistenceSuspension();
+    }
     _tiltAutoScroll.removeListener(_onTiltAutoScrollChanged);
-    _tiltAutoScroll.stop();
+    _tiltAutoScroll.stop(notify: false);
     super.deactivate();
   }
 
@@ -499,13 +676,6 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     if (pinnedBlockId != null) {
       final pinnedLine = _viewerData.getBlock(pinnedBlockId);
       if (pinnedLine != null) return pinnedLine;
-    }
-    final selectedBlockId = _selectedBlockId;
-    if (_selectedIsVisible && selectedBlockId != null && selectedBlockId > 0) {
-      final selectedLine = _viewerData.getBlock(selectedBlockId);
-      if (selectedLine != null) {
-        return selectedLine;
-      }
     }
     return null;
   }

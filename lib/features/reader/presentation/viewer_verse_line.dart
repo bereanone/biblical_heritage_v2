@@ -47,7 +47,8 @@ class ViewerVerseLine extends StatelessWidget {
   final bool isRangeSelected;
   final VoidCallback onTap;
   final VoidCallback? onVerseNumberLongPress;
-  final ValueChanged<LongPressMoveUpdateDetails>? onVerseNumberLongPressMoveDetails;
+  final ValueChanged<LongPressMoveUpdateDetails>?
+  onVerseNumberLongPressMoveDetails;
   final ViewerRangeSelection? rangeSelection;
   final ValueChanged<int>? onTokenLongPress;
   final ValueChanged<int>? onTokenLongPressMove;
@@ -86,6 +87,7 @@ class ViewerVerseLine extends StatelessWidget {
             highlight!.color,
             brightness == Brightness.dark,
             layerType: HighlightLayerType.savedVerse,
+            readerBackground: theme.scaffoldBackgroundColor,
           );
     final baseTextColor =
         highlightSpec?.textColor ?? theme.colorScheme.onSurface;
@@ -93,6 +95,7 @@ class ViewerVerseLine extends StatelessWidget {
       theme.colorScheme.primary,
       brightness == Brightness.dark,
       layerType: HighlightLayerType.temporarySelection,
+      readerBackground: theme.scaffoldBackgroundColor,
     );
     final verseBackground = highlightSpec?.backgroundColor;
     final rangeSelectionBackground = isRangeSelected
@@ -111,6 +114,7 @@ class ViewerVerseLine extends StatelessWidget {
           fallbackText: line.text,
           baseStyle: style.copyWith(color: baseTextColor),
           redLetterColor: redLetterColor,
+          isNightMode: brightness == Brightness.dark,
           startsInRedLetter: startsInRedLetter,
           blockId: line.blockId,
           rangeSelection: rangeSelection,
@@ -186,7 +190,9 @@ class ViewerVerseLine extends StatelessWidget {
                 showVerseNumber: !showChapterNumber,
                 showChapterNumber: showChapterNumber,
                 chapterStyle: chapterStyle,
-                numberStyle: numberStyle,
+                numberStyle: highlightSpec == null
+                    ? numberStyle
+                    : numberStyle.copyWith(color: highlightSpec.textColor),
                 isTagged: isTagged,
                 textDirection: textDirection,
                 onLongPress: onVerseNumberLongPress,
@@ -253,12 +259,14 @@ class _VerseGutter extends StatelessWidget {
     ).ceilToDouble();
     // Reserve a 3-digit verse slot so chapters like Psalm 119 do not clip
     // once the verse numbers reach 100+ at larger font sizes.
-    final reservedVerseWidth = _measureTextWidth(
-      context,
-      '888',
-      numberStyle,
-      textDirection,
-    ).ceilToDouble() + 4.0;
+    final reservedVerseWidth =
+        _measureTextWidth(
+          context,
+          '888',
+          numberStyle,
+          textDirection,
+        ).ceilToDouble() +
+        4.0;
     final verseSlotWidth = verseWidth > reservedVerseWidth
         ? verseWidth
         : reservedVerseWidth;

@@ -1,5 +1,7 @@
 import '../../../core/bootstrap/local_settings_store.dart';
 
+enum ReaderTiltStatusBannerMode { alwaysVisible, autoHide, alwaysHidden }
+
 class ReaderTiltPreferences {
   const ReaderTiltPreferences({
     this.reverseVerticalDirection = false,
@@ -9,6 +11,7 @@ class ReaderTiltPreferences {
     this.reverseHorizontalDirection = false,
     this.horizontalSensitivity = 0.5,
     this.horizontalChapterTiltAvailabilityMigrated = false,
+    this.statusBannerMode = ReaderTiltStatusBannerMode.autoHide,
   });
 
   static const defaults = ReaderTiltPreferences();
@@ -24,6 +27,7 @@ class ReaderTiltPreferences {
   final bool reverseHorizontalDirection;
   final double horizontalSensitivity;
   final bool horizontalChapterTiltAvailabilityMigrated;
+  final ReaderTiltStatusBannerMode statusBannerMode;
 
   ReaderTiltPreferences copyWith({
     bool? reverseVerticalDirection,
@@ -33,6 +37,7 @@ class ReaderTiltPreferences {
     bool? reverseHorizontalDirection,
     double? horizontalSensitivity,
     bool? horizontalChapterTiltAvailabilityMigrated,
+    ReaderTiltStatusBannerMode? statusBannerMode,
   }) => ReaderTiltPreferences(
     reverseVerticalDirection:
         reverseVerticalDirection ?? this.reverseVerticalDirection,
@@ -51,6 +56,7 @@ class ReaderTiltPreferences {
     horizontalChapterTiltAvailabilityMigrated:
         horizontalChapterTiltAvailabilityMigrated ??
         this.horizontalChapterTiltAvailabilityMigrated,
+    statusBannerMode: statusBannerMode ?? this.statusBannerMode,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -62,6 +68,7 @@ class ReaderTiltPreferences {
     'horizontal_sensitivity': horizontalSensitivity,
     'horizontal_chapter_tilt_availability_migrated':
         horizontalChapterTiltAvailabilityMigrated,
+    'status_banner_mode': statusBannerMode.name,
   };
 
   factory ReaderTiltPreferences.fromJson(Object? value) {
@@ -86,6 +93,10 @@ class ReaderTiltPreferences {
       horizontalChapterTiltAvailabilityMigrated: boolean(
         'horizontal_chapter_tilt_availability_migrated',
         false,
+      ),
+      statusBannerMode: ReaderTiltStatusBannerMode.values.firstWhere(
+        (mode) => mode.name == value['status_banner_mode'],
+        orElse: () => ReaderTiltStatusBannerMode.autoHide,
       ),
     );
   }

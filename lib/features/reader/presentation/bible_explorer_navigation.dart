@@ -45,6 +45,14 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
         _viewerLoadError = null;
         _navigationTick += 1;
       });
+      _liveVisibleLocation.update(
+        BibleVisibleLocation(
+          blockId: targetBlockId,
+          bookNumber: targetBook,
+          chapter: targetChapter,
+          verse: targetVerse,
+        ),
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -58,15 +66,10 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
   }
 
   void _handleVisibleBlockChanged(int blockId) {
-    final pinnedBlockId = _headerPinnedBlockId;
-    if (pinnedBlockId != null && blockId != pinnedBlockId) {
-      return;
-    }
     final line = _viewerData.getBlock(blockId);
     if (line == null) return;
     final session = _activeBibleSearchSession;
-    if (session != null &&
-        session.results.isNotEmpty) {
+    if (session != null && session.results.isNotEmpty) {
       final currentResult = session.currentResult;
       final isCurrentSearchResultVerse =
           currentResult.bookNumber == line.bookNumber &&
@@ -81,17 +84,22 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
         });
       }
     }
-    if (_bookNumber == line.bookNumber &&
-        _chapter == line.chapter &&
-        _verse == line.verse) {
-      return;
-    }
     if (!mounted) return;
-    setState(() {
-      _bookNumber = line.bookNumber;
-      _chapter = line.chapter;
-      _verse = line.verse;
-    });
+    final location = BibleVisibleLocation(
+      blockId: blockId,
+      bookNumber: line.bookNumber,
+      chapter: line.chapter,
+      verse: line.verse,
+    );
+    _bookNumber = line.bookNumber;
+    _chapter = line.chapter;
+    _verse = line.verse;
+    _liveVisibleLocation.update(location);
+    _locationPersistence.update(
+      location,
+      persistenceSuspended:
+          _tiltAutoScroll.isActive || (_macAutoScroll?.isActive ?? false),
+    );
   }
 
   Future<void> _navigateToBlockId(
@@ -118,6 +126,14 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
       _selectedBlockId = blockId;
       _navigationTick += 1;
     });
+    final location = BibleVisibleLocation(
+      blockId: blockId,
+      bookNumber: reference.bookNumber,
+      chapter: reference.chapter,
+      verse: reference.verse,
+    );
+    _liveVisibleLocation.update(location);
+    _locationPersistence.update(location, persistenceSuspended: false);
     if (recordHistory) {
       await _recordHistory();
     }
@@ -210,10 +226,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
 
   Future<void> _openBibleSearchBlock(int blockId) async {
     _isBibleSearchNavigationActive = true;
-    await _openBlockId(
-      blockId,
-      preserveBibleSearchSession: true,
-    );
+    await _openBlockId(blockId, preserveBibleSearchSession: true);
   }
 
   Future<void> _recordHistory() async {
@@ -227,12 +240,14 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
     if (blockId == null) return;
 
     await HistoryLogService.instance.insertHistory(blockId);
-    await NavigationHistoryService.instance.saveSelection(
+    final location = BibleVisibleLocation(
       blockId: blockId,
-      book: _bookNumber,
+      bookNumber: _bookNumber,
       chapter: _chapter,
       verse: _verse,
     );
+    _locationPersistence.update(location, persistenceSuspended: false);
+    await _locationPersistence.flush();
   }
 
   Future<void> _loadViewerSettings() async {
@@ -348,9 +363,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
   }
 
   Future<void> _openLibrary() async {
-    await Navigator.of(
-      context,
-    ).push(
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => LibraryScreen(
           themeMode: widget.themeMode,

@@ -114,6 +114,77 @@ class LibraryReaderDescendantChain {
   final LibraryBookSection readableSection;
 }
 
+/// Composes the stable structural heading path for the selected navigation
+/// identity, followed by any heading-only descendants and readable body.
+/// Identity is based on the navigation tree and section href, never title text.
+List<LibraryBookSection> libraryReaderComposedHeadingSections({
+  required LibraryCatalogNavigationItem navItem,
+  required LibraryNavigationTreeResult tree,
+  required List<LibraryBookSection> sections,
+  LibraryReaderDescendantChain? descendantChain,
+}) {
+  final itemById = <String, LibraryCatalogNavigationItem>{
+    for (final item in tree.items) item.id: item,
+  };
+  final parentIdByChildId = <String, String?>{};
+  for (final entry in tree.childrenByParent.entries) {
+    for (final child in entry.value) {
+      parentIdByChildId[child.id] = entry.key;
+    }
+  }
+
+  final navigationPath = <LibraryCatalogNavigationItem>[];
+  final visited = <String>{};
+  LibraryCatalogNavigationItem? cursor = navItem;
+  while (cursor != null && visited.add(cursor.id)) {
+    navigationPath.add(cursor);
+    final parentId = parentIdByChildId[cursor.id];
+    cursor = parentId == null ? null : itemById[parentId];
+  }
+
+  final result = <LibraryBookSection>[];
+  final seenSectionIdentities = <String>{};
+  void addSection(LibraryBookSection? section) {
+    if (section == null) return;
+    final identity = p.normalize(section.entryName).toLowerCase();
+    if (!seenSectionIdentities.add(identity)) return;
+    result.add(section);
+  }
+
+  for (final item in navigationPath.reversed) {
+    final index = _librarySectionIndexForNavigationItem(
+      sections: sections,
+      navItem: item,
+    );
+    addSection(index == null ? null : sections[index]);
+  }
+  if (descendantChain != null) {
+    for (final section in descendantChain.headingSections) {
+      addSection(section);
+    }
+    addSection(descendantChain.readableSection);
+  }
+  return List<LibraryBookSection>.unmodifiable(result);
+}
+
+List<String> libraryReaderLiveSectionHeadingLabels({
+  required List<LibraryBookSection> composedSections,
+  required String bookTitle,
+}) {
+  final normalizedBookTitle = _normalizeReaderLabel(bookTitle);
+  final result = <String>[];
+  for (final section in composedSections) {
+    final label = libraryReaderDisplaySectionTitle(section.title);
+    if (label.isEmpty) continue;
+    // Resolution and de-duplication have already happened by stable section
+    // identity. This display-only exclusion prevents the fixed book title
+    // from being repeated as its own breadcrumb level.
+    if (_normalizeReaderLabel(label) == normalizedBookTitle) continue;
+    result.add(label);
+  }
+  return List<String>.unmodifiable(result);
+}
+
 /// Finds the first readable descendant of [navItem] by following only
 /// explicit child links in [tree], never siblings, ancestors, or positional
 /// spine fallbacks. Returns null when no descendant in the subtree has

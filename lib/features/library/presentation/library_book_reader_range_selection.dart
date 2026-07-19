@@ -183,6 +183,7 @@ List<InlineSpan> buildLibraryInteractiveEpubSpans({
               _persistedLibraryMarkupColor(persistedHighlight.color),
               isNightMode,
               layerType: HighlightLayerType.savedRange,
+              readerBackground: baseStyle.backgroundColor,
             );
       final appliedHighlightSpec = (isSelected || isPendingAnchor)
           ? selectionHighlightSpec
@@ -195,6 +196,7 @@ List<InlineSpan> buildLibraryInteractiveEpubSpans({
             : _foregroundColorForHighlightedSpan(
                 segmentStyle: run.style,
                 baseStyle: baseStyle,
+                highlightBackgroundColor: appliedHighlightSpec.backgroundColor,
                 highlightTextColor: appliedHighlightSpec.textColor,
               ),
         fontWeight: (isSelected || isPendingAnchor)
@@ -211,20 +213,19 @@ List<InlineSpan> buildLibraryInteractiveEpubSpans({
           onWordLongPressMove(currentTokenIndex);
         };
       }
-      final recognizer = enableWordLongPressRecognizers &&
+      final recognizer =
+          enableWordLongPressRecognizers &&
               isSelected &&
               rangeSelection.hasCompletedRange
           ? (TapGestureRecognizer()..onTap = () => onWordTap(currentTokenIndex))
           : (enableWordLongPressRecognizers && !isWhitespace
-              ? (LongPressGestureRecognizer()
-                  ..onLongPress = () {
-                    onWordLongPress(currentTokenIndex);
-                  }
-                  ..onLongPressMoveUpdate = moveUpdateCallback)
-              : null);
-      if (geometrySeeds != null &&
-          geometryScopeId != null &&
-          !isWhitespace) {
+                ? (LongPressGestureRecognizer()
+                    ..onLongPress = () {
+                      onWordLongPress(currentTokenIndex);
+                    }
+                    ..onLongPressMoveUpdate = moveUpdateCallback)
+                : null);
+      if (geometrySeeds != null && geometryScopeId != null && !isWhitespace) {
         geometrySeeds.add(
           TextRangeLayoutSeed(
             anchor: TextRangeAnchor.elibrary(
@@ -516,12 +517,16 @@ Color _persistedLibraryMarkupColor(String colorHex) {
 Color? _foregroundColorForHighlightedSpan({
   required TextStyle segmentStyle,
   required TextStyle baseStyle,
+  required Color highlightBackgroundColor,
   required Color highlightTextColor,
 }) {
   final explicitColor = segmentStyle.color;
   final baseColor = baseStyle.color;
   if (explicitColor != null && explicitColor != baseColor) {
-    return explicitColor;
+    return highlightForegroundForBackground(
+      highlightBackgroundColor,
+      semanticColor: explicitColor,
+    );
   }
   return highlightTextColor;
 }

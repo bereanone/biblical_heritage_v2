@@ -153,7 +153,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
   }
 
   Future<void> _openRangeActions() async {
-    await _tiltAutoScroll.stop();
+    _stopReaderAutoscroll();
     if (!mounted) return;
     final passage = await _currentPassageOrLoad();
     if (!mounted) return;

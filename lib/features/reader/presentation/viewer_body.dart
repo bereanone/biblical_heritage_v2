@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../core/database/study_bible_database.dart';
@@ -9,6 +8,7 @@ import '../data/bible_markup_repository.dart';
 import '../data/highlights_repository.dart';
 import 'viewer_acrostic_block.dart';
 import 'bible_explorer_range_interaction.dart';
+import 'bible_visible_location_controller.dart';
 import 'viewer_data_controller.dart';
 import 'viewer_heading_block.dart';
 import 'viewer_markup_span_builder.dart';
@@ -21,6 +21,44 @@ import '../../library/presentation/reader_tilt_autoscroll_controller.dart';
 part 'viewer_body_helpers.dart';
 
 const bool _enableTextRangeGeometry = false;
+
+enum ViewerAutoScrollWindowAction {
+  scroll,
+  extendForward,
+  extendBackward,
+  stopAtStart,
+  stopAtEnd,
+}
+
+ViewerAutoScrollWindowAction viewerAutoScrollWindowAction({
+  required double delta,
+  required int firstVisibleBlockId,
+  required int lastVisibleBlockId,
+  required int firstLoadedBlockId,
+  required int lastLoadedBlockId,
+  required int maxBlockId,
+  int guardBlocks = 4,
+}) {
+  if (delta > 0 && lastVisibleBlockId >= lastLoadedBlockId - guardBlocks) {
+    return lastLoadedBlockId >= maxBlockId
+        ? ViewerAutoScrollWindowAction.stopAtEnd
+        : ViewerAutoScrollWindowAction.extendForward;
+  }
+  if (delta < 0 && firstVisibleBlockId <= firstLoadedBlockId + guardBlocks) {
+    return firstLoadedBlockId <= ViewerDataController.minId
+        ? ViewerAutoScrollWindowAction.stopAtStart
+        : ViewerAutoScrollWindowAction.extendBackward;
+  }
+  return ViewerAutoScrollWindowAction.scroll;
+}
+
+int viewerBodyItemCountForLoadedWindow(int? lastLoadedBlockId) =>
+    lastLoadedBlockId ?? 0;
+
+bool viewerVisibleLocationCallbackIsCurrent({
+  required int scheduledGeneration,
+  required int currentGeneration,
+}) => scheduledGeneration == currentGeneration;
 
 class ViewerBody extends StatefulWidget {
   const ViewerBody({
@@ -76,6 +114,10 @@ class _ViewerBodyState extends State<ViewerBody> {
   final ItemScrollController _itemScrollController = ItemScrollController();
   final ScrollOffsetController _scrollOffsetController =
       ScrollOffsetController();
+  final GlobalKey _visibleListKey = GlobalKey(
+    debugLabel: 'bible-visible-scroll-list',
+  );
+  ScrollPosition? _pixelScrollPosition;
   final ItemPositionsListener _itemPositionsListener =
       ItemPositionsListener.create();
   final TextRangeGeometryRegistry _geometryRegistry =
@@ -99,6 +141,28 @@ class _ViewerBodyState extends State<ViewerBody> {
   bool _suppressUserScroll = false;
   bool _userIsScrolling = false;
   bool _selectionVisible = false;
+  DateTime? _lastVisibleLocationEmission;
+  BibleVisibleLocation? _lastEmittedVisibleLocation;
+  int? _pendingVisibleBlockId;
+  int _visibleLocationGeneration = 0;
+
+  static const _visibleLocationInterval = Duration(milliseconds: 120);
+
+  void _captureVisiblePixelPosition() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      void inspect(Element element) {
+        if (element is StatefulElement && element.state is ScrollableState) {
+          final position = (element.state as ScrollableState).position;
+          if (position.hasPixels) _pixelScrollPosition = position;
+          return;
+        }
+        element.visitChildElements(inspect);
+      }
+
+      (_visibleListKey.currentContext as Element?)?.visitChildElements(inspect);
+    });
+  }
 
   String get _geometryScopeId => 'viewer:${widget.anchorBlockId}';
 
@@ -109,20 +173,79 @@ class _ViewerBodyState extends State<ViewerBody> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.autoScrollTarget?.attach(_scrollByPixels);
     });
+    _captureVisiblePixelPosition();
   }
 
   bool _scrollByPixels(double delta) {
-    if (!mounted) return false;
-    unawaited(
-      _scrollOffsetController
-          .animateScroll(
-            offset: delta,
-            duration: const Duration(milliseconds: 16),
-            curve: Curves.linear,
-          )
-          .catchError((_) {}),
+    final position = _pixelScrollPosition;
+    if (!mounted || position == null || !position.hasPixels) return false;
+    switch (_loadedWindowActionBeforeAutoScroll(delta)) {
+      case ViewerAutoScrollWindowAction.extendForward:
+      case ViewerAutoScrollWindowAction.extendBackward:
+        return true;
+      case ViewerAutoScrollWindowAction.stopAtStart:
+      case ViewerAutoScrollWindowAction.stopAtEnd:
+        return false;
+      case ViewerAutoScrollWindowAction.scroll:
+        break;
+    }
+    final target = (position.pixels + delta).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
     );
-    return true;
+    if ((target - position.pixels).abs() <= 0.01) return false;
+    final before = position.pixels;
+    position.jumpTo(target);
+    return (position.pixels - before).abs() > 0.01;
+  }
+
+  ViewerAutoScrollWindowAction _loadedWindowActionBeforeAutoScroll(
+    double delta,
+  ) {
+    if (delta == 0) return ViewerAutoScrollWindowAction.scroll;
+    final positions = _itemPositionsListener.itemPositions.value;
+    final firstLoaded = widget.data.firstBlockId;
+    final lastLoaded = widget.data.lastBlockId;
+    if (positions.isEmpty || firstLoaded == null || lastLoaded == null) {
+      return ViewerAutoScrollWindowAction.scroll;
+    }
+    var firstVisible = widget.data.maxBlockId;
+    var lastVisible = 1;
+    for (final position in positions) {
+      final blockId = position.index + 1;
+      if (blockId < firstVisible) firstVisible = blockId;
+      if (blockId > lastVisible) lastVisible = blockId;
+    }
+    const extensionBlocks = 15;
+    final action = viewerAutoScrollWindowAction(
+      delta: delta,
+      firstVisibleBlockId: firstVisible,
+      lastVisibleBlockId: lastVisible,
+      firstLoadedBlockId: firstLoaded,
+      lastLoadedBlockId: lastLoaded,
+      maxBlockId: widget.data.maxBlockId,
+    );
+    switch (action) {
+      case ViewerAutoScrollWindowAction.scroll:
+        return action;
+      case ViewerAutoScrollWindowAction.stopAtStart:
+      case ViewerAutoScrollWindowAction.stopAtEnd:
+        return action;
+      case ViewerAutoScrollWindowAction.extendForward:
+        final center = (lastLoaded + extensionBlocks).clamp(
+          ViewerDataController.minId,
+          widget.data.maxBlockId,
+        );
+        unawaited(widget.data.ensureWindow(center));
+        return action;
+      case ViewerAutoScrollWindowAction.extendBackward:
+        final center = (firstLoaded - extensionBlocks).clamp(
+          ViewerDataController.minId,
+          widget.data.maxBlockId,
+        );
+        unawaited(widget.data.ensureWindow(center));
+        return action;
+    }
   }
 
   @override
@@ -133,6 +256,15 @@ class _ViewerBodyState extends State<ViewerBody> {
         oldWidget.fontScale != widget.fontScale ||
         oldWidget.navigationTick != widget.navigationTick) {
       _lastScrolledBlockId = null;
+    }
+    if (oldWidget.anchorBlockId != widget.anchorBlockId ||
+        oldWidget.data != widget.data) {
+      _visibleLocationGeneration += 1;
+      _scrollDebounce?.cancel();
+      _scrollDebounce = null;
+      _pendingVisibleBlockId = null;
+      _lastEmittedVisibleLocation = null;
+      _lastVisibleLocationEmission = null;
     }
     if (oldWidget.highlightRefreshTick != widget.highlightRefreshTick) {
       final loadedIds = widget.data.loadedBlockIds;
@@ -227,35 +359,104 @@ class _ViewerBodyState extends State<ViewerBody> {
   }
 
   void _onScroll() {
-    _scrollDebounce?.cancel();
-    _scrollDebounce = Timer(const Duration(milliseconds: 150), () {
-      final positions = _itemPositionsListener.itemPositions.value;
-      if (positions.isEmpty) return;
+    final positions =
+        _itemPositionsListener.itemPositions.value
+            .where(
+              (position) =>
+                  position.itemTrailingEdge > 0.05 &&
+                  position.itemLeadingEdge < 1,
+            )
+            .toList(growable: false)
+          ..sort(
+            (left, right) =>
+                left.itemLeadingEdge.compareTo(right.itemLeadingEdge),
+          );
+    if (positions.isEmpty) return;
 
-      var minIndex = 1 << 30;
-      var maxIndex = -1;
-      for (final position in positions) {
-        if (position.index < minIndex) minIndex = position.index;
-        if (position.index > maxIndex) maxIndex = position.index;
-      }
-      if (maxIndex < 0) return;
+    int? firstMeaningfulId;
+    for (final position in positions) {
+      final blockId = position.index + 1;
+      final line = widget.data.getBlock(blockId);
+      if (line == null || line.verse <= 0 || line.text.trim().isEmpty) continue;
+      firstMeaningfulId = blockId;
+      break;
+    }
+    if (firstMeaningfulId == null) return;
+    _queueVisibleBlockEmission(firstMeaningfulId);
+  }
 
-      final centerIndex = (minIndex + maxIndex) ~/ 2;
-      final centerId = centerIndex + 1;
-      final selectedBlockId = widget.selectedBlockId;
-      if (selectedBlockId != null) {
-        final isVisible = _isVerseVisible(selectedBlockId);
-        if (_selectionVisible != isVisible) {
-          _selectionVisible = isVisible;
-          widget.onSelectionVisibilityChanged?.call(isVisible);
-        }
-      } else if (_selectionVisible) {
-        _selectionVisible = false;
-        widget.onSelectionVisibilityChanged?.call(false);
+  void _queueVisibleBlockEmission(int blockId) {
+    final line = widget.data.getBlock(blockId);
+    if (line == null) return;
+    final location = BibleVisibleLocation(
+      blockId: blockId,
+      bookNumber: line.bookNumber,
+      chapter: line.chapter,
+      verse: line.verse,
+    );
+    if (location == _lastEmittedVisibleLocation) return;
+
+    final now = DateTime.now();
+    final lastEmission = _lastVisibleLocationEmission;
+    final immediate = location.crossesChapterOrBook(
+      _lastEmittedVisibleLocation,
+    );
+    if (immediate ||
+        lastEmission == null ||
+        now.difference(lastEmission) >= _visibleLocationInterval) {
+      _emitVisibleBlock(blockId, location, now);
+      return;
+    }
+
+    _pendingVisibleBlockId = blockId;
+    if (_scrollDebounce != null) return;
+    final generation = _visibleLocationGeneration;
+    final remaining = _visibleLocationInterval - now.difference(lastEmission);
+    _scrollDebounce = Timer(remaining, () {
+      _scrollDebounce = null;
+      if (!mounted ||
+          !viewerVisibleLocationCallbackIsCurrent(
+            scheduledGeneration: generation,
+            currentGeneration: _visibleLocationGeneration,
+          )) {
+        return;
       }
-      widget.onVisibleIdChanged(centerId);
-      widget.data.ensureWindow(centerId);
+      final pending = _pendingVisibleBlockId;
+      _pendingVisibleBlockId = null;
+      if (pending == null) return;
+      final pendingLine = widget.data.getBlock(pending);
+      if (pendingLine == null) return;
+      _emitVisibleBlock(
+        pending,
+        BibleVisibleLocation(
+          blockId: pending,
+          bookNumber: pendingLine.bookNumber,
+          chapter: pendingLine.chapter,
+          verse: pendingLine.verse,
+        ),
+        DateTime.now(),
+      );
     });
+  }
+
+  void _emitVisibleBlock(
+    int blockId,
+    BibleVisibleLocation location,
+    DateTime now,
+  ) {
+    _pendingVisibleBlockId = null;
+    _lastEmittedVisibleLocation = location;
+    _lastVisibleLocationEmission = now;
+    final selectedBlockId = widget.selectedBlockId;
+    final selectedIsVisible = selectedBlockId != null
+        ? _isVerseVisible(selectedBlockId)
+        : false;
+    if (_selectionVisible != selectedIsVisible) {
+      _selectionVisible = selectedIsVisible;
+      widget.onSelectionVisibilityChanged?.call(selectedIsVisible);
+    }
+    widget.onVisibleIdChanged(blockId);
+    unawaited(widget.data.ensureWindow(blockId));
   }
 
   @override
@@ -363,11 +564,23 @@ class _ViewerBodyState extends State<ViewerBody> {
           }
         });
 
-        return NotificationListener<UserScrollNotification>(
+        return NotificationListener<ScrollNotification>(
           onNotification: (notification) {
-            if (_suppressUserScroll) return false;
-            final isScrolling = notification.direction != ScrollDirection.idle;
-            if (isScrolling) widget.onManualScroll?.call();
+            final notificationContext = notification.context;
+            if (notificationContext != null) {
+              _pixelScrollPosition = Scrollable.maybeOf(
+                notificationContext,
+              )?.position;
+            }
+            final manualStart = readerScrollNotificationIsManual(notification);
+            if (manualStart && !_suppressUserScroll) {
+              widget.onManualScroll?.call();
+            }
+            final isScrolling = notification is ScrollStartNotification
+                ? true
+                : notification is ScrollEndNotification
+                ? false
+                : _userIsScrolling;
             if (_userIsScrolling != isScrolling) {
               _userIsScrolling = isScrolling;
               if (!isScrolling && mounted) {
@@ -379,13 +592,26 @@ class _ViewerBodyState extends State<ViewerBody> {
             return false;
           },
           child: ScrollablePositionedList.builder(
-            itemCount: widget.data.maxBlockId,
+            key: _visibleListKey,
+            // Never expose unloaded forward IDs as scrollable blank rows. The
+            // item count grows only after ensureWindow has populated them.
+            itemCount: viewerBodyItemCountForLoadedWindow(
+              widget.data.lastBlockId,
+            ),
             itemScrollController: _itemScrollController,
             scrollOffsetController: _scrollOffsetController,
             itemPositionsListener: _itemPositionsListener,
             initialScrollIndex: _indexForBlockId(widget.anchorBlockId),
             padding: const EdgeInsets.fromLTRB(22, 4, 22, 14),
             itemBuilder: (context, index) {
+              // Make the visible pixel position available before the first
+              // user scroll notification. Mac autoscroll can therefore begin
+              // from a freshly opened reader instead of reporting a boundary.
+              _pixelScrollPosition ??= Scrollable.maybeOf(context)?.position;
+              if (_pixelScrollPosition == null ||
+                  !_pixelScrollPosition!.hasPixels) {
+                _captureVisiblePixelPosition();
+              }
               final blockId = index + 1;
               final line = widget.data.getBlock(blockId);
               if (line == null) {

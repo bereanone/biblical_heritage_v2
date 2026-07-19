@@ -147,7 +147,11 @@ class _SectionBlockView extends StatelessWidget {
           onWordTap: onWordTap,
           onWordLongPressMove: onWordLongPressMove,
           onWordLongPressMoveDetails: onWordLongPressMoveDetails,
-          enableWordLongPressRecognizers: true,
+          // A recognizer on every word fragments paragraph semantics and made
+          // physical scrolling spend most frames updating thousands of
+          // recognizer-backed spans. One block-level hit test below preserves
+          // selection without putting word recognizers in the render tree.
+          enableWordLongPressRecognizers: false,
           highlightQuery: searchQuery,
           highlightTerms: highlightTerms,
           geometryScopeId: geometryScopeId,
@@ -223,31 +227,59 @@ class _SectionBlockView extends StatelessWidget {
           )
         : Text.rich(textSpan, textAlign: textAlign, key: textKey);
 
-    return Padding(
-      padding: EdgeInsets.only(top: topPadding, bottom: bottomPadding),
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: onBlockTap,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            border: isBlockquote
-                ? Border(
-                    left: BorderSide(
-                      color: _readerBorderColor(
-                        theme,
-                        isNightMode,
-                      ).withValues(alpha: 0.65),
-                      width: 2,
-                    ),
-                  )
-                : null,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final textWidth = (constraints.maxWidth - (isBlockquote ? 12 : 0))
+            .clamp(1.0, double.infinity);
+        return Padding(
+          padding: EdgeInsets.only(top: topPadding, bottom: bottomPadding),
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: onBlockTap,
+            onLongPressStart: (details) {
+              final localPosition = Offset(
+                (details.localPosition.dx - (isBlockquote ? 12 : 0)).clamp(
+                  0.0,
+                  textWidth,
+                ),
+                details.localPosition.dy,
+              );
+              final tokenIndex = hitTestLibraryInteractiveEpubTokenIndex(
+                html: block.html,
+                fallbackText: block.text,
+                baseStyle: resolvedStyle,
+                maxWidth: textWidth,
+                localPosition: localPosition,
+                textDirection: Directionality.of(context),
+                textAlign: textAlign,
+                highlightQuery: searchQuery,
+                highlightTerms: highlightTerms,
+              );
+              if (tokenIndex != null) onWordLongPress(tokenIndex);
+            },
+            onLongPressMoveUpdate: onWordLongPressMoveDetails,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: isBlockquote
+                    ? Border(
+                        left: BorderSide(
+                          color: _readerBorderColor(
+                            theme,
+                            isNightMode,
+                          ).withValues(alpha: 0.65),
+                          width: 2,
+                        ),
+                      )
+                    : null,
+              ),
+              child: Padding(
+                padding: EdgeInsets.only(left: isBlockquote ? 12 : 0),
+                child: bodyChild,
+              ),
+            ),
           ),
-          child: Padding(
-            padding: EdgeInsets.only(left: isBlockquote ? 12 : 0),
-            child: bodyChild,
-          ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

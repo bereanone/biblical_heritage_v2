@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 
 import '../data/highlights_repository.dart';
+import 'highlight_render.dart';
 import 'viewer_range_selection.dart';
 
 class ViewerMarkupSegment {
@@ -46,6 +47,9 @@ InlineSpan buildViewerMarkupSpan({
       baseStyle.backgroundColor ??
       baseStyle.color?.withValues(alpha: 0.14) ??
       Colors.yellow.withValues(alpha: 0.28);
+  final readerBackground = isNightMode
+      ? const Color(0xFF121212)
+      : const Color(0xFFF6EEDD);
   for (final segment in segments) {
     final tokenIndex = segment.tokenIndex;
     final isSelected =
@@ -62,11 +66,23 @@ InlineSpan buildViewerMarkupSpan({
     final isStrongsMatch =
         segment.strongs != null &&
         segment.strongs!.any(highlightedStrongs.contains);
+    final sourceHighlight = (isSelected || isPendingAnchor)
+        ? selectedColor
+        : persisted?.color;
+    final highlightSpec = sourceHighlight == null
+        ? null
+        : resolveHighlightRender(
+            sourceHighlight,
+            isNightMode,
+            layerType: isSelected || isPendingAnchor
+                ? HighlightLayerType.temporarySelection
+                : HighlightLayerType.savedRange,
+            readerBackground: readerBackground,
+          );
     final style = _applyViewerSpanStyle(
       segment.style,
-      backgroundColor: (isSelected || isPendingAnchor)
-          ? selectedColor
-          : persisted?.color,
+      backgroundColor: highlightSpec?.backgroundColor,
+      highlightTextColor: highlightSpec?.textColor,
       emphasizeWeight: isSelected || isPendingAnchor || isStrongsMatch,
       underline: isStrongsMatch,
     );
@@ -158,6 +174,7 @@ int? hitTestViewerMarkupTokenIndex({
 TextStyle _applyViewerSpanStyle(
   TextStyle style, {
   Color? backgroundColor,
+  Color? highlightTextColor,
   required bool emphasizeWeight,
   required bool underline,
 }) {
@@ -169,6 +186,12 @@ TextStyle _applyViewerSpanStyle(
       : style.decoration;
   return style.copyWith(
     backgroundColor: backgroundColor ?? style.backgroundColor,
+    color: highlightTextColor == null
+        ? style.color
+        : highlightForegroundForBackground(
+            backgroundColor!,
+            semanticColor: style.color,
+          ),
     fontWeight: emphasizeWeight ? FontWeight.w700 : style.fontWeight,
     decoration: decoration,
   );

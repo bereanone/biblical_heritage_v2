@@ -39,6 +39,22 @@ class LibraryReaderStateWriter {
     });
   }
 
+  /// Clears only the resumable location for one library item.
+  ///
+  /// The item, annotations, content, and `last_opened` history stamp remain
+  /// untouched. This is intentionally narrow enough for fresh-open testing.
+  Future<void> clearSavedLocation(String libraryItemId) async {
+    final now = DateTime.now().toUtc().toIso8601String();
+    await _updateLibraryItemRow(libraryItemId, <String, Object?>{
+      'epub_href': null,
+      'epub_cfi': null,
+      'anchor_id': null,
+      'spine_index': null,
+      'paragraph_index': null,
+      'updated_at': now,
+    });
+  }
+
   Future<void> _updateLibraryItemRow(
     String libraryItemId,
     Map<String, Object?> values,

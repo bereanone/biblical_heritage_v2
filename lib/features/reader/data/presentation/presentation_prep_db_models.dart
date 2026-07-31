@@ -92,8 +92,10 @@ class PresentationProfileRecord {
       id: (row['id'] as int?) ?? 0,
       slideId: (row['slide_id'] as int?) ?? 0,
       displayTarget: row['display_target']?.toString() ?? '',
-      aspectRatioPreset: row['aspect_ratio_preset']?.toString() ?? 'sixteenByNine',
-      aspectRatioValue: (row['aspect_ratio_value'] as num?)?.toDouble() ?? (16 / 9),
+      aspectRatioPreset:
+          row['aspect_ratio_preset']?.toString() ?? 'sixteenByNine',
+      aspectRatioValue:
+          (row['aspect_ratio_value'] as num?)?.toDouble() ?? (16 / 9),
       rows: (row['rows'] as int?) ?? 2,
       columns: (row['columns'] as int?) ?? 2,
     );
@@ -191,10 +193,7 @@ class PresentationLoadedSlide {
 }
 
 class PresentationLoadedGroup {
-  const PresentationLoadedGroup({
-    required this.group,
-    required this.slides,
-  });
+  const PresentationLoadedGroup({required this.group, required this.slides});
 
   final PresentationGroupRecord group;
   final List<PresentationLoadedSlide> slides;

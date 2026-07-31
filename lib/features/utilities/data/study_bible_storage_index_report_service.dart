@@ -136,7 +136,8 @@ class StudyBibleStorageIndexReport {
       'source_cleanup_status': sourceCleanupStatus,
       'elibrary_write_target': eLibraryWriteTarget,
       'elibrary_migration_needed': eLibraryMigrationNeeded,
-      'elibrary_migration_completeness_label': eLibraryMigrationCompletenessLabel,
+      'elibrary_migration_completeness_label':
+          eLibraryMigrationCompletenessLabel,
       'elibrary_migration_status': eLibraryMigrationStatus,
       'elibrary_migration_report_path': eLibraryMigrationReportPath,
       'elibrary_migration_table_summaries': eLibraryMigrationTableSummaries,
@@ -202,7 +203,10 @@ class StudyBibleStorageIndexReport {
     line('eLibrary schema version', eLibrarySchemaVersion);
     line('eLibrary schema status', eLibrarySchemaStatus);
     line('eLibrary active source', activeELibraryReadSource);
-    line('user.db eLibrary row counts', _formatTableCounts(userELibraryTableCounts));
+    line(
+      'user.db eLibrary row counts',
+      _formatTableCounts(userELibraryTableCounts),
+    );
     line('eLibrary.db row counts', _formatTableCounts(eLibraryTableCounts));
     line('Backup status', backupStatus);
     line('eLibrary storage policy', storagePolicyLabel);
@@ -210,10 +214,7 @@ class StudyBibleStorageIndexReport {
     line('eLibrary write target', eLibraryWriteTarget);
     line('eLibrary migration needed', eLibraryMigrationNeeded ? 'yes' : 'no');
     line('eLibrary migration status', eLibraryMigrationStatus);
-    line(
-      'eLibrary migration completeness',
-      eLibraryMigrationCompletenessLabel,
-    );
+    line('eLibrary migration completeness', eLibraryMigrationCompletenessLabel);
     line('eLibrary migration report', eLibraryMigrationReportPath);
     line(
       'eLibrary migration tables',
@@ -377,8 +378,8 @@ class StudyBibleStorageIndexReportService {
       eLibraryMigrationCompletenessLabel: migrationReport.completenessLabel,
       eLibraryMigrationStatus: migrationReport.schemaCompatible
           ? (migrationReport.migrationNeeded
-              ? 'Legacy eLibrary rows pending copy.'
-              : 'Legacy eLibrary rows already copied.')
+                ? 'Legacy eLibrary rows pending copy.'
+                : 'Legacy eLibrary rows already copied.')
           : 'Schema mismatch blocks copy.',
       eLibraryMigrationReportPath: migrationReport.reportFilePath,
       eLibraryMigrationTableSummaries: migrationReport.tableReports
@@ -437,11 +438,8 @@ class StudyBibleStorageIndexReportService {
         db,
         'library_links',
       ),
-      'library_navigation_items':
-          await ELibraryReadResolver.instance.tableRowCount(
-            db,
-            'library_navigation_items',
-          ),
+      'library_navigation_items': await ELibraryReadResolver.instance
+          .tableRowCount(db, 'library_navigation_items'),
       'library_text_blocks': await ELibraryReadResolver.instance.tableRowCount(
         db,
         'library_text_blocks',
@@ -454,11 +452,8 @@ class StudyBibleStorageIndexReportService {
         db,
         'elibrary_markups',
       ),
-      'elibrary_install_estimates':
-          await ELibraryReadResolver.instance.tableRowCount(
-            db,
-            'elibrary_install_estimates',
-          ),
+      'elibrary_install_estimates': await ELibraryReadResolver.instance
+          .tableRowCount(db, 'elibrary_install_estimates'),
     };
   }
 

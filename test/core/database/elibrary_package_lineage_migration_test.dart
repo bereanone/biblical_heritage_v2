@@ -54,6 +54,9 @@ void main() {
     expect(rows.single['file_hash'], 'legacy-hash');
     expect(rows.single['source_work_id'], isNull);
     expect(rows.single['source_package_id'], isNull);
-    expect(await ELibrarySchema.currentAppliedVersion(db), 3);
+    expect(
+      await ELibrarySchema.currentAppliedVersion(db),
+      ELibrarySchema.currentVersion,
+    );
   });
 }

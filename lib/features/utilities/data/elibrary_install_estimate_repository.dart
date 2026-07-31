@@ -22,9 +22,7 @@ class ELibraryInstallEstimateRecord {
   final DateTime? lastCheckedUtc;
   final String? source;
 
-  factory ELibraryInstallEstimateRecord.fromRow(
-    Map<String, Object?> row,
-  ) {
+  factory ELibraryInstallEstimateRecord.fromRow(Map<String, Object?> row) {
     return ELibraryInstallEstimateRecord(
       collectionKey: row['collection_key']?.toString() ?? '',
       format: row['format']?.toString() ?? '',
@@ -59,21 +57,21 @@ class ELibraryInstallEstimateRepository {
 
   Future<Map<String, Map<String, ELibraryInstallEstimateRecord>>>
   loadByCollectionAndFormat() async {
-    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
-      List<Map<String, Object?>>
-    >(
-      read: (db) => db.query(
-        tableName,
-        orderBy: 'collection_key ASC, format ASC',
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-    );
+    final rowResult = await ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (db) =>
+              db.query(tableName, orderBy: 'collection_key ASC, format ASC'),
+          hasData: (rows) => rows.isNotEmpty,
+        );
     final rows = rowResult.value;
     final result = <String, Map<String, ELibraryInstallEstimateRecord>>{};
     for (final row in rows) {
       final record = ELibraryInstallEstimateRecord.fromRow(row);
       if (record.collectionKey.isEmpty || record.format.isEmpty) continue;
-      result.putIfAbsent(record.collectionKey, () => <String, ELibraryInstallEstimateRecord>{})[record.format] = record;
+      result.putIfAbsent(
+        record.collectionKey,
+        () => <String, ELibraryInstallEstimateRecord>{},
+      )[record.format] = record;
     }
     return result;
   }

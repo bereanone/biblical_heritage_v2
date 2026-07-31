@@ -20,7 +20,8 @@ class TagUnassignedCardTray extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final compact = constraints.maxHeight < 88 || constraints.maxWidth < 540;
+            final compact =
+                constraints.maxHeight < 88 || constraints.maxWidth < 540;
             final icon = ExcludeSemantics(
               child: DecoratedBox(
                 decoration: BoxDecoration(
@@ -83,16 +84,16 @@ class TagUnassignedCardTray extends StatelessWidget {
             final action = onBrowseCards == null
                 ? null
                 : compact
-                    ? IconButton.filledTonal(
-                        onPressed: onBrowseCards,
-                        tooltip: 'Choose Card',
-                        icon: const Icon(Icons.playlist_add_outlined),
-                      )
-                    : FilledButton.tonalIcon(
-                        onPressed: onBrowseCards,
-                        icon: const Icon(Icons.playlist_add_outlined),
-                        label: const Text('Choose Card'),
-                      );
+                ? IconButton.filledTonal(
+                    onPressed: onBrowseCards,
+                    tooltip: 'Choose Card',
+                    icon: const Icon(Icons.playlist_add_outlined),
+                  )
+                : FilledButton.tonalIcon(
+                    onPressed: onBrowseCards,
+                    icon: const Icon(Icons.playlist_add_outlined),
+                    label: const Text('Choose Card'),
+                  );
 
             if (compact) {
               return Row(
@@ -101,10 +102,7 @@ class TagUnassignedCardTray extends StatelessWidget {
                   icon,
                   const SizedBox(width: 12),
                   Expanded(child: label),
-                  if (action != null) ...[
-                    const SizedBox(width: 12),
-                    action,
-                  ],
+                  if (action != null) ...[const SizedBox(width: 12), action],
                 ],
               );
             }
@@ -114,15 +112,8 @@ class TagUnassignedCardTray extends StatelessWidget {
               children: [
                 icon,
                 const SizedBox(width: 14),
-                Expanded(
-                  child: DefaultTextStyle.merge(
-                    child: label,
-                  ),
-                ),
-                if (action != null) ...[
-                  const SizedBox(width: 14),
-                  action,
-                ],
+                Expanded(child: DefaultTextStyle.merge(child: label)),
+                if (action != null) ...[const SizedBox(width: 14), action],
               ],
             );
           },

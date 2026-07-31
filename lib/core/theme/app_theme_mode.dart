@@ -1,4 +1,1 @@
-enum AppThemeMode {
-  sepia,
-  night,
-}
+enum AppThemeMode { sepia, night }

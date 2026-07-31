@@ -8,6 +8,7 @@ import 'package:studybible2/core/database/elibrary_schema.dart';
 import 'package:studybible2/features/library/data/library_document_canonicalizer.dart';
 import 'package:studybible2/features/library/data/library_document_models.dart';
 import 'package:studybible2/features/library/data/library_document_repository.dart';
+import 'package:studybible2/features/library/data/library_search_navigation_target.dart';
 import 'package:studybible2/features/library/presentation/library_document_controller.dart';
 
 void main() {
@@ -197,6 +198,7 @@ void main() {
       source: source,
     );
     final repository = LibraryDocumentRepository(db);
+    expect(await repository.openingDisplayOrder('SSP'), 0);
     final controller = LibraryDocumentController(
       libraryItemId: 'SSP',
       repository: repository,
@@ -211,6 +213,155 @@ void main() {
     final locationAfter = await repository.resolveLocation('SSP', 5);
     expect(locationBefore!.heading!.plainText, 'Chapter 1');
     expect(locationAfter!.heading!.plainText, 'Chapter 2');
+
+    final sourceMap = await db.query(
+      'library_block_source_map',
+      where: 'library_item_id = ? AND legacy_paragraph_index IS NOT NULL',
+      whereArgs: const <Object?>['SSP'],
+      orderBy: 'legacy_paragraph_index DESC',
+      limit: 1,
+    );
+    final target = LibrarySearchNavigationTarget(
+      libraryItemId: 'SSP',
+      textBlockId: 42,
+      href: sourceMap.single['source_href']!.toString(),
+      paragraphIndex: (sourceMap.single['legacy_paragraph_index'] as num)
+          .toInt(),
+      paragraphOnSection: (sourceMap.single['legacy_paragraph_index'] as num)
+          .toInt(),
+    );
+    final targetOrder = await repository.displayOrderForSearchTarget(target);
+    expect(targetOrder, isNotNull);
+    expect(controller.blockAt(targetOrder!), isNull);
+    await controller.ensureWindow(targetOrder);
+    expect(controller.blockAt(targetOrder), isNotNull);
+  });
+
+  test('canonical ordinary opening skips front matter for Chapter 1', () async {
+    await source.writeAsString('''
+      <html><body>
+        <h1>Preface</h1><p>Readable introductory material.</p>
+        <h1>Chapter I — The Beginning</h1><p>Substantive chapter text.</p>
+      </body></html>
+    ''');
+    await const LibraryDocumentCanonicalizer().canonicalize(
+      db: db,
+      libraryItemId: 'front-matter-book',
+      source: source,
+    );
+
+    final repository = LibraryDocumentRepository(db);
+    final order = await repository.openingDisplayOrder('front-matter-book');
+    expect(order, isNotNull);
+    final location = await repository.resolveLocation(
+      'front-matter-book',
+      order!,
+    );
+    expect(location!.block.plainText, 'Chapter I — The Beginning');
+  });
+
+  test('canonical title-led article skips metadata section', () async {
+    await source.writeAsString('''
+      <html><body>
+        <section><h1>Information about this Book</h1>
+          <p>Publisher metadata, copyright, credits, and navigation help.</p>
+        </section>
+        <section><h1>The Enlargement of Our Work</h1>
+          <p>This is the first substantive article and contains the actual
+          reading text of the pamphlet for the reader.</p>
+          <p>A second substantive paragraph confirms that this is body text.</p>
+        </section>
+      </body></html>
+    ''');
+    await const LibraryDocumentCanonicalizer().canonicalize(
+      db: db,
+      libraryItemId: 'title-led-article',
+      source: source,
+    );
+
+    final repository = LibraryDocumentRepository(db);
+    final order = await repository.openingDisplayOrder(
+      'title-led-article',
+      bookTitle: 'The Enlargement of Our Work',
+    );
+    expect(order, isNotNull);
+    final location = await repository.resolveLocation(
+      'title-led-article',
+      order!,
+    );
+    expect(location!.block.plainText, 'The Enlargement of Our Work');
+  });
+
+  test(
+    'bare numeric headings become paragraphs, not Contents entries',
+    () async {
+      final html = '''
+<!doctype html>
+<html><head><title>Numeric Heading Fixture</title></head><body>
+<h1>Chapter 1</h1>
+<p>Real chapter body.</p>
+<h1>71</h1>
+<p>Body that followed a page-number heading.</p>
+<h2>Chapter 71</h2>
+<p>Body after a real heading that merely contains digits.</p>
+<h3>71.</h3>
+<p>Body after a heading with trailing punctuation.</p>
+<h1>1</h1>
+<p>Body after a lone single-digit heading.</p>
+</body></html>
+''';
+      await source.writeAsString(html, flush: true);
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'NUM',
+        source: source,
+      );
+      final headings = await LibraryDocumentRepository(db).loadHeadings('NUM');
+      expect(headings.map((block) => block.plainText), <String>[
+        'Chapter 1',
+        'Chapter 71',
+        '71.',
+      ]);
+      final blocks = await db.query(
+        'library_document_blocks',
+        where: 'library_item_id = ?',
+        whereArgs: const <Object?>['NUM'],
+        orderBy: 'display_order ASC',
+      );
+      final pageMarker = blocks.firstWhere((row) => row['plain_text'] == '71');
+      expect(pageMarker['block_type'], 'paragraph');
+      expect(pageMarker['formatted_content'], isNot(contains('heading_role')));
+      final loneDigit = blocks.firstWhere((row) => row['plain_text'] == '1');
+      expect(loneDigit['block_type'], 'paragraph');
+      final punctuated = blocks.firstWhere((row) => row['plain_text'] == '71.');
+      expect(punctuated['block_type'], 'heading');
+    },
+  );
+
+  test('force bypasses the skip check and rebuilds in place', () async {
+    const canonicalizer = LibraryDocumentCanonicalizer();
+    final first = await canonicalizer.canonicalize(
+      db: db,
+      libraryItemId: 'SSP',
+      source: source,
+    );
+    expect(first.skipped, isFalse);
+
+    final skipped = await canonicalizer.canonicalize(
+      db: db,
+      libraryItemId: 'SSP',
+      source: source,
+    );
+    expect(skipped.skipped, isTrue);
+
+    final forced = await canonicalizer.canonicalize(
+      db: db,
+      libraryItemId: 'SSP',
+      source: source,
+      force: true,
+    );
+    expect(forced.skipped, isFalse);
+    expect(forced.blockCount, first.blockCount);
   });
 
   test('block ID normalization excludes content', () {

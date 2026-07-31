@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-07-03T11:18:21.103974Z",
+  "captureApp": "CaptureClipper",
+  "captureMode": "clipboard-html",
+  "title": "SSP",
+  "author": "Stephen Nelson Haskell",
+  "shortCode": "SSP",
+  "fromRef": "15",
+  "toRef": "17",
+  "coverImage": "images/image_0001.png",
+  "imageCount": 1,
+  "htmlFile": "capture.html"
+}

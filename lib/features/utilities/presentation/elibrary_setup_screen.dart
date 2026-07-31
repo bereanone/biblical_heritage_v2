@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/library_root_service.dart';
@@ -10,6 +11,7 @@ import '../../../core/bootstrap/library_root_native.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/user_database.dart';
 import '../../library/data/library_catalog_service.dart';
+import '../../library/presentation/import_pioneer_library_screen.dart';
 import '../../reader/data/commentary_research_library_service.dart';
 import '../data/elibrary_file_management_service.dart';
 import '../data/elibrary_duplicate_cleanup_service.dart';
@@ -21,6 +23,8 @@ import '../data/pioneer_book_package_import_service.dart';
 import '../data/pioneer_study_collection_service.dart';
 import '../data/pioneer_captured_html_import_availability_service.dart';
 import '../data/pioneer_captured_html_import_folder_service.dart';
+import '../data/pioneer_epub_collection_service.dart';
+import '../data/pioneer_source_catalog.dart';
 import '../data/pioneer_text_import_service.dart';
 import 'library_indexing_prompt_dialogs.dart';
 import 'study_collection_import_dialog.dart';
@@ -425,18 +429,26 @@ class CaptureClipperImportsSection extends StatelessWidget {
     required this.statusLabel,
     required this.helperText,
     required this.disableActions,
+    required this.onCheckForNewBooks,
     required this.onImportBookPackage,
     required this.onImportCapturedBooks,
     required this.onChangeImportLocation,
+    required this.isIOS,
+    this.isAndroid = false,
+    this.onDownloadPioneerBooks,
     this.lastCheckedLabel,
   });
 
   final String statusLabel;
   final String helperText;
   final bool disableActions;
+  final VoidCallback onCheckForNewBooks;
   final VoidCallback onImportBookPackage;
   final VoidCallback onImportCapturedBooks;
   final VoidCallback onChangeImportLocation;
+  final bool isIOS;
+  final bool isAndroid;
+  final VoidCallback? onDownloadPioneerBooks;
   final String? lastCheckedLabel;
 
   @override
@@ -460,7 +472,11 @@ class CaptureClipperImportsSection extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Choose Pioneers.studycollection from the Collections folder in your cloud storage. StudyBible2 will show new and updated books before importing anything.',
+              isIOS
+                  ? 'Get available Pioneer books from verified public sources, or choose a book package from OneDrive, iCloud Drive, or another Files location. StudyBible copies it locally so it remains available offline.'
+                  : isAndroid
+                  ? 'Get available Pioneer books from verified public sources, or choose Pioneers.studycollection or a .studybook package from Files or cloud storage. Imported packages are copied into StudyBible2 storage.'
+                  : 'Get missing Pioneer books from verified public sources, or choose Pioneers.studycollection from the Collections folder in your cloud storage. StudyBible2 shows what will change before importing.',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),
@@ -474,14 +490,53 @@ class CaptureClipperImportsSection extends StatelessWidget {
               spacing: 12,
               runSpacing: 12,
               children: [
-                FilledButton(
-                  onPressed: disableActions ? null : onImportBookPackage,
-                  child: const Text('Check for New Books'),
-                ),
-                OutlinedButton(
-                  onPressed: disableActions ? null : onImportCapturedBooks,
-                  child: const Text('Import One Book Package'),
-                ),
+                if (isIOS) ...[
+                  FilledButton.icon(
+                    onPressed: disableActions ? null : onDownloadPioneerBooks,
+                    icon: const Icon(Icons.download_rounded),
+                    label: const Text('Get Pioneer Books Online'),
+                  ),
+                  OutlinedButton(
+                    onPressed: disableActions ? null : onImportBookPackage,
+                    child: const Text('Import StudyBible Book'),
+                  ),
+                  OutlinedButton(
+                    onPressed: disableActions ? null : onImportCapturedBooks,
+                    child: const Text('Import CaptureClipper Files'),
+                  ),
+                ] else if (isAndroid) ...[
+                  FilledButton.icon(
+                    onPressed: disableActions ? null : onDownloadPioneerBooks,
+                    icon: const Icon(Icons.download_rounded),
+                    label: const Text('Get Pioneer Books Online'),
+                  ),
+                  OutlinedButton(
+                    onPressed: disableActions ? null : onCheckForNewBooks,
+                    child: const Text('Import Pioneer Collection'),
+                  ),
+                  OutlinedButton(
+                    onPressed: disableActions ? null : onImportBookPackage,
+                    child: const Text('Import One Pioneer Book'),
+                  ),
+                ] else ...[
+                  FilledButton(
+                    onPressed: disableActions ? null : onCheckForNewBooks,
+                    child: const Text('Check for New Books'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: disableActions ? null : onDownloadPioneerBooks,
+                    icon: const Icon(Icons.download_rounded),
+                    label: const Text('Get Pioneer Books Online'),
+                  ),
+                  OutlinedButton(
+                    onPressed: disableActions ? null : onImportBookPackage,
+                    child: const Text('Import One Book Package'),
+                  ),
+                  OutlinedButton(
+                    onPressed: disableActions ? null : onChangeImportLocation,
+                    child: const Text('Choose CloudFiles Folder'),
+                  ),
+                ],
               ],
             ),
           ],
@@ -512,6 +567,7 @@ class ELibrarySetupAdvancedSection extends StatelessWidget {
     required this.setupReportPath,
     required this.indexReportPath,
     required this.storageMaintenanceWidget,
+    required this.isIOS,
   });
 
   final LibraryRootSelection? selection;
@@ -532,6 +588,7 @@ class ELibrarySetupAdvancedSection extends StatelessWidget {
   final String? setupReportPath;
   final String? indexReportPath;
   final Widget storageMaintenanceWidget;
+  final bool isIOS;
 
   @override
   Widget build(BuildContext context) {
@@ -608,8 +665,8 @@ class ELibrarySetupAdvancedSection extends StatelessWidget {
           const SizedBox(height: 12),
           sectionHeading('CaptureClipper Diagnostics'),
           const SizedBox(height: 6),
-          detailField('Import path', captureFolderPath),
-          detailField('Folder access', captureFolderAccess),
+          if (!isIOS) detailField('Import path', captureFolderPath),
+          if (!isIOS) detailField('Folder access', captureFolderAccess),
           detailField('Import folder status', captureFolderStatus),
           detailField(
             'Available imports',
@@ -627,62 +684,73 @@ class ELibrarySetupAdvancedSection extends StatelessWidget {
             runSpacing: 12,
             crossAxisAlignment: WrapCrossAlignment.start,
             children: [
-              CaptureClipperImportButton(
-                label: captureReadyCount > 0 ? 'Import Ready Books' : null,
-                busy: loadingCaptureFolder,
-                onPressed: onImportConfiguredFolder,
-              ),
-              OutlinedButton(
-                onPressed: loadingCaptureFolder ? null : onResetImportLocation,
-                child: const Text('Reset Import Location'),
-              ),
+              if (!isIOS)
+                CaptureClipperImportButton(
+                  label: captureReadyCount > 0 ? 'Import Ready Books' : null,
+                  busy: loadingCaptureFolder,
+                  onPressed: onImportConfiguredFolder,
+                ),
+              if (!isIOS)
+                OutlinedButton(
+                  onPressed: loadingCaptureFolder
+                      ? null
+                      : onResetImportLocation,
+                  child: const Text('Reset Import Location'),
+                ),
               OutlinedButton(
                 onPressed: loadingCaptureFolder ? null : onRepairBrokenItems,
                 child: const Text('Repair Broken CaptureClipper Items'),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  OutlinedButton(
-                    onPressed: loadingCaptureFolder
-                        ? null
-                        : onClearImportLocation,
-                    child: const Text('Clear Saved Import Location'),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Forgets the saved import location. It does not delete source files.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
+              if (!isIOS)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    OutlinedButton(
+                      onPressed: loadingCaptureFolder
+                          ? null
+                          : onClearImportLocation,
+                      child: const Text('Clear Saved Import Location'),
                     ),
-                  ),
-                ],
-              ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Forgets the saved import location. It does not delete source files.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               TextButton(
                 onPressed: loadingCaptureFolder ? null : onReviewImports,
                 child: const Text('Review Imports'),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          sectionHeading('Developer Tools'),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              OutlinedButton(
-                onPressed: loadingCaptureFolder
-                    ? null
-                    : onTestBroadAnyFilePicker,
-                child: const Text('Test Broad Any File Picker'),
-              ),
-              OutlinedButton(
-                onPressed: loadingCaptureFolder ? null : onPickScannedHtmlFile,
-                child: const Text('Pick Scanned HTML File'),
-              ),
-            ],
-          ),
+          if (kDebugMode) ...[
+            const SizedBox(height: 6),
+            sectionHeading('Developer Tools'),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                if (!isIOS)
+                  OutlinedButton(
+                    onPressed: loadingCaptureFolder
+                        ? null
+                        : onTestBroadAnyFilePicker,
+                    child: const Text('Test Broad Any File Picker'),
+                  ),
+                if (!isIOS)
+                  OutlinedButton(
+                    onPressed: loadingCaptureFolder
+                        ? null
+                        : onPickScannedHtmlFile,
+                    child: const Text('Pick Scanned HTML File'),
+                  ),
+              ],
+            ),
+          ],
           if (setupReportPath != null || indexReportPath != null) ...[
             const SizedBox(height: 8),
             sectionHeading('Diagnostic Reports'),
@@ -1188,6 +1256,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   int _indexedCount = 0;
   int _indexingErrors = 0;
   bool _manualIndexing = false;
+  Future<({int indexed, int skipped, int failed})>? _manualIndexFuture;
   String? _manualIndexStatus;
   int _manualIndexCompleted = 0;
   int _manualIndexTotal = 0;
@@ -1550,11 +1619,11 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     }
   }
 
-  Future<void> _checkForNewBooks() async {
-    if (_captureFolderBusy) return;
+  Future<void> _checkForNewBooks({String? selectedPath}) async {
+    if (_captureFolderBusy && selectedPath == null) return;
     setState(() => _captureFolderBusy = true);
     try {
-      String? path;
+      String? path = selectedPath;
       while (path == null) {
         try {
           path = await LibraryRootNative.pickStudyCollection();
@@ -1567,11 +1636,10 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         debugPrint('CaptureClipper book package picker cancelled.');
         if (!mounted) return;
         setState(() {
-          _captureFolderStatus =
-              'Package selection cancelled. Nothing was imported.';
+          _captureFolderStatus = 'No Pioneer file was selected.';
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Package selection cancelled.')),
+          const SnackBar(content: Text('No Pioneer file was selected.')),
         );
         return;
       }
@@ -1580,6 +1648,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       var selectedNew = 0;
       var selectedUpdates = 0;
       var alreadyCurrent = 0;
+      var directlyImported = 0;
       for (final path in [path]) {
         try {
           if (p.extension(path).toLowerCase() == '.studycollection') {
@@ -1624,7 +1693,11 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                   (book) => book.status == StudyCollectionBookStatus.current,
                 )
                 .length;
-            results.addAll(await service.importSelected(path, selected));
+            final batch = await service.importSelectedItems(path, selected);
+            results.addAll(batch.studybookResults);
+            directlyImported +=
+                batch.epubResults.where((result) => result.isImported).length +
+                batch.pdfWorkIds.length;
           }
         } catch (error) {
           failures.add('${p.basename(path)}: $error');
@@ -1639,7 +1712,8 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                   ),
                 );
       if (!mounted) return;
-      final importedCount = importReport?.importedCount ?? 0;
+      final importedCount =
+          (importReport?.importedCount ?? 0) + directlyImported;
       final message = failures.isEmpty
           ? selectedNew + selectedUpdates > 0
                 ? '${selectedNew == 0 ? '' : '$selectedNew new book${selectedNew == 1 ? '' : 's'} imported\n'}${selectedUpdates == 0 ? '' : '$selectedUpdates book${selectedUpdates == 1 ? '' : 's'} updated\n'}$alreadyCurrent already current'
@@ -1652,8 +1726,14 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       messenger.showSnackBar(SnackBar(content: Text(message)));
     } catch (error) {
       if (!mounted) return;
-      final message = 'CaptureClipper package import failed: $error';
-      debugPrint(message);
+      debugPrint('Pioneer collection import failed: $error');
+      final message = switch (error) {
+        FormatException(:final message) => message,
+        PlatformException() =>
+          'The selected Pioneer file could not be read. Try choosing it again from Files.',
+        _ =>
+          'The Pioneer collection could not be imported. The selected collection may be invalid.',
+      };
       setState(() => _captureFolderStatus = message);
       ScaffoldMessenger.of(
         context,
@@ -1692,24 +1772,139 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     if (_captureFolderBusy) return;
     setState(() => _captureFolderBusy = true);
     try {
-      final path = await LibraryRootNative.pickStudyBookPackage();
-      if (path == null) return;
+      final path = await LibraryRootNative.pickPioneerPackage();
+      if (path == null) {
+        if (!mounted) return;
+        const message = 'No Pioneer file was selected.';
+        setState(() => _captureFolderStatus = message);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text(message)));
+        return;
+      }
+      if (p.extension(path).toLowerCase() == '.studycollection') {
+        await _checkForNewBooks(selectedPath: path);
+        return;
+      }
+      if (p.extension(path).toLowerCase() == '.epub') {
+        final catalog = await PioneerSourceCatalog.load();
+        final work =
+            matchPioneerWorkForLocalEpub(catalog, path) ??
+            await loadPioneerWorkFromFolderFile(path);
+        if (work == null) {
+          throw PioneerBookPackageImportException(
+            'The selected EPUB could not be matched to a Pioneer catalog '
+            'title and was not discovered in the Pioneers source folder.',
+          );
+        }
+        final importResult = await PioneerTextImportService.instance
+            .importLocalEpubFile(
+              work: work,
+              filePath: path,
+              overwriteExisting: true,
+            );
+        final importedItem = await LibraryCatalogService.instance.loadItemById(
+          importResult.libraryItemId,
+        );
+        if (importedItem == null) {
+          throw PioneerBookPackageImportException(
+            '${p.basename(path)} was parsed, but its library item could not '
+            'be refreshed.',
+          );
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Imported “${importedItem.displayTitle}”.')),
+        );
+        await _loadCaptureFolderState();
+        return;
+      }
       final result = await PioneerBookPackageImportService.instance
-          .importPackage(path);
-      await PioneerCapturedHtmlImportFolderService.instance
+          .importPackage(path, setAsConfiguredFolder: false);
+      final report = await PioneerCapturedHtmlImportFolderService.instance
           .importConfiguredCloudFolder(
             selectedFolderPaths: [result.destinationFolderPath],
+            existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
           );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Book imported and indexed.')),
+      late final String libraryItemId;
+      late final String importedTitle;
+      if (report.entries.isNotEmpty) {
+        final entry = report.entries.firstWhere(
+          (entry) =>
+              p.normalize(entry.folderPath).toLowerCase() ==
+              p.normalize(result.destinationFolderPath).toLowerCase(),
+          orElse: () => report.entries.first,
+        );
+        if (!entry.imported || entry.libraryItemId?.trim().isEmpty != false) {
+          throw PioneerBookPackageImportException(
+            '${p.basename(path)} could not be added to the library: '
+            '${entry.reason?.trim().isNotEmpty == true ? entry.reason : 'the importer did not create a library item.'}',
+          );
+        }
+        libraryItemId = entry.libraryItemId!.trim();
+        importedTitle = entry.title;
+      } else {
+        // Some valid recovered packages contain ordinary chapter/paragraph
+        // HTML rather than EGW-style paragraph reference codes. The
+        // reference-preserving CaptureClipper scanner intentionally rejects
+        // those files, so fall back to the general captured-HTML importer
+        // after the package manifest and declared HTML file have already been
+        // validated by PioneerBookPackageImportService.
+        final fallbackReport = await PioneerCapturedHtmlImportFolderService
+            .instance
+            .scanFolder(
+              folderPath: result.destinationFolderPath,
+              importFiles: true,
+              existingImportPolicy:
+                  PioneerExistingImportPolicy.overwriteExisting,
+            );
+        final candidates = fallbackReport.files
+            .where((file) => file.libraryItemId?.trim().isNotEmpty == true)
+            .toList(growable: false);
+        if (candidates.isEmpty) {
+          final reason = fallbackReport.files
+              .map((file) => file.reason?.trim() ?? '')
+              .where((value) => value.isNotEmpty)
+              .join(' ');
+          throw PioneerBookPackageImportException(
+            '${p.basename(path)} was extracted, but its HTML could not be '
+            'added to the library'
+            '${reason.isEmpty ? '.' : ': $reason'}',
+          );
+        }
+        final entry = candidates.first;
+        libraryItemId = entry.libraryItemId!.trim();
+        importedTitle = entry.title;
+      }
+      final importedItem = await LibraryCatalogService.instance.loadItemById(
+        libraryItemId,
       );
-      await _loadCaptureFolderState();
-    } catch (error) {
+      if (importedItem == null) {
+        throw PioneerBookPackageImportException(
+          '${p.basename(path)} reported success, but its library item could '
+          'not be refreshed.',
+        );
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('$error')));
+      ).showSnackBar(SnackBar(content: Text('Imported “$importedTitle”.')));
+      await _loadCaptureFolderState();
+    } catch (error) {
+      if (!mounted) return;
+      debugPrint('Pioneer book package import failed: $error');
+      final message = switch (error) {
+        FormatException(:final message) => message,
+        PlatformException(:final message, :final details) =>
+          'The selected Pioneer file could not be read'
+              '${message != null && message.isNotEmpty ? ': $message' : ''}'
+              '${details != null && details.toString().isNotEmpty ? ' ($details)' : ''}.',
+        PioneerBookPackageImportException(:final message) => message,
+        _ => 'The Pioneer book could not be imported.',
+      };
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } finally {
       if (mounted) setState(() => _captureFolderBusy = false);
     }
@@ -1824,12 +2019,21 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         return;
       }
       final result = await PioneerCapturedHtmlImportFolderService.instance
-          .copyPickedFilesIntoManagedImportFolder(pickedPaths);
+          .copyPickedFilesIntoManagedImportFolder(
+            pickedPaths,
+            setAsConfiguredFolder: false,
+          );
+      final importReport = await PioneerCapturedHtmlImportFolderService.instance
+          .importConfiguredCloudFolder(
+            selectedFolderPaths: [result.destinationFolderPath],
+          );
       if (!mounted) return;
       final copied = result.copiedFilePaths.length;
       final failed = result.failedSourcePaths.length;
       final buffer = StringBuffer(
-        'Copied $copied file${copied == 1 ? '' : 's'} into app storage '
+        'Copied $copied file${copied == 1 ? '' : 's'} into app storage and '
+        'imported ${importReport.importedCount + importReport.repairedCount} '
+        'book${importReport.importedCount + importReport.repairedCount == 1 ? '' : 's'} '
         '(${p.basename(result.destinationFolderPath)}).',
       );
       if (failed > 0) {
@@ -2007,20 +2211,76 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
     }
   }
 
-  Future<({int indexed, int skipped, int failed})> _runManualIndex() async {
-    if (_manualIndexing) {
-      return (indexed: 0, skipped: 0, failed: 0);
+  Future<({int indexed, int skipped, int failed})> _runManualIndex({
+    String? rootPathOverride,
+  }) async {
+    final running = _manualIndexFuture;
+    if (running != null) return running;
+    final operation = _performManualIndex(rootPathOverride: rootPathOverride);
+    _manualIndexFuture = operation;
+    try {
+      return await operation;
+    } finally {
+      _manualIndexFuture = null;
     }
+  }
+
+  Future<({int indexed, int skipped, int failed})> _performManualIndex({
+    String? rootPathOverride,
+  }) async {
     setState(() {
       _manualIndexing = true;
-      _manualIndexStatus = 'Indexing new/changed books...';
+      _manualIndexStatus = 'Discovering retained EPUB files...';
       _manualIndexCompleted = 0;
       _manualIndexTotal = 0;
       _manualIndexCurrentTitle = null;
     });
     try {
+      final rootPath = rootPathOverride?.trim().isNotEmpty == true
+          ? p.normalize(rootPathOverride!.trim())
+          : await LibraryRootService.instance.accessibleLibraryRootPath();
+      if (rootPath == null || rootPath.trim().isEmpty) {
+        setState(() {
+          _manualIndexStatus =
+              'No files indexed: the app-managed Library Root is unavailable.';
+        });
+        return (indexed: 0, skipped: 0, failed: 1);
+      }
+      if (!Directory(rootPath).existsSync()) {
+        setState(() {
+          _manualIndexStatus =
+              'No files indexed: the expected app-managed root is inaccessible.';
+        });
+        return (indexed: 0, skipped: 0, failed: 1);
+      }
+
+      await LibraryCatalogService.instance.refreshManagedItemsFromDisk(
+        rootPathOverride: rootPath,
+      );
+      final candidates = await LibraryCatalogService.instance
+          .listUnindexedManagedItems();
+      if (!mounted) {
+        return (indexed: 0, skipped: 0, failed: 0);
+      }
+      if (candidates.isEmpty) {
+        setState(() {
+          _manualIndexStatus =
+              'No indexing candidates: all discovered EPUB files are already indexed.';
+        });
+        await _refreshPendingIndexCount();
+        await _refreshNeedsAttentionItems();
+        return (indexed: 0, skipped: 0, failed: 0);
+      }
+
+      final failures = <String>[];
+      setState(() {
+        _manualIndexStatus =
+            'Indexing ${candidates.length} new/changed books...';
+        _manualIndexTotal = candidates.length;
+      });
       final result = await CommentaryResearchLibraryService.instance
           .indexLocalCatalogedEpubs(
+            rootPathOverride: rootPath,
             onProgress: (completed, total, currentTitle) {
               if (!mounted) return;
               setState(() {
@@ -2029,19 +2289,32 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                 _manualIndexCurrentTitle = currentTitle;
               });
             },
+            onFailure: (fileName, error) {
+              failures.add('$fileName: $error');
+            },
           );
       if (!mounted) {
         return (indexed: 0, skipped: 0, failed: 0);
       }
-      final String status;
+      String status;
       if (result.indexed == 0 && result.skipped == 0 && result.failed == 0) {
-        status = 'Library is already indexed';
+        status =
+            'No files indexed: ${candidates.length} candidates produced no work.';
       } else {
         status =
             'Indexing complete — ${result.indexed} indexed, ${result.skipped} skipped, ${result.failed} failed';
+        if (failures.isNotEmpty) {
+          status = '$status. First failure: ${failures.first}';
+        }
       }
-      setState(() => _manualIndexStatus = status);
-      await _refreshPendingIndexCount();
+      final remaining = await LibraryCatalogService.instance
+          .countUnindexedManagedItems();
+      status =
+          '$status. ${remaining == 0 ? 'No books remain to index.' : '$remaining book${remaining == 1 ? '' : 's'} remain to index.'}';
+      setState(() {
+        _manualIndexStatus = status;
+        _pendingIndexCount = remaining;
+      });
       await _refreshNeedsAttentionItems();
       return result;
     } catch (error) {
@@ -2550,7 +2823,9 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       });
 
       final catalogTouched = await LibraryCatalogService.instance
-          .refreshManagedItemsFromDisk();
+          .refreshManagedItemsFromDisk(
+            rootPathOverride: downloadReport.destinationRoot,
+          );
       if (!mounted) return;
       setState(() {
         _setupStatusMessage = catalogTouched == 0
@@ -2564,7 +2839,9 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         _indexing = true;
       });
 
-      final indexResult = await _runManualIndex();
+      final indexResult = await _runManualIndex(
+        rootPathOverride: downloadReport.destinationRoot,
+      );
       if (!mounted) return;
       setState(() {
         _setupStatusMessage = 'Finalizing setup...';
@@ -2938,6 +3215,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   }
 
   bool _captureImportLocationIsReady() {
+    if (Platform.isIOS) return true;
     final path = _captureFolderPath?.trim() ?? '';
     return path.isNotEmpty && !_captureFolderIsLegacy;
   }
@@ -2949,6 +3227,9 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   }
 
   String _captureImportsHelperText() {
+    if (Platform.isIOS) {
+      return 'Import a copied book package or legacy CaptureClipper files.';
+    }
     return _captureImportLocationIsReady()
         ? 'Import CaptureClipper book packages or captured books into the Pioneer library.'
         : 'Set the import location, then bring in book packages or captured books.';
@@ -3012,8 +3293,19 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                     helperText: _captureImportsHelperText(),
                     disableActions: _running || _captureFolderBusy,
                     lastCheckedLabel: _lastCollectionCheckLabel,
-                    onImportBookPackage: _checkForNewBooks,
-                    onImportCapturedBooks: _importOneBookPackage,
+                    isIOS: Platform.isIOS,
+                    isAndroid: Platform.isAndroid,
+                    onDownloadPioneerBooks: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ImportPioneerLibraryScreen(),
+                      ),
+                    ),
+                    onCheckForNewBooks: _checkForNewBooks,
+                    onImportBookPackage: _importOneBookPackage,
+                    onImportCapturedBooks: () =>
+                        _importPickedCaptureClipperFiles(
+                          relatedFilesOnly: true,
+                        ),
                     onChangeImportLocation: () => _chooseCaptureFolder(),
                   ),
                   const SizedBox(height: 12),
@@ -3081,6 +3373,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                   ),
                   const SizedBox(height: 12),
                   ELibrarySetupAdvancedSection(
+                    isIOS: Platform.isIOS,
                     selection: selection,
                     captureFolderPath: _captureFolderPath,
                     captureFolderAccess: _captureFolderAccess,
@@ -3148,13 +3441,27 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                                     'Indexing new/changed books...',
                               ),
                             ] else ...[
-                              const LinearProgressIndicator(),
+                              LinearProgressIndicator(
+                                value: (_progress?.totalPlannedCount ?? 0) > 0
+                                    ? (_progress!.completedCount /
+                                              _progress!.totalPlannedCount)
+                                          .clamp(0.0, 1.0)
+                                    : null,
+                              ),
                               const SizedBox(height: 12),
                               Text(
                                 _setupStatusMessage ??
                                     _progress?.statusMessage ??
                                     'Preparing download...',
                               ),
+                              if ((_progress?.totalPlannedCount ?? 0) > 0) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${_progress!.completedCount} of '
+                                  '${_progress!.totalPlannedCount} prepared',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                              ],
                             ],
                             const SizedBox(height: 8),
                             Text(

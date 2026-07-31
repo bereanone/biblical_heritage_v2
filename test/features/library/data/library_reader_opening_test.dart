@@ -284,6 +284,56 @@ void main() {
       },
     );
 
+    test('The Enlargement of Our Work skips Information about this Book', () {
+      final item = _bookItem(id: 'ph029', title: 'The Enlargement of Our Work');
+      final enlargementSections = <LibraryBookSection>[
+        _section(
+          entryName: 'oebps/aboutbook.xhtml',
+          title: 'Information about this Book',
+          paragraphs: const [
+            'This electronic edition contains publication information and '
+                'details about the author and publisher.',
+          ],
+          spineIndex: 1,
+        ),
+        _section(
+          entryName: 'oebps/content00.xhtml',
+          title: 'The Enlargement of Our Work',
+          paragraphs: const [
+            'The Lord has repeatedly instructed us that the work must be '
+                'enlarged and carried into fields that have not heard.',
+            'This is the first substantive article body in the pamphlet.',
+          ],
+          spineIndex: 4,
+        ),
+      ];
+      final navigation = <LibraryCatalogNavigationItem>[
+        _navItem(
+          id: 'about',
+          label: 'Information about this Book',
+          href: 'oebps/aboutbook.xhtml',
+          sortOrder: 0,
+        ),
+        _navItem(
+          id: 'body',
+          label: 'The Enlargement of Our Work',
+          href: 'oebps/content00.xhtml',
+          sortOrder: 1,
+        ),
+      ];
+
+      expect(
+        libraryReaderInitialSectionIndex(
+          item: item,
+          sections: enlargementSections,
+          navigationItems: navigation,
+          devotionalMode: false,
+        ),
+        1,
+      );
+      expect(navigation.first.label, 'Information about this Book');
+    });
+
     test(
       'saved location is restored for a previously opened ordinary book',
       () {

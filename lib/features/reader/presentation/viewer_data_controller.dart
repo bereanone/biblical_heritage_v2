@@ -86,11 +86,7 @@ class ViewerDataController extends ChangeNotifier {
       }
 
       for (final row in fetched) {
-        final line = _mapLine(
-          row,
-          fallbackBookNumber: 1,
-          fallbackChapter: 1,
-        );
+        final line = _mapLine(row, fallbackBookNumber: 1, fallbackChapter: 1);
         final blockId = line.blockId ?? 0;
         if (blockId <= 0) continue;
         _blocks[blockId] = line;

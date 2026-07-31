@@ -13,6 +13,7 @@ import 'package:studybible2/features/library/data/library_document_models.dart';
 import 'package:studybible2/features/library/data/library_document_repository.dart';
 import 'package:studybible2/features/library/data/library_catalog_service.dart';
 import 'package:studybible2/features/library/presentation/canonical_library_reader.dart';
+import 'package:studybible2/features/library/presentation/library_book_reader_screen.dart';
 import 'package:studybible2/features/library/presentation/library_document_controller.dart';
 import 'package:studybible2/features/library/presentation/reader_tilt_autoscroll_controller.dart';
 import 'package:studybible2/features/library/presentation/mac_reader_autoscroll_controller.dart';
@@ -164,36 +165,53 @@ void main() {
     expect(night.foreground, const Color(0xFFF7F1E5));
   });
 
-  test(
-    'feature selection defaults to legacy and falls back when unavailable',
-    () {
-      expect(useCanonicalLibraryReader, isFalse);
-      expect(useCanonicalCaptureClipperReader, isFalse);
-      expect(
-        selectLibraryReaderImplementation(
-          featureEnabled: false,
-          canonicalComplete: true,
-        ),
-        LibraryReaderImplementation.legacy,
-      );
-      expect(
-        selectLibraryReaderImplementation(
-          featureEnabled: true,
-          canonicalComplete: false,
-        ),
-        LibraryReaderImplementation.legacy,
-      );
-      expect(
-        selectLibraryReaderImplementation(
-          featureEnabled: true,
-          canonicalComplete: true,
-        ),
-        LibraryReaderImplementation.canonical,
-      );
-    },
-  );
+  test('legacy rollout flags no longer control production routing', () {
+    expect(useCanonicalLibraryReader, isFalse);
+    expect(useCanonicalCaptureClipperReader, isFalse);
+    expect(
+      shouldAttemptCanonicalDocumentReader(
+        item: _item(fileFormat: 'html', sourceType: 'egw_html_capture'),
+      ),
+      isTrue,
+    );
+    expect(
+      selectLibraryReaderImplementation(
+        featureEnabled: false,
+        canonicalComplete: true,
+      ),
+      LibraryReaderImplementation.legacy,
+    );
+    expect(
+      selectLibraryReaderImplementation(
+        featureEnabled: true,
+        canonicalComplete: false,
+      ),
+      LibraryReaderImplementation.legacy,
+    );
+    expect(
+      selectLibraryReaderImplementation(
+        featureEnabled: true,
+        canonicalComplete: true,
+      ),
+      LibraryReaderImplementation.canonical,
+    );
+  });
 
-  test('rollout supports CaptureClipper HTML and excludes EPUB', () {
+  test('capability routing supports CaptureClipper and managed EPUBs', () {
+    final ssp = _item(fileFormat: 'html', sourceType: 'egw_html_capture');
+    final managedEpub = _item(
+      fileFormat: 'epub',
+      sourceType: 'official_download',
+      relativePath: 'ePubs/EGW/EGW_Books/book.epub',
+      collectionName: 'EGW Books',
+    );
+    expect(LibraryBookReaderScreen(item: ssp).enableCanonicalReader, isTrue);
+    expect(
+      LibraryBookReaderScreen(item: managedEpub).enableCanonicalReader,
+      isTrue,
+    );
+    expect(shouldAttemptCanonicalDocumentReader(item: ssp), isTrue);
+    expect(shouldAttemptCanonicalDocumentReader(item: managedEpub), isTrue);
     expect(
       supportsCanonicalCaptureClipperReader(
         _item(fileFormat: 'html', sourceType: 'egw_html_capture'),
@@ -212,10 +230,17 @@ void main() {
       ),
       isFalse,
     );
+    expect(shouldAttemptCanonicalDocumentReader(item: managedEpub), isTrue);
+    expect(
+      shouldAttemptCanonicalDocumentReader(
+        item: _item(fileFormat: 'html', sourceType: 'user_added'),
+      ),
+      isFalse,
+    );
   });
 
   test(
-    'Mac keyboard autoscroll is platform scoped and leaves iOS path alone',
+    'steady autoscroll covers Android and Mac while leaving iOS tilt alone',
     () {
       expect(
         shouldUseMacReaderAutoscroll(isMacOS: true, isProofHarness: false),
@@ -227,6 +252,22 @@ void main() {
       );
       expect(
         shouldUseMacReaderAutoscroll(isMacOS: true, isProofHarness: true),
+        isFalse,
+      );
+      expect(
+        shouldUseSteadyReaderAutoscroll(isIOS: false, isProofHarness: false),
+        isTrue,
+      );
+      expect(
+        shouldUseSteadyReaderAutoscroll(
+          isIOS: false,
+          isAndroid: true,
+          isProofHarness: false,
+        ),
+        isFalse,
+      );
+      expect(
+        shouldUseSteadyReaderAutoscroll(isIOS: true, isProofHarness: false),
         isFalse,
       );
     },
@@ -288,6 +329,11 @@ void main() {
       final completedSetup = setup!;
       final controller = completedSetup.controller;
       final target = CallbackReaderAutoScrollTarget();
+      final steady = MacReaderAutoScrollController(
+        scrollTarget: target,
+        driveFrames: false,
+      );
+      addTearDown(steady.dispose);
       final visible = <int>[];
       await tester.pumpWidget(
         MaterialApp(
@@ -299,6 +345,7 @@ void main() {
                 autoScrollTarget: target,
                 onVisibleOrderChanged: visible.add,
                 textColor: Colors.black,
+                onManualScroll: steady.stopForManualInteraction,
               ),
             ),
           ),
@@ -318,26 +365,26 @@ void main() {
       final visiblePosition = tester
           .state<ScrollableState>(scrollableFinder.first)
           .position;
-      final mac = MacReaderAutoScrollController(
-        scrollTarget: target,
-        driveFrames: false,
-      );
-      addTearDown(mac.dispose);
       final initialOffset = visiblePosition.pixels;
-      mac.setSignedStep(1);
-      mac.tick(const Duration(seconds: 1));
+      steady.setSignedStep(1);
+      steady.tick(const Duration(seconds: 1));
       await tester.pump();
       final slowOffset = visiblePosition.pixels;
       expect(slowOffset, greaterThan(initialOffset));
-      mac.setSignedStep(20);
-      mac.tick(const Duration(milliseconds: 100));
+      steady.setSignedStep(20);
+      steady.tick(const Duration(milliseconds: 100));
       await tester.pump();
       final fastOffset = visiblePosition.pixels;
       expect(fastOffset - slowOffset, greaterThan(slowOffset - initialOffset));
-      mac.setSignedStep(-1);
-      mac.tick(const Duration(milliseconds: 500));
+      steady.setSignedStep(-1);
+      steady.tick(const Duration(milliseconds: 500));
       await tester.pump();
       expect(visiblePosition.pixels, lessThan(fastOffset));
+      steady.setSignedStep(0);
+      final stoppedOffset = visiblePosition.pixels;
+      steady.tick(const Duration(seconds: 2));
+      await tester.pump();
+      expect(visiblePosition.pixels, stoppedOffset);
       expect(
         identical(
           visiblePosition,
@@ -350,6 +397,7 @@ void main() {
         const Offset(0, -20),
       );
       await tester.pump();
+      expect(steady.isActive, isFalse);
       expect(target.scrollBy(260), isTrue);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 150));
@@ -364,24 +412,89 @@ void main() {
       });
     },
   );
+
+  testWidgets('explicit search target scrolls to its exact canonical block', (
+    tester,
+  ) async {
+    final setup = await tester.runAsync(() async {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      final dir = await Directory.systemTemp.createTemp(
+        'canonical_search_target_',
+      );
+      final db = await openDatabase(p.join(dir.path, 'test.db'));
+      await ELibrarySchema.ensure(db);
+      final source = File(p.join(dir.path, 'ssp.html'));
+      await source.writeAsBytes(
+        await File(
+          'test/fixtures/elibrary/ssp_canonical_poc.html',
+        ).readAsBytes(),
+      );
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'item',
+        source: source,
+      );
+      final controller = LibraryDocumentController(
+        libraryItemId: 'item',
+        repository: LibraryDocumentRepository(db),
+      );
+      await controller.initialize();
+      return (controller: controller, db: db, dir: dir);
+    });
+    final completedSetup = setup!;
+    var positioned = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 180,
+            child: CanonicalLibraryDocumentBody(
+              controller: completedSetup.controller,
+              autoScrollTarget: CallbackReaderAutoScrollTarget(),
+              onVisibleOrderChanged: (_) {},
+              textColor: Colors.black,
+              onManualScroll: () {},
+              initialScrollOrder: 4,
+              onInitialScrollCompleted: () => positioned = true,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+
+    expect(positioned, isTrue);
+    expect(find.text('Chapter 2'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.runAsync(() async {
+      await completedSetup.db.close();
+      await completedSetup.dir.delete(recursive: true);
+    });
+  });
 }
 
 LibraryCatalogItem _item({
   required String fileFormat,
   required String sourceType,
+  String? relativePath,
+  String collectionName = 'Pioneer Authors',
 }) => LibraryCatalogItem(
   id: 'item',
   title: 'Test Book',
   author: 'Test Author',
   fileName: fileFormat == 'epub' ? 'book.epub' : 'capture.html',
   fileHash: null,
-  relativePath: fileFormat == 'epub'
-      ? 'ePubs/book.epub'
-      : 'TextCaptures/book/capture.html',
+  relativePath:
+      relativePath ??
+      (fileFormat == 'epub'
+          ? 'ePubs/book.epub'
+          : 'TextCaptures/book/capture.html'),
   fileFormat: fileFormat,
   folderType: 'Research',
   libraryRole: 'book',
-  collectionName: 'Pioneer Authors',
+  collectionName: collectionName,
   sourceSite: null,
   sourceUrl: null,
   sourceType: sourceType,

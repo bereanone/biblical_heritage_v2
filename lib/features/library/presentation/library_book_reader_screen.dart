@@ -22,6 +22,7 @@ import '../data/elibrary_markup_repository.dart';
 import '../data/library_citation_display_helper.dart';
 import '../data/library_reader_opening.dart';
 import '../data/library_reader_state_writer.dart';
+import '../data/library_search_navigation_target.dart';
 import '../data/library_section_heuristics.dart';
 import '../../reader/data/commentary_research_library_service.dart';
 import '../../reader/presentation/highlight_render.dart';
@@ -44,6 +45,8 @@ import 'reader_tilt_autoscroll_controller.dart';
 import 'reader_tilt_autoscroll_controls.dart';
 import 'reader_tilt_motion_source.dart';
 import 'reader_tilt_preferences.dart';
+import 'mac_reader_autoscroll_controller.dart';
+import 'mac_reader_autoscroll_controls.dart';
 import 'canonical_library_reader.dart';
 import '../../reader/presentation/text_range_geometry.dart';
 import '../../utilities/data/pioneer_captured_html_import_folder_service.dart';
@@ -62,6 +65,16 @@ part 'library_book_reader_screen_helpers.dart';
 const bool _enableTextRangeGeometry = false;
 const bool elibraryAutomaticTiltChapterTransitionsEnabled = false;
 
+@visibleForTesting
+bool libraryReaderUsesSteadyAutoscroll(TargetPlatform platform) =>
+    platform != TargetPlatform.iOS && platform != TargetPlatform.android;
+
+@visibleForTesting
+bool libraryReaderSteadyAutoscrollEnabled({
+  required LibraryCatalogItem item,
+  required bool hasReadableSections,
+}) => hasReadableSections && !item.isPdf;
+
 enum _ReaderBookMenuAction {
   openELibrarySetup,
   removeCurrentBook,
@@ -76,13 +89,14 @@ class LibraryBookReaderScreen extends StatefulWidget {
     this.initialAnchorId,
     this.initialSpineIndex,
     this.initialParagraphIndex,
+    this.searchTarget,
     this.searchQuery,
     this.highlightTerms = const [],
     this.searchSession,
     this.onReturnToBible,
     this.themeMode,
     this.onThemeChanged,
-    this.enableCanonicalReader = useCanonicalCaptureClipperReader,
+    this.enableCanonicalReader = true,
   });
 
   final LibraryCatalogItem item;
@@ -90,6 +104,7 @@ class LibraryBookReaderScreen extends StatefulWidget {
   final String? initialAnchorId;
   final int? initialSpineIndex;
   final int? initialParagraphIndex;
+  final LibrarySearchNavigationTarget? searchTarget;
   final String? searchQuery;
   final List<String> highlightTerms;
   final LibraryCatalogSearchSession? searchSession;
@@ -113,6 +128,12 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   final CallbackReaderAutoScrollTarget _tiltScrollTarget =
       CallbackReaderAutoScrollTarget();
   late final ReaderTiltAutoScrollController _tiltAutoScroll;
+  late final MacReaderAutoScrollController _steadyAutoScroll;
+  final FocusNode _readerFocusNode = FocusNode(
+    debugLabel: 'library-reader-keyboard-focus',
+  );
+  bool _readerShortcutsSuspended = false;
+  int _lastMacAutoscrollStatusRevision = 0;
   final ReaderTiltPreferencesStore _tiltPreferencesStore =
       const ReaderTiltPreferencesStore();
   final Map<String, GlobalKey> _bodyBlockKeys = <String, GlobalKey>{};
@@ -145,10 +166,12 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   bool _windowUpdateScheduled = false;
   int _selectedNavigationIndex = 0;
   int _chapterGeneration = 0;
+  int _liveSectionGeneration = 0;
   final LibraryLiveSectionController _liveSection =
       LibraryLiveSectionController();
   int? _selectedHeadingTargetIndex;
   String? _pendingBodyScrollTargetKey;
+  bool _searchTargetPositioned = false;
   Map<String, String> _refCodeByLocation = <String, String>{};
   Map<String, Map<int, String>> _paragraphReferenceCodesBySection =
       <String, Map<int, String>>{};
@@ -165,15 +188,23 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   @override
   void initState() {
     super.initState();
+    final searchTarget = widget.searchTarget;
+    if (searchTarget != null) {
+      debugPrint('search_target_received ${searchTarget.diagnosticSummary}');
+    }
     WidgetsBinding.instance.addObserver(this);
     _tiltAutoScroll = ReaderTiltAutoScrollController(
-      motionSource: IosReaderTiltMotionSource(),
+      motionSource: PlatformReaderTiltMotionSource(),
       scrollTarget: _tiltScrollTarget,
       // Vertical movement uses the same continuous document as manual scroll.
       // No horizontal callback is registered, preserving the rocking fail-safe.
     );
+    _steadyAutoScroll = MacReaderAutoScrollController(
+      scrollTarget: _tiltScrollTarget,
+    )..addListener(_onMacAutoscrollChanged);
     _tiltScrollTarget.attach(_scrollContinuousDocument);
     _loadTiltPreferences();
+    _loadSteadyAutoscrollPreferences();
     _nightMode = widget.themeMode == AppThemeMode.night;
     final initialSearchTerm = widget.searchQuery?.trim() ?? '';
     _lastSearchTerm = initialSearchTerm.isNotEmpty ? initialSearchTerm : null;
@@ -185,6 +216,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _tiltAutoScroll.dispose();
+    _steadyAutoScroll
+      ..removeListener(_onMacAutoscrollChanged)
+      ..dispose();
+    _readerFocusNode.dispose();
     _tiltScrollTarget.detach();
     _geometryDebounce?.cancel();
     _itemPositionsListener.itemPositions.removeListener(_onBodyScroll);
@@ -195,7 +230,6 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   Timer? _geometryDebounce;
 
   void _onBodyScroll() {
-    if (_tiltAutoScroll.isActive) return;
     if (_windowUpdateScheduled || _bodyScrollPosition == null) return;
     _windowUpdateScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -250,6 +284,69 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     }
     if (mounted) {
       _tiltAutoScroll.updatePreferences(preferences, showBanner: false);
+    }
+  }
+
+  Future<void> _loadSteadyAutoscrollPreferences() async {
+    final preferences = await AppSettingsService.instance
+        .loadMacAutoscrollPreferences();
+    if (mounted) _steadyAutoScroll.updatePreferences(preferences);
+  }
+
+  Future<void> _openSteadyAutoscrollSettings() async {
+    final initial = MacAutoscrollPreferences(
+      baseSpeed: _steadyAutoScroll.baseSpeed,
+      lastNonzeroStep: _steadyAutoScroll.lastNonzeroStep,
+      maximumStep: _steadyAutoScroll.maximumStep,
+      statusBannerMode: _steadyAutoScroll.statusBannerMode,
+    );
+    _readerShortcutsSuspended = true;
+    final preferences = await (defaultTargetPlatform == TargetPlatform.macOS
+        ? showMacAutoscrollSettingsDialog(context: context, initial: initial)
+        : showReaderAutoscrollSettingsDialog(
+            context: context,
+            initial: initial,
+          ));
+    if (!mounted) return;
+    _readerShortcutsSuspended = false;
+    if (preferences != null) {
+      _steadyAutoScroll.updatePreferences(preferences);
+      await AppSettingsService.instance.saveMacAutoscrollPreferences(
+        preferences,
+      );
+    }
+    _readerFocusNode.requestFocus();
+  }
+
+  void _onMacAutoscrollChanged() {
+    if (!mounted) return;
+    final controller = _steadyAutoScroll;
+    if (controller.statusRevision == _lastMacAutoscrollStatusRevision) return;
+    _lastMacAutoscrollStatusRevision = controller.statusRevision;
+    unawaited(
+      AppSettingsService.instance.saveMacAutoscrollPreferences(
+        MacAutoscrollPreferences(
+          baseSpeed: controller.baseSpeed,
+          lastNonzeroStep: controller.lastNonzeroStep,
+          maximumStep: controller.maximumStep,
+          statusBannerMode: controller.statusBannerMode,
+        ),
+      ),
+    );
+  }
+
+  void _toggleSteadyAutoscroll() {
+    if (!_steadyAutoScroll.isActive) _tiltAutoScroll.stop(notify: false);
+    _steadyAutoScroll.toggle();
+    _readerFocusNode.requestFocus();
+  }
+
+  void _toggleTiltAutoscroll() {
+    if (_tiltAutoScroll.isActive) {
+      _tiltAutoScroll.stop();
+    } else {
+      _steadyAutoScroll.stopWithoutNotification();
+      _tiltAutoScroll.activate();
     }
   }
 
@@ -311,18 +408,31 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         notification.dragDetails != null;
     if (isManualStart || isManualUpdate) {
       _tiltAutoScroll.stopForManualInteraction();
+      _steadyAutoScroll.stopForManualInteraction();
+      _readerFocusNode.requestFocus();
     }
+    return false;
+  }
+
+  bool _handleReaderScrollMetricsNotification(
+    ScrollMetricsNotification notification,
+  ) {
+    _bodyScrollPosition = Scrollable.maybeOf(notification.context)?.position;
     return false;
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) _tiltAutoScroll.stop();
+    if (state != AppLifecycleState.resumed) {
+      _tiltAutoScroll.stop();
+      _steadyAutoScroll.stopWithoutNotification();
+    }
   }
 
   @override
   void deactivate() {
     _tiltAutoScroll.stop(notify: false);
+    _steadyAutoScroll.stopWithoutNotification();
     super.deactivate();
   }
 
@@ -370,6 +480,12 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
             );
       final devotionalMode =
           widget.item.isDevotional || isDevotionalNavigation(navigationItems);
+      if (widget.searchTarget == null && !widget.item.isPdf) {
+        debugPrint(
+          'default_open_resolution_started workId=${widget.item.id} '
+          'sourceEditionId=${widget.item.sourceWorkId ?? widget.item.id}',
+        );
+      }
       final navigationTree = widget.item.isPdf
           ? const LibraryNavigationTreeResult(
               items: <LibraryCatalogNavigationItem>[],
@@ -387,8 +503,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
               sections: sections,
               navigationItems: navigationItems,
               devotionalMode: devotionalMode,
-              initialHref: widget.initialHref,
-              initialSpineIndex: widget.initialSpineIndex,
+              initialHref: widget.searchTarget?.href ?? widget.initialHref,
+              initialSpineIndex:
+                  widget.searchTarget?.spineIndex ?? widget.initialSpineIndex,
             );
       var initialNavigationIndex = widget.item.isPdf
           ? 0
@@ -422,6 +539,74 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
           }
         }
       }
+      if (widget.searchTarget == null &&
+          !widget.item.isPdf &&
+          sections.isNotEmpty) {
+        final selected = sections[resolvedInitialIndex];
+        final savedLocationRequested =
+            widget.item.lastOpened != null &&
+            ((widget.item.epubHref ?? '').trim().isNotEmpty ||
+                widget.item.spineIndex != null);
+        final savedHref = (widget.item.epubHref ?? '').trim();
+        final savedLocationUsed =
+            savedLocationRequested &&
+            ((savedHref.isNotEmpty &&
+                    _hrefMatchesSection(selected.entryName, savedHref)) ||
+                (widget.item.spineIndex != null &&
+                    selected.spineIndex == widget.item.spineIndex));
+        if (savedLocationUsed) {
+          debugPrint(
+            'default_open_saved_position_used workId=${widget.item.id} '
+            'sourceEditionId=${widget.item.sourceWorkId ?? widget.item.id} '
+            'selectedSectionId=${selected.entryName} '
+            'selectedSectionTitle=${selected.title} '
+            'reason=valid_saved_position',
+          );
+        } else {
+          if (savedLocationRequested) {
+            debugPrint(
+              'default_open_saved_position_repaired workId=${widget.item.id} '
+              'sourceEditionId=${widget.item.sourceWorkId ?? widget.item.id} '
+              'selectedSectionId=${selected.entryName} '
+              'selectedSectionTitle=${selected.title} '
+              'reason=saved_section_missing_or_unreadable',
+            );
+          }
+          final skipped = sections
+              .take(resolvedInitialIndex)
+              .where(
+                (section) =>
+                    libraryIsFrontMatterOpeningLabel(section.title) ||
+                    libraryIsFrontMatterOpeningLabel(section.entryName),
+              )
+              .map((section) => '${section.entryName}:${section.title}')
+              .join('|');
+          if (skipped.isNotEmpty) {
+            debugPrint(
+              'default_open_front_matter_skipped workId=${widget.item.id} '
+              'sourceEditionId=${widget.item.sourceWorkId ?? widget.item.id} '
+              'selectedSectionId=${selected.entryName} '
+              'selectedSectionTitle=${selected.title} '
+              'skippedSectionIds=$skipped '
+              'reason=first_substantive_section',
+            );
+          }
+          debugPrint(
+            resolvedInitialIndex == 0
+                ? 'default_open_fallback_used workId=${widget.item.id} '
+                      'sourceEditionId=${widget.item.sourceWorkId ?? widget.item.id} '
+                      'selectedSectionId=${selected.entryName} '
+                      'selectedSectionTitle=${selected.title} '
+                      'reason=no_later_substantive_section'
+                : 'default_open_substantive_section_selected '
+                      'workId=${widget.item.id} '
+                      'sourceEditionId=${widget.item.sourceWorkId ?? widget.item.id} '
+                      'selectedSectionId=${selected.entryName} '
+                      'selectedSectionTitle=${selected.title} '
+                      'reason=first_substantive_section',
+          );
+        }
+      }
       // Periodicals generate ref codes inline (libraryReaderPeriodicalRefCode)
       // and books load codes in the background after first paint; skipping
       // the DB scan here avoids ~1,900 serial async queries on RH open.
@@ -448,6 +633,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         _elibraryMarkupsByHref = elibraryMarkupsByHref;
         _loading = false;
       });
+      if (widget.searchTarget != null && sections.isNotEmpty) {
+        debugPrint(
+          'search_target_section_loaded '
+          '${widget.searchTarget!.diagnosticSummary} '
+          'resolvedSection=${sections[resolvedInitialIndex].entryName}',
+        );
+      }
       _initializeContinuousWindow();
       _publishLiveSectionLocation(_chapterGeneration);
       final targetKey = _initialScrollTargetKey();
@@ -455,6 +647,15 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         if (!mounted) return;
         _scrollToTarget(targetKey);
       });
+      if (widget.searchTarget != null && targetKey != null) {
+        // The continuous section list can publish its first visible item
+        // immediately after the first frame. Re-assert the explicit search
+        // target once after that bounded initialization settles.
+        Future<void>.delayed(const Duration(milliseconds: 450), () {
+          if (!mounted) return;
+          _scrollToTarget(targetKey, attempt: 4);
+        });
+      }
       unawaited(
         LibraryReaderStateWriter.instance.stampLastOpened(widget.item.id),
       );
@@ -509,10 +710,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       MaterialPageRoute<void>(
         builder: (_) => LibraryBookReaderScreen(
           item: nextResult.item,
-          initialHref: nextResult.item.epubHref,
-          initialAnchorId: nextResult.item.anchorId,
-          initialSpineIndex: nextResult.item.spineIndex,
-          initialParagraphIndex: nextResult.item.paragraphIndex,
+          searchTarget: nextResult.targetForQuery(nextSession.query),
           searchQuery: nextSession.query,
           highlightTerms: extractLibrarySearchHighlightTerms(nextSession.query),
           searchSession: nextSession,
@@ -1558,6 +1756,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   }
 
   Future<void> _saveCurrentLocation() async {
+    if (widget.searchTarget != null && !_searchTargetPositioned) return;
     final locationIndex = _stableLiveSectionIndex ?? _selectedIndex;
     if (_sections.isEmpty ||
         locationIndex < 0 ||
@@ -1567,13 +1766,22 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
 
     final currentSection = _sections[locationIndex];
     final currentNavigationItem = _navigationItemForSectionIndex(locationIndex);
-    final savedHref = currentNavigationItem?.href?.trim();
-    final savedAnchorId = currentNavigationItem?.parentId != null
+    final visibleBlock = _visibleBlockForSection(locationIndex);
+    final savedHref = visibleBlock != null
+        ? currentSection.entryName
+        : currentNavigationItem?.href?.trim();
+    final visibleAnchorId = visibleBlock?.anchorId?.trim();
+    final savedAnchorId = visibleBlock != null
+        ? (visibleAnchorId?.isNotEmpty == true ? visibleAnchorId : null)
+        : currentNavigationItem?.parentId != null
         ? currentNavigationItem?.anchorId?.trim()
         : null;
-    final savedParagraphIndex = currentNavigationItem?.parentId != null
-        ? currentNavigationItem?.bodyOrder
-        : null;
+    final savedParagraphIndex =
+        visibleBlock?.bodyOrder ??
+        _paragraphOrdinalForBlock(currentSection, visibleBlock) ??
+        (currentNavigationItem?.parentId != null
+            ? currentNavigationItem?.bodyOrder
+            : null);
     await LibraryReaderStateWriter.instance.saveCurrentLocation(
       libraryItemId: widget.item.id,
       currentSectionEntryName: currentSection.entryName,
@@ -1582,6 +1790,42 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       savedAnchorId: savedAnchorId,
       savedParagraphIndex: savedParagraphIndex,
     );
+  }
+
+  int? _paragraphOrdinalForBlock(
+    LibraryBookSection section,
+    LibraryBookBlock? target,
+  ) {
+    if (target == null || target.kind != 'paragraph') return null;
+    var paragraphOrdinal = 0;
+    for (final block in section.blocks) {
+      if (block.kind == 'paragraph') paragraphOrdinal += 1;
+      if (identical(block, target)) return paragraphOrdinal;
+    }
+    return null;
+  }
+
+  LibraryBookBlock? _visibleBlockForSection(int sectionIndex) {
+    final section = _contentSectionForIndex(sectionIndex);
+    final viewport = _continuousScrollViewKey.currentContext
+        ?.findRenderObject();
+    if (section == null || viewport is! RenderBox || !viewport.attached) {
+      return null;
+    }
+    final probeY = viewport.localToGlobal(Offset.zero).dy + 24;
+    LibraryBookBlock? firstBelowProbe;
+    for (var index = 0; index < section.blocks.length; index++) {
+      final block = section.blocks[index];
+      final targetKey = _blockTargetKey(block, index);
+      final blockBox = _bodyBlockKeys[targetKey]?.currentContext
+          ?.findRenderObject();
+      if (blockBox is! RenderBox || !blockBox.attached) continue;
+      final top = blockBox.localToGlobal(Offset.zero).dy;
+      final bottom = top + blockBox.size.height;
+      if (top <= probeY && bottom > probeY) return block;
+      if (top > probeY && firstBelowProbe == null) firstBelowProbe = block;
+    }
+    return firstBelowProbe;
   }
 
   void _selectSection(int index) {
@@ -1789,9 +2033,16 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       return;
     }
     final visibleIndex = _readableSectionIndices[visiblePosition.index];
-    if (_stableLiveSectionIndex == visibleIndex) return;
+    final sectionChanged = _stableLiveSectionIndex != visibleIndex;
     _stableLiveSectionIndex = visibleIndex;
-    _publishLiveSectionLocationForIndex(visibleIndex, ++_chapterGeneration);
+    _publishLiveSectionLocationForIndex(
+      visibleIndex,
+      ++_liveSectionGeneration,
+      includeVisibleHeading: true,
+    );
+    if (sectionChanged) {
+      _selectedHeadingTargetIndex = null;
+    }
   }
 
   LibraryCatalogNavigationItem? get _selectedNavigationItem {
@@ -1822,13 +2073,27 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     );
   }
 
-  void _publishLiveSectionLocationForIndex(int index, int generation) {
+  void _publishLiveSectionLocationForIndex(
+    int index,
+    int generation, {
+    bool includeVisibleHeading = false,
+  }) {
     if (index < 0 || index >= _sections.length) return;
     final currentSection = _sections[index];
     final labels = libraryReaderLiveSectionHeadingLabels(
       composedSections: _composedHeadingSectionsForIndex(index),
       bookTitle: widget.item.displayTitle,
-    );
+    ).toList(growable: true);
+    if (includeVisibleHeading) {
+      final visibleHeading = _visibleHeadingForSection(index);
+      if (visibleHeading != null &&
+          visibleHeading.isNotEmpty &&
+          (labels.isEmpty ||
+              _normalizeReaderLabel(labels.last) !=
+                  _normalizeReaderLabel(visibleHeading))) {
+        labels.add(visibleHeading);
+      }
+    }
     if (labels.isEmpty) return;
     _liveSection.update(
       LibraryLiveSectionLocation(
@@ -1838,6 +2103,43 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         generation: generation,
       ),
     );
+  }
+
+  String? _visibleHeadingForSection(int sectionIndex) {
+    final section = _contentSectionForIndex(sectionIndex);
+    final viewport = _continuousScrollViewKey.currentContext
+        ?.findRenderObject();
+    if (section == null ||
+        viewport is! RenderBox ||
+        !viewport.attached ||
+        section.blocks.isEmpty) {
+      return null;
+    }
+
+    final probeY = viewport.localToGlobal(Offset.zero).dy + 40;
+    String? nearestHeading;
+    for (var blockIndex = 0; blockIndex < section.blocks.length; blockIndex++) {
+      final block = section.blocks[blockIndex];
+      if (!_isReaderStructuralHeading(block)) continue;
+      final key = _blockTargetKey(block, blockIndex);
+      final renderObject = _bodyBlockKeys[key]?.currentContext
+          ?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.attached) continue;
+      final top = renderObject.localToGlobal(Offset.zero).dy;
+      if (top > probeY) break;
+      final label = libraryReaderDisplaySectionTitle(block.text);
+      if (label.isNotEmpty) nearestHeading = label;
+    }
+    return nearestHeading;
+  }
+
+  bool _isReaderStructuralHeading(LibraryBookBlock block) {
+    if (block.isHeading) return true;
+    final text = block.text.trim();
+    return RegExp(
+      r'^(?:chapter\s+\d+\b|introduction\b|preface\b|appendix\b|response\s+of\s+history\b)',
+      caseSensitive: false,
+    ).hasMatch(text);
   }
 
   bool get _isDevotionalNavigationBook {
@@ -2306,7 +2608,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     _publishLiveSectionLocation(generation);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && generation == _chapterGeneration) {
-        if (shouldJumpToSectionStart && effectiveSectionIndex != null) {
+        if ((shouldJumpToSectionStart || targetKey == null) &&
+            effectiveSectionIndex != null) {
           _selectSection(effectiveSectionIndex);
           return;
         }
@@ -2507,7 +2810,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   }
 
   bool get _hasExplicitInitialSourceLocation {
-    return (widget.initialHref?.trim().isNotEmpty ?? false) ||
+    return widget.searchTarget != null ||
+        (widget.initialHref?.trim().isNotEmpty ?? false) ||
         (widget.initialAnchorId?.trim().isNotEmpty ?? false) ||
         (widget.initialSpineIndex != null && widget.initialSpineIndex! > 0) ||
         (widget.initialParagraphIndex != null &&
@@ -2515,10 +2819,15 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   }
 
   String? _explicitInitialScrollTargetKey() {
-    final currentSection = _currentSection;
+    // Structural TOC entries may be heading-only shells whose readable
+    // descendant is what the continuous reader actually renders.
+    final currentSection =
+        _contentSectionForIndex(_selectedIndex) ?? _currentSection;
     if (currentSection == null || currentSection.blocks.isEmpty) return null;
 
-    final initialHrefParts = _splitReaderHref(widget.initialHref);
+    final initialHrefParts = _splitReaderHref(
+      widget.searchTarget?.href ?? widget.initialHref,
+    );
     final initialAnchorId =
         widget.initialAnchorId?.trim() ?? initialHrefParts.anchor ?? '';
     if (initialAnchorId.isNotEmpty) {
@@ -2530,7 +2839,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       }
     }
 
-    final initialParagraphIndex = widget.initialParagraphIndex;
+    final initialParagraphIndex =
+        widget.searchTarget?.paragraphOnSection ?? widget.initialParagraphIndex;
     if (initialParagraphIndex != null && initialParagraphIndex > 0) {
       var paragraphCounter = 0;
       for (var index = 0; index < currentSection.blocks.length; index++) {
@@ -2538,12 +2848,45 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         if (block.kind != 'paragraph') continue;
         paragraphCounter += 1;
         if (paragraphCounter == initialParagraphIndex) {
+          final matchedText = widget.searchTarget?.matchedText?.trim() ?? '';
+          if (matchedText.isEmpty ||
+              _searchTargetTextMatches(block.text, matchedText)) {
+            return _blockTargetKey(block, index);
+          }
+          break;
+        }
+      }
+    }
+
+    // Legacy indexes and EPUB renderers do not universally agree on whether
+    // headings and zero-based ordinals participate in paragraph numbering.
+    // The indexed paragraph snapshot is retained on the typed target, so use
+    // it as a deterministic fallback inside the already-resolved section.
+    final matchedText = widget.searchTarget?.matchedText?.trim() ?? '';
+    if (matchedText.isNotEmpty) {
+      final normalizedMatch = _normalizedSearchTargetText(matchedText);
+      for (var index = 0; index < currentSection.blocks.length; index++) {
+        final block = currentSection.blocks[index];
+        if (block.kind != 'paragraph') continue;
+        final normalizedBlock = _normalizedSearchTargetText(block.text);
+        if (_searchTargetTextMatches(normalizedBlock, normalizedMatch)) {
           return _blockTargetKey(block, index);
         }
       }
     }
 
     return null;
+  }
+
+  String _normalizedSearchTargetText(String value) =>
+      value.replaceAll(RegExp(r'\s+'), ' ').trim().toLowerCase();
+
+  bool _searchTargetTextMatches(String left, String right) {
+    final normalizedLeft = _normalizedSearchTargetText(left);
+    final normalizedRight = _normalizedSearchTargetText(right);
+    return normalizedLeft == normalizedRight ||
+        normalizedLeft.contains(normalizedRight) ||
+        normalizedRight.contains(normalizedLeft);
   }
 
   String? _savedLocationTargetKey() {
@@ -2619,13 +2962,38 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         : _bodyBlockKeys[resolvedTargetKey]?.currentContext;
     if (targetContext != null) {
       _selectedHeadingTargetIndex = null;
-      Scrollable.ensureVisible(
-        targetContext,
-        alignment: 0.08,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeInOut,
-      );
+      final target = widget.searchTarget;
+      if (target != null) {
+        debugPrint('search_target_widget_found ${target.diagnosticSummary}');
+      }
+      final targetOffset = _scrollOffsetForContext(targetContext);
+      final scroll = targetOffset == null
+          ? Scrollable.ensureVisible(
+              targetContext,
+              alignment: 0.08,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeInOut,
+            )
+          : position.animateTo(
+              (targetOffset - position.viewportDimension * 0.08).clamp(
+                position.minScrollExtent,
+                position.maxScrollExtent,
+              ),
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeInOut,
+            );
       _pendingBodyScrollTargetKey = null;
+      unawaited(
+        scroll.then((_) {
+          if (!mounted) return;
+          _searchTargetPositioned = true;
+          if (target != null) {
+            debugPrint(
+              'search_target_scroll_completed ${target.diagnosticSummary}',
+            );
+          }
+        }),
+      );
       return;
     }
 
@@ -2643,6 +3011,19 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
 
     _pendingBodyScrollTargetKey = null;
     _selectedHeadingTargetIndex = null;
+    final searchTarget = widget.searchTarget;
+    if (searchTarget != null) {
+      debugPrint(
+        'search_target_resolution_failed ${searchTarget.diagnosticSummary} '
+        'reason=legacy target widget not mounted after bounded retries',
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('The exact search location could not be positioned.'),
+        ),
+      );
+      return;
+    }
     position.animateTo(
       0,
       duration: const Duration(milliseconds: 220),
@@ -3430,7 +3811,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       final block = blocks[index];
       final isParagraph = block.kind == 'paragraph';
       if (isParagraph) paragraphIndex += 1;
-      final referenceCode = isParagraph
+      final referenceCode = isParagraph && !_isReaderStructuralHeading(block)
           ? (item.isDevotional
                 ? libraryReaderDevotionalFallbackRefCodeForBlock(
                     item: item,
@@ -3568,9 +3949,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
 
   @override
   Widget build(BuildContext context) {
-    if (widget.enableCanonicalReader) {
+    if (shouldAttemptCanonicalDocumentReader(
+      item: widget.item,
+      routingEnabled: widget.enableCanonicalReader,
+    )) {
       return CanonicalLibraryReaderGate(
         item: widget.item,
+        searchTarget: widget.searchTarget,
         themeMode: widget.themeMode,
         onThemeChanged: widget.onThemeChanged,
         onBack: _backToBible,
@@ -3596,6 +3981,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
           initialAnchorId: widget.initialAnchorId,
           initialSpineIndex: widget.initialSpineIndex,
           initialParagraphIndex: widget.initialParagraphIndex,
+          searchTarget: widget.searchTarget,
           searchQuery: widget.searchQuery,
           highlightTerms: widget.highlightTerms,
           searchSession: widget.searchSession,
@@ -3621,391 +4007,416 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         (theme.textTheme.headlineSmall?.fontSize ?? 24) *
         _fontScale *
         _zoomScale;
-    return LibraryFontScaleScope(
+    final scaffold = LibraryFontScaleScope(
       scale: _fontScale,
       child: Scaffold(
         backgroundColor: background,
-        body: PopScope(
-          canPop: true,
-          onPopInvokedWithResult: (didPop, _) {
-            if (didPop) {
-              _saveCurrentLocation();
-            }
-          },
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (MediaQuery.sizeOf(context).width < 900) ...[
-                    Row(
-                      children: [
-                        FilledButton.tonalIcon(
-                          onPressed: _backToBible,
-                          icon: const Icon(Icons.arrow_back),
-                          label: Text(
-                            'Back to Bible',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: libraryControlTextStyle(
-                              context,
-                              theme.textTheme.labelLarge,
-                              fontWeight: FontWeight.w800,
-                              color: textColor,
-                            ),
-                          ),
-                          style: FilledButton.styleFrom(
-                            foregroundColor: textColor,
-                            backgroundColor: cardBackground,
-                            side: BorderSide(color: cardBorder),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'eLibrary',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: libraryScaledTextStyle(
-                              theme.textTheme.headlineMedium,
-                              libraryTitleScale(_fontScale),
-                              fontWeight: FontWeight.w800,
-                              color: textColor,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        FilledButton.tonalIcon(
-                          onPressed: _openSearch,
-                          icon: const Icon(Icons.search),
-                          label: Text(
-                            'Search',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: libraryControlTextStyle(
-                              context,
-                              theme.textTheme.labelLarge,
-                              fontWeight: FontWeight.w800,
-                              color: textColor,
-                            ),
-                          ),
-                          style: FilledButton.styleFrom(
-                            foregroundColor: textColor,
-                            backgroundColor: cardBackground,
-                            side: BorderSide(color: cardBorder),
-                          ),
-                        ),
-                        if (_hasSearchSession)
-                          _SearchHitNavigator(
-                            label: widget.searchSession!.counterLabel,
-                            canGoPrevious: widget.searchSession!.hasPrevious,
-                            canGoNext: widget.searchSession!.hasNext,
-                            onPrevious: () => _navigateSearchHit(-1),
-                            onNext: () => _navigateSearchHit(1),
-                            textColor: textColor,
-                            backgroundColor: cardBackground,
-                            borderColor: cardBorder,
-                          ),
-                        FilledButton.tonalIcon(
-                          onPressed: _closeToLibrary,
-                          icon: const Icon(Icons.library_books_outlined),
-                          label: Text(
-                            'Library',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: libraryControlTextStyle(
-                              context,
-                              theme.textTheme.labelLarge,
-                              fontWeight: FontWeight.w800,
-                              color: textColor,
-                            ),
-                          ),
-                          style: FilledButton.styleFrom(
-                            foregroundColor: textColor,
-                            backgroundColor: cardBackground,
-                            side: BorderSide(color: cardBorder),
-                          ),
-                        ),
-                        _buildReaderActionsMenu(
-                          theme: theme,
-                          textColor: textColor,
-                          cardBackground: cardBackground,
-                          cardBorder: cardBorder,
-                        ),
-                      ],
-                    ),
-                  ] else ...[
-                    Row(
-                      children: [
-                        FilledButton.tonalIcon(
-                          onPressed: _backToBible,
-                          icon: const Icon(Icons.arrow_back),
-                          label: Text(
-                            'Back to Bible',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: libraryControlTextStyle(
-                              context,
-                              theme.textTheme.labelLarge,
-                              fontWeight: FontWeight.w800,
-                              color: textColor,
-                            ),
-                          ),
-                          style: FilledButton.styleFrom(
-                            foregroundColor: textColor,
-                            backgroundColor: cardBackground,
-                            side: BorderSide(color: cardBorder),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'eLibrary',
-                          style: libraryScaledTextStyle(
-                            theme.textTheme.headlineMedium,
-                            libraryTitleScale(_fontScale),
-                            fontWeight: FontWeight.w800,
-                            color: textColor,
-                          ),
-                        ),
-                        const Spacer(),
-                        FilledButton.tonalIcon(
-                          onPressed: _openSearch,
-                          icon: const Icon(Icons.search),
-                          label: Text(
-                            'Search',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: libraryControlTextStyle(
-                              context,
-                              theme.textTheme.labelLarge,
-                              fontWeight: FontWeight.w800,
-                              color: textColor,
-                            ),
-                          ),
-                          style: FilledButton.styleFrom(
-                            foregroundColor: textColor,
-                            backgroundColor: cardBackground,
-                            side: BorderSide(color: cardBorder),
-                          ),
-                        ),
-                        if (_hasSearchSession) ...[
-                          const SizedBox(width: 10),
-                          _SearchHitNavigator(
-                            label: widget.searchSession!.counterLabel,
-                            canGoPrevious: widget.searchSession!.hasPrevious,
-                            canGoNext: widget.searchSession!.hasNext,
-                            onPrevious: () => _navigateSearchHit(-1),
-                            onNext: () => _navigateSearchHit(1),
-                            textColor: textColor,
-                            backgroundColor: cardBackground,
-                            borderColor: cardBorder,
-                          ),
-                        ],
-                        const SizedBox(width: 12),
-                        FilledButton.tonalIcon(
-                          onPressed: _closeToLibrary,
-                          icon: const Icon(Icons.library_books_outlined),
-                          label: Text(
-                            'Library',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: libraryControlTextStyle(
-                              context,
-                              theme.textTheme.labelLarge,
-                              fontWeight: FontWeight.w800,
-                              color: textColor,
-                            ),
-                          ),
-                          style: FilledButton.styleFrom(
-                            foregroundColor: textColor,
-                            backgroundColor: cardBackground,
-                            side: BorderSide(color: cardBorder),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        _buildReaderActionsMenu(
-                          theme: theme,
-                          textColor: textColor,
-                          cardBackground: cardBackground,
-                          cardBorder: cardBorder,
-                        ),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  Material(
-                    color: summaryBackground,
-                    borderRadius: BorderRadius.circular(18),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            item.displayTitle,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: libraryTitleTextStyle(
-                              context,
-                              theme.textTheme.titleLarge,
-                              fontWeight: FontWeight.w800,
-                              color: textColor,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          SizedBox(
-                            height: libraryStableLiveIndicatorHeight(
-                              _fontScale,
-                            ),
-                            child:
-                                ValueListenableBuilder<
-                                  LibraryLiveSectionLocation?
-                                >(
-                                  valueListenable: _liveSection,
-                                  builder: (context, location, child) {
-                                    final label = location?.displayLabel.trim();
-                                    return Text(
-                                      label == null || label.isEmpty
-                                          ? _currentSubtitle
-                                          : label,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: libraryBodyTextStyle(
-                                        context,
-                                        theme.textTheme.bodyMedium,
-                                        color: subduedColor,
-                                      ),
-                                    );
-                                  },
+        body: Stack(
+          children: [
+            PopScope(
+              canPop: true,
+              onPopInvokedWithResult: (didPop, _) {
+                if (didPop) {
+                  _saveCurrentLocation();
+                }
+              },
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (MediaQuery.sizeOf(context).width < 900) ...[
+                        Row(
+                          children: [
+                            FilledButton.tonalIcon(
+                              onPressed: _backToBible,
+                              icon: const Icon(Icons.arrow_back),
+                              label: Text(
+                                'Back to Bible',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: libraryControlTextStyle(
+                                  context,
+                                  theme.textTheme.labelLarge,
+                                  fontWeight: FontWeight.w800,
+                                  color: textColor,
                                 ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  ReaderTiltAutoScrollActiveIndicator(
-                    controller: _tiltAutoScroll,
-                  ),
-                  Expanded(
-                    child: Material(
-                      color: cardBackground,
-                      borderRadius: BorderRadius.circular(26),
-                      borderOnForeground: true,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(26),
-                          border: Border.all(color: cardBorder),
+                              ),
+                              style: FilledButton.styleFrom(
+                                foregroundColor: textColor,
+                                backgroundColor: cardBackground,
+                                side: BorderSide(color: cardBorder),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'eLibrary',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: libraryScaledTextStyle(
+                                  theme.textTheme.headlineMedium?.copyWith(
+                                    fontFamily: 'Roboto',
+                                  ),
+                                  libraryTitleScale(_fontScale),
+                                  fontWeight: FontWeight.w800,
+                                  color: textColor,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            FilledButton.tonalIcon(
+                              onPressed: _openSearch,
+                              icon: const Icon(Icons.search),
+                              label: Text(
+                                'Search',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: libraryControlTextStyle(
+                                  context,
+                                  theme.textTheme.labelLarge,
+                                  fontWeight: FontWeight.w800,
+                                  color: textColor,
+                                ),
+                              ),
+                              style: FilledButton.styleFrom(
+                                foregroundColor: textColor,
+                                backgroundColor: cardBackground,
+                                side: BorderSide(color: cardBorder),
+                              ),
+                            ),
+                            if (_hasSearchSession)
+                              _SearchHitNavigator(
+                                label: widget.searchSession!.counterLabel,
+                                canGoPrevious:
+                                    widget.searchSession!.hasPrevious,
+                                canGoNext: widget.searchSession!.hasNext,
+                                onPrevious: () => _navigateSearchHit(-1),
+                                onNext: () => _navigateSearchHit(1),
+                                textColor: textColor,
+                                backgroundColor: cardBackground,
+                                borderColor: cardBorder,
+                              ),
+                            FilledButton.tonalIcon(
+                              onPressed: _closeToLibrary,
+                              icon: const Icon(Icons.library_books_outlined),
+                              label: Text(
+                                'Library',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: libraryControlTextStyle(
+                                  context,
+                                  theme.textTheme.labelLarge,
+                                  fontWeight: FontWeight.w800,
+                                  color: textColor,
+                                ),
+                              ),
+                              style: FilledButton.styleFrom(
+                                foregroundColor: textColor,
+                                backgroundColor: cardBackground,
+                                side: BorderSide(color: cardBorder),
+                              ),
+                            ),
+                            _buildReaderActionsMenu(
+                              theme: theme,
+                              textColor: textColor,
+                              cardBackground: cardBackground,
+                              cardBorder: cardBorder,
+                            ),
+                          ],
+                        ),
+                      ] else ...[
+                        Row(
+                          children: [
+                            FilledButton.tonalIcon(
+                              onPressed: _backToBible,
+                              icon: const Icon(Icons.arrow_back),
+                              label: Text(
+                                'Back to Bible',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: libraryControlTextStyle(
+                                  context,
+                                  theme.textTheme.labelLarge,
+                                  fontWeight: FontWeight.w800,
+                                  color: textColor,
+                                ),
+                              ),
+                              style: FilledButton.styleFrom(
+                                foregroundColor: textColor,
+                                backgroundColor: cardBackground,
+                                side: BorderSide(color: cardBorder),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              'eLibrary',
+                              style: libraryScaledTextStyle(
+                                theme.textTheme.headlineMedium?.copyWith(
+                                  fontFamily: 'Roboto',
+                                ),
+                                libraryTitleScale(_fontScale),
+                                fontWeight: FontWeight.w800,
+                                color: textColor,
+                              ),
+                            ),
+                            const Spacer(),
+                            FilledButton.tonalIcon(
+                              onPressed: _openSearch,
+                              icon: const Icon(Icons.search),
+                              label: Text(
+                                'Search',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: libraryControlTextStyle(
+                                  context,
+                                  theme.textTheme.labelLarge,
+                                  fontWeight: FontWeight.w800,
+                                  color: textColor,
+                                ),
+                              ),
+                              style: FilledButton.styleFrom(
+                                foregroundColor: textColor,
+                                backgroundColor: cardBackground,
+                                side: BorderSide(color: cardBorder),
+                              ),
+                            ),
+                            if (_hasSearchSession) ...[
+                              const SizedBox(width: 10),
+                              _SearchHitNavigator(
+                                label: widget.searchSession!.counterLabel,
+                                canGoPrevious:
+                                    widget.searchSession!.hasPrevious,
+                                canGoNext: widget.searchSession!.hasNext,
+                                onPrevious: () => _navigateSearchHit(-1),
+                                onNext: () => _navigateSearchHit(1),
+                                textColor: textColor,
+                                backgroundColor: cardBackground,
+                                borderColor: cardBorder,
+                              ),
+                            ],
+                            const SizedBox(width: 12),
+                            FilledButton.tonalIcon(
+                              onPressed: _closeToLibrary,
+                              icon: const Icon(Icons.library_books_outlined),
+                              label: Text(
+                                'Library',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: libraryControlTextStyle(
+                                  context,
+                                  theme.textTheme.labelLarge,
+                                  fontWeight: FontWeight.w800,
+                                  color: textColor,
+                                ),
+                              ),
+                              style: FilledButton.styleFrom(
+                                foregroundColor: textColor,
+                                backgroundColor: cardBackground,
+                                side: BorderSide(color: cardBorder),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            _buildReaderActionsMenu(
+                              theme: theme,
+                              textColor: textColor,
+                              cardBackground: cardBackground,
+                              cardBorder: cardBorder,
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      Material(
+                        color: summaryBackground,
+                        borderRadius: BorderRadius.circular(18),
                         child: Padding(
-                          padding: const EdgeInsets.all(18),
-                          child: _loading
-                              ? const Center(child: CircularProgressIndicator())
-                              : _error != null
-                              ? Center(
-                                  child: Text(
-                                    _error!,
-                                    textAlign: TextAlign.center,
-                                    style: libraryBodyTextStyle(
-                                      context,
-                                      theme.textTheme.bodyLarge,
-                                      color: textColor,
-                                    ),
-                                  ),
-                                )
-                              : _sections.isEmpty
-                              ? Center(
-                                  child: Text(
-                                    item.isPdf
-                                        ? 'PDF reading is not wired yet.'
-                                        : 'This book does not expose readable sections yet.',
-                                    textAlign: TextAlign.center,
-                                    style: libraryBodyTextStyle(
-                                      context,
-                                      theme.textTheme.bodyLarge,
-                                      color: textColor,
-                                    ),
-                                  ),
-                                )
-                              : GestureDetector(
-                                  behavior: HitTestBehavior.translucent,
-                                  onTap: () {
-                                    if (_tiltAutoScroll.isActive) {
-                                      _tiltAutoScroll.showStatusBanner();
-                                    }
-                                    if (_rangeSelection.hasCompletedRange) {
-                                      _clearLibraryRangeSelection();
-                                    }
-                                  },
-                                  child: NotificationListener<ScrollNotification>(
-                                    onNotification: (notification) {
-                                      final notificationContext =
-                                          notification.context;
-                                      if (notificationContext != null) {
-                                        _bodyScrollPosition =
-                                            Scrollable.maybeOf(
-                                              notificationContext,
-                                            )?.position;
-                                      }
-                                      return _handleReaderScrollNotification(
-                                        notification,
-                                      );
-                                    },
-                                    child: ScrollablePositionedList.builder(
-                                      key: _continuousScrollViewKey,
-                                      itemCount: _readableSectionIndices.length,
-                                      initialScrollIndex:
-                                          _readableSectionIndices
-                                              .indexOf(_selectedIndex)
-                                              .clamp(
-                                                0,
-                                                _readableSectionIndices.length -
-                                                    1,
-                                              ),
-                                      itemScrollController:
-                                          _itemScrollController,
-                                      itemPositionsListener:
-                                          _itemPositionsListener,
-                                      itemBuilder: (context, itemIndex) {
-                                        _bodyScrollPosition ??=
-                                            Scrollable.maybeOf(
-                                              context,
-                                            )?.position;
-                                        final sectionIndex =
-                                            _readableSectionIndices[itemIndex];
-                                        return _buildContinuousSectionUnit(
-                                          context: context,
-                                          sectionIndex: sectionIndex,
-                                          textColor: textColor,
-                                          subduedColor: subduedColor,
-                                          cardBackground: cardBackground,
-                                          isNight: isNight,
-                                          bodyFontSize: bodyFontSize,
-                                          titleFontSize: titleFontSize,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.displayTitle,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: libraryTitleTextStyle(
+                                  context,
+                                  theme.textTheme.titleLarge,
+                                  fontWeight: FontWeight.w800,
+                                  color: textColor,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              SizedBox(
+                                height: libraryStableLiveIndicatorHeight(
+                                  _fontScale,
+                                ),
+                                child:
+                                    ValueListenableBuilder<
+                                      LibraryLiveSectionLocation?
+                                    >(
+                                      valueListenable: _liveSection,
+                                      builder: (context, location, child) {
+                                        final label = location?.displayLabel
+                                            .trim();
+                                        return Text(
+                                          label == null || label.isEmpty
+                                              ? _currentSubtitle
+                                              : label,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: libraryBodyTextStyle(
+                                            context,
+                                            theme.textTheme.bodyMedium,
+                                            color: subduedColor,
+                                          ),
                                         );
                                       },
                                     ),
-                                  ),
-                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
+                      const SizedBox(height: 12),
+                      ReaderTiltAutoScrollActiveIndicator(
+                        controller: _tiltAutoScroll,
+                      ),
+                      Expanded(
+                        child: Material(
+                          color: cardBackground,
+                          borderRadius: BorderRadius.circular(26),
+                          borderOnForeground: true,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(26),
+                              border: Border.all(color: cardBorder),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(18),
+                              child: _loading
+                                  ? const Center(
+                                      child: CircularProgressIndicator(),
+                                    )
+                                  : _error != null
+                                  ? Center(
+                                      child: Text(
+                                        _error!,
+                                        textAlign: TextAlign.center,
+                                        style: libraryBodyTextStyle(
+                                          context,
+                                          theme.textTheme.bodyLarge,
+                                          color: textColor,
+                                        ),
+                                      ),
+                                    )
+                                  : _sections.isEmpty
+                                  ? Center(
+                                      child: Text(
+                                        item.isPdf
+                                            ? 'PDF reading is not wired yet.'
+                                            : 'This book does not expose readable sections yet.',
+                                        textAlign: TextAlign.center,
+                                        style: libraryBodyTextStyle(
+                                          context,
+                                          theme.textTheme.bodyLarge,
+                                          color: textColor,
+                                        ),
+                                      ),
+                                    )
+                                  : GestureDetector(
+                                      behavior: HitTestBehavior.translucent,
+                                      onTap: () {
+                                        _readerFocusNode.requestFocus();
+                                        if (_tiltAutoScroll.isActive) {
+                                          _tiltAutoScroll.showStatusBanner();
+                                        }
+                                        if (_rangeSelection.hasCompletedRange) {
+                                          _clearLibraryRangeSelection();
+                                        }
+                                      },
+                                      child: NotificationListener<ScrollMetricsNotification>(
+                                        onNotification:
+                                            _handleReaderScrollMetricsNotification,
+                                        child: NotificationListener<ScrollNotification>(
+                                          onNotification: (notification) {
+                                            final notificationContext =
+                                                notification.context;
+                                            if (notificationContext != null) {
+                                              _bodyScrollPosition =
+                                                  Scrollable.maybeOf(
+                                                    notificationContext,
+                                                  )?.position;
+                                            }
+                                            return _handleReaderScrollNotification(
+                                              notification,
+                                            );
+                                          },
+                                          child: ScrollablePositionedList.builder(
+                                            key: _continuousScrollViewKey,
+                                            itemCount:
+                                                _readableSectionIndices.length,
+                                            initialScrollIndex:
+                                                _readableSectionIndices
+                                                    .indexOf(_selectedIndex)
+                                                    .clamp(
+                                                      0,
+                                                      _readableSectionIndices
+                                                              .length -
+                                                          1,
+                                                    ),
+                                            itemScrollController:
+                                                _itemScrollController,
+                                            itemPositionsListener:
+                                                _itemPositionsListener,
+                                            itemBuilder: (context, itemIndex) {
+                                              _bodyScrollPosition ??=
+                                                  Scrollable.maybeOf(
+                                                    context,
+                                                  )?.position;
+                                              final sectionIndex =
+                                                  _readableSectionIndices[itemIndex];
+                                              return _buildContinuousSectionUnit(
+                                                context: context,
+                                                sectionIndex: sectionIndex,
+                                                textColor: textColor,
+                                                subduedColor: subduedColor,
+                                                cardBackground: cardBackground,
+                                                isNight: isNight,
+                                                bodyFontSize: bodyFontSize,
+                                                titleFontSize: titleFontSize,
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
-          ),
+            MacReaderAutoscrollStatusOverlay(
+              controller: _steadyAutoScroll,
+              foregroundColor: textColor,
+              backgroundColor: background,
+            ),
+          ],
         ),
         bottomNavigationBar: LayoutBuilder(
           builder: (context, _) => SafeArea(
@@ -4039,6 +4450,31 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                             : _openContentsPopup,
                       ),
                       const SizedBox(width: 12),
+                      if (libraryReaderUsesSteadyAutoscroll(
+                        defaultTargetPlatform,
+                      )) ...[
+                        if (defaultTargetPlatform == TargetPlatform.macOS)
+                          MacReaderAutoScrollButton(
+                            controller: _steadyAutoScroll,
+                            enabled: libraryReaderSteadyAutoscrollEnabled(
+                              item: item,
+                              hasReadableSections: _sections.isNotEmpty,
+                            ),
+                            onPressed: _toggleSteadyAutoscroll,
+                            onLongPress: _openSteadyAutoscrollSettings,
+                          )
+                        else
+                          ReaderAutoScrollButton(
+                            controller: _steadyAutoScroll,
+                            enabled: libraryReaderSteadyAutoscrollEnabled(
+                              item: item,
+                              hasReadableSections: _sections.isNotEmpty,
+                            ),
+                            onPressed: _toggleSteadyAutoscroll,
+                            onLongPress: _openSteadyAutoscrollSettings,
+                          ),
+                        const SizedBox(width: 12),
+                      ],
                       _ToolbarPillButton(
                         isNightMode: isNight,
                         icon: Icons.library_books_outlined,
@@ -4096,13 +4532,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                           interactionGeneration: _chapterGeneration,
                           compact: false,
                           enabled: _sections.isNotEmpty && !item.isPdf,
-                          onPressed: () {
-                            if (_tiltAutoScroll.isActive) {
-                              _tiltAutoScroll.stop();
-                            } else {
-                              _tiltAutoScroll.activate();
-                            }
-                          },
+                          onPressed: _toggleTiltAutoscroll,
                           onLongPress: _openTiltSettings,
                         ),
                         const SizedBox(width: 12),
@@ -4127,6 +4557,20 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
           ),
         ),
       ),
+    );
+    if (defaultTargetPlatform != TargetPlatform.macOS) {
+      return scaffold;
+    }
+    return Focus(
+      focusNode: _readerFocusNode,
+      autofocus: true,
+      onKeyEvent: (node, event) => handleMacReaderAutoscrollKeyEvent(
+        event: event,
+        readerFocusNode: node,
+        controller: _steadyAutoScroll,
+        suspended: _readerShortcutsSuspended,
+      ),
+      child: scaffold,
     );
   }
 }

@@ -435,22 +435,36 @@ class CommentaryResearchLibraryService
   ///   failed  – files that threw during navigation/body parsing
   Future<({int indexed, int skipped, int failed})> indexLocalCatalogedEpubs({
     void Function(int completed, int total, String? currentTitle)? onProgress,
+    String? rootPathOverride,
+    void Function(String fileName, Object error)? onFailure,
   }) async {
     final stopwatch = Stopwatch()..start();
     final selection = await LibraryRootService.instance.loadSelection();
-    final rootPath = selection.path;
-    if (rootPath == null || rootPath.trim().isEmpty || !selection.exists) {
+    final override = rootPathOverride?.trim() ?? '';
+    final rootPath = override.isNotEmpty
+        ? p.normalize(override)
+        : (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
+              selection.path;
+    if (rootPath == null ||
+        rootPath.trim().isEmpty ||
+        !Directory(rootPath).existsSync()) {
       return (indexed: 0, skipped: 0, failed: 0);
     }
 
     final db = await ELibraryDatabase.instance.database;
     // Include books that are either not yet indexed OR indexed before
     // library_text_blocks was introduced (status = indexed but no text rows).
+    // Items whose app-managed EPUB was already removed after a validated
+    // canonical import (see EpubStoragePolicyService) are intentionally
+    // absent from disk and are read exclusively through the canonical
+    // reader — this legacy indexer must not try to open them and flag them
+    // broken.
     final rows = await db.rawQuery('''
       SELECT relative_path, folder_type, title
       FROM library_items
       WHERE deleted_at IS NULL
         AND LOWER(COALESCE(file_format, '')) = 'epub'
+        AND LOWER(COALESCE(epub_storage_state, 'present')) = 'present'
         AND (
           LOWER(COALESCE(index_status, '')) NOT IN ('indexed', 'indexed_empty')
           OR NOT EXISTS (
@@ -476,6 +490,10 @@ class CommentaryResearchLibraryService
     final total = rows.length;
 
     for (final row in rows) {
+      // Keep long retained-library recovery passes responsive on Android.
+      // EPUB parsing itself is unchanged; this only lets Flutter service UI,
+      // cancellation, and lifecycle events between candidates.
+      await Future<void>.delayed(Duration.zero);
       final relativePath = row['relative_path']?.toString().trim() ?? '';
       final rowTitle = row['title']?.toString().trim();
       onProgress?.call(
@@ -513,8 +531,9 @@ class CommentaryResearchLibraryService
           deviceId: deviceId,
         );
         indexed += 1;
-      } catch (_) {
+      } catch (error) {
         failed += 1;
+        onFailure?.call(p.basename(file.path), error);
       }
       completed += 1;
     }

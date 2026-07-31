@@ -231,20 +231,20 @@ void main() {
         ),
       );
 
-      expect(find.text('8 books need attention'), findsOneWidget);
+      expect(find.text('8 unreadable books set aside'), findsOneWidget);
       expect(
-        find.text('These books could not be prepared for reading.'),
+        find.text('Hidden from the library; original files were preserved.'),
         findsOneWidget,
       );
       expect(find.text('Christ Our Saviour'), findsNothing);
       expect(find.text('The Impending Conflict'), findsNothing);
       expect(find.text('Third Book'), findsNothing);
-      expect(find.text('Retry Repairable'), findsOneWidget);
+      expect(find.text('Review'), findsOneWidget);
       expect(find.textContaining('OPF'), findsNothing);
       expect(find.textContaining('Filename:'), findsNothing);
     });
 
-    testWidgets('reveals technical details behind Review Details', (
+    testWidgets('reveals set-aside details in the Review dialog', (
       tester,
     ) async {
       await tester.pumpWidget(
@@ -253,22 +253,18 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('Review Details'));
+      await tester.tap(find.text('Review'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Hide Details'), findsOneWidget);
+      expect(find.text('8 unreadable books set aside'), findsNWidgets(2));
       expect(find.textContaining('Filename: en_COS.epub'), findsOneWidget);
       expect(find.textContaining('Filename: en_IC.epub'), findsOneWidget);
       expect(
-        find.textContaining(
-          'Exact index_error: Missing OEBPS/content.opf entry.',
-        ),
+        find.text('Reason: The downloaded book file is incomplete.'),
         findsNWidgets(7),
       );
       expect(
-        find.textContaining(
-          'Exact index_error: No readable text content found after parsing.',
-        ),
+        find.text('Reason: No readable book content was found.'),
         findsOneWidget,
       );
     });

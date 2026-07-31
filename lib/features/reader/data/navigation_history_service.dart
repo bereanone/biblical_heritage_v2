@@ -52,17 +52,13 @@ class NavigationHistoryService {
     required int verse,
   }) async {
     final db = await UserDatabase.instance.database;
-    await db.insert(
-      'navigation_history',
-      {
-        'id': 1,
-        'block_id': blockId,
-        'book': book,
-        'chapter': chapter,
-        'verse': verse,
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('navigation_history', {
+      'id': 1,
+      'block_id': blockId,
+      'book': book,
+      'chapter': chapter,
+      'verse': verse,
+      'updated_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 }

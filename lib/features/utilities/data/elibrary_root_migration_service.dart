@@ -109,7 +109,9 @@ class ELibraryRootMigrationService {
       final sourceDir = Directory(p.join(source, folder));
       if (!await sourceDir.exists()) continue;
       scannedFolders.add(p.relative(sourceDir.path, from: source));
-      destinationFolders.add(p.relative(p.join(destination, folder), from: destination));
+      destinationFolders.add(
+        p.relative(p.join(destination, folder), from: destination),
+      );
       await for (final entity in sourceDir.list(
         recursive: true,
         followLinks: false,
@@ -162,7 +164,10 @@ class ELibraryRootMigrationService {
         .where((folder) => Directory(p.join(source, folder)).existsSync())
         .toList(growable: false);
     final destinationFolders = _managedSourceFolders
-        .map((folder) => p.relative(p.join(destination, folder), from: destination))
+        .map(
+          (folder) =>
+              p.relative(p.join(destination, folder), from: destination),
+        )
         .toList(growable: false);
 
     var movedCount = 0;
@@ -192,7 +197,8 @@ class ELibraryRootMigrationService {
         final sourceStat = await sourceFile.stat();
         if (await destinationFile.exists()) {
           final destinationStat = await destinationFile.stat();
-          final identical = destinationStat.size == sourceStat.size &&
+          final identical =
+              destinationStat.size == sourceStat.size &&
               await _sha256ForFile(sourceFile) ==
                   await _sha256ForFile(destinationFile);
           if (identical) {

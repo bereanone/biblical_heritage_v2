@@ -7,6 +7,117 @@ import 'package:studybible2/core/bootstrap/library_root_native.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('Android Pioneer filename validation is case-insensitive', () {
+    expect(
+      validateAndroidPioneerPickerPath(
+        '/cache/PIONEERS.STUDYCOLLECTION',
+        collection: true,
+      ),
+      '/cache/PIONEERS.STUDYCOLLECTION',
+    );
+    expect(
+      validateAndroidPioneerPickerPath(
+        '/cache/DAR.STUDYBOOK',
+        collection: false,
+      ),
+      '/cache/DAR.STUDYBOOK',
+    );
+  });
+
+  test('Android Pioneer filename validation explains wrong file types', () {
+    expect(
+      () => validateAndroidPioneerPickerPath(
+        '/cache/DAR.studybook',
+        collection: true,
+      ),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          'Choose Pioneers.studycollection.',
+        ),
+      ),
+    );
+    expect(
+      () => validateAndroidPioneerPickerPath(
+        '/cache/Pioneers.studycollection',
+        collection: false,
+      ),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          'Choose a .studybook Pioneer package.',
+        ),
+      ),
+    );
+  });
+
+  test(
+    'Android authorization serializes a persisted read/write tree grant',
+    () {
+      final authorization = AndroidLibraryAuthorization.fromMap({
+        'authorized': true,
+        'persistedRead': true,
+        'persistedWrite': true,
+        'enumerates': true,
+        'expectedMarkersFound': true,
+        'treeUri':
+            'content://com.android.externalstorage.documents/tree/'
+            'primary%3ADocuments%2FStudyBible',
+        'path': '/app/StudyBibleMirror',
+        'displayName': 'StudyBible',
+        'fileCount': 480,
+        'authorizationState': 'authorized',
+        'authorizationTimestamp': 1234,
+        'lastReconnect': 1200,
+        'lastAuthorizationError': 'previous grant expired',
+      });
+
+      expect(authorization.isAuthorized, isTrue);
+      expect(authorization.persistedRead, isTrue);
+      expect(authorization.persistedWrite, isTrue);
+      expect(authorization.enumerates, isTrue);
+      expect(authorization.expectedMarkersFound, isTrue);
+      expect(authorization.displayName, 'StudyBible');
+      expect(authorization.fileCount, 480);
+      expect(authorization.authorizationTimestamp, 1234);
+      expect(authorization.lastReconnect, 1200);
+      expect(authorization.lastAuthorizationError, 'previous grant expired');
+    },
+  );
+
+  test('saved URI without persisted grant remains unauthorized', () {
+    final authorization = AndroidLibraryAuthorization.fromMap({
+      'authorized': false,
+      'persistedRead': false,
+      'persistedWrite': false,
+      'enumerates': false,
+      'treeUri': 'content://provider/tree/studybible',
+      'authorizationState': 'libraryRootAuthorizationMissing',
+      'validationError': 'No matching persisted permission.',
+    });
+
+    expect(authorization.isAuthorized, isFalse);
+    expect(authorization.persistedRead, isFalse);
+    expect(authorization.persistedWrite, isFalse);
+    expect(authorization.authorizationState, 'libraryRootAuthorizationMissing');
+  });
+
+  test('read-only grant is not writable authorization', () {
+    final authorization = AndroidLibraryAuthorization.fromMap({
+      'authorized': false,
+      'persistedRead': true,
+      'persistedWrite': false,
+      'enumerates': true,
+      'expectedMarkersFound': true,
+    });
+
+    expect(authorization.persistedRead, isTrue);
+    expect(authorization.persistedWrite, isFalse);
+    expect(authorization.isAuthorized, isFalse);
+  });
+
   setUp(() {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
   });
@@ -20,29 +131,38 @@ void main() {
         );
   });
 
-  test('returns the native folder picker selection on iOS', () async {
-    const channel = MethodChannel('studybible/library_root');
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (call) async {
-          switch (call.method) {
-            case 'pickFolder':
-              return <String, Object?>{
-                'path':
-                    '/Users/deanbowen/Library/CloudStorage/OneDrive/CloudFiles',
-                'bookmark': 'folder-bookmark',
-              };
-          }
-          return null;
-        });
+  test(
+    'rejects persistent folder selection on iOS with clear guidance',
+    () async {
+      const channel = MethodChannel('studybible/library_root');
+      var nativePickerInvoked = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            switch (call.method) {
+              case 'pickFolder':
+                nativePickerInvoked = true;
+                return <String, Object?>{
+                  'path':
+                      '/Users/deanbowen/Library/CloudStorage/OneDrive/CloudFiles',
+                  'bookmark': 'folder-bookmark',
+                };
+            }
+            return null;
+          });
 
-    final result = await LibraryRootNative.pickFolder();
-
-    expect(
-      result?.path,
-      '/Users/deanbowen/Library/CloudStorage/OneDrive/CloudFiles',
-    );
-    expect(result?.bookmark, 'folder-bookmark');
-  });
+      await expectLater(
+        LibraryRootNative.pickFolder(),
+        throwsA(
+          isA<UnsupportedError>().having(
+            (error) => error.message,
+            'message',
+            contains('selecting a .studybook package'),
+          ),
+        ),
+      );
+      expect(nativePickerInvoked, isFalse);
+    },
+  );
 
   test('returns the HTML fallback selection on iOS', () async {
     const channel = MethodChannel('studybible/library_root');

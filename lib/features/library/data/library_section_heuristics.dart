@@ -78,6 +78,8 @@ bool libraryIsFrontMatterOpeningLabel(String value) {
     'word to the reader',
     'to the reader',
     'about this book',
+    'information about this book',
+    'book information',
     'about the author',
     'how to use this book',
     'a note to the reader',
@@ -96,6 +98,8 @@ bool libraryIsFrontMatterOpeningLabel(String value) {
     'publisher s preface',
     'translators preface',
     'translator s preface',
+    'information about this book ',
+    'book information ',
   ];
   for (final prefix in prefixes) {
     if (normalized.startsWith(prefix)) return true;
@@ -134,9 +138,21 @@ bool libraryIsMeaningfulReadingSection({
 
   final looksLikeMetadataLabel =
       libraryIsMetadataSectionLabel(normalizedTitle) ||
-      libraryIsMetadataSectionLabel(normalizedHref) ||
-      (normalizedBookTitle.isNotEmpty &&
-          normalizedTitle == normalizedBookTitle);
+      libraryIsMetadataSectionLabel(normalizedHref);
+  final titlePageBoilerplate =
+      normalizedBookTitle.isNotEmpty &&
+      normalizedTitle == normalizedBookTitle &&
+      trimmedParagraphs.any((paragraph) {
+        final normalized = _normalizeLibraryText(paragraph);
+        return normalized.contains('copyright') ||
+            normalized.contains('originally published') ||
+            normalized.contains('publishing association') ||
+            normalized.contains('published in the usa') ||
+            normalized.startsWith('isbn') ||
+            normalized.contains('www ');
+      });
+
+  if (titlePageBoilerplate) return false;
 
   if (looksLikeMetadataLabel) {
     if (bodyParagraphCount >= 2 && totalLength >= 180) {

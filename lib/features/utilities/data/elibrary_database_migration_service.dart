@@ -71,10 +71,8 @@ class ELibraryDatabaseMigrationSchemaTableReport {
         'missing source indexes: ${missingIndexesInSource.join(", ")}',
       if (missingIndexesInDestination.isNotEmpty)
         'missing eLibrary.db indexes: ${missingIndexesInDestination.join(", ")}',
-      if (sourceColumns != destinationColumns)
-        'column order differs',
-      if (sourceIndexes != destinationIndexes)
-        'index order differs',
+      if (sourceColumns != destinationColumns) 'column order differs',
+      if (sourceIndexes != destinationIndexes) 'index order differs',
     ];
     return '$tableName: ${parts.join("; ")}';
   }
@@ -228,10 +226,12 @@ class ELibraryDatabaseMigrationReport {
       'completed_at_utc': completedAtUtc?.toIso8601String(),
       'dry_run': dryRun,
       'schema_compatible': schemaCompatible,
-      'schema_reports':
-          schemaReports.map((report) => report.toJson()).toList(growable: false),
-      'table_reports':
-          tableReports.map((report) => report.toJson()).toList(growable: false),
+      'schema_reports': schemaReports
+          .map((report) => report.toJson())
+          .toList(growable: false),
+      'table_reports': tableReports
+          .map((report) => report.toJson())
+          .toList(growable: false),
       'source_database_path': sourceDatabasePath,
       'destination_database_path': destinationDatabasePath,
       'source_row_count': sourceRowCount,
@@ -251,10 +251,9 @@ class ELibraryDatabaseMigrationReport {
       'backup_directory_path': backupDirectoryPath,
       'report_file_path': reportFilePath,
       'schema_issues': schemaIssues,
-      'table_status_lines':
-          tableReports.map((report) => report.toDiagnosticText()).toList(
-            growable: false,
-          ),
+      'table_status_lines': tableReports
+          .map((report) => report.toDiagnosticText())
+          .toList(growable: false),
     };
   }
 
@@ -277,7 +276,10 @@ class ELibraryDatabaseMigrationReport {
     line('Would insert rows', wouldInsertRowCount);
     line('Skipped existing rows', skippedExistingRowCount);
     line('Inserted rows', insertedRowCount);
-    line('Completeness before', '${(completenessBefore * 100).toStringAsFixed(1)}%');
+    line(
+      'Completeness before',
+      '${(completenessBefore * 100).toStringAsFixed(1)}%',
+    );
     line('Completeness after', completenessLabel);
     line('Active read source after copy', activeReadSourceAfterCopy);
     line('Backup directory', backupDirectoryPath);
@@ -360,31 +362,33 @@ class ELibraryDatabaseMigrationService {
     final sourceDb = await UserDatabase.instance.database;
     final destinationDb = await ELibraryDatabase.instance.database;
     final sourceDatabasePath = await SandboxBootstrap.userDatabasePath();
-    final destinationDatabasePath = await SandboxBootstrap.eLibraryDatabasePath();
+    final destinationDatabasePath =
+        await SandboxBootstrap.eLibraryDatabasePath();
     final schemaReports = await _compareSchemas(sourceDb, destinationDb);
     final schemaCompatible = schemaReports.every((report) => report.compatible);
-    final report = await _withAttachedLegacyDatabase<ELibraryDatabaseMigrationReport>(
-      destinationDb,
-      sourceDatabasePath,
-      () async {
-        final tableReports = await _buildTableReports(
-          destinationDb: destinationDb,
-          legacySchemaName: 'legacy_elibrary',
-          schemaReports: schemaReports,
+    final report =
+        await _withAttachedLegacyDatabase<ELibraryDatabaseMigrationReport>(
+          destinationDb,
+          sourceDatabasePath,
+          () async {
+            final tableReports = await _buildTableReports(
+              destinationDb: destinationDb,
+              legacySchemaName: 'legacy_elibrary',
+              schemaReports: schemaReports,
+            );
+            return _assembleReport(
+              startedAt: startedAt,
+              dryRun: true,
+              schemaReports: schemaReports,
+              schemaCompatible: schemaCompatible,
+              tableReports: tableReports,
+              sourceDatabasePath: sourceDatabasePath,
+              destinationDatabasePath: destinationDatabasePath,
+              backupDirectoryPath: null,
+              reportFilePath: await _latestReportPath(),
+            );
+          },
         );
-        return _assembleReport(
-          startedAt: startedAt,
-          dryRun: true,
-          schemaReports: schemaReports,
-          schemaCompatible: schemaCompatible,
-          tableReports: tableReports,
-          sourceDatabasePath: sourceDatabasePath,
-          destinationDatabasePath: destinationDatabasePath,
-          backupDirectoryPath: null,
-          reportFilePath: await _latestReportPath(),
-        );
-      },
-    );
     return report;
   }
 
@@ -395,7 +399,8 @@ class ELibraryDatabaseMigrationService {
     final sourceDb = await UserDatabase.instance.database;
     final destinationDb = await ELibraryDatabase.instance.database;
     final sourceDatabasePath = await SandboxBootstrap.userDatabasePath();
-    final destinationDatabasePath = await SandboxBootstrap.eLibraryDatabasePath();
+    final destinationDatabasePath =
+        await SandboxBootstrap.eLibraryDatabasePath();
     final schemaReports = await _compareSchemas(sourceDb, destinationDb);
     final schemaCompatible = schemaReports.every((report) => report.compatible);
     if (!schemaCompatible) {
@@ -462,12 +467,19 @@ class ELibraryDatabaseMigrationService {
     if (!await directory.exists()) {
       return null;
     }
-    final files = directory
-        .listSync()
-        .whereType<File>()
-        .where((file) => p.basename(file.path).startsWith('elibrary_database_migration_') && p.extension(file.path) == '.json')
-        .toList(growable: false)
-      ..sort((left, right) => left.path.compareTo(right.path));
+    final files =
+        directory
+            .listSync()
+            .whereType<File>()
+            .where(
+              (file) =>
+                  p
+                      .basename(file.path)
+                      .startsWith('elibrary_database_migration_') &&
+                  p.extension(file.path) == '.json',
+            )
+            .toList(growable: false)
+          ..sort((left, right) => left.path.compareTo(right.path));
     return files.isEmpty ? null : files.last.path;
   }
 
@@ -481,19 +493,21 @@ class ELibraryDatabaseMigrationService {
       final destinationColumns = await _tableColumns(destinationDb, table);
       final sourceIndexes = await _tableIndexes(sourceDb, table);
       final destinationIndexes = await _tableIndexes(destinationDb, table);
-      final sourceColumnMap = {for (final column in sourceColumns) column.name: column};
+      final sourceColumnMap = {
+        for (final column in sourceColumns) column.name: column,
+      };
       final destinationColumnMap = {
         for (final column in destinationColumns) column.name: column,
       };
-      final sourceColumnNames = sourceColumns.map((column) => column.name).toList(
-            growable: false,
-          );
+      final sourceColumnNames = sourceColumns
+          .map((column) => column.name)
+          .toList(growable: false);
       final destinationColumnNames = destinationColumns
           .map((column) => column.name)
           .toList(growable: false);
-      final sourceIndexNames = sourceIndexes.map((index) => index.name).toList(
-            growable: false,
-          );
+      final sourceIndexNames = sourceIndexes
+          .map((index) => index.name)
+          .toList(growable: false);
       final destinationIndexNames = destinationIndexes
           .map((index) => index.name)
           .toList(growable: false);
@@ -537,16 +551,18 @@ class ELibraryDatabaseMigrationService {
         table,
         schema: legacySchemaName,
       );
-      final destinationRowCountBefore = await _tableRowCount(destinationDb, table);
+      final destinationRowCountBefore = await _tableRowCount(
+        destinationDb,
+        table,
+      );
       final matchingRowCountBefore = await _tableMatchingRowCount(
         destinationDb: destinationDb,
         table: table,
         legacySchemaName: legacySchemaName,
       );
-      final wouldInsertRowCount =
-          sourceRowCount > matchingRowCountBefore
-              ? sourceRowCount - matchingRowCountBefore
-              : 0;
+      final wouldInsertRowCount = sourceRowCount > matchingRowCountBefore
+          ? sourceRowCount - matchingRowCountBefore
+          : 0;
       reports.add(
         ELibraryDatabaseMigrationTableReport(
           tableName: table,
@@ -657,9 +673,7 @@ class ELibraryDatabaseMigrationService {
     );
   }
 
-  Future<void> _copyAllTables({
-    required Database destinationDb,
-  }) async {
+  Future<void> _copyAllTables({required Database destinationDb}) async {
     await destinationDb.transaction((txn) async {
       for (final table in _tables) {
         final columns = await _tableColumnNames(txn, table);
@@ -681,15 +695,14 @@ class ELibraryDatabaseMigrationService {
   }) async {
     final backupRoot = await LibraryRootService.instance.backupRootPath();
     final backupDir = Directory(
-      p.join(backupRoot, 'elibrary_database_migration_${_timestamp(startedAt)}'),
+      p.join(
+        backupRoot,
+        'elibrary_database_migration_${_timestamp(startedAt)}',
+      ),
     );
     await backupDir.create(recursive: true);
 
-    await _copyDatabaseFiles(
-      sourceDatabasePath,
-      backupDir,
-      prefix: 'user',
-    );
+    await _copyDatabaseFiles(sourceDatabasePath, backupDir, prefix: 'user');
     await _copyDatabaseFiles(
       destinationDatabasePath,
       backupDir,
@@ -720,7 +733,9 @@ class ELibraryDatabaseMigrationService {
     DatabaseExecutor db,
     String tableName,
   ) async {
-    final rows = await db.rawQuery('PRAGMA table_info(${_quoteIdentifier(tableName)})');
+    final rows = await db.rawQuery(
+      'PRAGMA table_info(${_quoteIdentifier(tableName)})',
+    );
     return rows
         .map(
           (row) => _TableColumnInfo(
@@ -747,7 +762,9 @@ class ELibraryDatabaseMigrationService {
     DatabaseExecutor db,
     String tableName,
   ) async {
-    final rows = await db.rawQuery('PRAGMA index_list(${_quoteIdentifier(tableName)})');
+    final rows = await db.rawQuery(
+      'PRAGMA index_list(${_quoteIdentifier(tableName)})',
+    );
     final indexes = <_TableIndexInfo>[];
     for (final row in rows) {
       final name = row['name']?.toString() ?? '';
@@ -797,14 +814,12 @@ class ELibraryDatabaseMigrationService {
     required String legacySchemaName,
   }) async {
     final joinClause = _joinClause(table);
-    final rows = await destinationDb.rawQuery(
-      '''
+    final rows = await destinationDb.rawQuery('''
       SELECT COUNT(*) AS cnt
       FROM ${_quoteIdentifier(table)} dest
       INNER JOIN $legacySchemaName.${_quoteIdentifier(table)} src
         ON $joinClause
-      ''',
-    );
+      ''');
     if (rows.isNotEmpty) {
       return (rows.first['cnt'] as num?)?.toInt() ?? 0;
     }
@@ -845,16 +860,19 @@ class ELibraryDatabaseMigrationService {
     if (reportRoot == null) return null;
     final directory = Directory(reportRoot);
     if (!await directory.exists()) return null;
-    final files = directory
-        .listSync()
-        .whereType<File>()
-        .where(
-          (file) =>
-              p.basename(file.path).startsWith('elibrary_database_migration_') &&
-              p.extension(file.path) == '.json',
-        )
-        .toList(growable: false)
-      ..sort((left, right) => left.path.compareTo(right.path));
+    final files =
+        directory
+            .listSync()
+            .whereType<File>()
+            .where(
+              (file) =>
+                  p
+                      .basename(file.path)
+                      .startsWith('elibrary_database_migration_') &&
+                  p.extension(file.path) == '.json',
+            )
+            .toList(growable: false)
+          ..sort((left, right) => left.path.compareTo(right.path));
     return files.isEmpty ? null : files.last.path;
   }
 
@@ -870,10 +888,9 @@ class ELibraryDatabaseMigrationService {
       'elibrary_database_migration_${_timestamp(report.completedAtUtc ?? DateTime.now().toUtc())}.json',
     );
     await File(reportPath).writeAsString(
-      const JsonEncoder.withIndent('  ').convert({
-        ...report.toJson(),
-        'report_file_path': reportPath,
-      }),
+      const JsonEncoder.withIndent(
+        '  ',
+      ).convert({...report.toJson(), 'report_file_path': reportPath}),
     );
     return reportPath;
   }

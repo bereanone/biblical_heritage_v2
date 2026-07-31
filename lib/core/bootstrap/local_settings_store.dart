@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../features/library/data/library_setup_state.dart';
 import '../../features/utilities/data/elibrary_storage_policy.dart';
 
 class LocalSettingsStore {
@@ -16,6 +17,11 @@ class LocalSettingsStore {
       'pioneer_captured_html_folder_path';
   static const _pioneerCapturedHtmlFolderBookmarkKey =
       'pioneer_captured_html_folder_bookmark';
+  static const _lastPioneerPickerDirectoryKey = 'last_pioneer_picker_directory';
+  static const _pioneerEpubSourceFolderPathKey =
+      'pioneer_epub_source_folder_path';
+  static const _pioneerEpubSourceFolderBookmarkKey =
+      'pioneer_epub_source_folder_bookmark';
 
   Future<File> _settingsFile() async {
     final supportDir = await getApplicationSupportDirectory();
@@ -167,6 +173,60 @@ class LocalSettingsStore {
     await save(settings);
   }
 
+  /// The permanent, external, read-only raw Pioneer EPUB folder the user
+  /// selected for "Import Pioneer Library" bulk import. Only the reference
+  /// needed to reopen it is stored — never a copy of its contents, and
+  /// never Dean-specific in any portable manifest (this is per-device local
+  /// state, not synced/exported data).
+  Future<String?> loadPioneerEpubSourceFolderPath() async {
+    final settings = await load();
+    final value =
+        settings[_pioneerEpubSourceFolderPathKey]?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
+  Future<String?> loadPioneerEpubSourceFolderBookmark() async {
+    final settings = await load();
+    final value =
+        settings[_pioneerEpubSourceFolderBookmarkKey]?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
+  Future<void> savePioneerEpubSourceFolder({
+    required String path,
+    String? bookmark,
+  }) async {
+    final settings = await load();
+    settings[_pioneerEpubSourceFolderPathKey] = path.trim();
+    settings[_pioneerEpubSourceFolderBookmarkKey] =
+        bookmark?.trim().isEmpty == true ? null : bookmark?.trim();
+    await save(settings);
+  }
+
+  /// Clears only the stored folder reference/bookmark — never touches any
+  /// already-imported book, its canonical content, or user data.
+  Future<void> clearPioneerEpubSourceFolder() async {
+    final settings = await load();
+    settings.remove(_pioneerEpubSourceFolderPathKey);
+    settings.remove(_pioneerEpubSourceFolderBookmarkKey);
+    await save(settings);
+  }
+
+  Future<String?> loadLastPioneerPickerDirectory() async {
+    final settings = await load();
+    final value =
+        settings[_lastPioneerPickerDirectoryKey]?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
+  Future<void> saveLastPioneerPickerDirectory(String path) async {
+    final normalized = path.trim();
+    if (normalized.isEmpty) return;
+    final settings = await load();
+    settings[_lastPioneerPickerDirectoryKey] = normalized;
+    await save(settings);
+  }
+
   Future<Map<String, String>> loadPioneerCollectionCheck() async {
     final settings = await load();
     final raw = settings['pioneer_collection_last_check'];
@@ -217,6 +277,27 @@ class LocalSettingsStore {
   Future<void> saveELibraryStoragePolicy(ELibraryStoragePolicy policy) async {
     final settings = await load();
     settings['elibrary_storage_policy'] = policy.storedValue;
+    await save(settings);
+  }
+
+  Future<LibrarySetupState> loadLibrarySetupState() async {
+    final settings = await load();
+    return librarySetupStateFromStoredValue(
+      settings['elibrary_setup_state']?.toString(),
+    );
+  }
+
+  Future<void> saveLibrarySetupState(LibrarySetupState state) async {
+    final settings = await load();
+    settings['elibrary_setup_state'] = state.storedValue;
+    await save(settings);
+  }
+
+  /// Restores the first-run invitation (e.g. from a future "reset setup"
+  /// action in Library Settings). Durable but always resettable.
+  Future<void> resetLibrarySetupState() async {
+    final settings = await load();
+    settings.remove('elibrary_setup_state');
     await save(settings);
   }
 }

@@ -113,7 +113,7 @@ TextStyle libraryBodyTextStyle(
   double? letterSpacing,
 }) {
   return libraryScaledTextStyle(
-    base,
+    base?.copyWith(fontFamily: 'Roboto'),
     libraryBodyScale(libraryFontScaleOf(context)),
     multiplier: 1.0,
     color: color,
@@ -132,7 +132,7 @@ TextStyle libraryTitleTextStyle(
   double? letterSpacing,
 }) {
   return libraryScaledTextStyle(
-    base,
+    base?.copyWith(fontFamily: 'Roboto'),
     libraryTitleScale(libraryFontScaleOf(context)),
     color: color,
     fontWeight: fontWeight,

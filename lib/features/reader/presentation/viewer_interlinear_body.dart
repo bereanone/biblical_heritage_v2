@@ -162,7 +162,8 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
           final markups = await BibleMarkupRepository().loadMarkedVerseKeys(
             lines: passage.lines,
             bookNamesByNumber: {
-              for (final line in passage.lines) line.bookNumber: passage.bookName,
+              for (final line in passage.lines)
+                line.bookNumber: passage.bookName,
             },
           );
           if (!mounted) return;
@@ -242,71 +243,72 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
         initialScrollIndex: initialIndex,
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
         itemBuilder: (context, index) {
-        final item = renderItems[index];
-        VerseLine? previousVerseLine;
-        for (var probe = index - 1; probe >= 0; probe--) {
-          final prior = renderItems[probe];
-          if (prior case ViewerVerseItem(:final line)) {
-            previousVerseLine = line;
-            break;
+          final item = renderItems[index];
+          VerseLine? previousVerseLine;
+          for (var probe = index - 1; probe >= 0; probe--) {
+            final prior = renderItems[probe];
+            if (prior case ViewerVerseItem(:final line)) {
+              previousVerseLine = line;
+              break;
+            }
           }
-        }
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: index == renderItems.length - 1
-                ? 0
-                : item is ViewerHeadingItem
-                ? 4
-                : item is ViewerAcrosticItem
-                ? 0
-                : 10,
-          ),
-          child: switch (item) {
-            ViewerAcrosticItem(:final hebrew, :final transliteration) => Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Divider(height: 8),
-                ViewerAcrosticBlock(
-                  hebrew: hebrew,
-                  transliteration: transliteration,
-                  fontScale: widget.fontScale,
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: index == renderItems.length - 1
+                  ? 0
+                  : item is ViewerHeadingItem
+                  ? 4
+                  : item is ViewerAcrosticItem
+                  ? 0
+                  : 10,
+            ),
+            child: switch (item) {
+              ViewerAcrosticItem(:final hebrew, :final transliteration) =>
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Divider(height: 8),
+                    ViewerAcrosticBlock(
+                      hebrew: hebrew,
+                      transliteration: transliteration,
+                      fontScale: widget.fontScale,
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            ViewerHeadingItem(:final text) => ViewerHeadingBlock(
-              text: text,
-              fontScale: widget.fontScale,
-            ),
-            ViewerVerseItem(:final line) => _InterlinearVerseFlow(
-              blockId: line.blockId,
-              line: line,
-              tokens:
-                  cachedTokens[line.blockId] ??
-                  const <InterlinearTokenRecord>[],
-              fontScale: widget.fontScale,
-              settings: widget.settings,
-              isSelected: _matchesSelectedLine(line),
-              hasUserMarkup: (cachedMarkups ?? const <String>{}).contains(
-                '${line.bookNumber}:${line.chapter}:${line.verse}',
+              ViewerHeadingItem(:final text) => ViewerHeadingBlock(
+                text: text,
+                fontScale: widget.fontScale,
               ),
-              showChapterNumber:
-                  previousVerseLine == null ||
-                  previousVerseLine.bookNumber != line.bookNumber ||
-                  previousVerseLine.chapter != line.chapter,
-              isHebrew: (passage.bookNumber ?? 1) <= 39,
-              showTopDivider:
-                  index == 0 || renderItems[index - 1] is! ViewerAcrosticItem,
-              onTap: () => widget.onSelectVerse(line),
-              onOpenStrongs: (strongsId) {
-                showViewerStrongsPageOne(
-                  context,
-                  strongsId: strongsId,
-                  onSelectBlockId: widget.onSelectBlockId,
-                );
-              },
-            ),
-          },
-        );
+              ViewerVerseItem(:final line) => _InterlinearVerseFlow(
+                blockId: line.blockId,
+                line: line,
+                tokens:
+                    cachedTokens[line.blockId] ??
+                    const <InterlinearTokenRecord>[],
+                fontScale: widget.fontScale,
+                settings: widget.settings,
+                isSelected: _matchesSelectedLine(line),
+                hasUserMarkup: (cachedMarkups ?? const <String>{}).contains(
+                  '${line.bookNumber}:${line.chapter}:${line.verse}',
+                ),
+                showChapterNumber:
+                    previousVerseLine == null ||
+                    previousVerseLine.bookNumber != line.bookNumber ||
+                    previousVerseLine.chapter != line.chapter,
+                isHebrew: (passage.bookNumber ?? 1) <= 39,
+                showTopDivider:
+                    index == 0 || renderItems[index - 1] is! ViewerAcrosticItem,
+                onTap: () => widget.onSelectVerse(line),
+                onOpenStrongs: (strongsId) {
+                  showViewerStrongsPageOne(
+                    context,
+                    strongsId: strongsId,
+                    onSelectBlockId: widget.onSelectBlockId,
+                  );
+                },
+              ),
+            },
+          );
         },
       ),
     );
@@ -332,8 +334,7 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
     if (targetIndex == null) return false;
     for (final position in _itemPositionsListener.itemPositions.value) {
       if (position.index != targetIndex) continue;
-      final center =
-          (position.itemLeadingEdge + position.itemTrailingEdge) / 2;
+      final center = (position.itemLeadingEdge + position.itemTrailingEdge) / 2;
       return (center - 0.5).abs() <= tolerance;
     }
     return false;
@@ -424,12 +425,12 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
           final shouldScroll =
               !isVisible || !_isVerseNearCenter(verseItemIndex, blockId);
           if (shouldScroll) {
-              await _itemScrollController.scrollTo(
-                index: targetIndex,
-                alignment: 0.22,
-                duration: const Duration(milliseconds: 240),
-                curve: Curves.easeInOut,
-              );
+            await _itemScrollController.scrollTo(
+              index: targetIndex,
+              alignment: 0.22,
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeInOut,
+            );
           }
           if (!mounted || token != _recenterToken) return;
           _lastScrolledBlockId = blockId;

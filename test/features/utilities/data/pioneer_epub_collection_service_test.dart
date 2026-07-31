@@ -194,6 +194,7 @@ void main() {
       cacheRootPathResolver: () async => cacheRoot.path,
       catalogLoader: () async => _curatedMergeCatalog(),
       directCatalogLoader: (_) async => _emptyCatalog(),
+      localCatalogLoader: () async => _emptyCatalog(),
     );
 
     final catalog = await service.loadCatalog();
@@ -225,7 +226,8 @@ void main() {
     );
     expect(danielAndTheRevelation.authorName, 'Uriah Smith');
     expect(danielAndTheRevelation.sourceCandidates.length, 3);
-    expect(danielAndTheRevelation.preferredImportCandidate, isNull);
+    expect(danielAndTheRevelation.preferredImportCandidate, isNotNull);
+    expect(danielAndTheRevelation.preferredImportCandidate!.provider, 'aplib');
     expect(
       danielAndTheRevelation.alternateSourceCandidates.any(
         (candidate) => candidate.provider == 'adventaudio',
@@ -235,7 +237,7 @@ void main() {
     expect(danielAndTheRevelation.hasDeferredPdfSource, isFalse);
     expect(historyOfTheSabbath.id, startsWith('aplib_j_n_andrews_'));
     expect(adventAudioOnly.id, 'the_adventaudio_only_work');
-    expect(adventAudioOnly.preferredImportCandidate, isNull);
+    expect(adventAudioOnly.preferredImportCandidate, isNotNull);
     expect(
       keepTheSabbathHoly.id,
       startsWith('aplib_needs_review_keep_the_sabbath_holy_epub_'),
@@ -277,6 +279,7 @@ void main() {
         cacheRootPathResolver: () async => cacheRoot.path,
         catalogLoader: () async => _curatedMergeCatalog(),
         directCatalogLoader: (_) async => _directEllenWhiteAudioCatalog(),
+        localCatalogLoader: () async => _emptyCatalog(),
       );
 
       final catalog = await service.loadCatalog(refresh: true);
@@ -289,15 +292,16 @@ void main() {
       expect(darWorks, hasLength(1));
       final danielAndTheRevelation = darWorks.single;
 
-    expect(danielAndTheRevelation, isNotNull);
-    expect(danielAndTheRevelation.title, 'Daniel and the Revelation');
-    expect(danielAndTheRevelation.authorName, 'Uriah Smith');
-    expect(danielAndTheRevelation.preferredImportCandidate, isNull);
-    expect(danielAndTheRevelation.isImportable, isFalse);
-    expect(
-      danielAndTheRevelation.sourceTypeLabel,
-      'EGW Reader Capture',
-    );
+      expect(danielAndTheRevelation, isNotNull);
+      expect(danielAndTheRevelation.title, 'Daniel and the Revelation');
+      expect(danielAndTheRevelation.authorName, 'Uriah Smith');
+      expect(danielAndTheRevelation.preferredImportCandidate, isNotNull);
+      expect(
+        danielAndTheRevelation.preferredImportCandidate!.provider,
+        'ellenwhiteaudio',
+      );
+      expect(danielAndTheRevelation.isImportable, isTrue);
+      expect(danielAndTheRevelation.sourceTypeLabel, 'EGW Reader Capture');
       expect(
         danielAndTheRevelation.sourceCandidates.any(
           (candidate) =>
@@ -338,6 +342,7 @@ void main() {
         cacheRootPathResolver: () async => cacheRoot.path,
         catalogLoader: () async => _curatedMergeCatalog(),
         directCatalogLoader: (_) async => _emptyCatalog(),
+        localCatalogLoader: () async => _emptyCatalog(),
       );
 
       final catalog = await service.loadCatalog(refresh: true);
@@ -397,6 +402,7 @@ void main() {
         cacheRootPathResolver: () async => cacheRoot.path,
         catalogLoader: () async => _emptyCatalog(),
         directCatalogLoader: (_) async => _emptyCatalog(),
+        localCatalogLoader: () async => _emptyCatalog(),
       );
 
       final catalog = await service.loadCatalog(refresh: true);
@@ -441,6 +447,7 @@ void main() {
       cacheRootPathResolver: () async => cacheRoot.path,
       catalogLoader: () async => _emptyCatalog(),
       directCatalogLoader: (_) async => _emptyCatalog(),
+      localCatalogLoader: () async => _emptyCatalog(),
     );
 
     final catalog = await service.loadCatalog(refresh: true);
@@ -450,5 +457,81 @@ void main() {
     expect(uriahSmith, isNotNull);
     expect(uriahSmith!.works.length, 1);
     expect(catalog.diagnostics!.duplicateEntriesSkipped, 1);
+  });
+
+  test(
+    'discovers every structurally valid EPUB in the Pioneer folder',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'pioneer_local_folder_',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      final folder = Directory('${root.path}/ePubs/Pioneers')
+        ..createSync(recursive: true);
+      final validBytes = _zipBytes([
+        MapEntry(
+          'META-INF/container.xml',
+          '<container><rootfiles><rootfile full-path="OEBPS/content.opf"/>'
+                  '</rootfiles></container>'
+              .codeUnits,
+        ),
+        MapEntry(
+          'OEBPS/content.opf',
+          '<package><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                  '<dc:title>Future Pioneer Work</dc:title>'
+                  '<dc:creator>Future Pioneer Author</dc:creator>'
+                  '</metadata></package>'
+              .codeUnits,
+        ),
+      ]);
+      File('${folder.path}/future_work.epub').writeAsBytesSync(validBytes);
+      File('${folder.path}/broken.epub').writeAsStringSync('not a zip');
+      File('${folder.path}/notes.txt').writeAsStringSync('ignored');
+
+      final catalog = await loadPioneerCatalogFromFolder(folder.path);
+
+      expect(catalog.workCount, 1);
+      final work = catalog.workById('future_work');
+      expect(work, isNotNull);
+      expect(work!.title, 'Future Pioneer Work');
+      expect(work.authorName, 'Future Pioneer Author');
+      expect(work.preferredImportCandidate!.provider, 'cloudfiles');
+      expect(work.preferredImportCandidate!.url, startsWith('file:'));
+    },
+  );
+
+  test('resolves a selected EPUB directly from a Pioneers folder', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'pioneer_selected_file_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final folder = Directory('${root.path}/ePubs/Pioneers')
+      ..createSync(recursive: true);
+    final file = File('${folder.path}/sanctification.epub')
+      ..writeAsBytesSync(
+        _zipBytes([
+          MapEntry(
+            'META-INF/container.xml',
+            '<container><rootfiles><rootfile full-path="OPS/book.opf"/>'
+                    '</rootfiles></container>'
+                .codeUnits,
+          ),
+          MapEntry(
+            'OPS/book.opf',
+            '<package><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                    '<dc:title>Sanctification</dc:title>'
+                    '<dc:creator>Daniel T. Bordeau</dc:creator>'
+                    '</metadata></package>'
+                .codeUnits,
+          ),
+        ]),
+      );
+
+    final work = await loadPioneerWorkFromFolderFile(file.path);
+
+    expect(work, isNotNull);
+    expect(work!.id, 'sanctification');
+    expect(work.title, 'Sanctification');
+    expect(work.authorName, 'Daniel T. Bordeau');
   });
 }

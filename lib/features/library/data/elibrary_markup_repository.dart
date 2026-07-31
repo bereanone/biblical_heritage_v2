@@ -51,19 +51,19 @@ class ElibraryMarkupRepository {
   static const String highlightType = 'highlight';
   static const String defaultHighlightColor = '#F7D87D';
 
-  Future<Map<String, List<ElibraryMarkupRecord>>>
-  loadMarkupsBySectionForItem(String libraryItemId) async {
-    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
-      List<Map<String, Object?>>
-    >(
-      read: (db) => db.query(
-        'elibrary_markups',
-        where: 'library_item_id = ? AND deleted_at IS NULL',
-        whereArgs: [libraryItemId],
-        orderBy: 'created_at ASC, id ASC',
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-    );
+  Future<Map<String, List<ElibraryMarkupRecord>>> loadMarkupsBySectionForItem(
+    String libraryItemId,
+  ) async {
+    final rowResult = await ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (db) => db.query(
+            'elibrary_markups',
+            where: 'library_item_id = ? AND deleted_at IS NULL',
+            whereArgs: [libraryItemId],
+            orderBy: 'created_at ASC, id ASC',
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+        );
     final rows = rowResult.value;
     final result = <String, List<ElibraryMarkupRecord>>{};
     for (final row in rows) {
@@ -174,10 +174,7 @@ class ElibraryMarkupRepository {
     final now = _utcNow();
     return db.update(
       'elibrary_markups',
-      {
-        'updated_at': now,
-        'deleted_at': now,
-      },
+      {'updated_at': now, 'deleted_at': now},
       where:
           'library_item_id = ? AND epub_href = ? AND markup_type = ? AND deleted_at IS NULL AND NOT ('
           'end_block_index < ? OR '

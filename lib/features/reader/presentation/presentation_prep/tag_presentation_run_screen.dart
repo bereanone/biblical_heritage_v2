@@ -222,11 +222,7 @@ class _TagPresentationRunScreenState extends State<TagPresentationRunScreen> {
             children: [
               Icon(Icons.error_outline, size: 48, color: Colors.red.shade400),
               const SizedBox(height: 16),
-              Text(
-                _error!,
-                style: errorStyle,
-                textAlign: TextAlign.center,
-              ),
+              Text(_error!, style: errorStyle, textAlign: TextAlign.center),
               const SizedBox(height: 24),
               OutlinedButton(
                 onPressed: () => Navigator.of(context).pop(),
@@ -378,9 +374,7 @@ class _TagPresentationRunScreenState extends State<TagPresentationRunScreen> {
               Padding(
                 padding: const EdgeInsets.only(left: 8),
                 child: Material(
-                  color: isFirst
-                      ? Colors.transparent
-                      : const Color(0x99141417),
+                  color: isFirst ? Colors.transparent : const Color(0x99141417),
                   borderRadius: BorderRadius.circular(999),
                   child: IconButton(
                     constraints: BoxConstraints.tightFor(
@@ -403,9 +397,7 @@ class _TagPresentationRunScreenState extends State<TagPresentationRunScreen> {
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: Material(
-                  color: isLast
-                      ? Colors.transparent
-                      : const Color(0x99141417),
+                  color: isLast ? Colors.transparent : const Color(0x99141417),
                   borderRadius: BorderRadius.circular(999),
                   child: IconButton(
                     constraints: BoxConstraints.tightFor(
@@ -460,10 +452,7 @@ TagPresentationPrepWorkspace _buildRunScreenWorkspace(
   return TagPresentationPrepWorkspace.fromPreview(preview);
 }
 
-UnifiedTagChainItem _runToChainItem(
-  int groupId,
-  PresentationItemRecord item,
-) {
+UnifiedTagChainItem _runToChainItem(int groupId, PresentationItemRecord item) {
   final id = item.sourceItemId ?? 'saved:${item.id}';
   final itemType = _runItemTypeFromString(item.itemType);
   final mediaPath = item.mediaPath;
@@ -529,9 +518,7 @@ TagPresentationPrepSlide _runToSlide(PresentationLoadedSlide ls) {
         TagPresentationGridCell(
           row: row,
           column: col,
-          itemIds: List.unmodifiable(
-            zoneItemIds['cell:$row:$col'] ?? const [],
-          ),
+          itemIds: List.unmodifiable(zoneItemIds['cell:$row:$col'] ?? const []),
         ),
   ];
 
@@ -563,8 +550,8 @@ TagPresentationAspectRatio _runAspectRatioFromProfile(
     'sixteenByTen' => const TagPresentationAspectRatio.sixteenByTen(),
     'nineBySixteen' => const TagPresentationAspectRatio.nineBySixteen(),
     _ => TagPresentationAspectRatio.custom(
-        profile.aspectRatioValue > 0 ? profile.aspectRatioValue : 16 / 9,
-      ),
+      profile.aspectRatioValue > 0 ? profile.aspectRatioValue : 16 / 9,
+    ),
   };
 }
 

@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../library/data/library_catalog_service.dart';
 import '../../library/presentation/library_book_reader_screen.dart';
+import '../../library/presentation/library_item_open_guard.dart';
 import '../../utilities/presentation/elibrary_setup_screen.dart';
 import '../data/commentary_research_library_service.dart';
 import '../data/commentary_research_filters.dart';
@@ -725,6 +726,9 @@ Future<void> _openEpubSource(
     );
     return;
   }
+
+  if (!await ensureLibraryItemOpenable(context, sourceTarget.item)) return;
+  if (!context.mounted) return;
 
   final resolvedFilePath = p.join(rootPath, sourceTarget.item.relativePath);
   if (!File(resolvedFilePath).existsSync()) {

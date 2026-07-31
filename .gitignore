@@ -22,6 +22,7 @@ migrate_working_dir/
 .vscode/
 .vscode/*
 #.vscode/
+.claude/
 CLAUDE.md
 DAR*.docx
 
@@ -46,15 +47,22 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Local distribution builds (APKs, zips) built for tester handoff.
+/dist/
+
 # Local project planning notes
 UpgradePath.txt
 
 # Generated cover art cache; keep placeholder files tracked.
 assets/library_covers/*
 !assets/library_covers/.gitkeep
+!assets/library_covers/DAR.png
+!assets/library_covers/LOF_ATJ.png
 !assets/library_covers/thumbs/
 assets/library_covers/thumbs/*
 !assets/library_covers/thumbs/.gitkeep
+!assets/library_covers/thumbs/DAR.png
+!assets/library_covers/thumbs/LOF_ATJ.png
 
 # Generated EPUB/PDF payloads; keep baseline placeholders tracked.
 assets/databases/ePubs/EGW/**
@@ -73,3 +81,10 @@ assets/databases/PDFs/Research/**
 # Local backup artifacts for the baseline eLibrary database.
 assets/databases/eLibrary.db.bak
 assets/databases/*before-scans-import*
+assets/databases/Databases/
+assets/databases/Graphics/
+assets/databases/download_reports/
+assets/scans/
+EPUB_CANONICAL_BATCH_REPORT_*.md
+EPUB_CANONICAL_BATCH_REPORT_*.json
+recovery_backups/

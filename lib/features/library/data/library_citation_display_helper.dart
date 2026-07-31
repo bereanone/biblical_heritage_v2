@@ -301,9 +301,7 @@ bool _looksLikeInternalLocator(String? value) {
       lower.contains('.xhtml')) {
     return true;
   }
-  if (RegExp(
-    r'(?<!\w)\d+:\d+:\d+(?:-\d+)?(?::\d+)?(?!\w)',
-  ).hasMatch(lower)) {
+  if (RegExp(r'(?<!\w)\d+:\d+:\d+(?:-\d+)?(?::\d+)?(?!\w)').hasMatch(lower)) {
     return true;
   }
   return false;

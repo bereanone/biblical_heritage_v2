@@ -37,7 +37,21 @@ target 'Runner' do
 end
 
 post_install do |installer|
+  resource_bundle_identifiers = {
+    'DKImagePickerController-DKImagePickerController' => 'org.cocoapods.DKImagePickerController.resources',
+    'DKPhotoGallery-DKPhotoGallery' => 'org.cocoapods.DKPhotoGallery.resources',
+    'SDWebImage-SDWebImage' => 'org.cocoapods.SDWebImage.resources',
+    'SwiftyGif-SwiftyGif' => 'org.cocoapods.SwiftyGif.resources',
+  }
+
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+
+    resource_bundle_identifier = resource_bundle_identifiers[target.name]
+    next unless resource_bundle_identifier
+
+    target.build_configurations.each do |configuration|
+      configuration.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = resource_bundle_identifier
+    end
   end
 end

@@ -258,10 +258,7 @@ class ViewerSearchSectionFilterDialog extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
-                'Tap any section below.',
-                style: theme.textTheme.bodySmall,
-              ),
+              Text('Tap any section below.', style: theme.textTheme.bodySmall),
               const SizedBox(height: 10),
               Flexible(
                 child: ListView.separated(
@@ -347,9 +344,9 @@ class ViewerSearchBookFilterDialog extends StatelessWidget {
                         color: color,
                         indentLevel: 0,
                         selected: option.bookNumber == selectedBookNumber,
-                        onTap: () => Navigator.of(context).pop(
-                          ViewerSearchBookFilterResult(option.bookNumber),
-                        ),
+                        onTap: () => Navigator.of(
+                          context,
+                        ).pop(ViewerSearchBookFilterResult(option.bookNumber)),
                       ),
                     );
                   },
@@ -426,10 +423,7 @@ class _ViewerSearchHighlightFilterDialog extends StatelessWidget {
                       ),
                       title: Text(group.name),
                       trailing: selected
-                          ? Icon(
-                              Icons.check,
-                              color: theme.colorScheme.primary,
-                            )
+                          ? Icon(Icons.check, color: theme.colorScheme.primary)
                           : null,
                       onTap: () => Navigator.of(context).pop(group.id),
                     );

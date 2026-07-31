@@ -15,19 +15,13 @@ Future<UnifiedTagChainItem?> showTagCardPickerSheet(
     useSafeArea: true,
     backgroundColor: Colors.transparent,
     builder: (context) {
-      return _TagCardPickerSheet(
-        items: items,
-        zoneLabel: zoneLabel,
-      );
+      return _TagCardPickerSheet(items: items, zoneLabel: zoneLabel);
     },
   );
 }
 
 class _TagCardPickerSheet extends StatefulWidget {
-  const _TagCardPickerSheet({
-    required this.items,
-    required this.zoneLabel,
-  });
+  const _TagCardPickerSheet({required this.items, required this.zoneLabel});
 
   final List<UnifiedTagChainItem> items;
   final String zoneLabel;
@@ -46,8 +40,8 @@ class _TagCardPickerSheetState extends State<_TagCardPickerSheet> {
   }
 
   Future<void> _loadMediaRootPath() async {
-    final rootPath =
-        await LibraryRootService.instance.accessibleLibraryRootPath();
+    final rootPath = await LibraryRootService.instance
+        .accessibleLibraryRootPath();
     if (!mounted) return;
     setState(() {
       _mediaRootPath = rootPath;
@@ -117,10 +111,7 @@ class _TagCardPickerSheetState extends State<_TagCardPickerSheet> {
                       ],
                     ),
                   ),
-                  Divider(
-                    height: 1,
-                    color: theme.colorScheme.outlineVariant,
-                  ),
+                  Divider(height: 1, color: theme.colorScheme.outlineVariant),
                   Expanded(
                     child: items.isEmpty
                         ? Center(

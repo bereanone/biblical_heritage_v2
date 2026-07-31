@@ -3610,7 +3610,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       }
     }
     final slides = <_ParsedSharedSlide>[];
-    final seen = <String>{};
 
     for (var i = 0; i < blocks.length; i++) {
       final block = blocks[i];
@@ -3627,18 +3626,12 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           '[ImportDiag] block[$i] → kind=$kind noteRef=${slide.noteRef.substring(0, slide.noteRef.length.clamp(0, 60))} contentLen=${slide.contentText.length}',
         );
       }
-      final dedupeKey = slide.target?.verseRef ?? slide.noteRef;
-      if (!seen.add(dedupeKey)) {
-        if (kDebugMode)
-          debugPrint('[ImportDiag] block[$i] DEDUPED (key already seen)');
-        continue;
-      }
       slides.add(slide);
     }
 
     if (kDebugMode) {
       debugPrint(
-        '[ImportDiag] _parseSharedListFromText → ${slides.length} unique slide(s)',
+        '[ImportDiag] _parseSharedListFromText → ${slides.length} slide(s)',
       );
     }
     if (slides.isEmpty) return null;
@@ -4345,7 +4338,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     var bibleImportedCount = 0;
     var eLibraryImportedCount = 0;
     var noteImportedCount = 0;
-    var studyOrder = 1;
     final now = DateTime.now().millisecondsSinceEpoch;
     final warnings = <String>[];
 
@@ -4380,6 +4372,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     }
 
     for (final slide in [...noteSlides, ...recoveredAsNotes]) {
+      final sourceOrder = parsed.slides.indexOf(slide) + 1;
       final metadata = slide.studyBibleMetadata ?? const <String, Object?>{};
       final noteText = _s(metadata['note_text']).trim().isNotEmpty
           ? _s(metadata['note_text']).trim()
@@ -4400,13 +4393,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           '[ImportDiag] note slide: first="${slide.contentText.split('\n').first.substring(0, slide.contentText.split('\n').first.length.clamp(0, 60))}" verseRef=$verseRef',
         );
       }
-      final exists = await db.query(
-        tableName,
-        columns: ['id'],
-        where: 'user_id = ? AND tag = ? AND verse_ref = ?',
-        whereArgs: [userId, importTag, verseRef],
-        limit: 1,
-      );
+      // A shared list is an ordered sequence, not a set. Always insert each
+      // source occurrence so duplicate notes remain distinct cards.
+      const exists = <Map<String, Object?>>[];
       final values = <String, Object?>{
         'user_id': userId,
         'tag': importTag,
@@ -4425,7 +4414,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           if (referenceCode.isNotEmpty) 'reference_code': referenceCode,
           if (noteText.isNotEmpty) 'note_text': noteText,
         }),
-        'sort_order': studyOrder,
+        'sort_order': sourceOrder,
         'created_at': now + inserted + updatedExisting,
       };
       if (exists.isNotEmpty) {
@@ -4443,7 +4432,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           );
           updatedExisting++;
           noteImportedCount++;
-          studyOrder++;
           continue;
         }
         skippedExisting++;
@@ -4458,10 +4446,10 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       await db.insert(tableName, values);
       inserted++;
       noteImportedCount++;
-      studyOrder++;
     }
 
     for (final slide in scriptureSlides) {
+      final sourceOrder = parsed.slides.indexOf(slide) + 1;
       final target = slide.target!;
       String? importedNoteText;
       for (final contentLine in slide.contentText.split('\n')) {
@@ -4472,13 +4460,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           break;
         }
       }
-      final exists = await db.query(
-        tableName,
-        columns: ['id'],
-        where: 'user_id = ? AND tag = ? AND verse_ref = ?',
-        whereArgs: [userId, importTag, target.verseRef],
-        limit: 1,
-      );
+      // Duplicate references are meaningful independent entries in exports.
+      const exists = <Map<String, Object?>>[];
       final values = <String, Object?>{
         'user_id': userId,
         'tag': importTag,
@@ -4489,7 +4472,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         'verse_number': target.verse,
         'token_number': target.tokenNumber,
         if (importedNoteText != null) 'note_text': importedNoteText,
-        'sort_order': studyOrder,
+        'sort_order': sourceOrder,
         'created_at': now + inserted + updatedExisting,
       };
       if (exists.isNotEmpty) {
@@ -4503,7 +4486,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           );
           updatedExisting++;
           bibleImportedCount++;
-          studyOrder++;
           continue;
         }
         skippedExisting++;
@@ -4512,10 +4494,10 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       await db.insert(tableName, values);
       inserted++;
       bibleImportedCount++;
-      studyOrder++;
     }
 
     for (final slide in eLibrarySlides) {
+      final sourceOrder = parsed.slides.indexOf(slide) + 1;
       final metadata = slide.elibraryMetadata!;
       final stableRef = _s(metadata['stable_ref']).trim();
       final paragraphText =
@@ -4587,13 +4569,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         continue;
       }
 
-      final exists = await db.query(
-        tableName,
-        columns: ['id'],
-        where: 'user_id = ? AND tag = ? AND verse_ref = ?',
-        whereArgs: [userId, importTag, effectiveStableRef],
-        limit: 1,
-      );
+      const exists = <Map<String, Object?>>[];
       final values = <String, Object?>{
         'user_id': userId,
         'tag': importTag,
@@ -4606,7 +4582,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         'reference_code': citation.isNotEmpty ? citation : null,
         'note_text': effectiveParagraphText,
         'note_format_json': jsonEncode(metadata),
-        'sort_order': studyOrder,
+        'sort_order': sourceOrder,
         'created_at': now + inserted + updatedExisting,
       };
       if (exists.isNotEmpty) {
@@ -4620,7 +4596,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           );
           updatedExisting++;
           eLibraryImportedCount++;
-          studyOrder++;
           continue;
         }
         skippedExisting++;
@@ -4629,7 +4604,6 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       await db.insert(tableName, values);
       inserted++;
       eLibraryImportedCount++;
-      studyOrder++;
     }
 
     await saveTagCategory(

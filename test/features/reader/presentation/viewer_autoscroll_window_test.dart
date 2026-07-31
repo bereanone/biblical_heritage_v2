@@ -47,17 +47,34 @@ void main() {
     );
   });
 
-  test('Bible stops safely at its actual final boundary', () {
+  test(
+    'Bible lets ScrollPosition determine its actual final pixel boundary',
+    () {
+      expect(
+        viewerAutoScrollWindowAction(
+          delta: 5,
+          firstVisibleBlockId: 992,
+          lastVisibleBlockId: 1000,
+          firstLoadedBlockId: 950,
+          lastLoadedBlockId: 1000,
+          maxBlockId: 1000,
+        ),
+        ViewerAutoScrollWindowAction.scroll,
+      );
+    },
+  );
+
+  test('Bible can reverse within the first loaded verses above pixel zero', () {
     expect(
       viewerAutoScrollWindowAction(
-        delta: 5,
-        firstVisibleBlockId: 992,
-        lastVisibleBlockId: 1000,
-        firstLoadedBlockId: 950,
-        lastLoadedBlockId: 1000,
+        delta: -5,
+        firstVisibleBlockId: 3,
+        lastVisibleBlockId: 7,
+        firstLoadedBlockId: 1,
+        lastLoadedBlockId: 50,
         maxBlockId: 1000,
       ),
-      ViewerAutoScrollWindowAction.stopAtEnd,
+      ViewerAutoScrollWindowAction.scroll,
     );
   });
 

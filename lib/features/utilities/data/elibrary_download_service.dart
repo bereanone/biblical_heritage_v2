@@ -8,9 +8,11 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/library_root_service.dart';
+import '../../../core/bootstrap/library_root_native.dart';
 import '../../../core/database/user_database.dart';
 import 'elibrary_install_estimate_repository.dart';
 import 'elibrary_folder_policy.dart';
+import 'epub_download_validator.dart';
 
 const bool _debugELibraryDownloadLogs = false;
 
@@ -95,7 +97,7 @@ class ELibraryDownloadService {
     }
 
     final destinationRoot = p.join(rootPath, 'eLibrary_Downloads');
-    return _runDownloads(
+    final report = await _runDownloads(
       startedAt: startedAt,
       stopwatch: stopwatch,
       destinationRoot: destinationRoot,
@@ -109,6 +111,7 @@ class ELibraryDownloadService {
       userAgent: 'StudyBible2 eLibrary Downloader',
       productionLayout: false,
     );
+    return report;
   }
 
   Future<ELibraryDownloadReport> runProductionSetup({
@@ -125,6 +128,7 @@ class ELibraryDownloadService {
     void Function(ELibraryDownloadProgress progress)? onProgress,
     bool Function()? isCancelled,
   }) async {
+    await LibraryRootService.instance.requireLibraryAuthorization(write: true);
     final collections = await _collectionsWithItems();
     final startedAt = DateTime.now().toUtc();
     final stopwatch = Stopwatch()..start();
@@ -155,7 +159,7 @@ class ELibraryDownloadService {
 
     await LibraryRootService.instance.ensureStructure(rootPath);
 
-    return _runDownloads(
+    final report = await _runDownloads(
       startedAt: startedAt,
       stopwatch: stopwatch,
       destinationRoot: rootPath,
@@ -169,6 +173,8 @@ class ELibraryDownloadService {
       userAgent: 'StudyBible2 eLibrary Setup',
       productionLayout: true,
     );
+    await LibraryRootNative.syncAndroidLibraryTree();
+    return report;
   }
 
   Future<List<int?>> estimateProductionCollectionCounts() async {
@@ -326,6 +332,35 @@ class ELibraryDownloadService {
       dryRun: dryRun,
     );
     final unavailableUrls = <String>{};
+    final totalPlannedCount = selectedCollections.fold<int>(
+      0,
+      (sum, c) => sum + c.items.length * selectedFormats.length,
+    );
+    void emitProgress({
+      required ELibraryDownloadPhase phase,
+      required String collectionLabel,
+      required int collectionIdx,
+      required String currentFile,
+      required String statusMessage,
+    }) {
+      onProgress?.call(
+        ELibraryDownloadProgress(
+          currentCollection: collectionLabel,
+          collectionIndex: collectionIdx,
+          collectionTotal: selectedCollections.length,
+          discoveredCount: report.totalLinksDiscovered,
+          downloadedCount: report.downloadedCount,
+          skippedCount: report.skippedExistingCount,
+          unavailableCount: report.unavailableCount,
+          failedCount: report.failedCount,
+          currentFile: currentFile,
+          elapsedSeconds: stopwatch.elapsedMilliseconds / 1000.0,
+          statusMessage: statusMessage,
+          phase: phase,
+          totalPlannedCount: totalPlannedCount,
+        ),
+      );
+    }
 
     try {
       for (
@@ -345,20 +380,15 @@ class ELibraryDownloadService {
             '[ELibraryDownload] installing ${collection.label} (${collection.url})',
           );
         }
-        onProgress?.call(
-          ELibraryDownloadProgress(
-            currentCollection: collection.label,
-            collectionIndex: collectionIndex + 1,
-            collectionTotal: selectedCollections.length,
-            discoveredCount: report.totalLinksDiscovered,
-            downloadedCount: report.downloadedCount,
-            skippedCount: report.skippedExistingCount,
-            unavailableCount: report.unavailableCount,
-            failedCount: report.failedCount,
-            currentFile: 'preparing...',
-            elapsedSeconds: stopwatch.elapsedMilliseconds / 1000.0,
-            statusMessage: 'Preparing ${collection.label} downloads...',
-          ),
+        emitProgress(
+          phase: ELibraryDownloadPhase.collectionStarted,
+          collectionLabel: collection.label,
+          collectionIdx: collectionIndex + 1,
+          currentFile: 'preparing...',
+          statusMessage:
+              'Preparing ${collection.label} downloads '
+              '(${collection.items.length} item'
+              '${collection.items.length == 1 ? '' : 's'} discovered)...',
         );
 
         if (productionLayout) {
@@ -434,6 +464,14 @@ class ELibraryDownloadService {
                   '[ELibraryDownload] skipped cached ${collection.label} ${book.code} ${format.name}',
                 );
               }
+              emitProgress(
+                phase: ELibraryDownloadPhase.itemSkippedUnchanged,
+                collectionLabel: collection.label,
+                collectionIdx: collectionIndex + 1,
+                currentFile: '${book.code}.${format.name}',
+                statusMessage:
+                    'Already up to date: ${collection.label} ${book.title}',
+              );
               continue;
             }
 
@@ -449,21 +487,13 @@ class ELibraryDownloadService {
               await stagingFile.delete();
             }
 
-            onProgress?.call(
-              ELibraryDownloadProgress(
-                currentCollection: collection.label,
-                collectionIndex: collectionIndex + 1,
-                collectionTotal: selectedCollections.length,
-                discoveredCount: report.totalLinksDiscovered,
-                downloadedCount: report.downloadedCount,
-                skippedCount: report.skippedExistingCount,
-                unavailableCount: report.unavailableCount,
-                failedCount: report.failedCount,
-                currentFile: '${book.code}.${format.name}',
-                elapsedSeconds: stopwatch.elapsedMilliseconds / 1000.0,
-                statusMessage:
-                    'Downloading ${collection.label} ${book.title} (${format.name.toUpperCase()})',
-              ),
+            emitProgress(
+              phase: ELibraryDownloadPhase.downloadingItem,
+              collectionLabel: collection.label,
+              collectionIdx: collectionIndex + 1,
+              currentFile: '${book.code}.${format.name}',
+              statusMessage:
+                  'Downloading ${collection.label} ${book.title} (${format.name.toUpperCase()})',
             );
 
             final downloadResult = unavailableUrls.contains(sourceUrl)
@@ -479,6 +509,81 @@ class ELibraryDownloadService {
                     destinationFile: stagingFile,
                     formatLabel: format.name.toUpperCase(),
                   );
+
+            if (downloadResult.success && format == _DownloadFormat.epub) {
+              emitProgress(
+                phase: ELibraryDownloadPhase.validatingItem,
+                collectionLabel: collection.label,
+                collectionIdx: collectionIndex + 1,
+                currentFile: '${book.code}.${format.name}',
+                statusMessage:
+                    'Validating ${collection.label} ${book.title}...',
+              );
+              final validation = await _validateDownloadedEpub(
+                stagingFile: stagingFile,
+                expectedTitle: book.title,
+              );
+              if (!validation.isValid) {
+                if (await stagingFile.exists()) {
+                  await stagingFile.delete();
+                }
+                final detail =
+                    validation.detail ?? 'EPUB failed download validation.';
+                if (validation.looksLikePlaceholder) {
+                  unavailableUrls.add(sourceUrl);
+                  report.unavailableCount += 1;
+                  report.filesUnavailable.add(
+                    ELibraryDownloadFileRecord(
+                      title: book.title,
+                      collection: collection.label,
+                      format: format.name,
+                      sourceUrl: sourceUrl,
+                      relativePath: relativePath,
+                      fileName: p.basename(destinationPath),
+                      fileSize: 0,
+                      sha256: null,
+                      status: dryRun
+                          ? 'would_be_unavailable_placeholder'
+                          : 'unavailable_placeholder',
+                      error: detail,
+                    ),
+                  );
+                } else {
+                  report.invalidDownloadCount += 1;
+                  report.filesInvalid.add(
+                    ELibraryDownloadFileRecord(
+                      title: book.title,
+                      collection: collection.label,
+                      format: format.name,
+                      sourceUrl: sourceUrl,
+                      relativePath: relativePath,
+                      fileName: p.basename(destinationPath),
+                      fileSize: 0,
+                      sha256: null,
+                      status: dryRun ? 'would_be_invalid' : 'invalid_download',
+                      error: detail,
+                    ),
+                  );
+                }
+                if (_debugELibraryDownloadLogs) {
+                  debugPrint(
+                    '[ELibraryDownload] rejected ${collection.label} ${book.code} '
+                    '${format.name}: $detail',
+                  );
+                }
+                emitProgress(
+                  phase: ELibraryDownloadPhase.itemUnavailable,
+                  collectionLabel: collection.label,
+                  collectionIdx: collectionIndex + 1,
+                  currentFile: '${book.code}.${format.name}',
+                  statusMessage:
+                      'Not available: ${collection.label} '
+                      '${book.title}',
+                );
+                await Future<void>.delayed(const Duration(milliseconds: 120));
+                continue;
+              }
+            }
 
             if (downloadResult.success) {
               final stagedSize = await stagingFile.length();
@@ -512,6 +617,14 @@ class ELibraryDownloadService {
                       '[ELibraryDownload] skipped existing ${collection.label} ${book.code} ${format.name}',
                     );
                   }
+                  emitProgress(
+                    phase: ELibraryDownloadPhase.itemSkippedUnchanged,
+                    collectionLabel: collection.label,
+                    collectionIdx: collectionIndex + 1,
+                    currentFile: '${book.code}.${format.name}',
+                    statusMessage:
+                        'Already up to date: ${collection.label} ${book.title}',
+                  );
                   continue;
                 }
 
@@ -708,6 +821,23 @@ class ELibraryDownloadService {
                 'failed=${report.failedCount}',
               );
             }
+
+            emitProgress(
+              phase: downloadResult.success
+                  ? ELibraryDownloadPhase.itemDownloaded
+                  : downloadResult.unavailable
+                  ? ELibraryDownloadPhase.itemUnavailable
+                  : ELibraryDownloadPhase.itemFailed,
+              collectionLabel: collection.label,
+              collectionIdx: collectionIndex + 1,
+              currentFile: '${book.code}.${format.name}',
+              statusMessage: downloadResult.success
+                  ? 'Downloaded successfully: ${collection.label} '
+                        '${book.title}'
+                  : downloadResult.unavailable
+                  ? 'Not available: ${collection.label} ${book.title}'
+                  : 'Download failed: ${collection.label} ${book.title}',
+            );
 
             await Future<void>.delayed(const Duration(milliseconds: 120));
           }
@@ -918,6 +1048,14 @@ class ELibraryDownloadService {
     }
   }
 
+  Future<EpubDownloadValidationResult> _validateDownloadedEpub({
+    required File stagingFile,
+    required String expectedTitle,
+  }) async {
+    final bytes = await stagingFile.readAsBytes();
+    return EpubDownloadValidator.validate(bytes, expectedTitle: expectedTitle);
+  }
+
   Future<Map<String, _ExistingFileFingerprint>>
   _loadExistingFileFingerprints() async {
     final db = await UserDatabase.instance.database;
@@ -1020,10 +1158,12 @@ class ELibraryDownloadReport {
     required this.skippedExistingCount,
     required this.unavailableCount,
     required this.failedCount,
+    required this.invalidDownloadCount,
     required this.filesDownloaded,
     required this.filesSkipped,
     required this.filesUnavailable,
     required this.filesQuarantined,
+    required this.filesInvalid,
     required this.failures,
     required this.usedStaticPageDiscovery,
     required this.usedFallbackManifest,
@@ -1047,10 +1187,12 @@ class ELibraryDownloadReport {
   final int skippedExistingCount;
   final int unavailableCount;
   final int failedCount;
+  final int invalidDownloadCount;
   final List<ELibraryDownloadFileRecord> filesDownloaded;
   final List<ELibraryDownloadFileRecord> filesSkipped;
   final List<ELibraryDownloadFileRecord> filesUnavailable;
   final List<ELibraryDownloadFileRecord> filesQuarantined;
+  final List<ELibraryDownloadFileRecord> filesInvalid;
   final List<ELibraryDownloadFileRecord> failures;
   final bool usedStaticPageDiscovery;
   final bool usedFallbackManifest;
@@ -1074,6 +1216,7 @@ class ELibraryDownloadReport {
     'skipped_existing_count': skippedExistingCount,
     'unavailable_count': unavailableCount,
     'failed_count': failedCount,
+    'invalid_download_count': invalidDownloadCount,
     'files_downloaded': filesDownloaded
         .map((item) => item.toJson())
         .toList(growable: false),
@@ -1084,6 +1227,9 @@ class ELibraryDownloadReport {
         .map((item) => item.toJson())
         .toList(growable: false),
     'files_quarantined': filesQuarantined
+        .map((item) => item.toJson())
+        .toList(growable: false),
+    'files_invalid': filesInvalid
         .map((item) => item.toJson())
         .toList(growable: false),
     'failures': failures.map((item) => item.toJson()).toList(growable: false),
@@ -1135,6 +1281,22 @@ class ELibraryDownloadFileRecord {
   };
 }
 
+/// Coarse-grained phase of a single collection/item within a running
+/// download+prepare pass, so a progress UI can show one continuous
+/// Downloading -> Validating -> Ready sequence instead of only a single
+/// generic status string. Purely additive/optional — every existing
+/// consumer that only reads [ELibraryDownloadProgress.statusMessage] keeps
+/// working unchanged.
+enum ELibraryDownloadPhase {
+  collectionStarted,
+  downloadingItem,
+  validatingItem,
+  itemDownloaded,
+  itemSkippedUnchanged,
+  itemUnavailable,
+  itemFailed,
+}
+
 class ELibraryDownloadProgress {
   const ELibraryDownloadProgress({
     required this.currentCollection,
@@ -1148,6 +1310,8 @@ class ELibraryDownloadProgress {
     required this.currentFile,
     required this.elapsedSeconds,
     required this.statusMessage,
+    this.phase = ELibraryDownloadPhase.downloadingItem,
+    this.totalPlannedCount = 0,
   });
 
   final String currentCollection;
@@ -1161,6 +1325,21 @@ class ELibraryDownloadProgress {
   final String currentFile;
   final double elapsedSeconds;
   final String statusMessage;
+
+  /// Which step this update describes — optional, defaults to
+  /// [ELibraryDownloadPhase.downloadingItem] for backward compatibility.
+  final ELibraryDownloadPhase phase;
+
+  /// Total items (books x selected formats) planned across every selected
+  /// collection, known before the first download starts, so a UI can show a
+  /// determinate "N of Total" progress bar instead of an indeterminate spinner.
+  /// Zero when unknown.
+  final int totalPlannedCount;
+
+  /// Items accounted for so far (downloaded + skipped + unavailable + failed),
+  /// useful alongside [totalPlannedCount] for a determinate progress value.
+  int get completedCount =>
+      downloadedCount + skippedCount + unavailableCount + failedCount;
 }
 
 class _MutableELibraryDownloadReport {
@@ -1186,6 +1365,7 @@ class _MutableELibraryDownloadReport {
   int unavailableCount = 0;
   int quarantinedCount = 0;
   int failedCount = 0;
+  int invalidDownloadCount = 0;
   final List<ELibraryDownloadFileRecord> filesDownloaded =
       <ELibraryDownloadFileRecord>[];
   final List<ELibraryDownloadFileRecord> filesSkipped =
@@ -1193,6 +1373,8 @@ class _MutableELibraryDownloadReport {
   final List<ELibraryDownloadFileRecord> filesUnavailable =
       <ELibraryDownloadFileRecord>[];
   final List<ELibraryDownloadFileRecord> filesQuarantined =
+      <ELibraryDownloadFileRecord>[];
+  final List<ELibraryDownloadFileRecord> filesInvalid =
       <ELibraryDownloadFileRecord>[];
   final List<ELibraryDownloadFileRecord> failures =
       <ELibraryDownloadFileRecord>[];
@@ -1222,6 +1404,7 @@ class _MutableELibraryDownloadReport {
       skippedExistingCount: skippedExistingCount,
       unavailableCount: unavailableCount,
       failedCount: failedCount,
+      invalidDownloadCount: invalidDownloadCount,
       filesDownloaded: List<ELibraryDownloadFileRecord>.unmodifiable(
         filesDownloaded,
       ),
@@ -1232,6 +1415,7 @@ class _MutableELibraryDownloadReport {
       filesQuarantined: List<ELibraryDownloadFileRecord>.unmodifiable(
         filesQuarantined,
       ),
+      filesInvalid: List<ELibraryDownloadFileRecord>.unmodifiable(filesInvalid),
       failures: List<ELibraryDownloadFileRecord>.unmodifiable(failures),
       usedStaticPageDiscovery: usedStaticPageDiscovery,
       usedFallbackManifest: usedFallbackManifest,

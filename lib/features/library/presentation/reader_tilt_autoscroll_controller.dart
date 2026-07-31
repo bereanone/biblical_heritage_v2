@@ -492,9 +492,9 @@ class ReaderTiltAutoScrollController extends ChangeNotifier {
       return;
     }
     final previous = _smoothedPitch ?? sample.pitchRadians;
+    final sampleSmoothing = settings.sampleSmoothingFactor;
     _smoothedPitch =
-        previous +
-        (sample.pitchRadians - previous) * settings.sampleSmoothingFactor;
+        previous + (sample.pitchRadians - previous) * sampleSmoothing;
     final relativePitch = _smoothedPitch! - neutralPitchRadians!;
     diagnosticRelativePitchRadians = relativePitch;
     final now = _now();

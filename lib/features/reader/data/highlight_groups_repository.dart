@@ -44,7 +44,12 @@ class HighlightGroupRecord {
 class HighlightGroupsRepository {
   Future<int> ensureUserId() async {
     final db = await UserDatabase.instance.database;
-    final rows = await db.query('users', columns: ['id'], orderBy: 'id ASC', limit: 1);
+    final rows = await db.query(
+      'users',
+      columns: ['id'],
+      orderBy: 'id ASC',
+      limit: 1,
+    );
     if (rows.isNotEmpty) {
       final value = rows.first['id'];
       if (value is num) return value.toInt();

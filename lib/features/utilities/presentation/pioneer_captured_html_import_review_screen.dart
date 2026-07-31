@@ -40,7 +40,10 @@ class _PioneerCapturedHtmlImportReviewScreenState
     }
   }
 
-  Color _statusColor(ThemeData theme, PioneerCapturedHtmlImportReviewEntry entry) {
+  Color _statusColor(
+    ThemeData theme,
+    PioneerCapturedHtmlImportReviewEntry entry,
+  ) {
     if (entry.isFailed) return theme.colorScheme.errorContainer;
     if (entry.isNeedsCleanup) {
       return theme.colorScheme.tertiaryContainer;
@@ -123,9 +126,8 @@ class _PioneerCapturedHtmlImportReviewScreenState
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
                 itemCount: _entries.length,
-                separatorBuilder: (context, index) => const SizedBox(
-                  height: 12,
-                ),
+                separatorBuilder: (context, index) =>
+                    const SizedBox(height: 12),
                 itemBuilder: (context, index) {
                   final entry = _entries[index];
                   final statusColor = _statusColor(theme, entry);

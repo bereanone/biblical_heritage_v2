@@ -1,6 +1,8 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'library_document_models.dart';
+import 'library_search_navigation_target.dart';
+import 'library_section_heuristics.dart';
 
 class LibraryDocumentRepository {
   const LibraryDocumentRepository(this.db);
@@ -34,6 +36,27 @@ class LibraryDocumentRepository {
         rows.first['status'] == 'complete' &&
         rows.first['canonicalizer_version'] == canonicalizerVersion &&
         await blockCount(libraryItemId) > 0;
+  }
+
+  /// Updates only the catalog title/author for an already-imported item —
+  /// never touches canonical content, `source_work_id`, or anything in the
+  /// separate user database. `null` leaves a field unchanged.
+  Future<void> updateCatalogMetadata(
+    String libraryItemId, {
+    String? title,
+    String? author,
+  }) async {
+    final values = <String, Object?>{
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+      if (title != null) 'title': title,
+      if (author != null) 'author': author,
+    };
+    await db.update(
+      'library_items',
+      values,
+      where: 'id = ?',
+      whereArgs: <Object?>[libraryItemId],
+    );
   }
 
   Future<int> blockCount(String libraryItemId) async => _firstIntValue(
@@ -106,6 +129,129 @@ class LibraryDocumentRepository {
       limit: 1,
     );
     return rows.isEmpty ? null : (rows.first['display_order'] as num).toInt();
+  }
+
+  /// Returns the first substantive canonical block while leaving all front
+  /// matter in the document and Contents tree.
+  Future<int?> openingDisplayOrder(
+    String libraryItemId, {
+    String? bookTitle,
+  }) async {
+    final headingRows = await db.query(
+      'library_document_blocks',
+      columns: const <String>['display_order', 'plain_text', 'source_href'],
+      where: 'library_item_id = ? AND block_type = ?',
+      whereArgs: <Object?>[
+        libraryItemId,
+        LibraryDocumentBlockType.heading.name,
+      ],
+      orderBy: 'display_order ASC',
+    );
+    for (final heading in headingRows) {
+      final label = heading['plain_text']?.toString() ?? '';
+      final href = heading['source_href']?.toString() ?? '';
+      if (libraryIsFrontMatterOpeningLabel(label) ||
+          libraryIsFrontMatterOpeningLabel(href)) {
+        continue;
+      }
+      final normalized = label
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+          .trim();
+      if (RegExp(
+        r'^(?:chapter|article|sermon|part) (?:1|i|one)(?: |$)',
+      ).hasMatch(normalized)) {
+        return (heading['display_order'] as num?)?.toInt();
+      }
+    }
+
+    final rows = await db.rawQuery(
+      '''
+      SELECT s.id, s.title, s.source_href, MIN(b.display_order) AS first_order
+      FROM library_document_sections s
+      JOIN library_document_blocks b
+        ON b.library_item_id = s.library_item_id AND b.section_id = s.id
+      WHERE s.library_item_id = ?
+      GROUP BY s.id, s.display_order
+      ORDER BY s.display_order ASC
+      ''',
+      <Object?>[libraryItemId],
+    );
+    for (final row in rows) {
+      final sectionId = row['id']?.toString() ?? '';
+      final title = row['title']?.toString() ?? '';
+      final href = row['source_href']?.toString() ?? '';
+      if (libraryIsFrontMatterOpeningLabel(title) ||
+          libraryIsFrontMatterOpeningLabel(href)) {
+        continue;
+      }
+      final blockRows = await db.query(
+        'library_document_blocks',
+        columns: const <String>['display_order', 'block_type', 'plain_text'],
+        where: 'library_item_id = ? AND section_id = ?',
+        whereArgs: <Object?>[libraryItemId, sectionId],
+        orderBy: 'display_order ASC',
+      );
+      final paragraphs = blockRows
+          .map((block) => block['plain_text']?.toString() ?? '')
+          .toList(growable: false);
+      if (libraryIsMeaningfulReadingSection(
+        title: title,
+        href: href,
+        paragraphs: paragraphs,
+        bookTitle: bookTitle,
+      )) {
+        for (final block in blockRows) {
+          if (block['block_type'] != LibraryDocumentBlockType.heading.name) {
+            continue;
+          }
+          final heading = block['plain_text']?.toString() ?? '';
+          if (!libraryIsFrontMatterOpeningLabel(heading)) {
+            return (block['display_order'] as num?)?.toInt();
+          }
+        }
+        return (row['first_order'] as num?)?.toInt();
+      }
+    }
+    return null;
+  }
+
+  Future<bool> containsDisplayOrder(
+    String libraryItemId,
+    int displayOrder,
+  ) async {
+    final rows = await db.query(
+      'library_document_blocks',
+      columns: const <String>['id'],
+      where: 'library_item_id = ? AND display_order = ?',
+      whereArgs: <Object?>[libraryItemId, displayOrder],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<int?> displayOrderForSearchTarget(
+    LibrarySearchNavigationTarget target,
+  ) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT b.display_order
+      FROM library_block_source_map sm
+      INNER JOIN library_document_blocks b
+        ON b.library_item_id = sm.library_item_id
+        AND b.id = sm.block_id
+      WHERE sm.library_item_id = ?
+        AND LOWER(COALESCE(sm.source_href, '')) = LOWER(?)
+        AND sm.legacy_paragraph_index = ?
+      LIMIT 1
+      ''',
+      <Object?>[
+        target.libraryItemId,
+        target.href,
+        target.paragraphOnSection ?? target.paragraphIndex,
+      ],
+    );
+    return rows.isEmpty ? null : (rows.first['display_order'] as num?)?.toInt();
   }
 
   Future<LibraryDocumentLocation?> resolveLocation(

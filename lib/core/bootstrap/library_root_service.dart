@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -94,12 +95,25 @@ enum LibraryRootSource {
   legacyImplicit,
 }
 
+class LibraryRootAuthorizationMissing implements Exception {
+  const LibraryRootAuthorizationMissing([this.detail]);
+
+  final String? detail;
+
+  @override
+  String toString() =>
+      detail ??
+      'StudyBible cannot access the selected library folder. Your files are '
+          'still present. Reconnect the existing StudyBible folder to continue.';
+}
+
 class LibraryRootService {
   LibraryRootService._();
 
   static final LibraryRootService instance = LibraryRootService._();
   LibraryRootSelection? _cachedSelection;
   String? _cachedAccessiblePath;
+  AndroidLibraryAuthorization? _cachedAndroidAuthorization;
 
   static const defaultAppLibraryFolderName = 'Biblical Heritage Library';
 
@@ -187,6 +201,36 @@ class LibraryRootService {
       bookmark: bookmark,
       defaultAppRoot: defaultAppRoot,
     );
+
+    if (LibraryRootNative.usesAndroidDocumentTree) {
+      final authorization = await validateAndroidAuthorization();
+      final authorizedPath = authorization.path?.trim() ?? '';
+      if (authorization.isAuthorized && authorizedPath.isNotEmpty) {
+        final selection = LibraryRootSelection(
+          path: authorizedPath,
+          exists: Directory(authorizedPath).existsSync(),
+          needsReconnect: false,
+          source: LibraryRootSource.userSelected,
+          bookmark: authorization.treeUri,
+        );
+        _cachedSelection = selection;
+        return selection;
+      }
+      final legacyHint = path?.trim().isNotEmpty == true
+          ? path
+          : '/storage/emulated/0/Documents/StudyBible';
+      final selection = LibraryRootSelection(
+        path: legacyHint,
+        exists: false,
+        needsReconnect: true,
+        source: path?.trim().isNotEmpty == true
+            ? source
+            : LibraryRootSource.legacyImplicit,
+        bookmark: bookmark,
+      );
+      _cachedSelection = selection;
+      return selection;
+    }
 
     if (resolvedPath != null && resolvedPath.trim().isNotEmpty) {
       if ((Platform.isMacOS || Platform.isIOS) &&
@@ -283,6 +327,14 @@ class LibraryRootService {
     if (normalized.isEmpty) return;
 
     final bookmarkValue = bookmark?.trim() ?? '';
+    if (LibraryRootNative.usesAndroidDocumentTree) {
+      final authorization = await validateAndroidAuthorization(refresh: true);
+      if (!authorization.isAuthorized ||
+          authorization.treeUri != bookmarkValue ||
+          authorization.path?.trim() != normalized) {
+        throw LibraryRootAuthorizationMissing(authorization.validationError);
+      }
+    }
     if (bookmarkValue.isNotEmpty && (Platform.isMacOS || Platform.isIOS)) {
       final activated = await LibraryRootNative.activateBookmark(bookmarkValue);
       final activatedPath = activated?.trim() ?? '';
@@ -291,7 +343,6 @@ class LibraryRootService {
       }
       normalized = p.normalize(activatedPath);
     }
-
     await ensureStructure(normalized);
     await LocalSettingsStore.instance.saveLibraryRoot(
       path: normalized,
@@ -303,7 +354,66 @@ class LibraryRootService {
 
   Future<void> clearLibraryRoot() async {
     await LocalSettingsStore.instance.clearLibraryRoot();
+    await LibraryRootNative.clearAndroidLibraryTree();
     _invalidateCachedSelection();
+  }
+
+  Future<AndroidLibraryAuthorization> validateAndroidAuthorization({
+    bool refresh = false,
+  }) async {
+    if (!LibraryRootNative.usesAndroidDocumentTree) {
+      return const AndroidLibraryAuthorization.notApplicable();
+    }
+    if (!refresh && _cachedAndroidAuthorization != null) {
+      return _cachedAndroidAuthorization!;
+    }
+    final authorization = await LibraryRootNative.validateAndroidLibraryTree();
+    _cachedAndroidAuthorization = authorization;
+    return authorization;
+  }
+
+  Future<AndroidLibraryAuthorization> reconnectAndroidLibraryRoot() async {
+    if (!LibraryRootNative.usesAndroidDocumentTree) {
+      return const AndroidLibraryAuthorization.notApplicable();
+    }
+    final authorization = await LibraryRootNative.pickAndroidLibraryTree(
+      requireExisting: true,
+    );
+    if (authorization == null) {
+      throw const LibraryRootAuthorizationMissing(
+        'Folder selection was cancelled. Your files are still present.',
+      );
+    }
+    if (!authorization.isAuthorized ||
+        authorization.path == null ||
+        authorization.treeUri == null) {
+      throw LibraryRootAuthorizationMissing(authorization.validationError);
+    }
+    _cachedAndroidAuthorization = authorization;
+    await LocalSettingsStore.instance.saveLibraryRoot(
+      path: authorization.path!,
+      bookmark: authorization.treeUri,
+      source: LibraryRootSource.userSelected.name,
+    );
+    _invalidateCachedSelection(clearAuthorization: false);
+    return authorization;
+  }
+
+  Future<void> requireLibraryAuthorization({bool write = false}) async {
+    if (!LibraryRootNative.usesAndroidDocumentTree) return;
+    final authorization = await validateAndroidAuthorization(refresh: true);
+    final valid =
+        authorization.isAuthorized &&
+        authorization.persistedRead &&
+        authorization.enumerates &&
+        (!write || authorization.persistedWrite);
+    if (!valid) {
+      debugPrint(
+        'library_batch_blocked_for_authorization '
+        'state=${authorization.authorizationState}',
+      );
+      throw LibraryRootAuthorizationMissing(authorization.validationError);
+    }
   }
 
   Future<void> ensureStructure([String? rootPath]) async {
@@ -484,9 +594,12 @@ class LibraryRootService {
     return selection.needsReconnect;
   }
 
-  void _invalidateCachedSelection() {
+  void _invalidateCachedSelection({bool clearAuthorization = true}) {
     _cachedSelection = null;
     _cachedAccessiblePath = null;
+    if (clearAuthorization) {
+      _cachedAndroidAuthorization = null;
+    }
   }
 
   LibraryRootSource _selectionSource({
@@ -582,7 +695,6 @@ class LibraryRootService {
   }
 
   void invalidateCachedSelection() {
-    _cachedSelection = null;
-    _cachedAccessiblePath = null;
+    _invalidateCachedSelection();
   }
 }

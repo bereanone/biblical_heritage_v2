@@ -13,7 +13,7 @@ Future<void> showViewerModePopup(
   required VoidCallback onApplyDefaultMarkup,
   required PresentationAspectRatioPreset presentationAspectRatio,
   required ValueChanged<PresentationAspectRatioPreset>
-      onPresentationAspectRatioChanged,
+  onPresentationAspectRatioChanged,
 }) {
   return showDialog<void>(
     context: context,
@@ -181,12 +181,13 @@ Future<void> showViewerModePopup(
                           itemBuilder: (context) =>
                               PresentationAspectRatioPreset.values
                                   .map(
-                                    (preset) => PopupMenuItem<
-                                      PresentationAspectRatioPreset
-                                    >(
-                                      value: preset,
-                                      child: Text(preset.label),
-                                    ),
+                                    (preset) =>
+                                        PopupMenuItem<
+                                          PresentationAspectRatioPreset
+                                        >(
+                                          value: preset,
+                                          child: Text(preset.label),
+                                        ),
                                   )
                                   .toList(growable: false),
                           child: Container(
@@ -270,10 +271,7 @@ class _ModeRow extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.bodySmall,
-                  ),
+                  Text(subtitle, style: theme.textTheme.bodySmall),
                 ],
               ),
             ),

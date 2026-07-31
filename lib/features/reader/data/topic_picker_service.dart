@@ -53,22 +53,18 @@ class TopicPickerService {
     List<Map<String, Object?>> sectionRows;
     List<Map<String, Object?>> topicRows;
     try {
-      sectionRows = await db.rawQuery(
-        '''
+      sectionRows = await db.rawQuery('''
         SELECT section_id, section_name, color_hex, min_block_id, max_block_id
         FROM bible_sections
         ORDER BY section_id
-        ''',
-      );
-      topicRows = await db.rawQuery(
-        '''
+        ''');
+      topicRows = await db.rawQuery('''
         SELECT sh.id, sh.heading AS label, sh.block_id, b.book_number
         FROM section_headings sh
         JOIN bible_blocks b ON b.id = sh.block_id
         WHERE sh.block_id IS NOT NULL
         ORDER BY sh.block_id
-        ''',
-      );
+        ''');
     } on DatabaseException catch (error) {
       if (error.toString().contains('no such table: bible_sections') ||
           error.toString().contains('no such table: section_headings')) {
@@ -108,10 +104,6 @@ class TopicPickerService {
 
     final books = await StudyBibleDatabase.instance.loadBooks();
 
-    return TopicPickerData(
-      sections: sections,
-      books: books,
-      topics: topics,
-    );
+    return TopicPickerData(sections: sections, books: books, topics: topics);
   }
 }

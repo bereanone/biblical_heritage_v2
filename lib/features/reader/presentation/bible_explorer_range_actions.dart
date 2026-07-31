@@ -26,7 +26,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
           _chapter = line.chapter;
           _verse = line.verse;
         });
-        _pinHeaderToSelectedVerse(line.blockId);
+        _publishSelectedLocation(line);
         _recordHistory();
       }
       _openRangeActions();
@@ -56,8 +56,21 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       _chapter = line.chapter;
       _verse = line.verse;
     });
-    _pinHeaderToSelectedVerse(line.blockId);
+    _publishSelectedLocation(line);
     _recordHistory();
+  }
+
+  void _publishSelectedLocation(VerseLine line) {
+    final blockId = line.blockId;
+    if (blockId == null || blockId <= 0) return;
+    _liveVisibleLocation.updateSelected(
+      BibleVisibleLocation(
+        blockId: blockId,
+        bookNumber: line.bookNumber,
+        chapter: line.chapter,
+        verse: line.verse,
+      ),
+    );
   }
 
   void _selectMarkupAnchor(VerseLine line) {

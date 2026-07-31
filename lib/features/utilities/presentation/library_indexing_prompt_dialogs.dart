@@ -146,9 +146,9 @@ String _libraryNeedsAttentionFriendlyReason(String? reason) {
   return 'The downloaded book file could not be prepared for reading.';
 }
 
-/// Compact warning card for managed EPUBs that need attention. The card keeps
-/// the summary human-friendly by default and exposes technical details behind
-/// a review toggle for support/debugging.
+/// Compact notice for managed EPUBs that were set aside after indexing failed.
+/// Details stay in an on-demand dialog so unreadable files do not dominate the
+/// setup screen.
 class LibraryNeedsAttentionCard extends StatefulWidget {
   const LibraryNeedsAttentionCard({
     super.key,
@@ -167,152 +167,104 @@ class LibraryNeedsAttentionCard extends StatefulWidget {
 }
 
 class _LibraryNeedsAttentionCardState extends State<LibraryNeedsAttentionCard> {
-  bool _showDetails = false;
-
-  void _toggleDetails() {
-    setState(() => _showDetails = !_showDetails);
+  Future<void> _showDetails() {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(
+          '${widget.items.length} unreadable '
+          'book${widget.items.length == 1 ? '' : 's'} set aside',
+        ),
+        content: SizedBox(
+          width: 560,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'These files remain safely stored, but are hidden from the '
+                  'library because no readable book content was found.',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 16),
+                for (final item in widget.items) ...[
+                  Text(
+                    _libraryNeedsAttentionTitle(item),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  SelectableText(
+                    'Filename: ${item.fileName.trim().isEmpty ? '(not set)' : item.fileName.trim()}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  SelectableText(
+                    'Reason: ${_libraryNeedsAttentionFriendlyReason(item.reason)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          if (widget.onRetryRepairable != null)
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                widget.onRetryRepairable!();
+              },
+              child: const Text('Retry'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     if (widget.items.isEmpty) return const SizedBox.shrink();
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final items = widget.items;
     return Card(
       elevation: 0,
-      color: Color.lerp(scheme.errorContainer, scheme.surface, 0.6),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: scheme.error.withValues(alpha: 0.18)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      child: ListTile(
+        dense: true,
+        leading: const Icon(Icons.inventory_2_outlined),
+        title: Text(
+          '${items.length} unreadable '
+          'book${items.length == 1 ? '' : 's'} set aside',
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        subtitle: const Text(
+          'Hidden from the library; original files were preserved.',
+        ),
+        trailing: Wrap(
+          spacing: 0,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.warning_amber_rounded,
-                  color: scheme.error,
-                  size: 24,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    '${items.length} book${items.length == 1 ? '' : 's'} '
-                    'need${items.length == 1 ? 's' : ''} attention',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: scheme.onSurface,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'These books could not be prepared for reading.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: scheme.onSurfaceVariant,
+            TextButton(onPressed: _showDetails, child: const Text('Review')),
+            if (widget.onRefresh != null)
+              IconButton(
+                tooltip: 'Refresh set-aside status',
+                onPressed: widget.onRefresh,
+                icon: const Icon(Icons.refresh),
               ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _toggleDetails,
-                  icon: Icon(
-                    _showDetails
-                        ? Icons.expand_less
-                        : Icons.manage_search_outlined,
-                  ),
-                  label: Text(_showDetails ? 'Hide Details' : 'Review Details'),
-                ),
-                FilledButton.tonalIcon(
-                  onPressed: widget.onRetryRepairable,
-                  icon: const Icon(Icons.build_circle_outlined),
-                  label: const Text('Retry Repairable'),
-                ),
-                IconButton(
-                  tooltip: 'Refresh warning status',
-                  onPressed: widget.onRefresh,
-                  icon: const Icon(Icons.refresh),
-                ),
-              ],
-            ),
-            if (_showDetails) ...[
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: scheme.surface.withValues(alpha: 0.45),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: scheme.outlineVariant),
-                ),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 220),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Review Details',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            color: scheme.onSurface,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        for (final item in items) ...[
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _libraryNeedsAttentionTitle(item),
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    color: scheme.onSurface,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                SelectableText(
-                                  'Filename: ${item.fileName.trim().isEmpty ? '(not set)' : item.fileName.trim()}',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                SelectableText(
-                                  'Technical reason: ${_libraryNeedsAttentionFriendlyReason(item.reason)}',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                SelectableText(
-                                  'Exact index_error: ${(item.reason?.trim().isNotEmpty == true ? item.reason!.trim() : 'No diagnostic details available.')}',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
           ],
         ),
       ),

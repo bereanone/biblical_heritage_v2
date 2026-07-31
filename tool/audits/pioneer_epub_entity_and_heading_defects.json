@@ -1,0 +1,1434 @@
+{
+  "summary": {
+    "generated_at": "2026-07-29T02:51:27.457246Z",
+    "source_db_path": "/Users/deanbowen/Development/eLibrary/Databases/_pre_epub_entity_and_heading_repair_backup_20260729_024733/eLibrary.db",
+    "metadata_affected_count": 15,
+    "heading_affected_count": 263,
+    "expected_metadata_count": 13,
+    "expected_heading_count": 263
+  },
+  "metadata_affected": [
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_appeal_from_the_u_s_supreme_court_decision_making_this_a_christian_nation_epub_3a94ef64_ace581e954_epub",
+      "title": "Appeal from the U. S. Supreme Court Decision Making this &quot;A Christian Nation&quot;",
+      "author": "A. T. Jones",
+      "decoded_title": "Appeal from the U. S. Supreme Court Decision Making this \"A Christian Nation\"",
+      "decoded_author": "A. T. Jones"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_australian_sentinel_herald_of_liberty_articles_1894_epub_443b75ec_acf38e0794_epub",
+      "title": "Australian Sentinel &amp; Herald of Liberty Articles (1894)",
+      "author": "A. T. Jones",
+      "decoded_title": "Australian Sentinel & Herald of Liberty Articles (1894)",
+      "decoded_author": "A. T. Jones"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_due_process_of_law_and_the_divine_right_of_dissent_epub_425631b2_02380b1ab6_epub",
+      "title": "&quot;Due Process of Law&quot; and The Divine Right of Dissent",
+      "author": "A. T. Jones",
+      "decoded_title": "\"Due Process of Law\" and The Divine Right of Dissent",
+      "decoded_author": "A. T. Jones"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_note_on_south_african_missionary_epub_0b3e4108_554c7b105e_epub",
+      "title": "&quot;Note&quot; on South African Missionary",
+      "author": "A. T. Jones",
+      "decoded_title": "\"Note\" on South African Missionary",
+      "decoded_author": "A. T. Jones"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_abiding_sabbath_and_the_lord_s_day_epub_db8227ad_3f925c924e_epub",
+      "title": "The &quot;Abiding Sabbath&quot; and the &quot;Lord's Day&quot;",
+      "author": "A. T. Jones",
+      "decoded_title": "The \"Abiding Sabbath\" and the \"Lord's Day\"",
+      "decoded_author": "A. T. Jones"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_missionary_worker_article_1903_epub_133cf0e9_a9e6f0f385_epub",
+      "title": "The Missionary Worker Article (1903)&#13;",
+      "author": "A. T. Jones",
+      "decoded_title": "The Missionary Worker Article (1903)\r",
+      "decoded_author": "A. T. Jones"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_puritan_sabbath_for_physical_rest_1894_epub_2adbea71_e1aef2de07_epub",
+      "title": "The Puritan Sabbath for &quot;Physical Rest&quot; [1894]",
+      "author": "A. T. Jones",
+      "decoded_title": "The Puritan Sabbath for \"Physical Rest\" [1894]",
+      "decoded_author": "A. T. Jones"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_puritan_sabbath_for_physical_rest_australian_epub_2c6395a5_bcb6f0d043_epub",
+      "title": "The Puritan Sabbath for &quot;Physical Rest&quot; [Australian]",
+      "author": "A. T. Jones",
+      "decoded_title": "The Puritan Sabbath for \"Physical Rest\" [Australian]",
+      "decoded_author": "A. T. Jones"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_charles_fitch_come_out_of_her_my_people_epub_14223a34_3ef161dfce_epub",
+      "title": "&quot;Come Out of Her, My People&quot;",
+      "author": "Charles Fitch",
+      "decoded_title": "\"Come Out of Her, My People\"",
+      "decoded_author": "Charles Fitch"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_christian_demand_for_war_epub_b7b37328_f5644f93e8_epub",
+      "title": "The &quot;Christian&quot; Demand for War",
+      "author": "E. J. Waggoner",
+      "decoded_title": "The \"Christian\" Demand for War",
+      "decoded_author": "E. J. Waggoner"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_what_think_ye_of_christ_epub_7576c062_5bcb80f91f_epub",
+      "title": "&quot;What Think Ye of Christ?&quot;",
+      "author": "E. J; Waggoner",
+      "decoded_title": "\"What Think Ye of Christ?\"",
+      "decoded_author": "E. J; Waggoner"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_review_of_the_two_sermons_of_rev_r_g_baird_on_the_christian_sabbath_epub_69f162f7_aa44a25ff2_epub",
+      "title": "Review of the Two Sermons of Rev. R. G. Baird on the &quot;Christian Sabbath&quot;",
+      "author": "J. H. Waggoner",
+      "decoded_title": "Review of the Two Sermons of Rev. R. G. Baird on the \"Christian Sabbath\"",
+      "decoded_author": "J. H. Waggoner"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_the_hope_of_the_gospel_epub_04b5087d_e8eae8b564_epub",
+      "title": "The Hope of the Gospel&#13;",
+      "author": "Loughborough",
+      "decoded_title": "The Hope of the Gospel\r",
+      "decoded_author": "Loughborough"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_w_w_prescott_the_daily_the_daily_the_daily_epub_97098b1b_dcf1da116e_epub",
+      "title": "&quot;The Daily&quot;&#13;&quot;The Daily&quot;&#13;The Daily",
+      "author": "W. W. Prescott",
+      "decoded_title": "\"The Daily\"\r\"The Daily\"\rThe Daily",
+      "decoded_author": "W. W. Prescott"
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_william_miller_miller_s_reply_to_stuart_s_hints_on_the_interpretation_of_prophecy_epub_59429372_af0febe1b9_epub",
+      "title": "Miller's Reply to Stuart's &quot;Hints on the Interpretation of Prophecy&quot;",
+      "author": "William Miller",
+      "decoded_title": "Miller's Reply to Stuart's \"Hints on the Interpretation of Prophecy\"",
+      "decoded_author": "William Miller"
+    }
+  ],
+  "heading_affected": [
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_an_exposition_of_matthew_twenty_four_on_the_second_coming_of_christ_epub_da8cb047_37e42ae9c9_epub",
+      "title": "An Exposition of Matthew Twenty-Four on the Second Coming of Christ",
+      "affected_heading_count": 77
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_civil_government_and_religion_1889_epub_73748ca8_78501c35e7_epub",
+      "title": "Civil Government and Religion [1889]",
+      "affected_heading_count": 147
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_civil_government_and_the_decalogue_epub_f65418a3_c47d6b2c19_epub",
+      "title": "Civil Government and the Decalogue",
+      "affected_heading_count": 2
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_bible_adventism_epub_2ed14d03_5d33131e24_epub",
+      "title": "Bible Adventism",
+      "affected_heading_count": 173
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_appeal_from_the_u_s_supreme_court_decision_making_this_a_christian_nation_epub_3a94ef64_ace581e954_epub",
+      "title": "Appeal from the U. S. Supreme Court Decision Making this &quot;A Christian Nation&quot;",
+      "affected_heading_count": 82
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_are_there_any_protestants_epub_a13e23fc_7ea9d1940f_epub",
+      "title": "Are There Any Protestants?",
+      "affected_heading_count": 3
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_arguments_on_the_breckinridge_sunday_bill_epub_f706b80a_7acb0b3a75_epub",
+      "title": "Arguments on the Breckinridge Sunday Bill",
+      "affected_heading_count": 61
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_australian_sentinel_herald_of_liberty_articles_1894_epub_443b75ec_acf38e0794_epub",
+      "title": "Australian Sentinel &amp; Herald of Liberty Articles (1894)",
+      "affected_heading_count": 2
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_bible_questions_and_answers_concerning_man_epub_4deac771_d9141cec28_epub",
+      "title": "Bible Questions and Answers Concerning Man",
+      "affected_heading_count": 12
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_christ_and_the_pharisees_epub_b8dee483_e95f35b294_epub",
+      "title": "Christ and the Pharisees",
+      "affected_heading_count": 29
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_christian_patriotism_epub_170a8c59_bd1ee0cf6b_epub",
+      "title": "Christian Patriotism",
+      "affected_heading_count": 79
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_civil_government_and_religion_1890_epub_7946038e_6a8ad95c5d_epub",
+      "title": "Civil Government and Religion [1890]",
+      "affected_heading_count": 154
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_civil_government_and_religion_1894_epub_97333102_1a9092ccbe_epub",
+      "title": "Civil Government and Religion [1894]",
+      "affected_heading_count": 154
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_due_process_of_law_and_the_divine_right_of_dissent_epub_425631b2_02380b1ab6_epub",
+      "title": "&quot;Due Process of Law&quot; and The Divine Right of Dissent",
+      "affected_heading_count": 104
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_ecclesiastical_empire_epub_4e40c8ef_a584ff004f_epub",
+      "title": "Ecclesiastical Empire",
+      "affected_heading_count": 779
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_general_conference_bulletin_articles_1893_1903_epub_04f06c12_c96005c1f2_epub",
+      "title": "General Conference Bulletin Articles (1893-1903)",
+      "affected_heading_count": 293
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_is_sunday_the_true_sabbath_of_god_epub_ede4bb0a_a16ebd8bbc_epub",
+      "title": "Is Sunday the True Sabbath of God?",
+      "affected_heading_count": 56
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_judicial_religious_legislation_exposed_epub_43a5f383_004378733f_epub",
+      "title": "Judicial Religious Legislation Exposed",
+      "affected_heading_count": 3
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_national_reform_an_absurdity_epub_376614bd_11a6aa7fdb_epub",
+      "title": "National Reform an Absurdity",
+      "affected_heading_count": 14
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_national_reform_and_the_rights_of_conscience_epub_5c8bd5fd_8b596df437_epub",
+      "title": "National Reform and the Rights of Conscience",
+      "affected_heading_count": 11
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_national_reform_is_church_and_state_bsl_epub_2a4efa19_5501f70cb2_epub",
+      "title": "National Reform is Church and State [BSL]",
+      "affected_heading_count": 13
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_national_reform_is_church_and_state_sl_epub_2892fa61_bd2c30ea93_epub",
+      "title": "National Reform is Church and State [SL]",
+      "affected_heading_count": 11
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_national_reformed_presbyterianism_epub_6eda4793_382273b184_epub",
+      "title": "National Reformed Presbyterianism",
+      "affected_heading_count": 21
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_one_man_power_epub_88b596f4_76473184af_epub",
+      "title": "One-Man Power",
+      "affected_heading_count": 18
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_partial_report_of_hearing_on_johnston_sunday_bill_s_404_epub_dd5d5a72_eeccae6420_epub",
+      "title": "Partial Report of Hearing on Johnston Sunday Bill, S. 404",
+      "affected_heading_count": 14
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_religion_and_the_public_schools_epub_15b7ce65_a5eef9481c_epub",
+      "title": "Religion and the Public Schools",
+      "affected_heading_count": 24
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_rev_w_f_crafts_against_the_editors_of_the_american_sentinel_epub_356ad9bb_3a07b709e2_epub",
+      "title": "Rev. W. F. Crafts Against the Editors of the American Sentinel",
+      "affected_heading_count": 8
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_shall_religion_be_taught_in_the_public_schools_epub_628d0c8e_9314d1a7ef_epub",
+      "title": "Shall Religion Be Taught in the Public Schools?",
+      "affected_heading_count": 8
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_sunday_legislation_epub_71eade2f_567528b68f_epub",
+      "title": "Sunday Legislation",
+      "affected_heading_count": 25
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_abiding_sabbath_and_the_lord_s_day_epub_db8227ad_3f925c924e_epub",
+      "title": "The &quot;Abiding Sabbath&quot; and the &quot;Lord's Day&quot;",
+      "affected_heading_count": 139
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_american_papacy_epub_1b58f123_1f95d7cb37_epub",
+      "title": "The American Papacy",
+      "affected_heading_count": 10
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_bible_echo_and_signs_of_the_times_articles_1886_1906_epub_ff426b6d_71f3b327a4_epub",
+      "title": "The Bible Echo and Signs of the Times Articles (1886-1906)",
+      "affected_heading_count": 90
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_captivity_of_the_republic_epub_5d76fbac_363e43dca5_epub",
+      "title": "The Captivity of the Republic",
+      "affected_heading_count": 101
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_christian_educator_article_1897_epub_dffd0cb7_f11931b9dc_epub",
+      "title": "The Christian Educator Article (1897)",
+      "affected_heading_count": 1
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_churches_and_the_public_treasury_epub_c54f4572_dab90e82f6_epub",
+      "title": "The Churches and the Public Treasury",
+      "affected_heading_count": 29
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_columbian_year_and_the_meaning_of_the_four_centuries_epub_afe59ed3_b49d96a775_epub",
+      "title": "The Columbian Year and the Meaning of the Four Centuries",
+      "affected_heading_count": 37
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_coming_of_our_lord_epub_22fef478_23310ce4e5_epub",
+      "title": "The Coming of Our Lord",
+      "affected_heading_count": 4
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_eastern_question_epub_a595c787_c64701f08b_epub",
+      "title": "The Eastern Question",
+      "affected_heading_count": 13
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_edmunds_resolution_epub_6fb4902b_a023ab2339_epub",
+      "title": "The Edmunds Resolution",
+      "affected_heading_count": 10
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_empires_of_the_bible_from_the_confusion_of_tongues_to_the_babylonian_captivity_epub_65c87bb1_d68e81b06c_epub",
+      "title": "The Empires of the Bible from the Confusion of Tongues to the Babylonian Captivity",
+      "affected_heading_count": 343
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_gospel_of_health_articles_1897_1898_epub_12b25cec_d2a43c103b_epub",
+      "title": "The Gospel of Health Articles (1897-1898)",
+      "affected_heading_count": 4
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_great_empires_of_prophecy_from_babylon_to_the_fall_of_rome_epub_fb4171aa_cfb91a207f_epub",
+      "title": "The Great Empires of Prophecy, from Babylon to the Fall of Rome",
+      "affected_heading_count": 610
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_great_nations_of_to_day_epub_bd1aba69_a8176e5b52_epub",
+      "title": "The Great Nations of To-day",
+      "affected_heading_count": 214
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_immortality_of_the_soul_is_it_a_scriptural_doctrine_epub_068af024_d36064765c_epub",
+      "title": "The Immortality of the Soul, Is it a Scriptural Doctrine",
+      "affected_heading_count": 27
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_life_boat_articles_1902_1903_epub_f00bd377_dad0216001_epub",
+      "title": "The Life Boat Articles (1902-1903)",
+      "affected_heading_count": 3
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_limits_of_civil_authority_epub_2b7fb0b0_cd965d6b81_epub",
+      "title": "The Limits of Civil Authority",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_marshaling_of_the_nations_epub_ac924619_df0e44b7ae_epub",
+      "title": "The Marshaling of the Nations",
+      "affected_heading_count": 32
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_medical_missionary_articles_1903_1909_epub_38ab8deb_c533af061a_epub",
+      "title": "The Medical Missionary Articles (1903-1909)",
+      "affected_heading_count": 190
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_missionary_magazine_article_1899_epub_5c738979_2d82310af6_epub",
+      "title": "The Missionary Magazine Article (1899)",
+      "affected_heading_count": 1
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_missionary_worker_article_1903_epub_133cf0e9_a9e6f0f385_epub",
+      "title": "The Missionary Worker Article (1903)&#13;",
+      "affected_heading_count": 1
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_national_reformed_constitution_and_the_american_hierarchy_epub_2aaa2987_cd0cb57102_epub",
+      "title": "The National Reformed Constitution and the American Hierarchy",
+      "affected_heading_count": 18
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_national_sunday_law_rll_epub_fd213fab_c78d3f5558_epub",
+      "title": "The National Sunday Law [RLL]",
+      "affected_heading_count": 172
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_national_sunday_law_sl18_epub_f04cefcb_d64da9b5e4_epub",
+      "title": "The National Sunday Law [SL18]",
+      "affected_heading_count": 173
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_national_sunday_law_sl27_epub_2354b1ed_89cd8a7720_epub",
+      "title": "The National Sunday Law [SL27]",
+      "affected_heading_count": 168
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_peopling_of_the_earth_epub_9aa6c33f_a73d8a8e06_epub",
+      "title": "The Peopling of the Earth",
+      "affected_heading_count": 46
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_place_of_the_bible_in_education_epub_82eaeaa3_1cd46a26ae_epub",
+      "title": "The Place of the Bible in Education",
+      "affected_heading_count": 206
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_present_truth_uk_articles_1887_1903_epub_d1d58507_d036632d6e_epub",
+      "title": "The Present Truth [UK] Articles (1887-1903)",
+      "affected_heading_count": 147
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_puritan_sabbath_for_physical_rest_1894_epub_2adbea71_e1aef2de07_epub",
+      "title": "The Puritan Sabbath for &quot;Physical Rest&quot; [1894]",
+      "affected_heading_count": 7
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_puritan_sabbath_for_physical_rest_australian_epub_2c6395a5_bcb6f0d043_epub",
+      "title": "The Puritan Sabbath for &quot;Physical Rest&quot; [Australian]",
+      "affected_heading_count": 7
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_rights_of_the_people_epub_bcb041cd_ea6a6846c1_epub",
+      "title": "The Rights of the People",
+      "affected_heading_count": 301
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_southern_sentinel_and_herald_of_liberty_articles_1895_1897_epub_a0a69e79_aef18c1238_epub",
+      "title": "The Southern Sentinel and Herald of Liberty Articles (1895-1897)",
+      "affected_heading_count": 5
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_southern_watchman_articles_1903_1905_epub_0f01c735_6201cdbf9d_epub",
+      "title": "The Southern Watchman Articles (1903-1905)",
+      "affected_heading_count": 9
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_two_republics_or_rome_and_the_united_states_of_america_epub_80b91a90_b4fa0c0b81_epub",
+      "title": "The Two Republics, or Rome and the United States of America",
+      "affected_heading_count": 90
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_union_of_church_and_state_in_the_united_states_epub_106d4a85_03a681bd2c_epub",
+      "title": "The Union of Church and State in the United States",
+      "affected_heading_count": 84
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_the_world_s_greatest_issues_military_diplomatic_religious_epub_cfc1471d_1266ea8aca_epub",
+      "title": "The World's Greatest Issues: Military, Diplomatic, Religious",
+      "affected_heading_count": 149
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_tremont_temple_lectures_epub_d129d4c1_80545c7c4d_epub",
+      "title": "Tremont Temple Lectures",
+      "affected_heading_count": 10
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_union_conference_record_articles_1898_1903_epub_ae63aa8c_404677185f_epub",
+      "title": "Union Conference Record Articles (1898-1903)",
+      "affected_heading_count": 9
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_views_of_national_reform_series_one_epub_6287fb91_347763c1fd_epub",
+      "title": "Views of National Reform, Series One",
+      "affected_heading_count": 70
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_a_t_jones_we_would_see_jesus_epub_dcd04adc_2bd7fb04c8_epub",
+      "title": "We Would See Jesus",
+      "affected_heading_count": 8
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_apollos_hale_herald_of_the_bridegroom_epub_3cc8cab9_67da39f020_epub",
+      "title": "Herald of the Bridegroom",
+      "affected_heading_count": 27
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_apollos_hale_the_second_advent_manual_epub_8c1a0e98_764929b937_epub",
+      "title": "The Second Advent Manual",
+      "affected_heading_count": 83
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_charles_fitch_come_out_of_her_my_people_epub_14223a34_3ef161dfce_epub",
+      "title": "&quot;Come Out of Her, My People&quot;",
+      "affected_heading_count": 5
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_charles_fitch_the_glory_of_god_in_the_earth_epub_dba412b0_a08497ccb0_epub",
+      "title": "The Glory of God in the Earth",
+      "affected_heading_count": 30
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_charles_fitch_the_power_of_the_gospel_epub_d95f6f95_a0e652298b_epub",
+      "title": "The Power of the Gospel",
+      "affected_heading_count": 12
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_charles_fitch_views_of_sanctification_epub_62f30ce3_58a5a31d8d_epub",
+      "title": "Views of Sanctification",
+      "affected_heading_count": 17
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_american_sentinel_articles_1886_1899_epub_457c684f_f14b2fa045_epub",
+      "title": "American Sentinel Articles (1886-1899)",
+      "affected_heading_count": 118
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_baptism_its_significance_epub_75b517b6_fd2e3f8f39_epub",
+      "title": "Baptism: Its Significance",
+      "affected_heading_count": 9
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_bible_readings_for_the_home_circle_portion_1899_epub_510c7fb3_a90ba7e25d_epub",
+      "title": "Bible Readings for the Home Circle [Portion] (1899)",
+      "affected_heading_count": 5
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_can_we_keep_the_sabbath_epub_d2ef787d_608783144c_epub",
+      "title": "Can We Keep the Sabbath?",
+      "affected_heading_count": 10
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_civil_sunday_holiday_epub_4c08736f_630d070b89_epub",
+      "title": "Civil Sunday Holiday",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_fathers_of_the_catholic_church_epub_7bdaeb0f_aaae31c901_epub",
+      "title": "Fathers of the Catholic Church",
+      "affected_heading_count": 212
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_foreknowledge_and_foreordination_epub_8ab23e92_220e97bba8_epub",
+      "title": "Foreknowledge and Foreordination",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_general_conference_bulletin_articles_1889_1903_epub_a5b846a3_9ccae38717_epub",
+      "title": "General Conference Bulletin Articles (1889-1903)",
+      "affected_heading_count": 134
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_how_to_get_knowledge_epub_68bd71bd_73f7bed1aa_epub",
+      "title": "How to Get Knowledge",
+      "affected_heading_count": 3
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_letter_and_spirit_epub_e575bc7e_b02b9b6c55_epub",
+      "title": "Letter and Spirit",
+      "affected_heading_count": 5
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_living_by_faith_epub_de42f47a_1e256cb7f2_epub",
+      "title": "Living by Faith",
+      "affected_heading_count": 11
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_national_reform_success_means_religious_persecution_epub_ea56f516_5edf2845c7_epub",
+      "title": "National Reform Success Means Religious Persecution",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_prophetic_lights_epub_0b03b6c9_9199015c45_epub",
+      "title": "Prophetic Lights",
+      "affected_heading_count": 143
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_rev_w_f_crafts_against_the_editors_of_the_american_sentinel_epub_4808a823_6c86fb54a3_epub",
+      "title": "Rev. W. F. Crafts Against the Editors of the American Sentinel",
+      "affected_heading_count": 8
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_salvation_in_jesus_christ_epub_e5c1c0cf_9ed19160a4_epub",
+      "title": "Salvation in Jesus Christ",
+      "affected_heading_count": 4
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_sunday_the_origin_of_its_observance_in_the_christian_church_epub_ff5743c5_9307ddfdca_epub",
+      "title": "Sunday: The Origin of its Observance in the Christian Church",
+      "affected_heading_count": 78
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_advent_review_and_sabbath_herald_articles_1884_1903_epub_3fa789c8_283cc90408_epub",
+      "title": "The Advent Review and Sabbath Herald Articles (1884-1903)",
+      "affected_heading_count": 16
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_american_sabbath_union_and_human_rights_epub_e2eedb5e_7593d1f314_epub",
+      "title": "The American Sabbath Union and Human Rights",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_bible_echo_and_australasian_signs_of_the_times_articles_1887_1906_epub_aa013cf6_88523f6c99_epub",
+      "title": "The Bible Echo and Australasian Signs of the Times Articles (1887-1906)",
+      "affected_heading_count": 59
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_blair_educational_amendment_epub_74e9f9af_e0f1290d7d_epub",
+      "title": "The Blair Educational Amendment",
+      "affected_heading_count": 10
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_blair_sunday_rest_bill_epub_70dd90d7_bf9b638937_epub",
+      "title": "The Blair Sunday-Rest Bill",
+      "affected_heading_count": 42
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_christian_demand_for_war_epub_b7b37328_f5644f93e8_epub",
+      "title": "The &quot;Christian&quot; Demand for War",
+      "affected_heading_count": 12
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_cross_of_christ_epub_4c7267cf_dcd25e801b_epub",
+      "title": "The Cross of Christ",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_everlasting_covenant_epub_66d6a7a7_82c629d827_epub",
+      "title": "The Everlasting Covenant",
+      "affected_heading_count": 383
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_full_assurance_of_faith_epub_0aa8b00a_e21fda66a8_epub",
+      "title": "The Full Assurance of Faith",
+      "affected_heading_count": 10
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_gospel_in_creation_epub_ee0c67fb_98173ce8e1_epub",
+      "title": "The Gospel in Creation",
+      "affected_heading_count": 134
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_home_missionary_articles_1890_1894_epub_02b76625_b76254f0a5_epub",
+      "title": "The Home Missionary Articles (1890-1894)",
+      "affected_heading_count": 9
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_honor_due_to_god_epub_15da7cd0_a6aaa65413_epub",
+      "title": "The Honor Due to God",
+      "affected_heading_count": 57
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_literal_week_epub_1d38fef0_f13171b48f_epub",
+      "title": "The Literal Week",
+      "affected_heading_count": 7
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_medical_missionary_articles_1897_1909_epub_536ee2c5_1b4ef9a3ae_epub",
+      "title": "The Medical Missionary Articles (1897-1909)",
+      "affected_heading_count": 94
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_missionary_magazine_articles_1898_1902_epub_51eb1882_2c855cbd0f_epub",
+      "title": "The Missionary Magazine Articles (1898-1902)",
+      "affected_heading_count": 11
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_power_of_forgiveness_epub_4487e74e_646ef1031b_epub",
+      "title": "The Power of Forgiveness",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_rest_that_remains_for_the_people_of_god_epub_85955af5_40e527795f_epub",
+      "title": "The Rest That Remains for the People of God",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_sabbath_school_worker_1890_epub_867f5de6_cb9c0afba0_epub",
+      "title": "The Sabbath-School Worker (1890)",
+      "affected_heading_count": 18
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_the_sure_foundation_and_the_keys_of_the_kingdom_epub_ffbca160_3c4937e685_epub",
+      "title": "The Sure Foundation and the Keys of the Kingdom",
+      "affected_heading_count": 9
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_three_sabbaths_epub_24f86e4c_b62f592030_epub",
+      "title": "Three Sabbaths",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_what_think_ye_of_christ_epub_7576c062_5bcb80f91f_epub",
+      "title": "&quot;What Think Ye of Christ?&quot;",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_e_j_waggoner_why_we_oppose_religious_legislation_epub_27b2de8e_5dab87c64b_epub",
+      "title": "Why We Oppose Religious Legislation",
+      "affected_heading_count": 19
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_a_vindication_of_the_doctrine_of_the_resurrection_of_the_unjust_epub_da0f2f38_3b7f074ef4_epub",
+      "title": "A Vindication of the Doctrine of the Resurrection of the Unjust",
+      "affected_heading_count": 87
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_a_written_discussion_upon_the_sabbath_epub_da7f33c5_36b9bd389d_epub",
+      "title": "A Written Discussion ... Upon the Sabbath",
+      "affected_heading_count": 125
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_angels_their_nature_and_ministry_epub_cc2b40b1_8e729acff2_epub",
+      "title": "Angels: Their Nature and Ministry",
+      "affected_heading_count": 127
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_discussion_on_the_sabbath_question_1869_epub_a874c158_d81c14f00d_epub",
+      "title": "Discussion on the Sabbath Question [1869]",
+      "affected_heading_count": 105
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_from_eden_to_eden_epub_d730d626_19d0eb0bba_epub",
+      "title": "From Eden to Eden",
+      "affected_heading_count": 192
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_justification_by_faith_epub_f7860e54_229882ea09_epub",
+      "title": "Justification by Faith",
+      "affected_heading_count": 37
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_positive_institutions_epub_7961a46d_18f3086e27_epub",
+      "title": "Positive Institutions",
+      "affected_heading_count": 11
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_purity_of_national_religion_epub_3a3bd2c2_38d09c14bd_epub",
+      "title": "Purity of National Religion",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_refutation_of_the_doctrine_called_the_age_to_come_epub_2f1863d8_c0c4a831a1_epub",
+      "title": "Refutation of the Doctrine Called The Age to Come",
+      "affected_heading_count": 146
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_review_of_a_series_of_discourses_on_the_sabbath_question_epub_2a35237c_3ff8f2d0e4_epub",
+      "title": "Review of a Series of Discourses ... on the Sabbath Question",
+      "affected_heading_count": 59
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_review_of_the_two_sermons_of_rev_r_g_baird_on_the_christian_sabbath_epub_69f162f7_aa44a25ff2_epub",
+      "title": "Review of the Two Sermons of Rev. R. G. Baird on the &quot;Christian Sabbath&quot;",
+      "affected_heading_count": 55
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_the_atonement_epub_87f895b7_180bf65431_epub",
+      "title": "The Atonement",
+      "affected_heading_count": 28
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_the_lost_time_question_epub_039a168d_737c6cc9d8_epub",
+      "title": "The Lost Time Question",
+      "affected_heading_count": 13
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_the_mark_of_the_beast_epub_68b17204_42f2664bb3_epub",
+      "title": "The Mark of the Beast",
+      "affected_heading_count": 12
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_the_nature_and_tendency_of_modern_spiritualism_epub_aecc7a9a_30c0488da7_epub",
+      "title": "The Nature and Tendency of Modern Spiritualism",
+      "affected_heading_count": 150
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_the_origin_and_growth_of_sunday_observance_in_the_christian_church_epub_404ece43_3785c2c21e_epub",
+      "title": "The Origin and Growth of Sunday Observance in the Christian Church",
+      "affected_heading_count": 80
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_the_perpetuity_of_the_seventh_day_sabbath_epub_a91e7772_1a3350eecc_epub",
+      "title": "The Perpetuity of the Seventh-day Sabbath",
+      "affected_heading_count": 114
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_the_spirit_of_god_epub_6577dcd6_46ae69c064_epub",
+      "title": "The Spirit of God",
+      "affected_heading_count": 117
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_the_ten_commandments_epub_346c02d7_b3d20532bd_epub",
+      "title": "The Ten Commandments",
+      "affected_heading_count": 28
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_the_truth_found_epub_b8826e89_2c4c46199f_epub",
+      "title": "The Truth Found",
+      "affected_heading_count": 49
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_thoughts_on_baptism_epub_d1d5227a_55cfa16f83_epub",
+      "title": "Thoughts on Baptism",
+      "affected_heading_count": 120
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_h_waggoner_which_day_do_you_keep_and_why_epub_07c0626d_821a42dc3a_epub",
+      "title": "Which Day Do You Keep and Why?",
+      "affected_heading_count": 5
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_an_examination_of_the_scripture_testimony_concerning_man_s_present_condition_and_his_future_reward_or_punishment_epub_a0b50384_13936d50b8_epub",
+      "title": "An Examination of the Scripture Testimony Concerning Man's Present Condition and His Future Reward or Punishment",
+      "affected_heading_count": 3
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_discussion_on_the_sabbath_question_1863_epub_ada0409f_11116633e4_epub",
+      "title": "Discussion on the Sabbath Question [1863]",
+      "affected_heading_count": 47
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_hand_book_of_health_epub_a9adee53_524ff950ee_epub",
+      "title": "Hand Book of Health",
+      "affected_heading_count": 163
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_heavenly_visions_epub_6e14b5e9_46e8d11b0c_epub",
+      "title": "Heavenly Visions",
+      "affected_heading_count": 81
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_last_day_tokens_epub_ee4e8fda_ab4dc93763_epub",
+      "title": "Last Day Tokens",
+      "affected_heading_count": 118
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_miracles_in_my_life_epub_e7bf1feb_0860d2c034_epub",
+      "title": "Miracles in My Life",
+      "affected_heading_count": 86
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_questions_on_the_sealing_message_epub_ddf61909_116646bfa4_epub",
+      "title": "Questions on the Sealing Message",
+      "affected_heading_count": 35
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_religious_societies_epub_8b919e01_90dbe90d45_epub",
+      "title": "Religious Societies",
+      "affected_heading_count": 13
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_sabbath_controversy_in_allegan_mich_epub_7fc45977_4576ed5bce_epub",
+      "title": "Sabbath Controversy in Allegan, Mich.",
+      "affected_heading_count": 10
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_spiritual_gifts_epub_d42616e8_c7fb07e683_epub",
+      "title": "Spiritual Gifts",
+      "affected_heading_count": 29
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_the_church_its_organization_order_and_discipline_epub_31947d76_0100e16c44_epub",
+      "title": "The Church: Its Organization, Order and Discipline",
+      "affected_heading_count": 123
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_the_hope_of_the_gospel_epub_04b5087d_e8eae8b564_epub",
+      "title": "The Hope of the Gospel&#13;",
+      "affected_heading_count": 70
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_the_prophetic_gift_in_the_gospel_church_epub_768c2fc6_88776967a3_epub",
+      "title": "The Prophetic Gift in the Gospel Church",
+      "affected_heading_count": 82
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_the_saints_inheritance_epub_5ac743b2_59814c58d3_epub",
+      "title": "The Saints' Inheritance",
+      "affected_heading_count": 69
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_the_two_horned_beast_epub_0ed49903_d37dd82a9b_epub",
+      "title": "The Two-Horned Beast",
+      "affected_heading_count": 45
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_j_n_loughborough_the_two_horned_beast_of_rev_xiii_a_symbol_of_the_united_states_epub_a9e81ba6_f58f6ae227_epub",
+      "title": "The Two-Horned Beast of Rev. XIII, a Symbol of the United States",
+      "affected_heading_count": 9
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_a_brief_account_of_the_last_sickness_and_death_of_nathaniel_white_epub_d7456492_aab782841f_epub",
+      "title": "A Brief Account of the Last Sickness and Death of Nathaniel White",
+      "affected_heading_count": 8
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_a_brief_exposition_of_the_angels_of_revelation_14_epub_fb147688_0effc50ca7_epub",
+      "title": "A Brief Exposition of the Angels of Revelation 14",
+      "affected_heading_count": 24
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_a_circular_to_the_citizens_of_battle_creek_relative_to_the_dime_tabernacle_epub_b2fbaef8_75c465b6a5_epub",
+      "title": "A Circular to the Citizens of Battle Creek, Relative to The Dime Tabernacle",
+      "affected_heading_count": 3
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_a_solemn_appeal_epub_1de421c0_f107dc2dbc_epub",
+      "title": "A Solemn Appeal",
+      "affected_heading_count": 243
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_an_appeal_to_the_working_men_and_women_in_the_ranks_of_seventh_day_adventists_epub_975c29f1_cf003f4219_epub",
+      "title": "An Appeal to the Working Men and Women in the Ranks of Seventh-day Adventists",
+      "affected_heading_count": 41
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_appeal_on_immortality_epub_1998d257_308b9dacbf_epub",
+      "title": "Appeal on Immortality",
+      "affected_heading_count": 7
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_ascension_robes_slander_refuted_epub_929e7437_923770cf2e_epub",
+      "title": "Ascension Robes; Slander Refuted",
+      "affected_heading_count": 4
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_bible_hygiene_epub_e8ca2129_e8fd839f19_epub",
+      "title": "Bible Hygiene",
+      "affected_heading_count": 88
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_brother_miller_s_dream_epub_f0fd589c_f69ca1b634_epub",
+      "title": "Brother Miller's Dream",
+      "affected_heading_count": 9
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_christ_in_the_old_testament_and_the_sabbath_in_the_new_epub_39c973b6_978e6a7764_epub",
+      "title": "Christ in the Old Testament, and the Sabbath in the New",
+      "affected_heading_count": 49
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_death_and_burial_epub_58125e16_826694f6d2_epub",
+      "title": "Death and Burial",
+      "affected_heading_count": 12
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_god_s_memorial_epub_5a5118ec_5e51efaef8_epub",
+      "title": "God's Memorial",
+      "affected_heading_count": 14
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_health_or_how_to_live_epub_4a5b5cc0_171cd47a5a_epub",
+      "title": "Health, or, How to Live",
+      "affected_heading_count": 348
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_life_incidents_epub_a4b82a09_02e5ce71ce_epub",
+      "title": "Life Incidents",
+      "affected_heading_count": 331
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_life_sketches_epub_55a7b394_f231ef157f_epub",
+      "title": "Life Sketches",
+      "affected_heading_count": 365
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_my_lord_delayeth_his_coming_epub_6ff2ebfe_010fc4fe5b_epub",
+      "title": "My Lord Delayeth His Coming",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_our_faith_and_hope_epub_159cf6e7_2ec55ba354_epub",
+      "title": "Our Faith and Hope",
+      "affected_heading_count": 38
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_our_faith_and_hope_no_1_epub_8f12fa59_0f7a234ee9_epub",
+      "title": "Our Faith and Hope, No. 1",
+      "affected_heading_count": 162
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_perpetuity_of_spiritual_gifts_epub_6cefef06_0ab5c2fc9d_epub",
+      "title": "Perpetuity of Spiritual Gifts",
+      "affected_heading_count": 20
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_personality_of_god_epub_9239bb83_5f06c88b5d_epub",
+      "title": "Personality of God",
+      "affected_heading_count": 7
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_preach_the_word_epub_d16a50ba_324fde95f2_epub",
+      "title": "Preach the Word",
+      "affected_heading_count": 2
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_report_of_the_book_fund_for_tract_and_book_distribution_epub_9aebcc29_2ad1759404_epub",
+      "title": "Report of the Book Fund for Tract and Book Distribution",
+      "affected_heading_count": 11
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_sketches_of_the_christian_life_and_public_labors_of_william_miller_epub_10726551_6a83c1c3fa_epub",
+      "title": "Sketches of the Christian Life and Public Labors of William Miller",
+      "affected_heading_count": 356
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_small_fruits_epub_c37ca54c_bc1e3802b8_epub",
+      "title": "Small Fruits",
+      "affected_heading_count": 21
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_the_early_life_and_later_experience_and_labors_of_elder_joseph_bates_epub_ba28095c_cbcfa88fb2_epub",
+      "title": "The Early Life and Later Experience and Labors of Elder Joseph Bates",
+      "affected_heading_count": 22
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_the_four_universal_monarchies_of_the_prophecy_of_daniel_and_god_s_everlasting_kingdom_epub_8dd6c82b_9f1df37403_epub",
+      "title": "The Four Universal Monarchies of the Prophecy of Daniel, and God's Everlasting Kingdom",
+      "affected_heading_count": 33
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_the_game_of_life_epub_bacb4a8c_fd83e6647f_epub",
+      "title": "The Game of Life",
+      "affected_heading_count": 4
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_the_judgment_epub_00257115_76bff85db5_epub",
+      "title": "The Judgment",
+      "affected_heading_count": 15
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_the_law_and_the_gospel_epub_1ba6afd7_1b00ba2bc5_epub",
+      "title": "The Law and the Gospel",
+      "affected_heading_count": 19
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_the_old_moral_code_of_ten_commandments_not_revised_epub_904541cf_cc76d206df_epub",
+      "title": "The Old Moral Code of Ten Commandments Not Revised",
+      "affected_heading_count": 11
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_the_parable_epub_d13951ba_b61db299ac_epub",
+      "title": "The Parable",
+      "affected_heading_count": 22
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_the_redeemer_and_redeemed_epub_6dabcff2_5baaa09d34_epub",
+      "title": "The Redeemer and Redeemed",
+      "affected_heading_count": 41
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_the_sanctuary_the_2300_days_and_the_shut_door_epub_5d0c1e90_cb6097234c_epub",
+      "title": "The Sanctuary, the 2300 Days, and the Shut Door",
+      "affected_heading_count": 10
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_the_second_advent_epub_77a9a645_bb855e287c_epub",
+      "title": "The Second Advent",
+      "affected_heading_count": 27
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_the_second_coming_of_christ_epub_bd021880_707715022e_epub",
+      "title": "The Second Coming of Christ",
+      "affected_heading_count": 75
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_james_white_the_seventh_day_of_the_week_is_the_sabbath_of_the_lord_epub_1ef97d77_272debff4f_epub",
+      "title": "The Seventh Day of the Week is the Sabbath of the Lord",
+      "affected_heading_count": 56
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_josiah_litch_judaism_overthrown_epub_dc98f4a8_f5ed546d34_epub",
+      "title": "Judaism Overthrown",
+      "affected_heading_count": 30
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_josiah_litch_prophetic_expositions_vol_1_epub_c5020956_587b93535a_epub",
+      "title": "Prophetic Expositions Vol. 1",
+      "affected_heading_count": 182
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_josiah_litch_prophetic_expositions_vol_2_epub_8d84f345_6073710595_epub",
+      "title": "Prophetic Expositions Vol. 2",
+      "affected_heading_count": 222
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_josiah_litch_the_probability_of_the_second_coming_of_christ_about_a_d_1843_epub_7db50782_7837432562_epub",
+      "title": "The Probability of the Second Coming of Christ About A.D. 1843",
+      "affected_heading_count": 189
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_magan_the_peril_of_the_republic_of_the_united_states_of_america_epub_4405f0f2_be80abb952_epub",
+      "title": "The Peril of the Republic of the United States of America",
+      "affected_heading_count": 162
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_rebekah_smith_poems_with_a_sketch_of_the_life_and_experience_of_annie_r_smith_epub_9d156606_9f47dbd9df_epub",
+      "title": "Poems: With a Sketch of the Life and Experience of Annie R. Smith",
+      "affected_heading_count": 10
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_s_n_haskell_bible_handbook_epub_d690cbf1_bdfdb76fdc_epub",
+      "title": "Bible Handbook",
+      "affected_heading_count": 112
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_s_n_haskell_the_story_of_daniel_the_prophet_epub_a523ccfc_f6ffb344cb_epub",
+      "title": "The Story of Daniel the Prophet",
+      "affected_heading_count": 223
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_samuel_snow_the_true_midnight_cry_vol_1_no_1_august_22_1844_epub_7d4ce376_8e8e5ca25e_epub",
+      "title": "The True Midnight Cry, Vol. 1, No. 1 (August 22, 1844)",
+      "affected_heading_count": 3
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_stephenson_the_atonement_epub_29e08334_653ae167a6_epub",
+      "title": "The Atonement",
+      "affected_heading_count": 181
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_storrs_six_sermons_on_the_inquiry_is_there_immortality_in_sin_and_suffering_epub_b2aa83a8_c7a2c4f0bf_epub",
+      "title": "Six Sermons on the Inquiry Is There Immortality in Sin and Suffering?",
+      "affected_heading_count": 129
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_storrs_the_rich_man_and_lazurus_epub_540ca63c_e11d63419d_epub",
+      "title": "The Rich Man and Lazurus",
+      "affected_heading_count": 3
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_t_m_preble_a_tract_showing_that_the_seventh_day_should_be_observed_as_the_sabbath_instead_of_the_first_day_epub_1ae2aedc_7b3b6779b2_epub",
+      "title": "A Tract, Showing that the Seventh Day Should be Observed as the Sabbath, Instead of the First Day",
+      "affected_heading_count": 7
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_t_m_preble_the_two_adams_epub_85079fac_832d16eb3c_epub",
+      "title": "The Two Adams",
+      "affected_heading_count": 20
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_a_greek_falsehood_epub_34503b4a_f31fceb36d_epub",
+      "title": "A Greek Falsehood",
+      "affected_heading_count": 20
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_a_question_answered_epub_9d652c74_cf78b89b41_epub",
+      "title": "A Question Answered",
+      "affected_heading_count": 1
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_a_study_of_the_144_000_epub_7b5338c9_0cd0406a63_epub",
+      "title": "A Study of the 144,000",
+      "affected_heading_count": 7
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_a_word_for_the_sabbath_epub_8ce57a86_32e663e3ae_epub",
+      "title": "A Word for The Sabbath",
+      "affected_heading_count": 2
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_america_s_crisis_epub_ffcc44f1_3c185a53d7_epub",
+      "title": "America's Crisis",
+      "affected_heading_count": 18
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_an_appeal_to_the_youth_epub_c999db69_08bf4173e8_epub",
+      "title": "An Appeal to the Youth",
+      "affected_heading_count": 66
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_bible_student_s_assistant_epub_be51f985_75ae7f7af5_epub",
+      "title": "Bible Student's Assistant",
+      "affected_heading_count": 42
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_both_sides_on_the_sabbath_and_law_epub_2d74312b_739b6ebea6_epub",
+      "title": "Both Sides on the Sabbath and Law",
+      "affected_heading_count": 198
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_day_of_the_crucifixion_and_resurrection_of_christ_epub_abd8bd19_900397d95d_epub",
+      "title": "Day of the Crucifixion and Resurrection of Christ",
+      "affected_heading_count": 30
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_here_and_hereafter_epub_f39aed0d_ab07ff7fb8_epub",
+      "title": "Here and Hereafter",
+      "affected_heading_count": 301
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_in_memoriam_bourdeau_epub_d58ccd99_712ecf5312_epub",
+      "title": "In Memoriam [Bourdeau]",
+      "affected_heading_count": 15
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_in_memoriam_white_epub_6e1feacf_5db8a9a9ee_epub",
+      "title": "In Memoriam [White]",
+      "affected_heading_count": 54
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_is_sunday_called_the_sabbath_in_the_new_testament_epub_b754f442_f13526cf20_epub",
+      "title": "Is Sunday Called the Sabbath in the New Testament?",
+      "affected_heading_count": 7
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_key_to_smith_s_diagram_and_parliamentary_rules_epub_1029126f_51a366d60c_epub",
+      "title": "Key to Smith's Diagram and Parliamentary Rules",
+      "affected_heading_count": 28
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_key_to_the_prophetic_chart_epub_bc06f1e7_2b6d08db0d_epub",
+      "title": "Key to the Prophetic Chart",
+      "affected_heading_count": 37
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_looking_unto_jesus_epub_e6d629b1_2ddc755200_epub",
+      "title": "Looking Unto Jesus",
+      "affected_heading_count": 230
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_man_s_nature_and_destiny_epub_8e9c569a_c8b5a3f95c_epub",
+      "title": "Man's Nature and Destiny",
+      "affected_heading_count": 281
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_modern_spiritualism_epub_410f176b_c263e23c64_epub",
+      "title": "Modern Spiritualism",
+      "affected_heading_count": 134
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_mortal_or_immortal_which_epub_bbc1e8e8_0593da80db_epub",
+      "title": "Mortal or Immortal? Which?",
+      "affected_heading_count": 102
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_parable_of_the_ten_virgins_epub_a45e1336_770af42de1_epub",
+      "title": "Parable of the Ten Virgins",
+      "affected_heading_count": 21
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_replies_to_elder_canright_s_attacks_on_seventh_day_adventists_epub_ff165c22_ef737c9e9e_epub",
+      "title": "Replies to Elder Canright's Attacks on Seventh-day Adventists",
+      "affected_heading_count": 171
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_sabbaton_epub_8391ead4_cf4195b84f_epub",
+      "title": "Sabbaton",
+      "affected_heading_count": 21
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_seventh_day_adventists_and_their_work_epub_f05864e3_f5a9e4ffaf_epub",
+      "title": "Seventh-day Adventists and Their Work",
+      "affected_heading_count": 12
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_sunday_in_the_greek_epub_14e4effc_ff48508aa2_epub",
+      "title": "Sunday in the Greek",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_synopsis_of_the_present_truth_epub_9c4ab04e_67d27f24c0_epub",
+      "title": "Synopsis of the Present Truth",
+      "affected_heading_count": 289
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_the_2300_days_and_the_sanctuary_epub_0c8c79bb_f6478418e1_epub",
+      "title": "The 2300 Days and the Sanctuary",
+      "affected_heading_count": 30
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_the_biblical_institute_epub_58031f50_31d50ce517_epub",
+      "title": "The Biblical Institute",
+      "affected_heading_count": 295
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_the_defense_of_elder_james_white_and_wife_epub_8fd82bdb_ad3e40bd78_epub",
+      "title": "The Defense of Elder James White and Wife",
+      "affected_heading_count": 20
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_the_great_commandment_epub_6c953471_2cbd56d9e3_epub",
+      "title": "The Great Commandment",
+      "affected_heading_count": 3
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_the_marvel_of_nations_epub_789838f1_1b431e9404_epub",
+      "title": "The Marvel of Nations",
+      "affected_heading_count": 201
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_the_sanctuary_and_the_twenty_three_hundred_days_of_daniel_8_14_epub_77fc1484_f153f4909b_epub",
+      "title": "The Sanctuary and the Twenty-three Hundred Days of Daniel 8:14",
+      "affected_heading_count": 271
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_the_seven_heads_of_revelation_12_13_and_17_epub_6dbad307_d89e3d4a2c_epub",
+      "title": "The Seven Heads of Revelation 12, 13, and 17",
+      "affected_heading_count": 39
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_the_two_covenants_epub_08e6ff78_d063485c2e_epub",
+      "title": "The Two Covenants",
+      "affected_heading_count": 28
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_the_visions_of_mrs_e_g_white_epub_16775ec2_4b351a6440_epub",
+      "title": "The Visions of Mrs. E.G. White",
+      "affected_heading_count": 126
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_the_warning_voice_of_time_and_prophecy_epub_1e90f964_38dcae58e8_epub",
+      "title": "The Warning Voice of Time and Prophecy",
+      "affected_heading_count": 7
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_trine_immersion_epub_6d6fbea1_e447babb2e_epub",
+      "title": "Trine Immersion",
+      "affected_heading_count": 7
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_vindication_of_the_business_career_of_elder_james_white_epub_44af7c82_4e260a8d4e_epub",
+      "title": "Vindication of the Business Career of Elder James White",
+      "affected_heading_count": 17
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_what_was_nailed_to_the_cross_epub_ccb27d09_24536c85c7_epub",
+      "title": "What Was Nailed to the Cross?",
+      "affected_heading_count": 14
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_who_changed_the_sabbath_epub_a1e9ef13_42735bb4c9_epub",
+      "title": "Who Changed the Sabbath?",
+      "affected_heading_count": 21
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_uriah_smith_without_excuse_epub_44063b63_56cdb09173_epub",
+      "title": "Without Excuse",
+      "affected_heading_count": 5
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_w_w_prescott_christ_and_the_sabbath_epub_e9c6c2d3_b8c25ccfc8_epub",
+      "title": "Christ and the Sabbath",
+      "affected_heading_count": 33
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_w_w_prescott_partial_report_of_hearing_on_johnston_sunday_bill_s_404_epub_380f940b_2c08fe01ee_epub",
+      "title": "Partial Report of Hearing on Johnston Sunday Bill, S. 404",
+      "affected_heading_count": 14
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_w_w_prescott_sabbath_school_lessons_1896_1897_epub_3bbf32a3_a0ad0410e8_epub",
+      "title": "Sabbath School Lessons (1896, 1897)",
+      "affected_heading_count": 101
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_w_w_prescott_the_advent_review_and_sabbath_herald_articles_1896_epub_ef5d4e56_5bb7713911_epub",
+      "title": "The Advent Review and Sabbath Herald Articles (1896)",
+      "affected_heading_count": 5
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_w_w_prescott_the_daily_the_daily_the_daily_epub_97098b1b_dcf1da116e_epub",
+      "title": "&quot;The Daily&quot;&#13;&quot;The Daily&quot;&#13;The Daily",
+      "affected_heading_count": 16
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_w_w_prescott_the_doctrine_of_christ_epub_2cd7f280_8c72b2dade_epub",
+      "title": "The Doctrine of Christ",
+      "affected_heading_count": 191
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_w_w_prescott_the_saviour_of_the_world_epub_87171e4f_8c40464bc9_epub",
+      "title": "The Saviour of the World",
+      "affected_heading_count": 106
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_w_w_prescott_victory_in_christ_epub_5c81cecb_592fe43cd4_epub",
+      "title": "Victory in Christ",
+      "affected_heading_count": 16
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_ward_history_and_doctrine_of_the_millennium_epub_da661742_7737676450_epub",
+      "title": "History and Doctrine of the Millennium",
+      "affected_heading_count": 66
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_whiting_origin_nature_and_influence_of_neology_epub_419c7b2a_cf1b1c8c82_epub",
+      "title": "Origin, Nature, and Influence of Neology",
+      "affected_heading_count": 46
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_william_e_foy_the_christian_experience_of_william_e_foy_epub_02f466a6_91795f15cc_epub",
+      "title": "The Christian Experience of William E. Foy",
+      "affected_heading_count": 17
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_william_miller_a_lecture_on_the_typical_sabbaths_and_great_jubilee_epub_075a77b5_c9d9f7b9ae_epub",
+      "title": "A Lecture on the Typical Sabbaths and Great Jubilee",
+      "affected_heading_count": 29
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_william_miller_evidences_from_scripture_and_history_of_the_second_coming_of_christ_about_the_year_a_d_1843_and_of_his_personal_reign_of_1000_years_epub_1a57cb14_e98d556c14_epub",
+      "title": "Evidences from Scripture and History of the Second Coming of Christ About the Year A. D. 1843, and of His Personal Reign of 1000 Years",
+      "affected_heading_count": 54
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_william_miller_miller_s_works_volume_1_views_of_the_prophecies_and_prophetic_chronology_epub_50cfc8a5_f552a1a3ae_epub",
+      "title": "Miller's Works. Volume 1. Views of the Prophecies and Prophetic Chronology",
+      "affected_heading_count": 12
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_william_miller_miller_s_works_volume_2_evidence_from_scripture_and_history_of_the_second_coming_of_christ_about_the_year_1843_epub_449ce2f2_09e056e115_epub",
+      "title": "Miller's Works. Volume 2. Evidence from Scripture and History of the Second Coming of Christ about the Year 1843",
+      "affected_heading_count": 263
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_william_miller_remarks_on_revelations_thirteenth_seventeenth_and_eighteenth_epub_ba4c02f4_02e01e4bde_epub",
+      "title": "Remarks on Revelations Thirteenth, Seventeenth and Eighteenth",
+      "affected_heading_count": 39
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_william_miller_review_of_a_discourse_delivered_in_the_north_church_newburyport_on_the_last_evening_of_the_year_1841_by_l_f_dimmick_pastor_of_the_church_epub_2469d8a6_a0e144ab61_epub",
+      "title": "Review of a Discourse, Delivered in the North Church, Newburyport, on the Last Evening of the Year 1841, by L. F. Dimmick, Pastor of the Church",
+      "affected_heading_count": 33
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_william_miller_the_kingdom_of_god_epub_251fc4a1_44b29f587c_epub",
+      "title": "The Kingdom of God",
+      "affected_heading_count": 21
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_aplib_william_miller_william_miller_s_apology_and_defence_august_1_epub_bfea62c6_f36582f44a_epub",
+      "title": "William Miller's Apology and Defence, August 1",
+      "affected_heading_count": 33
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_christ_and_his_righteousness_c305978785_epub",
+      "title": "Christ and His Righteousness",
+      "affected_heading_count": 84
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_fundamental_principles_of_seventh_day_adventists_3f1a7b0292_epub",
+      "title": "Fundamental Principles of Seventh-day Adventists",
+      "affected_heading_count": 6
+    },
+    {
+      "library_item_id": "library_item_pioneer_epub_import_importedpioneerepubs_the_united_states_in_the_light_of_prophecy_a012f332b4_epub",
+      "title": "The United States in the Light of Prophecy",
+      "affected_heading_count": 137
+    }
+  ]
+}

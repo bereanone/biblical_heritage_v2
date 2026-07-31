@@ -135,8 +135,8 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
       sourceSummary = sourceItems.isNotEmpty
           ? 'Editing "${rec.name}" — source tag loaded.'
           : _hasSourceTag(loaded.group)
-              ? 'Editing "${rec.name}" — source tag unavailable.'
-              : 'Editing saved presentation.';
+          ? 'Editing "${rec.name}" — source tag unavailable.'
+          : 'Editing saved presentation.';
     } catch (_) {
       sourceSummary = 'Editing saved presentation.';
     }
@@ -167,7 +167,9 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
   Future<TagPresentationPrepPreview> _resolvePreview() async {
     final requestedTag = (widget.request.tagName ?? '').trim();
     if ((widget.request.chainId ?? '').trim().isNotEmpty) {
-      final chain = await widget.adapter!.loadChainById(widget.request.chainId!);
+      final chain = await widget.adapter!.loadChainById(
+        widget.request.chainId!,
+      );
       if (chain != null) {
         final items =
             chain.items.where((item) => !item.isDeleted).toList(growable: false)
@@ -301,9 +303,7 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
   /// offer unused cards when editing a saved presentation. Returns empty lists
   /// when no source metadata is stored or the tag no longer exists.
   Future<(List<UnifiedTagChainItem>, List<UnifiedTagChain>)>
-  _reloadSourceTagItems(
-    PresentationGroupRecord group,
-  ) async {
+  _reloadSourceTagItems(PresentationGroupRecord group) async {
     final tagKey = group.sourceTagKey?.trim() ?? '';
     final tagId = group.sourceTagId?.trim() ?? '';
     final tagName = group.sourceTagName?.trim() ?? '';
@@ -341,17 +341,13 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
     // Name-based fallback.
     final lookupName = parsedName.isNotEmpty ? parsedName : tagName;
     if (lookupName.isNotEmpty) {
-      final matching =
-          snapshot.chains
-              .where((chain) {
-                if (!(_tagMatches(chain.name, lookupName) ||
-                    _tagMatches(chain.legacyTagName, lookupName))) {
-                  return false;
-                }
-                return chain.storageKind != UnifiedTagStorageKind.dollar;
-              })
-              .toList()
-            ..sort(_compareChainPriority);
+      final matching = snapshot.chains.where((chain) {
+        if (!(_tagMatches(chain.name, lookupName) ||
+            _tagMatches(chain.legacyTagName, lookupName))) {
+          return false;
+        }
+        return chain.storageKind != UnifiedTagStorageKind.dollar;
+      }).toList()..sort(_compareChainPriority);
       if (matching.isNotEmpty) return _itemsFromAdapterChain(matching.first);
     }
 
@@ -401,9 +397,7 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
     final isBibleAnchor =
         entry.bookNumber > 0 && entry.chapter > 0 && entry.verse > 0;
     final itemType = hasMedia && !hasTextContent && !isBibleAnchor
-        ? (media.every(
-                (m) => m.mediaType.toLowerCase().startsWith('image/'),
-              )
+        ? (media.every((m) => m.mediaType.toLowerCase().startsWith('image/'))
               ? UnifiedTagItemType.image
               : UnifiedTagItemType.media)
         : _legacyHashEntryItemType(entry);
@@ -830,33 +824,45 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
     final zones = <PresentationZoneSaveRequest>[];
     for (final region in slide.gridLayout.sortedMergedRegions) {
       final zoneKey = 'merge:${region.id}';
-      zones.add(PresentationZoneSaveRequest(
-        zoneKey: zoneKey,
-        zoneType: 'merged',
-        startRow: region.startRow,
-        startColumn: region.startColumn,
-        rowSpan: region.rowSpan,
-        columnSpan: region.columnSpan,
-        items: [
-          for (var j = 0; j < region.itemIds.length; j++)
-            _buildItemSaveRequest(j, itemsById[region.itemIds[j]], bibleBodyById),
-        ],
-      ));
+      zones.add(
+        PresentationZoneSaveRequest(
+          zoneKey: zoneKey,
+          zoneType: 'merged',
+          startRow: region.startRow,
+          startColumn: region.startColumn,
+          rowSpan: region.rowSpan,
+          columnSpan: region.columnSpan,
+          items: [
+            for (var j = 0; j < region.itemIds.length; j++)
+              _buildItemSaveRequest(
+                j,
+                itemsById[region.itemIds[j]],
+                bibleBodyById,
+              ),
+          ],
+        ),
+      );
     }
     for (final cell in slide.gridLayout.visibleCells) {
       final zoneKey = 'cell:${cell.row}:${cell.column}';
-      zones.add(PresentationZoneSaveRequest(
-        zoneKey: zoneKey,
-        zoneType: 'cell',
-        startRow: cell.row,
-        startColumn: cell.column,
-        rowSpan: 1,
-        columnSpan: 1,
-        items: [
-          for (var j = 0; j < cell.itemIds.length; j++)
-            _buildItemSaveRequest(j, itemsById[cell.itemIds[j]], bibleBodyById),
-        ],
-      ));
+      zones.add(
+        PresentationZoneSaveRequest(
+          zoneKey: zoneKey,
+          zoneType: 'cell',
+          startRow: cell.row,
+          startColumn: cell.column,
+          rowSpan: 1,
+          columnSpan: 1,
+          items: [
+            for (var j = 0; j < cell.itemIds.length; j++)
+              _buildItemSaveRequest(
+                j,
+                itemsById[cell.itemIds[j]],
+                bibleBodyById,
+              ),
+          ],
+        ),
+      );
     }
     return PresentationSlideSaveRequest(
       slideOrder: slideOrder,
@@ -1139,7 +1145,9 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_editMode ? 'Edit Presentation' : 'Presentation Preparation'),
+        title: Text(
+          _editMode ? 'Edit Presentation' : 'Presentation Preparation',
+        ),
       ),
       body: SafeArea(
         child: LayoutBuilder(
@@ -1266,8 +1274,7 @@ class _TagPresentationPrepScreenState extends State<TagPresentationPrepScreen> {
                                       ? true
                                       : workspace.canApplySelectedMerge,
                                   onSavePresentation: _savePresentation,
-                                  onSavedPresentations:
-                                      _openSavedPresentations,
+                                  onSavedPresentations: _openSavedPresentations,
                                 ),
                             ],
                           ),

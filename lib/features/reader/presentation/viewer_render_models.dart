@@ -17,19 +17,14 @@ class ViewerAcrosticItem extends ViewerRenderItem {
 }
 
 class ViewerHeadingItem extends ViewerRenderItem {
-  const ViewerHeadingItem({
-    required this.blockId,
-    required this.text,
-  });
+  const ViewerHeadingItem({required this.blockId, required this.text});
 
   final int blockId;
   final String text;
 }
 
 class ViewerVerseItem extends ViewerRenderItem {
-  const ViewerVerseItem({
-    required this.line,
-  });
+  const ViewerVerseItem({required this.line});
 
   final VerseLine line;
 }

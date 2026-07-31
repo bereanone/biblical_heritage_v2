@@ -71,14 +71,13 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
     if (duplicate) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('A highlight group named "$name" already exists.')),
+        SnackBar(
+          content: Text('A highlight group named "$name" already exists.'),
+        ),
       );
       return;
     }
-    await _repository.createGroup(
-      name: name,
-      colorHex: _selected.hex,
-    );
+    await _repository.createGroup(name: name, colorHex: _selected.hex);
     _nameController.clear();
     await _load();
   }
@@ -89,7 +88,9 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('This group is currently in use and cannot be deleted.'),
+          content: Text(
+            'This group is currently in use and cannot be deleted.',
+          ),
         ),
       );
       return;
@@ -121,9 +122,7 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
     );
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Markup Settings'),
-      ),
+      appBar: AppBar(title: const Text('Markup Settings')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -132,8 +131,8 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
                 Text(
                   'Highlight Groups',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 const Text('Step 1: Choose a color'),
@@ -143,39 +142,45 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
                 Text(
                   'Create Group',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 10,
                   runSpacing: 10,
-                  children: _palette.map((choice) {
-                    final selected = choice == _selected;
-                    return GestureDetector(
-                      onTap: () => setState(() => _selected = choice),
-                      child: Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: choice.color,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: selected ? Colors.white : Colors.transparent,
-                            width: 2,
+                  children: _palette
+                      .map((choice) {
+                        final selected = choice == _selected;
+                        return GestureDetector(
+                          onTap: () => setState(() => _selected = choice),
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: choice.color,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: selected
+                                    ? Colors.white
+                                    : Colors.transparent,
+                                width: 2,
+                              ),
+                              boxShadow: selected
+                                  ? [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.25,
+                                        ),
+                                        blurRadius: 4,
+                                      ),
+                                    ]
+                                  : null,
+                            ),
                           ),
-                          boxShadow: selected
-                              ? [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.25),
-                                    blurRadius: 4,
-                                  ),
-                                ]
-                              : null,
-                        ),
-                      ),
-                    );
-                  }).toList(growable: false),
+                        );
+                      })
+                      .toList(growable: false),
                 ),
                 const SizedBox(height: 14),
                 Row(
@@ -200,8 +205,8 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
                 Text(
                   'Live Preview',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Row(
@@ -209,8 +214,7 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
                     Expanded(
                       child: _PreviewCard(
                         title: 'Sepia',
-                        backgroundColor:
-                            sepiaTheme.scaffoldBackgroundColor,
+                        backgroundColor: sepiaTheme.scaffoldBackgroundColor,
                         child: _buildPreviewVerse(
                           _selected.color,
                           '12',
@@ -223,8 +227,7 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
                     Expanded(
                       child: _PreviewCard(
                         title: 'Night',
-                        backgroundColor:
-                            nightTheme.scaffoldBackgroundColor,
+                        backgroundColor: nightTheme.scaffoldBackgroundColor,
                         child: _buildPreviewVerse(
                           _selected.color,
                           '12',
@@ -246,7 +249,9 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
                         vertical: 10,
                       ),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHigh,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Row(
@@ -255,7 +260,11 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                _buildPreviewChip(group.color, group.name, false),
+                                _buildPreviewChip(
+                                  group.color,
+                                  group.name,
+                                  false,
+                                ),
                                 const SizedBox(height: 6),
                                 Text(
                                   '$usedCount use${usedCount == 1 ? '' : 's'}',
@@ -335,11 +344,7 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
       ),
       child: RichText(
         text: TextSpan(
-          style: TextStyle(
-            color: spec.textColor,
-            fontSize: 14,
-            height: 1.35,
-          ),
+          style: TextStyle(color: spec.textColor, fontSize: 14, height: 1.35),
           children: [
             TextSpan(
               text: '$verseNumber ',
@@ -377,9 +382,7 @@ class _PreviewCard extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: backgroundColor,
-        border: Border.all(
-          color: Theme.of(context).dividerColor,
-        ),
+        border: Border.all(color: Theme.of(context).dividerColor),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -388,7 +391,9 @@ class _PreviewCard extends StatelessWidget {
           Text(
             '$title Theme',
             style: TextStyle(
-              color: Theme.of(context).brightness == Brightness.dark && title == 'Night'
+              color:
+                  Theme.of(context).brightness == Brightness.dark &&
+                      title == 'Night'
                   ? Colors.white
                   : null,
             ),
@@ -423,7 +428,10 @@ class _HighlightPreviewSpec {
   final Color textColor;
 }
 
-_HighlightPreviewSpec _resolveHighlightPreview(Color sourceColor, bool isNight) {
+_HighlightPreviewSpec _resolveHighlightPreview(
+  Color sourceColor,
+  bool isNight,
+) {
   final spec = resolveHighlightRender(sourceColor, isNight);
   return _HighlightPreviewSpec(
     backgroundColor: spec.backgroundColor,

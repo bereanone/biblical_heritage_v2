@@ -324,11 +324,7 @@ void main() {
 
       final adapter = UnifiedTagReadAdapter(
         databaseProvider: () async => db,
-        bookNamesProvider: () async => {
-          43: 'John',
-          2: 'Exodus',
-          6: 'Joshua',
-        },
+        bookNamesProvider: () async => {43: 'John', 2: 'Exodus', 6: 'Joshua'},
       );
       final snapshot = await adapter.loadSnapshot();
       final importedChain = snapshot.chains.firstWhere(

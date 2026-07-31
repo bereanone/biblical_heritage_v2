@@ -20,7 +20,7 @@ class _Target implements ReaderAutoScrollTarget {
 }
 
 void main() {
-  test('signed speed uses reading and scan bands symmetrically', () {
+  test('direction buttons traverse one continuous signed ladder', () {
     final target = _Target();
     final controller = MacReaderAutoScrollController(
       scrollTarget: target,
@@ -29,15 +29,19 @@ void main() {
     addTearDown(controller.dispose);
 
     expect(controller.signedStep, 0);
-    for (final expected in <int>[1, 2, 3, 5, 15, 30, 60]) {
-      controller.increaseStep();
+    expect(controller.isActive, isFalse);
+    controller.toggle();
+    expect(controller.isActive, isTrue);
+    expect(controller.statusLabel, 'Autoscroll paused');
+    for (final expected in <int>[1, 2, 3, 5, 10, 25, 50]) {
+      controller.advanceDownward();
       expect(controller.signedStep, expected);
     }
-    controller.increaseStep();
-    expect(controller.signedStep, 60);
+    controller.advanceDownward();
+    expect(controller.signedStep, 50);
     for (final expected in <int>[
-      30,
-      15,
+      25,
+      10,
       5,
       3,
       2,
@@ -47,15 +51,17 @@ void main() {
       -2,
       -3,
       -5,
-      -15,
-      -30,
-      -60,
+      -10,
+      -25,
+      -50,
     ]) {
-      controller.decreaseStep();
+      controller.advanceUpward();
       expect(controller.signedStep, expected);
     }
-    controller.decreaseStep();
-    expect(controller.signedStep, -60);
+    controller.advanceUpward();
+    expect(controller.signedStep, -50);
+    controller.advanceDownward();
+    expect(controller.signedStep, -25);
   });
 
   test('requested rate is base speed times signed step at 10x and 20x', () {
@@ -105,6 +111,31 @@ void main() {
     expect(target.deltas, <double>[18, -27]);
   });
 
+  test('paused zero stops movement and resumes in either direction', () {
+    final target = _Target();
+    final controller = MacReaderAutoScrollController(
+      scrollTarget: target,
+      driveFrames: false,
+    );
+    addTearDown(controller.dispose);
+
+    controller.toggle();
+    controller.increaseStep();
+    controller.tick(const Duration(seconds: 1));
+    expect(target.offset, 18);
+
+    controller.decreaseStep();
+    expect(controller.signedStep, 0);
+    expect(controller.isActive, isTrue);
+    expect(controller.statusLabel, 'Autoscroll paused');
+    controller.tick(const Duration(seconds: 1));
+    expect(target.offset, 18);
+
+    controller.decreaseStep();
+    controller.tick(const Duration(seconds: 1));
+    expect(target.offset, 0);
+  });
+
   test('18 px/sec fractional frame deltas accumulate without truncation', () {
     final target = _Target();
     final controller = MacReaderAutoScrollController(
@@ -122,7 +153,7 @@ void main() {
     expect(target.offset, closeTo(18, .01));
   });
 
-  test('click toggle stops and resumes the last signed speed', () {
+  test('click toggle disables and re-enables paused', () {
     final controller = MacReaderAutoScrollController(
       scrollTarget: _Target(),
       driveFrames: false,
@@ -132,10 +163,13 @@ void main() {
     controller.setSignedStep(-3);
     controller.toggle();
     expect(controller.signedStep, 0);
-    expect(controller.statusLabel, 'Autoscroll Stopped');
+    expect(controller.statusLabel, 'Autoscroll stopped');
+    expect(controller.isActive, isFalse);
     expect(controller.lastNonzeroStep, -3);
     controller.toggle();
-    expect(controller.signedStep, -3);
+    expect(controller.signedStep, 0);
+    expect(controller.isActive, isTrue);
+    expect(controller.statusLabel, 'Autoscroll paused');
   });
 
   test('manual scrolling while already stopped emits no stopped status', () {
@@ -161,6 +195,8 @@ void main() {
     addTearDown(controller.dispose);
 
     controller.toggle();
+    expect(controller.signedStep, 0);
+    controller.increaseStep();
     expect(controller.signedStep, 1);
     controller.tick(const Duration(seconds: 3));
     expect(target.offset, closeTo(54, .001));
@@ -201,7 +237,7 @@ void main() {
     expect(controller.hasFrameDriver, isFalse);
   });
 
-  test('invalid constructor resume step is normalized and never zero', () {
+  test('remembered preferences do not bypass paused enable state', () {
     final zeroController = MacReaderAutoScrollController(
       scrollTarget: _Target(),
       preferences: const MacAutoscrollPreferences(lastNonzeroStep: 0),
@@ -209,7 +245,7 @@ void main() {
     );
     addTearDown(zeroController.dispose);
     zeroController.toggle();
-    expect(zeroController.signedStep, 1);
+    expect(zeroController.signedStep, 0);
 
     final clampedController = MacReaderAutoScrollController(
       scrollTarget: _Target(),
@@ -221,7 +257,8 @@ void main() {
     );
     addTearDown(clampedController.dispose);
     clampedController.toggle();
-    expect(clampedController.signedStep, -4);
+    expect(clampedController.signedStep, 0);
+    expect(clampedController.lastNonzeroStep, -4);
   });
 
   test('stored preferences are bounded and retain signed direction', () {
@@ -243,7 +280,7 @@ void main() {
     );
     expect(invalid.baseSpeed, defaultMacAutoscrollBaseSpeed);
     expect(invalid.lastNonzeroStep, 1);
-    expect(invalid.maximumStep, 60);
+    expect(invalid.maximumStep, 50);
     final phase7 = MacAutoscrollPreferences.fromStoredValues(
       baseSpeed: '18',
       lastNonzeroStep: '5',
@@ -268,6 +305,7 @@ void main() {
       driveFrames: false,
     );
     addTearDown(controller.dispose);
+    controller.toggle();
 
     controller.setSignedStep(20);
     expect(controller.statusLabel, 'Autoscroll ↓ 20×');
@@ -288,6 +326,7 @@ void main() {
       driveFrames: false,
     );
     addTearDown(controller.dispose);
+    controller.toggle();
 
     for (var press = 0; press < 10; press++) {
       controller.increaseStep();
@@ -297,7 +336,7 @@ void main() {
     expect(controller.signedStep, 5);
   });
 
-  test('60x requests the full configured scan rate', () {
+  test('50x requests the full configured scan rate', () {
     final controller = MacReaderAutoScrollController(
       scrollTarget: _Target(),
       preferences: const MacAutoscrollPreferences(baseSpeed: 60),
@@ -305,8 +344,8 @@ void main() {
     );
     addTearDown(controller.dispose);
 
-    controller.setSignedStep(60);
-    expect(controller.pixelsPerSecond, 3600);
-    expect(controller.statusLabel, 'Autoscroll ↓ 60×');
+    controller.setSignedStep(50);
+    expect(controller.pixelsPerSecond, 3000);
+    expect(controller.statusLabel, 'Autoscroll ↓ 50×');
   });
 }

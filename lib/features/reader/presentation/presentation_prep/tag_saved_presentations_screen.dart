@@ -61,8 +61,8 @@ class _TagSavedPresentationsScreenState
     if (!mounted) return;
     setState(() => _loading = true);
     try {
-      final list =
-          await PresentationPrepRepository.instance.listPresentations();
+      final list = await PresentationPrepRepository.instance
+          .listPresentations();
       if (!mounted) return;
       setState(() {
         _presentations = list;
@@ -94,8 +94,9 @@ class _TagSavedPresentationsScreenState
   Future<void> _previewPresentation(PresentationGroupRecord record) async {
     PresentationLoadedGroup? loaded;
     try {
-      loaded =
-          await PresentationPrepRepository.instance.loadPresentation(record.id);
+      loaded = await PresentationPrepRepository.instance.loadPresentation(
+        record.id,
+      );
     } catch (_) {
       if (!mounted) return;
       _showError('Could not load "${record.name}".');
@@ -166,9 +167,7 @@ class _TagSavedPresentationsScreenState
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Presentation'),
-        content: Text(
-          'Delete "${record.name}"?\n\nThis cannot be undone.',
-        ),
+        content: Text('Delete "${record.name}"?\n\nThis cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -650,8 +649,10 @@ class _PresentationCard extends StatelessWidget {
                               value: 'rename',
                               child: Row(
                                 children: [
-                                  Icon(Icons.drive_file_rename_outline,
-                                      size: 20),
+                                  Icon(
+                                    Icons.drive_file_rename_outline,
+                                    size: 20,
+                                  ),
                                   SizedBox(width: 12),
                                   Text('Rename'),
                                 ],
@@ -694,13 +695,13 @@ class _PresentationCard extends StatelessWidget {
           ),
           if (isExpanded) ...[
             const Divider(height: 1),
-          _SlideListSection(
-            slides: slides,
-            isLoading: isLoadingSlides,
-            fontScale: fontScale,
-            onCopySlide: onCopySlide,
-            onMoveUp: onMoveUp,
-            onMoveDown: onMoveDown,
+            _SlideListSection(
+              slides: slides,
+              isLoading: isLoadingSlides,
+              fontScale: fontScale,
+              onCopySlide: onCopySlide,
+              onMoveUp: onMoveUp,
+              onMoveDown: onMoveDown,
             ),
           ],
         ],
@@ -712,8 +713,18 @@ class _PresentationCard extends StatelessWidget {
     try {
       final dt = DateTime.parse(isoDate).toLocal();
       const months = [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
       ];
       return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
     } catch (_) {
@@ -777,8 +788,9 @@ class _SlideListSection extends StatelessWidget {
             fontScale: fontScale,
             onCopySlide: () => onCopySlide(slideList[i]),
             onMoveUp: i > 0 ? () => onMoveUp(slideList[i]) : null,
-            onMoveDown:
-                i < slideList.length - 1 ? () => onMoveDown(slideList[i]) : null,
+            onMoveDown: i < slideList.length - 1
+                ? () => onMoveDown(slideList[i])
+                : null,
           ),
         const SizedBox(height: 4),
       ],
@@ -940,7 +952,13 @@ class _CopiedSlideBanner extends StatelessWidget {
           children: [
             Icon(
               Icons.copy_outlined,
-              size: presentationScaledSize(context, 18, fontScale, min: 18, max: 22),
+              size: presentationScaledSize(
+                context,
+                18,
+                fontScale,
+                min: 18,
+                max: 22,
+              ),
               color: theme.colorScheme.onPrimaryContainer,
             ),
             const SizedBox(width: 10),
@@ -1004,7 +1022,13 @@ class _MetaChip extends StatelessWidget {
       children: [
         Icon(
           icon,
-          size: presentationScaledSize(context, 13, fontScale, min: 12, max: 15),
+          size: presentationScaledSize(
+            context,
+            13,
+            fontScale,
+            min: 12,
+            max: 15,
+          ),
           color: theme.colorScheme.outline,
         ),
         const SizedBox(width: 4),
@@ -1118,10 +1142,7 @@ TagPresentationPrepWorkspace buildWorkspaceFromSaved(
   return TagPresentationPrepWorkspace.fromPreview(preview);
 }
 
-UnifiedTagChainItem _toChainItem(
-  int groupId,
-  PresentationItemRecord item,
-) {
+UnifiedTagChainItem _toChainItem(int groupId, PresentationItemRecord item) {
   final id = item.sourceItemId ?? 'saved:${item.id}';
   final itemType = _itemTypeFromString(item.itemType);
   final mediaPath = item.mediaPath;
@@ -1171,14 +1192,16 @@ TagPresentationPrepSlide _toSlide(PresentationLoadedSlide ls) {
     final regionId = zone.zoneKey.startsWith('merge:')
         ? zone.zoneKey.substring(6)
         : zone.zoneKey;
-    mergedRegions.add(TagPresentationMergedRegion(
-      id: regionId,
-      startRow: zone.startRow,
-      startColumn: zone.startColumn,
-      rowSpan: zone.rowSpan,
-      columnSpan: zone.columnSpan,
-      itemIds: List.unmodifiable(itemIds),
-    ));
+    mergedRegions.add(
+      TagPresentationMergedRegion(
+        id: regionId,
+        startRow: zone.startRow,
+        startColumn: zone.startColumn,
+        rowSpan: zone.rowSpan,
+        columnSpan: zone.columnSpan,
+        itemIds: List.unmodifiable(itemIds),
+      ),
+    );
   }
 
   // Cells (all rows × columns, honouring saved cell zone data)
@@ -1188,9 +1211,7 @@ TagPresentationPrepSlide _toSlide(PresentationLoadedSlide ls) {
         TagPresentationGridCell(
           row: row,
           column: col,
-          itemIds: List.unmodifiable(
-            zoneItemIds['cell:$row:$col'] ?? const [],
-          ),
+          itemIds: List.unmodifiable(zoneItemIds['cell:$row:$col'] ?? const []),
         ),
   ];
 
@@ -1226,8 +1247,8 @@ TagPresentationAspectRatio _aspectRatioFromProfile(
     'sixteenByTen' => const TagPresentationAspectRatio.sixteenByTen(),
     'nineBySixteen' => const TagPresentationAspectRatio.nineBySixteen(),
     _ => TagPresentationAspectRatio.custom(
-        profile.aspectRatioValue > 0 ? profile.aspectRatioValue : 16 / 9,
-      ),
+      profile.aspectRatioValue > 0 ? profile.aspectRatioValue : 16 / 9,
+    ),
   };
 }
 

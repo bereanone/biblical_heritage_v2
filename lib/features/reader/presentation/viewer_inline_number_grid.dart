@@ -35,8 +35,9 @@ class _ViewerInlineNumberGridState extends State<ViewerInlineNumberGrid> {
   @override
   Widget build(BuildContext context) {
     final brightness = ThemeData.estimateBrightnessForColor(widget.color);
-    final textColor =
-        brightness == Brightness.light ? Colors.black : Colors.white;
+    final textColor = brightness == Brightness.light
+        ? Colors.black
+        : Colors.white;
 
     if (widget.scrollToSelected &&
         widget.selectedValue != null &&

@@ -23,10 +23,7 @@ enum UnifiedTagItemType {
 }
 
 class UnifiedTagReadSnapshot {
-  const UnifiedTagReadSnapshot({
-    required this.chains,
-    required this.loadedAt,
-  });
+  const UnifiedTagReadSnapshot({required this.chains, required this.loadedAt});
 
   final List<UnifiedTagChain> chains;
   final DateTime loadedAt;
@@ -208,7 +205,9 @@ class UnifiedTagBibleAnchor {
 extension UnifiedTagBibleAnchorDisplay on UnifiedTagBibleAnchor {
   String displayReference(Map<int, String> bookNames) {
     final bookName = bookNames[bookNumber]?.trim() ?? '';
-    final resolvedBookName = bookName.isNotEmpty ? bookName : 'Book $bookNumber';
+    final resolvedBookName = bookName.isNotEmpty
+        ? bookName
+        : 'Book $bookNumber';
     final verseLabel = verseEnd > verseStart
         ? '$verseStart-$verseEnd'
         : '$verseStart';

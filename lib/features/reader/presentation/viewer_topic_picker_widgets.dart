@@ -47,7 +47,9 @@ class ViewerTopicSummaryBar extends StatelessWidget {
                 'Topics · $total',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(fontSize: titleFontSize),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontSize: titleFontSize,
+                ),
               ),
             ),
           ),
@@ -69,7 +71,10 @@ class ViewerTopicSummaryBar extends StatelessWidget {
                   style: FilledButton.styleFrom(
                     backgroundColor: theme.colorScheme.primaryContainer,
                     foregroundColor: theme.colorScheme.onPrimaryContainer,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     minimumSize: const Size(0, 30),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     visualDensity: VisualDensity.compact,
@@ -144,7 +149,10 @@ class ViewerTopicOverlayGraphArea extends StatelessWidget {
 
     final bookRows = selectedBookItems.length.toDouble();
     final backRowHeight = (metrics.rowHeight + 2).clamp(26.0, 36.0);
-    final availableGraphHeight = (maxHeight - backRowHeight - 4.0).clamp(0.0, maxHeight);
+    final availableGraphHeight = (maxHeight - backRowHeight - 4.0).clamp(
+      0.0,
+      maxHeight,
+    );
     final rowHeight = _fitRowHeightForMax(
       metrics.rowHeight,
       availableGraphHeight,
@@ -225,12 +233,17 @@ class ViewerTopicGraphPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) return const SizedBox.shrink();
     final metrics = _resolvedGraphMetrics(context, fontScale);
-    final baseStyle = Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
+    final baseStyle =
+        Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
     final graphFontSize = customFontSize ?? metrics.fontSize;
     final rowHeight = customRowHeight ?? metrics.rowHeight;
-    final textLineHeight =
-        graphFontSize <= 0 ? 1.0 : (rowHeight / graphFontSize).clamp(0.92, 1.15);
-    final labelStyle = baseStyle.copyWith(fontSize: graphFontSize, height: textLineHeight);
+    final textLineHeight = graphFontSize <= 0
+        ? 1.0
+        : (rowHeight / graphFontSize).clamp(0.92, 1.15);
+    final labelStyle = baseStyle.copyWith(
+      fontSize: graphFontSize,
+      height: textLineHeight,
+    );
     final countStyle = labelStyle.copyWith(
       color: Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.6),
     );
@@ -255,14 +268,24 @@ class ViewerTopicGraphPanel extends StatelessWidget {
                     builder: (context, rowConstraints) {
                       const gap = 4.0;
                       const edge = 4.0;
-                      final usable = (rowConstraints.maxWidth - ((edge * 2) + (gap * 2)))
-                          .clamp(0.0, rowConstraints.maxWidth);
+                      final usable =
+                          (rowConstraints.maxWidth - ((edge * 2) + (gap * 2)))
+                              .clamp(0.0, rowConstraints.maxWidth);
                       final labelWidth = (usable * 0.44).floorToDouble();
                       final barWidth = (usable * 0.36).floorToDouble();
-                      final countWidth = (usable - labelWidth - barWidth).clamp(0.0, usable);
+                      final countWidth = (usable - labelWidth - barWidth).clamp(
+                        0.0,
+                        usable,
+                      );
                       final fillWidth = barWidth * (item.count / maxCount);
-                      final barHeightPreferred = (graphFontSize * 0.55).clamp(1.0, 13.0);
-                      final barHeight = (rowHeight - 2.0).clamp(1.0, barHeightPreferred);
+                      final barHeightPreferred = (graphFontSize * 0.55).clamp(
+                        1.0,
+                        13.0,
+                      );
+                      final barHeight = (rowHeight - 2.0).clamp(
+                        1.0,
+                        barHeightPreferred,
+                      );
 
                       return Row(
                         children: [
@@ -331,10 +354,7 @@ class ViewerTopicGraphPanel extends StatelessWidget {
 }
 
 class _GraphMetrics {
-  const _GraphMetrics({
-    required this.fontSize,
-    required this.rowHeight,
-  });
+  const _GraphMetrics({required this.fontSize, required this.rowHeight});
 
   final double fontSize;
   final double rowHeight;
@@ -342,8 +362,10 @@ class _GraphMetrics {
 
 _GraphMetrics _resolvedGraphMetrics(BuildContext context, double fontScale) {
   final baseStyle = Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
-  final graphFontSize =
-      ((baseStyle.fontSize ?? 14.0) * fontScale * 0.95).clamp(13.0, 21.0);
+  final graphFontSize = ((baseStyle.fontSize ?? 14.0) * fontScale * 0.95).clamp(
+    13.0,
+    21.0,
+  );
   final rowHeight = (graphFontSize * 1.45).clamp(24.0, 34.0);
   return _GraphMetrics(fontSize: graphFontSize, rowHeight: rowHeight);
 }

@@ -20,10 +20,7 @@ class ViewerSearchSectionOption {
 }
 
 class ViewerSearchBookOption {
-  const ViewerSearchBookOption({
-    required this.bookNumber,
-    required this.label,
-  });
+  const ViewerSearchBookOption({required this.bookNumber, required this.label});
 
   final int? bookNumber;
   final String label;
@@ -117,11 +114,11 @@ List<ViewerSearchBookOption> buildViewerSearchBookOptions(
   final filteredBooks = range == null
       ? books
       : books
-          .where(
-            (book) =>
-                book.bookNumber >= range.$1 && book.bookNumber <= range.$2,
-          )
-          .toList(growable: false);
+            .where(
+              (book) =>
+                  book.bookNumber >= range.$1 && book.bookNumber <= range.$2,
+            )
+            .toList(growable: false);
 
   return <ViewerSearchBookOption>[
     const ViewerSearchBookOption(bookNumber: null, label: 'Books'),

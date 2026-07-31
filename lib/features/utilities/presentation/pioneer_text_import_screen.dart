@@ -1,7 +1,7 @@
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/bootstrap/library_root_native.dart';
 import '../data/pioneer_install_status_service.dart';
 import '../data/pioneer_html_capture_folder_scanner.dart';
 import '../data/pioneer_text_import_service.dart';
@@ -348,18 +348,10 @@ class _PioneerTextImportScreenState extends State<PioneerTextImportScreen> {
       });
       return;
     }
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.any,
-      allowMultiple: false,
-      withData: false,
-    );
-    if (!mounted || result == null || result.files.isEmpty) {
-      return;
-    }
-    final filePath = result.files.single.path;
-    if (filePath == null || filePath.trim().isEmpty) {
+    final filePath = await LibraryRootNative.pickSavedPioneerExport();
+    if (!mounted || filePath == null || filePath.trim().isEmpty) {
       setState(() {
-        _importStatusText = 'No file path was returned for the saved export.';
+        _importStatusText = 'No saved export or EPUB was selected.';
       });
       return;
     }
@@ -630,7 +622,7 @@ class _PioneerTextImportScreenState extends State<PioneerTextImportScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pioneer Library Import'),
+        title: const Text('Pioneer Library — Advanced Tools'),
         centerTitle: true,
       ),
       body: FutureBuilder<PioneerSourceCatalog>(
@@ -753,7 +745,7 @@ class _PioneerTextImportScreenState extends State<PioneerTextImportScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Pioneer Library Import',
+                          'Pioneer Library — Advanced Tools',
                           style: theme.textTheme.titleLarge,
                         ),
                         const SizedBox(height: 4),

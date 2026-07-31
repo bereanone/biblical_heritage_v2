@@ -70,7 +70,9 @@ class _BibleMemoryPracticeScreenState extends State<BibleMemoryPracticeScreen> {
     _strikeCount = 0;
     _status
       ..clear()
-      ..addEntries(_targets.map((index) => MapEntry(index, _TargetState.pending)));
+      ..addEntries(
+        _targets.map((index) => MapEntry(index, _TargetState.pending)),
+      );
     if (_phase > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -84,9 +86,10 @@ class _BibleMemoryPracticeScreenState extends State<BibleMemoryPracticeScreen> {
   List<int> _buildTargetsForInterval(int interval) {
     if (interval <= 0) return const <int>[];
     if (interval == 1) {
-      return List<int>.generate(_tokens.length, (index) => index)
-          .where((index) => _tokens[index].isTargetable)
-          .toList(growable: false);
+      return List<int>.generate(
+        _tokens.length,
+        (index) => index,
+      ).where((index) => _tokens[index].isTargetable).toList(growable: false);
     }
     final targets = <int>[];
     var ordinal = 0;
@@ -231,7 +234,9 @@ class _BibleMemoryPracticeScreenState extends State<BibleMemoryPracticeScreen> {
               letterSpacing: 1.2,
               color: isCurrent
                   ? Colors.orange.shade700
-                  : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
+                  : Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.55),
             ),
           ),
         );
@@ -248,14 +253,13 @@ class _BibleMemoryPracticeScreenState extends State<BibleMemoryPracticeScreen> {
       if (interval == 1) {
         stageTitle = 'Stage ${_phase + 1}: Hide All Words (No Visual Hints)';
       } else {
-        stageTitle = 'Stage ${_phase + 1}: Guess Every ${_ordinal(interval)} Word';
+        stageTitle =
+            'Stage ${_phase + 1}: Guess Every ${_ordinal(interval)} Word';
       }
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.memoryVerse.reference),
-      ),
+      appBar: AppBar(title: Text(widget.memoryVerse.reference)),
       body: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -270,8 +274,8 @@ class _BibleMemoryPracticeScreenState extends State<BibleMemoryPracticeScreen> {
                     Text(
                       stageTitle,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text('Misses this session: $_sessionMisses'),
@@ -308,8 +312,8 @@ class _BibleMemoryPracticeScreenState extends State<BibleMemoryPracticeScreen> {
               Text(
                 _isFinalPhase
                     ? (_totalStrikes <= 3
-                        ? 'Session passed. Ready to advance cadence.'
-                        : 'Session complete, but strikes exceeded 3. Cadence will not advance.')
+                          ? 'Session passed. Ready to advance cadence.'
+                          : 'Session complete, but strikes exceeded 3. Cadence will not advance.')
                     : 'Stage ${_phase + 1} complete.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontWeight: FontWeight.w700),

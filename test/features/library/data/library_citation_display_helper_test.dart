@@ -21,13 +21,12 @@ void main() {
       isNull,
     );
     expect(
-      librarySafeUserFacingReferenceText('compactRef:library_item_research_epubs'),
+      librarySafeUserFacingReferenceText(
+        'compactRef:library_item_research_epubs',
+      ),
       isNull,
     );
-    expect(
-      librarySafeUserFacingReferenceText('content110.xhtml'),
-      isNull,
-    );
+    expect(librarySafeUserFacingReferenceText('content110.xhtml'), isNull);
   });
 
   test('prefers official devotional refs and falls back safely', () {
@@ -75,7 +74,8 @@ void main() {
           'elibrary-range:library_item_research_epubs:115:5::OEBPS/content110.xhtml',
       sourceReferenceText: 'library_item_research_epubs',
       fileName: 'content110.xhtml',
-      relativePath: 'ePubs/Research/EGW_Devotionals/library_item_research_epubs.epub',
+      relativePath:
+          'ePubs/Research/EGW_Devotionals/library_item_research_epubs.epub',
       pageCitation: '115.5',
       paragraphIndex: 5,
     );

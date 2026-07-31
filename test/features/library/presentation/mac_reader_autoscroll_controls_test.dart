@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:studybible2/features/library/presentation/mac_reader_autoscroll_controller.dart';
 import 'package:studybible2/features/library/presentation/mac_reader_autoscroll_controls.dart';
 import 'package:studybible2/features/library/presentation/reader_tilt_autoscroll_controller.dart';
+import 'package:studybible2/features/library/presentation/reader_tilt_preferences.dart';
 
 class _Target implements ReaderAutoScrollTarget {
   @override
@@ -57,6 +58,7 @@ void main() {
       ),
     );
     await tester.pump();
+    controller.toggle();
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
@@ -111,7 +113,7 @@ void main() {
     expect(controller.signedStep, 0);
   });
 
-  testWidgets('arrow keys still work after clicking the autoscroll button', (
+  testWidgets('one combined button toggles while keyboard controls speed', (
     tester,
   ) async {
     final controller = MacReaderAutoScrollController(
@@ -144,24 +146,38 @@ void main() {
     );
     await tester.pump();
 
+    expect(find.byKey(const ValueKey('mac-autoscroll-button')), findsOneWidget);
+    expect(find.byIcon(Icons.swap_vert), findsOneWidget);
+    expect(find.byKey(const ValueKey('mac-autoscroll-up')), findsNothing);
+    expect(find.byKey(const ValueKey('mac-autoscroll-down')), findsNothing);
+    expect(find.byIcon(Icons.arrow_upward), findsNothing);
+    expect(find.byIcon(Icons.arrow_downward), findsNothing);
+
     await tester.tap(find.byKey(const ValueKey('mac-autoscroll-button')));
     await tester.pump();
-    expect(controller.signedStep, 1);
+    expect(controller.signedStep, 0);
+    expect(controller.statusLabel, 'Autoscroll paused');
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
-    expect(controller.signedStep, 2);
+    expect(controller.signedStep, 1);
+
+    await tester.tap(find.byKey(const ValueKey('mac-autoscroll-button')));
+    await tester.pump();
+    expect(controller.signedStep, 0);
+    expect(controller.statusLabel, 'Autoscroll stopped');
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
+    expect(controller.signedStep, 0);
   });
 
-  testWidgets('button clicks toggle and long press opens Mac settings', (
-    tester,
-  ) async {
+  testWidgets('combined button long press opens Mac settings', (tester) async {
     final controller = MacReaderAutoScrollController(
       scrollTarget: _Target(),
       driveFrames: false,
     );
     addTearDown(controller.dispose);
-    var presses = 0;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -169,10 +185,7 @@ void main() {
           body: Builder(
             builder: (context) => MacReaderAutoScrollButton(
               controller: controller,
-              onPressed: () {
-                presses++;
-                controller.toggle();
-              },
+              onPressed: controller.toggle,
               onLongPress: () => showMacAutoscrollSettingsDialog(
                 context: context,
                 initial: const MacAutoscrollPreferences(),
@@ -182,13 +195,6 @@ void main() {
         ),
       ),
     );
-
-    await tester.tap(find.byKey(const ValueKey('mac-autoscroll-button')));
-    await tester.pump();
-    expect(presses, 1);
-    expect(controller.signedStep, 1);
-    await tester.tap(find.byKey(const ValueKey('mac-autoscroll-button')));
-    expect(controller.signedStep, 0);
 
     await tester.longPress(find.byKey(const ValueKey('mac-autoscroll-button')));
     await tester.pumpAndSettle();
@@ -201,10 +207,59 @@ void main() {
     expect(find.text('Cancel'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('mac-autoscroll-maximum-step')));
     await tester.pumpAndSettle();
-    expect(find.text('60×'), findsWidgets);
+    expect(find.text('50×'), findsWidgets);
   });
 
-  testWidgets('settings save 20x and cancel preserves the prior maximum', (
+  testWidgets('keyboard arrows follow all speed bands and reverse at 1x', (
+    tester,
+  ) async {
+    final controller = MacReaderAutoScrollController(
+      scrollTarget: _Target(),
+      driveFrames: false,
+    );
+    final readerFocus = FocusNode();
+    addTearDown(controller.dispose);
+    addTearDown(readerFocus.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Focus(
+          focusNode: readerFocus,
+          autofocus: true,
+          onKeyEvent: (node, event) => handleMacReaderAutoscrollKeyEvent(
+            event: event,
+            readerFocusNode: node,
+            controller: controller,
+          ),
+          child: const SizedBox(),
+        ),
+      ),
+    );
+    await tester.pump();
+    controller.toggle();
+
+    Future<void> press(LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(key);
+      await tester.sendKeyUpEvent(key);
+    }
+
+    for (final expected in <int>[1, 2, 3, 5, 10, 25, 50, 50]) {
+      await press(LogicalKeyboardKey.arrowDown);
+      expect(controller.signedStep, expected);
+    }
+    for (final expected in <int>[25, 10, 5, 3, 2, 1, 0, -1]) {
+      await press(LogicalKeyboardKey.arrowUp);
+      expect(controller.signedStep, expected);
+    }
+    for (final expected in <int>[-2, -3, -5, -10, -25, -50, -50]) {
+      await press(LogicalKeyboardKey.arrowUp);
+      expect(controller.signedStep, expected);
+    }
+    await press(LogicalKeyboardKey.arrowDown);
+    expect(controller.signedStep, -25);
+  });
+
+  testWidgets('settings save 25x and cancel preserves the prior maximum', (
     tester,
   ) async {
     MacAutoscrollPreferences? saved;
@@ -239,12 +294,12 @@ void main() {
     await tester.pumpAndSettle();
     await tester.drag(find.byType(Scrollable).last, const Offset(0, -500));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('20×').last);
+    await tester.tap(find.text('25×').last);
     await tester.pumpAndSettle();
-    expect(find.text('20×'), findsOneWidget);
+    expect(find.text('25×'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('mac-autoscroll-save')));
     await tester.pumpAndSettle();
-    expect(saved?.maximumStep, 20);
+    expect(saved?.maximumStep, 25);
 
     await tester.tap(find.text('Open settings'));
     await tester.pumpAndSettle();
@@ -252,10 +307,152 @@ void main() {
     await tester.pumpAndSettle();
     await tester.drag(find.byType(Scrollable).last, const Offset(0, -500));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('20×').last);
+    await tester.tap(find.text('25×').last);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('mac-autoscroll-cancel')));
     await tester.pumpAndSettle();
-    expect(saved?.maximumStep, 20);
+    expect(saved?.maximumStep, 25);
   });
+
+  testWidgets('Mac dialog exposes only the shared status banner choices', (
+    tester,
+  ) async {
+    MacAutoscrollPreferences? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                saved = await showMacAutoscrollSettingsDialog(
+                  context: context,
+                  initial: const MacAutoscrollPreferences(
+                    statusBannerMode: ReaderTiltStatusBannerMode.alwaysHidden,
+                  ),
+                );
+              },
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Status Banner'), findsOneWidget);
+    expect(find.text('Always Visible'), findsOneWidget);
+    expect(find.text('Auto-hide after 7 seconds'), findsOneWidget);
+    expect(find.text('Always Hidden'), findsOneWidget);
+    expect(find.textContaining('Neutral'), findsNothing);
+    expect(find.textContaining('Sideways'), findsNothing);
+    expect(find.textContaining('calibration'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('mac-autoscroll-save')));
+    await tester.pumpAndSettle();
+    expect(saved?.statusBannerMode, ReaderTiltStatusBannerMode.alwaysHidden);
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Always Visible'));
+    await tester.tap(find.byKey(const ValueKey('mac-autoscroll-save')));
+    await tester.pumpAndSettle();
+    expect(saved?.statusBannerMode, ReaderTiltStatusBannerMode.alwaysVisible);
+  });
+
+  testWidgets('Mac dialog cancel discards a pending banner choice', (
+    tester,
+  ) async {
+    MacAutoscrollPreferences? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                saved = await showMacAutoscrollSettingsDialog(
+                  context: context,
+                  initial: const MacAutoscrollPreferences(),
+                );
+              },
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Always Hidden'),
+      100,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Always Hidden'));
+    await tester.tap(find.byKey(const ValueKey('mac-autoscroll-cancel')));
+    await tester.pumpAndSettle();
+    expect(saved, isNull);
+  });
+
+  testWidgets(
+    'Mac status overlay honors visible, auto-hide, and hidden modes',
+    (tester) async {
+      final controller = MacReaderAutoScrollController(
+        scrollTarget: _Target(),
+        preferences: const MacAutoscrollPreferences(
+          statusBannerMode: ReaderTiltStatusBannerMode.alwaysVisible,
+        ),
+        driveFrames: false,
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Stack(
+              children: <Widget>[
+                MacReaderAutoscrollStatusOverlay(
+                  controller: controller,
+                  foregroundColor: Colors.black,
+                  backgroundColor: Colors.white,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      controller.toggle();
+      await tester.pump();
+      expect(find.text('Autoscroll paused'), findsOneWidget);
+      controller.increaseStep();
+      await tester.pump();
+      expect(find.text('Autoscroll ↓ 1×'), findsOneWidget);
+
+      controller.updatePreferences(
+        const MacAutoscrollPreferences(
+          statusBannerMode: ReaderTiltStatusBannerMode.autoHide,
+        ),
+      );
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('mac-autoscroll-status')),
+        findsOneWidget,
+      );
+      await tester.pump(const Duration(seconds: 7));
+      expect(find.byKey(const ValueKey('mac-autoscroll-status')), findsNothing);
+      controller.increaseStep();
+      await tester.pump();
+      expect(find.text('Autoscroll ↓ 2×'), findsOneWidget);
+
+      controller.updatePreferences(
+        const MacAutoscrollPreferences(
+          statusBannerMode: ReaderTiltStatusBannerMode.alwaysHidden,
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey('mac-autoscroll-status')), findsNothing);
+      controller.increaseStep();
+      expect(controller.signedStep, 3);
+    },
+  );
 }

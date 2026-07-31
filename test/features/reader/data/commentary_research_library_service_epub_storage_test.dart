@@ -9,10 +9,7 @@ void main() {
         'file_name': 'en_2T.epub',
         'title': 'Testimonies for the Church, vol. 2',
       },
-      {
-        'file_name': 'en_2TT.epub',
-        'title': 'Testimony Treasures, vol. 2',
-      },
+      {'file_name': 'en_2TT.epub', 'title': 'Testimony Treasures, vol. 2'},
     ];
 
     final filtered = filterRowsByPreferredCommentaryVolume(rows, '1BC');

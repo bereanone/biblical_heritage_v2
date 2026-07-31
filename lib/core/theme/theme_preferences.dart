@@ -9,8 +9,9 @@ class ThemePreferences {
   ThemePreferences._();
 
   static final ThemePreferences instance = ThemePreferences._();
-  static final ValueNotifier<AppThemeMode> themeModeListenable =
-      ValueNotifier(AppThemeMode.sepia);
+  static final ValueNotifier<AppThemeMode> themeModeListenable = ValueNotifier(
+    AppThemeMode.sepia,
+  );
 
   static const _themeModeKey = 'theme_mode';
 
@@ -28,7 +29,8 @@ class ThemePreferences {
       return AppThemeMode.sepia;
     }
     final rawMode = rows.first['value']?.toString().trim() ?? '';
-    final mode = AppThemeMode.values
+    final mode =
+        AppThemeMode.values
             .where((candidate) => candidate.name == rawMode)
             .firstOrNull ??
         AppThemeMode.sepia;
@@ -38,14 +40,10 @@ class ThemePreferences {
 
   Future<void> saveThemeMode(AppThemeMode mode) async {
     final db = await UserDatabase.instance.database;
-    await db.insert(
-      'prefs',
-      {
-        'key': _themeModeKey,
-        'value': mode.name,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('prefs', {
+      'key': _themeModeKey,
+      'value': mode.name,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
     themeModeListenable.value = mode;
     await AppSettingsService.instance.applyThemePreset(mode);
   }

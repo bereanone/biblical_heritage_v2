@@ -69,27 +69,21 @@ class PresentationItemSettingsRepository {
     final db = await UserDatabase.instance.database;
     final tagId = _tagIdentityHash(tagFamily: tagFamily, tag: tag);
     final now = DateTime.now().toUtc().toIso8601String();
-    await db.insert(
-      'presentation_item_settings',
-      {
-        'source_type': normalizedSourceType,
-        'source_id': normalizedSourceId,
-        'tag_id': tagId,
-        'font_size_override': settings.fontSizeOverride,
-        'alignment': settings.alignmentOverride == null
-            ? null
-            : presentationAlignmentPreferenceToJson(
-                settings.alignmentOverride!,
-              ),
-        'layout': settings.layoutOverride == null
-            ? null
-            : presentationLayoutPreferenceToJson(settings.layoutOverride!),
-        'allow_scroll': settings.allowScroll ? 1 : 0,
-        'auto_fit': settings.autoFitEnabled ? 1 : 0,
-        'updated_at': now,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('presentation_item_settings', {
+      'source_type': normalizedSourceType,
+      'source_id': normalizedSourceId,
+      'tag_id': tagId,
+      'font_size_override': settings.fontSizeOverride,
+      'alignment': settings.alignmentOverride == null
+          ? null
+          : presentationAlignmentPreferenceToJson(settings.alignmentOverride!),
+      'layout': settings.layoutOverride == null
+          ? null
+          : presentationLayoutPreferenceToJson(settings.layoutOverride!),
+      'allow_scroll': settings.allowScroll ? 1 : 0,
+      'auto_fit': settings.autoFitEnabled ? 1 : 0,
+      'updated_at': now,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> deleteSettingsForTag({
@@ -142,10 +136,7 @@ class PresentationItemSettingsRepository {
     return fallback;
   }
 
-  int _tagIdentityHash({
-    required String tagFamily,
-    required String tag,
-  }) {
+  int _tagIdentityHash({required String tagFamily, required String tag}) {
     final normalizedFamily = _normalizeSettingSegment(tagFamily);
     final normalizedTag = _normalizeSettingSegment(tag);
     return _fnv1a32('$normalizedFamily|$normalizedTag');

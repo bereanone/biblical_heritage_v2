@@ -206,23 +206,34 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
       }
 
       let picker: UIDocumentPickerViewController
-      if kind == "collection" || kind == "bookPackage" {
-        // The legacy import-mode initializer remains the most compatible
-        // copied-document workflow for third-party providers. On the
-        // physical iPad, OneDrive and Google Drive disable their locations
-        // during capability negotiation with forOpeningContentTypes/asCopy,
-        // even for public.data. `.import` copies selected files locally and
-        // requests no folder or persistent security-scoped access.
-        picker = UIDocumentPickerViewController(
-          documentTypes: ["public.data"],
-          in: .import
-        )
+      if kind == "collection" || kind == "bookPackage" || kind == "pioneerPackage" {
+        if #available(iOS 14.0, *) {
+          // Ask to open one file, with the broad public.item type plus the
+          // well-known zip archive type (a .studybook package is literally
+          // a ZIP archive under a custom extension). Some cloud providers
+          // (OneDrive observed) gray out files they can't confidently type
+          // when only the fully generic public.item type is requested for
+          // in-place opening; explicitly recognizing .zip lets the provider
+          // resolve the file's underlying format. Restricting capability
+          // negotiation to a custom package UTI or using the legacy
+          // `.import` controller can make OneDrive fail while enumerating
+          // the provider before a file is selected.
+          picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: [.zip, .item],
+            asCopy: false
+          )
+        } else {
+          picker = UIDocumentPickerViewController(
+            documentTypes: ["public.item"],
+            in: .import
+          )
+        }
       } else if #available(iOS 14.0, *) {
         var contentTypes: [UTType]
         if kind == "assets" {
-          contentTypes = [.html, .image, .plainText]
+          contentTypes = [.html, .image, .plainText, .json]
           contentTypes.append(
-            contentsOf: ["htm", "html", "css", "txt", "jpg", "jpeg", "png", "gif", "webp"]
+            contentsOf: ["json", "htm", "html", "css", "txt", "jpg", "jpeg", "png", "gif", "webp"]
               .compactMap { UTType(filenameExtension: $0) }
           )
         } else {
@@ -241,7 +252,7 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
         let documentTypes: [String]
         switch kind {
         case "assets":
-          documentTypes = ["public.html", "public.image", "public.text", "public.data"]
+          documentTypes = ["public.json", "public.html", "public.image", "public.text", "public.data"]
         default:
           documentTypes = ["public.html"]
         }
@@ -255,13 +266,21 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
       // provider location when multi-document selection is required. A
       // single copied-document request preserves provider navigation; users
       // can repeat the import action for additional books.
-      picker.allowsMultipleSelection = kind != "collection" && kind != "bookPackage"
+      picker.allowsMultipleSelection =
+        kind != "collection" && kind != "bookPackage" && kind != "pioneerPackage"
       picker.modalPresentationStyle = .formSheet
-      self.pendingSelectionKind = kind == "collection" ? .importCollectionCopy : kind == "bookPackage" ? .importPackageCopies : .importFileCopies
+      self.pendingSelectionKind =
+        kind == "collection"
+          ? .importCollectionCopy
+          : (kind == "bookPackage" || kind == "pioneerPackage")
+            ? .importPackageCopies
+            : .importFileCopies
       self.pendingResult = result
-      let loggedContentTypes = kind == "collection" || kind == "bookPackage" ? "[public.data]" : "[content-specific]"
-      let loggedCopyMode = kind == "collection" || kind == "bookPackage" ? "import" : "asCopy=true"
-      let loggedMultipleSelection = kind != "collection" && kind != "bookPackage"
+      let isPioneerPackageKind =
+        kind == "collection" || kind == "bookPackage" || kind == "pioneerPackage"
+      let loggedContentTypes = isPioneerPackageKind ? "[public.item]" : "[content-specific]"
+      let loggedCopyMode = isPioneerPackageKind ? "open-then-copy-locally" : "asCopy=true"
+      let loggedMultipleSelection = !isPioneerPackageKind
       print(
         "StudyBible2: presenting copied-document picker. "
           + "kind=\(kind) contentTypes=\(loggedContentTypes) "
@@ -380,7 +399,11 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
         let invalidNames = urls
           .map { $0.lastPathComponent }
           .filter {
-            !$0.lowercased().hasSuffix(".studybook")
+            let lower = $0.lowercased()
+            // Some export/backup tools append a redundant .zip suffix on
+            // top of .studybook (e.g. "Book.studybook.zip"); a .studybook
+            // package is itself a ZIP archive, so accept that variant too.
+            return !lower.hasSuffix(".studybook") && !lower.hasSuffix(".studybook.zip")
           }
         if !invalidNames.isEmpty {
           print("StudyBible2: rejected non-studybook copied selection(s): \(invalidNames).")
@@ -401,17 +424,78 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
           return
         }
       }
+      var returnedPaths: [String] = []
       for url in urls {
         let startedAccessing = url.startAccessingSecurityScopedResource()
         print(
           "StudyBible2: iOS import picker selection at \(url.path). "
             + "securityScopedAccess=\(startedAccessing ? "started" : "not needed")."
         )
-        if startedAccessing {
-          securityScopedURLs.append(url)
+        if selectionKind == .importPackageCopies || selectionKind == .importCollectionCopy {
+          do {
+            let caches = try FileManager.default.url(
+              for: .cachesDirectory,
+              in: .userDomainMask,
+              appropriateFor: nil,
+              create: true
+            )
+            let inbox = caches.appendingPathComponent("FilesProviderImports", isDirectory: true)
+            try FileManager.default.createDirectory(
+              at: inbox,
+              withIntermediateDirectories: true
+            )
+            let localURL = inbox.appendingPathComponent(
+              "\(UUID().uuidString)-\(url.lastPathComponent)",
+              isDirectory: false
+            )
+            var coordinationError: NSError?
+            var coordinatedCopyError: Error?
+            var copied = false
+            NSFileCoordinator().coordinate(
+              readingItemAt: url,
+              options: [],
+              error: &coordinationError
+            ) { coordinatedURL in
+              do {
+                try FileManager.default.copyItem(at: coordinatedURL, to: localURL)
+                copied = true
+              } catch {
+                coordinatedCopyError = error
+              }
+            }
+            if let error = coordinationError ?? coordinatedCopyError as NSError? {
+              throw error
+            }
+            if !copied {
+              throw NSError(
+                domain: "StudyBibleFileProviderImport",
+                code: 1,
+                userInfo: [
+                  NSLocalizedDescriptionKey: "OneDrive did not make the selected package available for copying."
+                ]
+              )
+            }
+            returnedPaths.append(localURL.path)
+          } catch {
+            if startedAccessing { url.stopAccessingSecurityScopedResource() }
+            finish(
+              FlutterError(
+                code: "provider_file_copy_failed",
+                message: "The selected package could not be copied into StudyBible storage.",
+                details: error.localizedDescription
+              )
+            )
+            return
+          }
+          if startedAccessing { url.stopAccessingSecurityScopedResource() }
+        } else {
+          returnedPaths.append(url.path)
+          if startedAccessing {
+            securityScopedURLs.append(url)
+          }
         }
       }
-      finish(["paths": urls.map { $0.path }])
+      finish(["paths": returnedPaths])
       return
     }
     guard let url = urls.first else {

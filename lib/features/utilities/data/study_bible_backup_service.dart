@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../../../core/app_info/app_version_info.dart';
 import '../../../core/bootstrap/library_root_native.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
@@ -281,7 +282,6 @@ class StudyBibleBackupService {
   static final StudyBibleBackupService instance = StudyBibleBackupService._();
 
   static const _appName = 'Biblical Heritage';
-  static const _appVersion = '1.0.0+1';
   static const _backupFormatVersion = 2;
   static const _backupManifestPath = 'backup_manifest.json';
   static const _userDatabaseFileName = 'user.db';
@@ -411,7 +411,7 @@ class StudyBibleBackupService {
       final manifest = <String, Object?>{
         'backup_format_version': _backupFormatVersion,
         'app_name': _appName,
-        'app_version': _appVersion,
+        'app_version': await AppVersionInfo.versionWithBuild(),
         'backup_created_at_utc': createdAtUtc.toIso8601String(),
         'backup_created_at_local': createdAtLocal.toIso8601String(),
         'platform': Platform.operatingSystem,

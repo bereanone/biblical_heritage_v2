@@ -549,7 +549,7 @@ void main() {
       final options = buildLibraryCollectionFilterOptions(items);
       expect(
         options.map((option) => option.label).toList(),
-        contains('Adventist Pioneer Library'),
+        contains('Pioneer Library'),
       );
 
       expect(
@@ -569,7 +569,7 @@ void main() {
       );
       expect(
         egwCollectionOptions.map((option) => option.label).toList(),
-        isNot(contains('Adventist Pioneer Library')),
+        isNot(contains('Pioneer Library')),
       );
     },
   );
@@ -816,9 +816,36 @@ void main() {
           .toList(growable: false);
       expect(lessonsResults, isNotEmpty);
       expect(lessonsResults.first.item.displayAuthor, 'A. T. Jones');
+      expect(lessonsResults.first.target, isNotNull);
+      expect(lessonsResults.first.target!.libraryItemId, lessons.id);
+      expect(lessonsResults.first.target!.textBlockId, greaterThan(0));
+      expect(lessonsResults.first.target!.href, isNotEmpty);
+      expect(
+        lessonsResults.first.target!.paragraphIndex,
+        greaterThanOrEqualTo(0),
+      );
+      expect(
+        lessonsResults.first.target!.matchedText,
+        lessonsResults.first.fullParagraph,
+      );
       expect(
         lessonsResults.first.snippet.toLowerCase(),
         contains('without faith it is impossible to please him'),
+      );
+
+      final repeatedResults = await LibraryCatalogService.instance
+          .searchContent(
+            query: 'faith',
+            collectionFilter: 'adventist_pioneer_library',
+            limit: 100,
+          );
+      final repeatedLessonsHits = repeatedResults
+          .where((result) => result.item.id == lessons.id)
+          .toList(growable: false);
+      expect(repeatedLessonsHits.length, greaterThan(1));
+      expect(
+        repeatedLessonsHits.map((result) => result.target!.textBlockId).toSet(),
+        hasLength(repeatedLessonsHits.length),
       );
 
       final sections = await CommentaryResearchLibraryService.instance

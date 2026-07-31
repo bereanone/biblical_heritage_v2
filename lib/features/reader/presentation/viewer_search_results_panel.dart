@@ -261,16 +261,15 @@ class _ViewerSearchResultsPanelState extends State<ViewerSearchResultsPanel> {
                   contentPadding: const EdgeInsets.symmetric(horizontal: 4),
                   isThreeLine: true,
                   selected: isSelected,
-                  selectedTileColor: Theme.of(context)
-                      .colorScheme
-                      .secondaryContainer
-                      .withValues(alpha: 0.45),
+                  selectedTileColor: Theme.of(
+                    context,
+                  ).colorScheme.secondaryContainer.withValues(alpha: 0.45),
                   leading: widget.onQuickApplyResult == null
                       ? null
                       : SearchResultQuickApplyButton(
                           tooltip: quickApplyTooltip,
-                          onPressed: hasQuickApplyTarget &&
-                                  !widget.isCurrentTagLoading
+                          onPressed:
+                              hasQuickApplyTarget && !widget.isCurrentTagLoading
                               ? () {
                                   unawaited(widget.onQuickApplyResult!(result));
                                 }

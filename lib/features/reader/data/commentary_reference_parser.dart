@@ -49,9 +49,9 @@ class BibleReferenceParser {
 
   static List<ParsedBibleReference> extractReferences(
     String text,
-    Map<String, int> bookLookup,
-    {required List<String> aliases}
-  ) {
+    Map<String, int> bookLookup, {
+    required List<String> aliases,
+  }) {
     final cleaned = text.trim();
     if (cleaned.isEmpty || bookLookup.isEmpty) return const [];
 

@@ -2,10 +2,28 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'reader_tilt_autoscroll_controller.dart';
+import 'reader_tilt_preferences.dart';
 
 const double defaultMacAutoscrollBaseSpeed = 18;
-const int defaultMacAutoscrollMaximumStep = 60;
-const List<int> macAutoscrollSpeedSteps = <int>[1, 2, 3, 5, 15, 30, 60];
+const int defaultMacAutoscrollMaximumStep = 50;
+const List<int> macAutoscrollSpeedSteps = <int>[1, 2, 3, 5, 10, 25, 50];
+const List<int> macAutoscrollSignedSpeedSteps = <int>[
+  -50,
+  -25,
+  -10,
+  -5,
+  -3,
+  -2,
+  -1,
+  0,
+  1,
+  2,
+  3,
+  5,
+  10,
+  25,
+  50,
+];
 const int _boundaryConfirmationFrames = 8;
 
 int normalizeMacAutoscrollRememberedStep(int? value, int maximumStep) {
@@ -20,12 +38,15 @@ class MacAutoscrollPreferences {
     this.baseSpeed = defaultMacAutoscrollBaseSpeed,
     this.lastNonzeroStep = 1,
     this.maximumStep = defaultMacAutoscrollMaximumStep,
+    this.statusBannerMode = ReaderTiltStatusBannerMode.autoHide,
   });
 
   factory MacAutoscrollPreferences.fromStoredValues({
     String? baseSpeed,
     String? lastNonzeroStep,
     String? maximumStep,
+    ReaderTiltStatusBannerMode statusBannerMode =
+        ReaderTiltStatusBannerMode.autoHide,
   }) {
     final parsedMaximum = int.tryParse(maximumStep ?? '');
     final maximum = parsedMaximum != null && parsedMaximum >= 1
@@ -41,12 +62,14 @@ class MacAutoscrollPreferences {
       baseSpeed: base,
       lastNonzeroStep: step,
       maximumStep: maximum,
+      statusBannerMode: statusBannerMode,
     );
   }
 
   final double baseSpeed;
   final int lastNonzeroStep;
   final int maximumStep;
+  final ReaderTiltStatusBannerMode statusBannerMode;
 }
 
 class MacReaderAutoScrollController extends ChangeNotifier {
@@ -64,6 +87,7 @@ class MacReaderAutoScrollController extends ChangeNotifier {
          1,
          defaultMacAutoscrollMaximumStep,
        ),
+       _statusBannerMode = preferences.statusBannerMode,
        _tickerFactory = tickerFactory ?? Ticker.new;
 
   final ReaderAutoScrollTarget scrollTarget;
@@ -73,9 +97,11 @@ class MacReaderAutoScrollController extends ChangeNotifier {
   Ticker? _ticker;
   Duration? _lastElapsed;
   bool _disposed = false;
+  bool _enabled = false;
   int _signedStep = 0;
   int _lastNonzeroStep;
   int _maximumStep;
+  ReaderTiltStatusBannerMode _statusBannerMode;
   double _baseSpeed;
   int statusRevision = 0;
   int _consecutiveBlockedFrames = 0;
@@ -85,51 +111,48 @@ class MacReaderAutoScrollController extends ChangeNotifier {
   int get lastNonzeroStep => _lastNonzeroStep;
   int get maximumStep => _maximumStep;
   double get baseSpeed => _baseSpeed;
-  bool get isActive => _signedStep != 0;
+  ReaderTiltStatusBannerMode get statusBannerMode => _statusBannerMode;
+  bool get isActive => _enabled;
+  bool get isScrolling => _enabled && _signedStep != 0;
   bool get hasFrameDriver => _ticker != null;
   double get pixelsPerSecond => _signedStep * _baseSpeed;
 
   String get statusLabel {
-    if (_signedStep == 0) return 'Autoscroll Stopped';
+    if (!_enabled) return 'Autoscroll stopped';
+    if (_signedStep == 0) return 'Autoscroll paused';
     return _signedStep > 0
         ? 'Autoscroll ↓ $_signedStep×'
         : 'Autoscroll ↑ ${_signedStep.abs()}×';
   }
 
-  void increaseStep() => setSignedStep(_nextStep(towardDown: true));
-  void decreaseStep() => setSignedStep(_nextStep(towardDown: false));
+  void increaseStep() => advanceDownward();
+  void decreaseStep() => advanceUpward();
 
-  int _nextStep({required bool towardDown}) {
-    if (_signedStep == 0) return towardDown ? 1 : -1;
-    if (towardDown && _signedStep < 0) {
-      return -_nextMagnitude(_signedStep.abs(), increasing: false);
-    }
-    if (!towardDown && _signedStep > 0) {
-      return _nextMagnitude(_signedStep, increasing: false);
-    }
-    final magnitude = _nextMagnitude(_signedStep.abs(), increasing: true);
-    return towardDown ? magnitude : -magnitude;
+  void advanceDownward() {
+    if (!_enabled) return;
+    setSignedStep(_adjacentSignedStep(1));
   }
 
-  int _nextMagnitude(int current, {required bool increasing}) {
-    final levels = <int>{
-      ...macAutoscrollSpeedSteps.where((value) => value <= _maximumStep),
-      _maximumStep,
-    }.toList()..sort();
-    if (increasing) {
-      return levels.firstWhere(
-        (value) => value > current,
-        orElse: () => _maximumStep,
-      );
-    }
-    final lower = levels.where((value) => value < current);
-    return lower.isEmpty ? 0 : lower.last;
+  void advanceUpward() {
+    if (!_enabled) return;
+    setSignedStep(_adjacentSignedStep(-1));
+  }
+
+  int _adjacentSignedStep(int direction) {
+    final ladder = macAutoscrollSignedSpeedSteps
+        .where((value) => value.abs() <= _maximumStep)
+        .toList(growable: false);
+    final index = ladder.indexOf(_signedStep);
+    if (index < 0) return _signedStep.clamp(-_maximumStep, _maximumStep);
+    return ladder[(index + direction).clamp(0, ladder.length - 1)];
   }
 
   void setSignedStep(int value) {
     if (_disposed) return;
     final next = value.clamp(-_maximumStep, _maximumStep);
-    if (next == _signedStep) {
+    final wasEnabled = _enabled;
+    _enabled = true;
+    if (next == _signedStep && wasEnabled) {
       _showStatus();
       return;
     }
@@ -147,25 +170,26 @@ class MacReaderAutoScrollController extends ChangeNotifier {
   }
 
   void toggle() {
-    final rememberedBefore = _lastNonzeroStep;
-    final resumeStep = normalizeMacAutoscrollRememberedStep(
-      rememberedBefore,
-      _maximumStep,
-    );
-    if (isActive) {
-      setSignedStep(0);
-    } else {
-      setSignedStep(resumeStep);
+    if (_disposed) return;
+    if (_enabled) {
+      _disable(showStatus: true);
+      return;
     }
+    _enabled = true;
+    _signedStep = 0;
+    _consecutiveBlockedFrames = 0;
+    _disposeTicker();
+    _showStatus();
   }
 
   void stopForManualInteraction() {
-    if (_disposed || !isActive) return;
-    setSignedStep(0);
+    if (_disposed || !_enabled) return;
+    _disable(showStatus: true);
   }
 
   void stopWithoutNotification() {
-    if (_disposed || _signedStep == 0) return;
+    if (_disposed || !_enabled) return;
+    _enabled = false;
     _signedStep = 0;
     _consecutiveBlockedFrames = 0;
     _disposeTicker();
@@ -181,6 +205,7 @@ class MacReaderAutoScrollController extends ChangeNotifier {
       preferences.lastNonzeroStep,
       _maximumStep,
     );
+    _statusBannerMode = preferences.statusBannerMode;
     if (_signedStep != 0) {
       _signedStep = _signedStep.clamp(-_maximumStep, _maximumStep);
     }
@@ -189,7 +214,7 @@ class MacReaderAutoScrollController extends ChangeNotifier {
 
   @visibleForTesting
   void tick(Duration elapsed) {
-    if (!isActive || elapsed <= Duration.zero || !scrollTarget.isAttached) {
+    if (!isScrolling || elapsed <= Duration.zero || !scrollTarget.isAttached) {
       return;
     }
     final seconds = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
@@ -202,7 +227,7 @@ class MacReaderAutoScrollController extends ChangeNotifier {
     _consecutiveBlockedFrames++;
     if (_hasMovedSinceStart &&
         _consecutiveBlockedFrames >= _boundaryConfirmationFrames) {
-      setSignedStep(0);
+      _disable(showStatus: true);
     }
   }
 
@@ -221,6 +246,14 @@ class MacReaderAutoScrollController extends ChangeNotifier {
     _ticker?.dispose();
     _ticker = null;
     _lastElapsed = null;
+  }
+
+  void _disable({required bool showStatus}) {
+    _enabled = false;
+    _signedStep = 0;
+    _consecutiveBlockedFrames = 0;
+    _disposeTicker();
+    if (showStatus) _showStatus();
   }
 
   void _showStatus() {

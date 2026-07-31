@@ -5,17 +5,23 @@ import 'elibrary_sdp_cleanup.dart';
 class ELibrarySchema {
   ELibrarySchema._();
 
-  static const currentVersion = 3;
+  static const currentVersion = 5;
   static const initialMigrationKey = 'phase_1_initial_schema';
   static const contributorsMigrationKey = 'phase_2_contributors';
   static const packageLineageMigrationKey = 'phase_3_package_lineage';
+  static const storagePolicyMigrationKey = 'phase_4_epub_storage_policy';
+  static const pioneerEpubProvenanceMigrationKey =
+      'phase_5_pioneer_epub_provenance';
 
   static Future<void> ensure(Database db) async {
     await _retryOnLocked(() async {
       await _createMigrationTable(db);
       await _createCoreTables(db);
       await _createCanonicalDocumentTables(db);
+      await _createCanonicalStagingTables(db);
       await _ensurePackageLineageColumns(db);
+      await _ensureStoragePolicyColumns(db);
+      await _ensurePioneerEpubProvenanceColumns(db);
       await _createIndexes(db);
       await _seedInitialMigration(db);
       await ELibraryBogusSdpCleanupService.instance.run(db);
@@ -71,6 +77,115 @@ class ELibrarySchema {
         PRIMARY KEY(library_item_id, block_id)
       )
     ''');
+  }
+
+  /// Additive staging area for the canonical document generation currently
+  /// being built. A candidate generation is written here, validated, and
+  /// only copied into the real `library_document_*` tables (replacing the
+  /// prior generation) once validation passes. If validation fails, the
+  /// real tables are left untouched so the prior usable generation stays
+  /// readable, and the failure is recorded on the staging conversion row.
+  static Future<void> _createCanonicalStagingTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_document_conversion_staging (
+        library_item_id TEXT PRIMARY KEY,
+        canonicalizer_version INTEGER NOT NULL,
+        source_hash TEXT,
+        status TEXT NOT NULL CHECK(status IN ('converting','failed')),
+        created_at TEXT,
+        error_message TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_document_sections_staging (
+        id TEXT PRIMARY KEY,
+        library_item_id TEXT NOT NULL,
+        display_order INTEGER NOT NULL,
+        title TEXT,
+        source_href TEXT,
+        content_hash TEXT,
+        UNIQUE(library_item_id, display_order)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_document_blocks_staging (
+        id TEXT PRIMARY KEY,
+        library_item_id TEXT NOT NULL,
+        section_id TEXT NOT NULL,
+        display_order INTEGER NOT NULL,
+        block_type TEXT NOT NULL,
+        plain_text TEXT,
+        formatted_content TEXT,
+        source_refcode TEXT,
+        source_href TEXT,
+        source_anchor TEXT,
+        content_hash TEXT,
+        UNIQUE(library_item_id, display_order)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_block_source_map_staging (
+        library_item_id TEXT NOT NULL,
+        block_id TEXT NOT NULL,
+        source_href TEXT,
+        legacy_block_index INTEGER,
+        legacy_paragraph_index INTEGER,
+        source_anchor TEXT,
+        PRIMARY KEY(library_item_id, block_id)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_document_blocks_staging_item_order ON library_document_blocks_staging(library_item_id, display_order)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_document_sections_staging_item_order ON library_document_sections_staging(library_item_id, display_order)',
+    );
+  }
+
+  /// Nullable/idempotent columns backing the platform EPUB storage policy.
+  /// `epub_storage_state` is 'present' until a validated canonical import
+  /// allows the app-managed EPUB copy to be removed (`removed_after_index`).
+  static Future<void> _ensureStoragePolicyColumns(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(library_items)');
+    final names = columns
+        .map((row) => row['name']?.toString().toLowerCase())
+        .whereType<String>()
+        .toSet();
+    if (!names.contains('epub_storage_state')) {
+      await db.execute(
+        "ALTER TABLE library_items ADD COLUMN epub_storage_state TEXT NOT NULL DEFAULT 'present'",
+      );
+    }
+    if (!names.contains('epub_removed_at')) {
+      await db.execute(
+        'ALTER TABLE library_items ADD COLUMN epub_removed_at TEXT',
+      );
+    }
+  }
+
+  /// Nullable provenance columns for a raw Pioneer EPUB folder bulk import
+  /// (`library_items.source_type = 'pioneer_epub_import'`): the source
+  /// file's path relative to the user-selected external Pioneer folder (so
+  /// re-scanning that folder can find the same row again) and a content
+  /// fingerprint (SHA-256) of the external source file (so an unchanged
+  /// source can be skipped on a later import run without re-reading and
+  /// re-canonicalizing it). Never populated for any other source type.
+  static Future<void> _ensurePioneerEpubProvenanceColumns(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(library_items)');
+    final names = columns
+        .map((row) => row['name']?.toString().toLowerCase())
+        .whereType<String>()
+        .toSet();
+    if (!names.contains('pioneer_source_relative_path')) {
+      await db.execute(
+        'ALTER TABLE library_items ADD COLUMN pioneer_source_relative_path TEXT',
+      );
+    }
+    if (!names.contains('pioneer_source_fingerprint')) {
+      await db.execute(
+        'ALTER TABLE library_items ADD COLUMN pioneer_source_fingerprint TEXT',
+      );
+    }
   }
 
   static Future<int?> currentAppliedVersion(Database db) async {
@@ -439,6 +554,24 @@ class ELibrarySchema {
       'status': 'completed',
       'details':
           'Added nullable source_work_id and source_package_id to library_items.',
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.insert('elibrary_schema_migrations', {
+      'migration_key': storagePolicyMigrationKey,
+      'from_version': 3,
+      'to_version': currentVersion,
+      'applied_at': now,
+      'status': 'completed',
+      'details':
+          'Added canonical document staging tables and library_items epub_storage_state/epub_removed_at columns.',
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.insert('elibrary_schema_migrations', {
+      'migration_key': pioneerEpubProvenanceMigrationKey,
+      'from_version': 4,
+      'to_version': currentVersion,
+      'applied_at': now,
+      'status': 'completed',
+      'details':
+          'Added nullable pioneer_source_relative_path/pioneer_source_fingerprint to library_items for raw Pioneer EPUB folder bulk import.',
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 

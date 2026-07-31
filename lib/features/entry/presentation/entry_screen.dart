@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/app_info/app_version_info.dart';
 import '../../../core/theme/app_theme_mode.dart';
+import '../../library/presentation/set_up_my_library_invitation.dart';
 import '../../reader/presentation/bible_explorer_screen.dart';
 import '../../utilities/presentation/utilities_screen.dart';
 
@@ -19,19 +21,32 @@ class EntryScreen extends StatefulWidget {
 }
 
 class _EntryScreenState extends State<EntryScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Runs after the first frame so the Bible Explorer/Utilities buttons
+    // are already interactive underneath; a dismissed (not explicitly
+    // skipped) invitation never blocks using the Bible.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeShowSetUpMyLibraryInvitation(context);
+    });
+  }
+
   void _handleThemeSelected(AppThemeMode mode) {
     widget.onThemeChanged(mode);
   }
 
-  void _showAboutDialog() {
+  Future<void> _showAboutDialog() async {
+    final version = await AppVersionInfo.versionName();
+    if (!mounted) return;
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('About'),
-        content: const Text(
-          'Biblical Heritage StudyBible 2.0\n'
-          'Version 2.0\n'
-          '© 2026 Dean Bowen — All Rights Reserved.\n'
+        content: Text(
+          'Biblical Heritage #StudyBible\n'
+          'Version $version\n'
+          '© 2026 Biblical Heritage\n'
           'Built with Flutter.\n\n'
           'Help: open Utilities for setup tools, then Bible Explorer for study controls and tutorials.',
         ),
@@ -73,7 +88,6 @@ class _EntryScreenState extends State<EntryScreen> {
                 constraints.maxHeight < 760 || constraints.maxWidth < 760;
             final logoHeight = compact ? 170.0 : 200.0;
             final titleSize = compact ? 34.0 : 40.0;
-            final hashSize = compact ? 28.0 : 32.0;
             final quoteSize = compact ? 16.0 : 18.0;
 
             return SingleChildScrollView(
@@ -111,13 +125,13 @@ class _EntryScreenState extends State<EntryScreen> {
                                     vertical: 8,
                                   ),
                                   child: Text(
-                                  'aA',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    fontFamily: 'Roboto',
+                                    'aA',
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      fontFamily: 'Roboto',
+                                    ),
                                   ),
-                                ),
                                 ),
                               ),
                               const SizedBox(height: 4),
@@ -139,7 +153,7 @@ class _EntryScreenState extends State<EntryScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Biblical Heritage StudyBible 2.0',
+                          'Biblical Heritage #StudyBible',
                           style: TextStyle(
                             fontFamily: 'PlayfairDisplay',
                             fontSize: titleSize,
@@ -147,17 +161,6 @@ class _EntryScreenState extends State<EntryScreen> {
                             color: colorScheme.onSurface,
                             letterSpacing: 1.2,
                             height: 1.1,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        Text(
-                          '#StudyBible2',
-                          style: TextStyle(
-                            fontFamily: 'Roboto',
-                            fontSize: hashSize,
-                            fontWeight: FontWeight.w900,
-                            color: colorScheme.primary,
-                            letterSpacing: 1.0,
                           ),
                           textAlign: TextAlign.center,
                         ),
@@ -197,10 +200,14 @@ class _EntryScreenState extends State<EntryScreen> {
                               vertical: 12,
                             ),
                             decoration: BoxDecoration(
-                              color: colorScheme.surface.withValues(alpha: 0.55),
+                              color: colorScheme.surface.withValues(
+                                alpha: 0.55,
+                              ),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: colorScheme.primary.withValues(alpha: 0.28),
+                                color: colorScheme.primary.withValues(
+                                  alpha: 0.28,
+                                ),
                               ),
                             ),
                             child: Text(
@@ -208,7 +215,9 @@ class _EntryScreenState extends State<EntryScreen> {
                               style: TextStyle(
                                 fontFamily: 'NotoSerif',
                                 fontSize: 15,
-                                color: colorScheme.onSurface.withValues(alpha: 0.92),
+                                color: colorScheme.onSurface.withValues(
+                                  alpha: 0.92,
+                                ),
                                 height: 1.3,
                               ),
                               textAlign: TextAlign.center,
@@ -226,7 +235,7 @@ class _EntryScreenState extends State<EntryScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                              ElevatedButton(
+                                ElevatedButton(
                                   style: ElevatedButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 40,
@@ -251,8 +260,7 @@ class _EntryScreenState extends State<EntryScreen> {
                                       MaterialPageRoute<void>(
                                         builder: (_) => UtilitiesScreen(
                                           themeMode: widget.themeMode,
-                                          onThemeChanged:
-                                              widget.onThemeChanged,
+                                          onThemeChanged: widget.onThemeChanged,
                                         ),
                                       ),
                                     );

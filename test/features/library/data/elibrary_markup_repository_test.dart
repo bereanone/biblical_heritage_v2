@@ -39,36 +39,29 @@ Future<void> _seedMarkup({
   required String color,
 }) async {
   final now = DateTime.now().toUtc().toIso8601String();
-  await db.insert(
-    'elibrary_markups',
-    <String, Object?>{
-      'library_item_id': libraryItemId,
-      'epub_href': epubHref,
-      'start_block_index': 1,
-      'start_char_offset': 0,
-      'end_block_index': 1,
-      'end_char_offset': 10,
-      'start_token_index': null,
-      'end_token_index': null,
-      'ref_start': 'AA 1.1',
-      'ref_end': 'AA 1.1',
-      'compact_ref': 'AA 1.1',
-      'selected_text_snapshot': 'sample text',
-      'markup_type': markupType,
-      'color': color,
-      'note_text': markupType == 'note' ? 'legacy note' : null,
-      'created_at': now,
-      'updated_at': now,
-      'deleted_at': null,
-    },
-    conflictAlgorithm: ConflictAlgorithm.replace,
-  );
+  await db.insert('elibrary_markups', <String, Object?>{
+    'library_item_id': libraryItemId,
+    'epub_href': epubHref,
+    'start_block_index': 1,
+    'start_char_offset': 0,
+    'end_block_index': 1,
+    'end_char_offset': 10,
+    'start_token_index': null,
+    'end_token_index': null,
+    'ref_start': 'AA 1.1',
+    'ref_end': 'AA 1.1',
+    'compact_ref': 'AA 1.1',
+    'selected_text_snapshot': 'sample text',
+    'markup_type': markupType,
+    'color': color,
+    'note_text': markupType == 'note' ? 'legacy note' : null,
+    'created_at': now,
+    'updated_at': now,
+    'deleted_at': null,
+  }, conflictAlgorithm: ConflictAlgorithm.replace);
 }
 
-Future<int> _countMarkups(
-  Database db, {
-  required String libraryItemId,
-}) async {
+Future<int> _countMarkups(Database db, {required String libraryItemId}) async {
   final rows = await db.rawQuery(
     '''
     SELECT COUNT(*) AS cnt
@@ -90,9 +83,15 @@ void main() {
   late Directory libraryRootDir;
 
   setUp(() async {
-    supportDir = await Directory.systemTemp.createTemp('elibrary_markup_support_');
-    documentsDir = await Directory.systemTemp.createTemp('elibrary_markup_documents_');
-    libraryRootDir = await Directory.systemTemp.createTemp('elibrary_markup_root_');
+    supportDir = await Directory.systemTemp.createTemp(
+      'elibrary_markup_support_',
+    );
+    documentsDir = await Directory.systemTemp.createTemp(
+      'elibrary_markup_documents_',
+    );
+    libraryRootDir = await Directory.systemTemp.createTemp(
+      'elibrary_markup_root_',
+    );
     LibraryRootService.instance.invalidateCachedSelection();
     await _installPathProviderMocks(
       supportDir: supportDir,
@@ -139,8 +138,7 @@ void main() {
     expect(bySection['OEBPS/content01.xhtml'], isNotNull);
     expect(bySection['OEBPS/content01.xhtml']!.single.markupType, 'note');
     expect(
-      await ElibraryMarkupRepository()
-          .loadHighlightsBySectionForItem('item-1'),
+      await ElibraryMarkupRepository().loadHighlightsBySectionForItem('item-1'),
       isEmpty,
     );
   });
@@ -164,14 +162,8 @@ void main() {
 
     expect(saved, isNotNull);
     expect(saved!.isHighlight, isTrue);
-    expect(
-      await _countMarkups(eLibraryDb, libraryItemId: 'item-2'),
-      1,
-    );
-    expect(
-      await _countMarkups(userDb, libraryItemId: 'item-2'),
-      0,
-    );
+    expect(await _countMarkups(eLibraryDb, libraryItemId: 'item-2'), 1);
+    expect(await _countMarkups(userDb, libraryItemId: 'item-2'), 0);
 
     final bySection = await ElibraryMarkupRepository()
         .loadHighlightsBySectionForItem('item-2');

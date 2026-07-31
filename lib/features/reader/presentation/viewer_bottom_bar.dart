@@ -57,6 +57,15 @@ class ViewerBottomBar extends StatelessWidget {
   Widget _autoScrollButton({bool compact = false}) {
     final macController = macAutoScrollController;
     if (macController != null) {
+      if (tiltAutoScrollController.motionSource.isSupported) {
+        return ReaderTiltAutoScrollIconButton(
+          controller: tiltAutoScrollController,
+          onPressed: onToggleTiltAutoScroll,
+          onLongPress: onOpenTiltAutoScrollSettings,
+          enabled: !interlinearEnabled,
+          compact: compact,
+        );
+      }
       return MacReaderAutoScrollButton(
         controller: macController,
         onPressed: onToggleMacAutoScroll!,

@@ -1,12 +1,27 @@
 import 'dart:io';
 
 import 'library_epub_metadata.dart';
+import 'library_xml_html_entities.dart';
 
 String? normalizeLibraryAuthor(String? value) {
-  final trimmed = value?.trim() ?? '';
+  var trimmed = value?.trim() ?? '';
+  if (trimmed.isEmpty) return null;
+  trimmed = decodeXmlHtmlEntities(trimmed);
+  trimmed = decodeXmlHtmlEntities(trimmed);
+  trimmed = trimmed.replaceAll(RegExp(r'\s+'), ' ').trim();
   if (trimmed.isEmpty) return null;
   if (trimmed.toLowerCase() == 'unknown author') return null;
+  if (_looksLikeInternalCode(trimmed)) return null;
   return trimmed;
+}
+
+/// Matches short all-caps import codes (e.g. "AW", "DAR", "GC") that leak in
+/// from source filenames rather than real author names.
+bool _looksLikeInternalCode(String value) {
+  final compact = value.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+  return compact.length <= 5 &&
+      RegExp(r'^[A-Z0-9]+$').hasMatch(compact) &&
+      !value.contains(RegExp(r'[a-z]'));
 }
 
 bool isEgwLibraryItem({

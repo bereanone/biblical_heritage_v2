@@ -12,7 +12,7 @@ import 'package:studybible2/core/theme/app_settings_service.dart';
 import 'package:studybible2/core/theme/theme_preferences.dart';
 
 Future<void> _pumpUntilEntryScreen(WidgetTester tester) async {
-  await _pumpUntilText(tester, 'Biblical Heritage StudyBible 2.0');
+  await _pumpUntilText(tester, 'Biblical Heritage #StudyBible');
 }
 
 Future<void> _pumpUntilText(WidgetTester tester, String text) async {
@@ -83,8 +83,7 @@ void main() {
     await tester.pumpWidget(const StudyBibleApp());
     await _pumpUntilEntryScreen(tester);
 
-    expect(find.text('Biblical Heritage StudyBible 2.0'), findsOneWidget);
-    expect(find.text('#StudyBible2'), findsOneWidget);
+    expect(find.text('Biblical Heritage #StudyBible'), findsOneWidget);
     expect(find.text('Bible Explorer'), findsOneWidget);
   });
 

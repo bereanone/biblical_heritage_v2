@@ -15,6 +15,12 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   final _service = LibraryCatalogService.instance;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
+  // Large/compact/keyboard-open layouts place the search field at different
+  // positions in the widget tree. A stable GlobalKey lets Flutter relocate
+  // its Element (and the EditableText's live input connection) across those
+  // positions instead of disposing and recreating it, which would otherwise
+  // close the on-screen keyboard mid-focus.
+  final GlobalKey _searchFieldKey = GlobalKey();
   LibraryRootSelection? _selection;
   bool _loading = true;
   String _loadingStatus = 'Loading library...';
@@ -22,7 +28,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   _LibraryTab _tab = _LibraryTab.books;
   _LibraryView _view = _LibraryView.shelf;
   double _viewerFontScale = 1.3;
-  String _fileTypeFilter = 'ePubs';
+  String _fileTypeFilter = libraryMediaFilterAll;
   String _collectionFilter = 'all';
   String _searchQuery = '';
   String? _selectedInitialLetter;
@@ -32,6 +38,21 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   bool _loadingCaptureImports = false;
   bool _captureImportDialogVisible = false;
   PageRoute<dynamic>? _observedRoute;
+
+  // Compact-layout secondary control collapse (see build()). Secondary
+  // controls hide on downward scroll and restore on upward scroll once the
+  // accumulated delta crosses a hysteresis threshold, to avoid jitter.
+  bool _secondaryControlsCollapsed = false;
+  double _scrollHysteresisAccumulator = 0;
+  bool _wasCompactLayout = false;
+  // macOS enforces a 900x700 minimum window size (MainFlutterWindow.swift),
+  // which leaves ~568 logical px of height for this LayoutBuilder at the
+  // smallest window the OS allows. The height threshold must sit above
+  // that floor or the compact layout would be unreachable by resizing a
+  // macOS window at all, even at the smallest size a user can drag to.
+  static const double _kCompactHeightThreshold = 650;
+  static const double _kCompactWidthThreshold = 640;
+  static const double _kScrollCollapseThreshold = 28;
 
   @override
   void initState() {
@@ -91,6 +112,9 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
       final selection = await LibraryRootService.instance.loadSelection();
       final viewerFontScale = await AppSettingsService.instance
           .loadViewerFontScale();
+      final fileTypeFilter = normalizeLibraryMediaFilter(
+        await AppSettingsService.instance.loadElibraryMediaFilter(),
+      );
       var items = await _service.loadItems();
       final hasCommentaryItems = items.any(
         (item) => item.collectionGroupKey == 'egw_commentaries',
@@ -104,6 +128,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
         _selection = selection;
         _items = items;
         _viewerFontScale = viewerFontScale;
+        _fileTypeFilter = fileTypeFilter;
         _loading = false;
         _loadingStatus = 'Library loaded.';
         _loadingError = null;
@@ -137,6 +162,13 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   Future<void> _refreshCaptureImportReport({
     required bool promptOnDiscovery,
   }) async {
+    if (shouldSkipCaptureClipperStartupScan()) {
+      if (mounted) setState(() => _loadingCaptureImports = false);
+      debugPrint(
+        'CaptureClipper library availability scan skipped by development override.',
+      );
+      return;
+    }
     if (mounted) {
       setState(() => _loadingCaptureImports = true);
     }
@@ -170,10 +202,9 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
     if (report == null || !report.hasAvailableImports) {
       await _refreshCaptureImportReport(promptOnDiscovery: false);
     }
+    if (!mounted) return;
     final refreshedReport = _captureImportReport;
-    if (!mounted ||
-        refreshedReport == null ||
-        !refreshedReport.hasAvailableImports) {
+    if (refreshedReport == null || !refreshedReport.hasAvailableImports) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No CaptureClipper imports are currently available.'),
@@ -322,6 +353,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
       } else {
         message = 'No CaptureClipper import folders were selected.';
       }
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
@@ -379,6 +411,8 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
 
   Future<void> _openBookReader(LibraryCatalogItem item) async {
     final resolvedItem = await _service.loadItemById(item.id) ?? item;
+    if (!mounted) return;
+    if (!await ensureLibraryItemOpenable(context, resolvedItem)) return;
     if (!mounted) return;
     final initialHref = _initialBookHref(resolvedItem);
     await Navigator.of(context, rootNavigator: true).push(
@@ -471,12 +505,14 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   }
 
   Future<void> _setFileTypeFilter(String value) async {
-    if (_fileTypeFilter == value) return;
+    final normalizedValue = normalizeLibraryMediaFilter(value);
+    if (_fileTypeFilter == normalizedValue) return;
     setState(() {
-      _fileTypeFilter = value;
+      _fileTypeFilter = normalizedValue;
       _selectedInitialLetter = null;
       _tab = _LibraryTab.books;
     });
+    await AppSettingsService.instance.saveElibraryMediaFilter(normalizedValue);
     await _syncSelectionAndNavigation(
       _filteredBooks,
       preferExistingSelection: true,
@@ -528,10 +564,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
 
   void _applySearchQueryFromField() {
     _applySearchQuery(_searchController.text);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _searchFocusNode.requestFocus();
-    });
+    _searchFocusNode.unfocus();
   }
 
   void _clearSearchQuery() {
@@ -570,9 +603,109 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
     setState(() => _selectedInitialLetter = letter);
   }
 
+  // Collapses/restores the compact-layout secondary control panel based on
+  // book-list scroll direction, with a pixel threshold (hysteresis) so small
+  // back-and-forth movements don't cause jitter. Snapping back to the top
+  // always restores the full controls immediately.
+  bool _handleBookListScrollNotification(ScrollNotification notification) {
+    if (notification is! ScrollUpdateNotification) return false;
+    final metrics = notification.metrics;
+    if (metrics.pixels <= metrics.minScrollExtent + 1) {
+      _scrollHysteresisAccumulator = 0;
+      if (_secondaryControlsCollapsed) {
+        setState(() => _secondaryControlsCollapsed = false);
+      }
+      return false;
+    }
+    final delta = notification.scrollDelta ?? 0;
+    if (delta == 0) return false;
+    if (delta > 0) {
+      _scrollHysteresisAccumulator = _scrollHysteresisAccumulator < 0
+          ? delta
+          : _scrollHysteresisAccumulator + delta;
+    } else {
+      _scrollHysteresisAccumulator = _scrollHysteresisAccumulator > 0
+          ? delta
+          : _scrollHysteresisAccumulator + delta;
+    }
+    if (_scrollHysteresisAccumulator >= _kScrollCollapseThreshold &&
+        !_secondaryControlsCollapsed) {
+      _scrollHysteresisAccumulator = 0;
+      setState(() => _secondaryControlsCollapsed = true);
+    } else if (_scrollHysteresisAccumulator <= -_kScrollCollapseThreshold &&
+        _secondaryControlsCollapsed) {
+      _scrollHysteresisAccumulator = 0;
+      setState(() => _secondaryControlsCollapsed = false);
+    }
+    return false;
+  }
+
   Future<void> _selectBook(LibraryCatalogItem item) async {
     setState(() => _selectedBookId = item.id);
+    final availability = libraryItemAvailability(item);
+    if (!availability.isAvailable) {
+      await _handleUnavailableBookSelected(item, availability);
+      return;
+    }
     await _openBookReader(item);
+  }
+
+  Future<void> _handleUnavailableBookSelected(
+    LibraryCatalogItem item,
+    LibraryItemAvailability availability,
+  ) async {
+    final canRetry = libraryItemSupportsRetryDownload(item);
+    final action = await showLibraryUnavailableBookDialog(
+      context,
+      item: item,
+      availability: availability,
+      canRetry: canRetry,
+    );
+    if (!mounted ||
+        action != LibraryUnavailableBookDialogAction.retryDownload) {
+      return;
+    }
+    await _retryUnavailableBookDownload(item);
+  }
+
+  Future<void> _retryUnavailableBookDownload(LibraryCatalogItem item) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      SnackBar(content: Text('Retrying download for "${item.displayTitle}"…')),
+    );
+    LibraryItemRetryDownloadResult result;
+    try {
+      result = await LibraryItemRetryDownloadService.instance.retry(
+        libraryItemId: item.id,
+        collectionName: item.collectionName ?? '',
+        relativePath: item.relativePath,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('Retry failed: $error')));
+      return;
+    }
+    if (!mounted) return;
+    await _reloadItems();
+    if (!mounted) return;
+    if (result.succeeded) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('"${item.displayTitle}" is now available.')),
+      );
+      final refreshed = _firstWhereOrNull(_items, (i) => i.id == item.id);
+      if (refreshed != null) {
+        await _openBookReader(refreshed);
+      }
+      return;
+    }
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text(
+          'The retry did not produce a readable copy. The source may still '
+          'be unavailable.',
+        ),
+      ),
+    );
   }
 
   List<LibraryCatalogItem> get _filteredBooks {
@@ -762,6 +895,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
     final cardBackground = _librarySurfaceLowColor(theme);
     final selection = _selection;
     final collectionOptions = _availableCollectionFilters;
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
 
     return Scaffold(
       backgroundColor: background,
@@ -798,162 +932,346 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
                           final collectionWidth = (constraints.maxWidth * 0.42)
                               .clamp(200.0, 300.0)
                               .toDouble();
-                          return _loading
-                              ? Center(
-                                  child: ConstrainedBox(
-                                    constraints: const BoxConstraints(
-                                      maxWidth: 520,
-                                    ),
-                                    child: Card(
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(20),
-                                        child: Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const CircularProgressIndicator(),
-                                            const SizedBox(height: 16),
-                                            Text(
-                                              _loadingStatus,
-                                              textAlign: TextAlign.center,
+                          final useKeyboardScrollablePhoneLayout =
+                              constraints.maxWidth < 600 && keyboardInset > 0;
+                          final isCompact =
+                              constraints.maxHeight <
+                                  _kCompactHeightThreshold ||
+                              constraints.maxWidth < _kCompactWidthThreshold;
+                          if (isCompact != _wasCompactLayout) {
+                            _wasCompactLayout = isCompact;
+                            if (isCompact && _secondaryControlsCollapsed) {
+                              _scrollHysteresisAccumulator = 0;
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (!mounted) return;
+                                setState(
+                                  () => _secondaryControlsCollapsed = false,
+                                );
+                              });
+                            }
+                          }
+
+                          final catalogPane = AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 180),
+                            child: switch (_tab) {
+                              _LibraryTab.books => _LibraryPane(
+                                key: const ValueKey('books'),
+                                books: _filteredBooks,
+                                selectedBookId: _selectedBookId,
+                                view: _view,
+                                onSelectBook: _selectBook,
+                                isEmptyMessage: _booksEmptyMessage(),
+                              ),
+                              _LibraryTab.recent => _RecentPane(
+                                key: const ValueKey('recent'),
+                                books: _recentBooks,
+                                selectedBookId: _selectedBookId,
+                                onSelectBook: _selectBook,
+                                isEmptyMessage: _recentEmptyMessage(),
+                              ),
+                            },
+                          );
+
+                          final titleFilterRow = Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                'Library',
+                                style: libraryScaledTextStyle(
+                                  theme.textTheme.headlineSmall,
+                                  libraryTitleScale(
+                                    libraryFontScaleOf(context),
+                                  ),
+                                  fontWeight: FontWeight.w800,
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                              ),
+                              SizedBox(
+                                width: collectionWidth,
+                                child: _CollectionFilterMenu(
+                                  currentValue: _collectionFilter,
+                                  options: collectionOptions,
+                                  onSelected: _handleCollectionFilterSelected,
+                                ),
+                              ),
+                              _FileTypeFilterMenu(
+                                currentValue: _fileTypeFilter,
+                                onSelected: _setFileTypeFilter,
+                              ),
+                              _SearchTextButton(
+                                onPressed: () => showLibraryCatalogSearchDialog(
+                                  context,
+                                  fontScale: _viewerFontScale,
+                                  onReturnToBible: _returnToBibleFromBookReader,
+                                ),
+                              ),
+                            ],
+                          );
+
+                          // Full, non-collapsing control set used both by the
+                          // keyboard-open phone layout (scrolls as one unit
+                          // with the results) and by large/tall layouts
+                          // (stays fixed above an independently-scrolling
+                          // results area — see the `!isCompact` branch below).
+                          final catalogControls = <Widget>[
+                            titleFilterRow,
+                            const SizedBox(height: 10),
+                            _SearchField(
+                              key: _searchFieldKey,
+                              controller: _searchController,
+                              focusNode: _searchFocusNode,
+                              onChanged: _setSearchQuery,
+                              onSubmitted: (_) => _applySearchQueryFromField(),
+                              onApply: _applySearchQueryFromField,
+                              onClear: _clearSearchQuery,
+                            ),
+                            const SizedBox(height: 10),
+                            _TabSelector(selectedTab: _tab, onChanged: _setTab),
+                            const SizedBox(height: 10),
+                            if (_tab == _LibraryTab.books) ...[
+                              _AlphabetStrip(
+                                selectedInitialLetter: _selectedInitialLetter,
+                                availableInitialLetters:
+                                    _availableInitialLetters,
+                                onChanged: _setInitialLetter,
+                              ),
+                              const SizedBox(height: 10),
+                              _ViewToggleRow(
+                                view: _view,
+                                onViewChanged: _setView,
+                              ),
+                              const SizedBox(height: 10),
+                            ],
+                          ];
+
+                          if (_loading) {
+                            return Center(
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 520,
+                                ),
+                                child: Card(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(20),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const CircularProgressIndicator(),
+                                        const SizedBox(height: 16),
+                                        Text(
+                                          _loadingStatus,
+                                          textAlign: TextAlign.center,
+                                        ),
+                                        if (_loadingError != null) ...[
+                                          const SizedBox(height: 12),
+                                          SelectableText(
+                                            _loadingError!,
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: theme.colorScheme.error,
                                             ),
-                                            if (_loadingError != null) ...[
-                                              const SizedBox(height: 12),
-                                              SelectableText(
-                                                _loadingError!,
-                                                textAlign: TextAlign.center,
-                                                style: TextStyle(
-                                                  color:
-                                                      theme.colorScheme.error,
-                                                ),
+                                          ),
+                                        ],
+                                        const SizedBox(height: 16),
+                                        Wrap(
+                                          spacing: 12,
+                                          runSpacing: 12,
+                                          alignment: WrapAlignment.center,
+                                          children: [
+                                            FilledButton(
+                                              onPressed: _load,
+                                              child: const Text('Retry'),
+                                            ),
+                                            OutlinedButton(
+                                              onPressed: _openELibrarySetup,
+                                              child: const Text(
+                                                'Open eLibrary Setup',
                                               ),
-                                            ],
-                                            const SizedBox(height: 16),
-                                            Wrap(
-                                              spacing: 12,
-                                              runSpacing: 12,
-                                              alignment: WrapAlignment.center,
-                                              children: [
-                                                FilledButton(
-                                                  onPressed: _load,
-                                                  child: const Text('Retry'),
-                                                ),
-                                                OutlinedButton(
-                                                  onPressed: _openELibrarySetup,
-                                                  child: const Text(
-                                                    'Open eLibrary Setup',
-                                                  ),
-                                                ),
-                                              ],
                                             ),
                                           ],
                                         ),
-                                      ),
-                                    ),
-                                  ),
-                                )
-                              : Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Wrap(
-                                      spacing: 10,
-                                      runSpacing: 10,
-                                      crossAxisAlignment:
-                                          WrapCrossAlignment.center,
-                                      children: [
-                                        Text(
-                                          'Library',
-                                          style: libraryScaledTextStyle(
-                                            theme.textTheme.headlineSmall,
-                                            libraryTitleScale(
-                                              libraryFontScaleOf(context),
-                                            ),
-                                            fontWeight: FontWeight.w800,
-                                            color: theme.colorScheme.onSurface,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: collectionWidth,
-                                          child: _CollectionFilterMenu(
-                                            currentValue: _collectionFilter,
-                                            options: collectionOptions,
-                                            onSelected:
-                                                _handleCollectionFilterSelected,
-                                          ),
-                                        ),
-                                        _FileTypeFilterMenu(
-                                          currentValue: _fileTypeFilter,
-                                          onSelected: _setFileTypeFilter,
-                                        ),
-                                        _SearchTextButton(
-                                          onPressed: () =>
-                                              showLibraryCatalogSearchDialog(
-                                                context,
-                                                fontScale: _viewerFontScale,
-                                                onReturnToBible:
-                                                    _returnToBibleFromBookReader,
-                                              ),
-                                        ),
                                       ],
                                     ),
-                                    const SizedBox(height: 10),
-                                    _SearchField(
-                                      controller: _searchController,
-                                      focusNode: _searchFocusNode,
-                                      onChanged: _setSearchQuery,
-                                      onSubmitted: (_) =>
-                                          _applySearchQueryFromField(),
-                                      onApply: _applySearchQueryFromField,
-                                      onClear: _clearSearchQuery,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+
+                          if (useKeyboardScrollablePhoneLayout) {
+                            // A focused text field must stay reachable above
+                            // the keyboard, so controls and results scroll
+                            // together as a single unit here.
+                            return CustomScrollView(
+                              key: const ValueKey('library-standard-layout'),
+                              keyboardDismissBehavior:
+                                  ScrollViewKeyboardDismissBehavior.manual,
+                              slivers: [
+                                SliverToBoxAdapter(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: catalogControls,
+                                  ),
+                                ),
+                                SliverFillRemaining(
+                                  hasScrollBody: false,
+                                  child: SizedBox(
+                                    height: constraints.maxHeight
+                                        .clamp(180.0, 360.0)
+                                        .toDouble(),
+                                    child: catalogPane,
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+
+                          if (!isCompact) {
+                            // Enough vertical space: keep every control
+                            // fixed and permanently visible; only the
+                            // book-results area scrolls.
+                            return Column(
+                              key: const ValueKey('library-standard-layout'),
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                ...catalogControls,
+                                Expanded(child: catalogPane),
+                              ],
+                            );
+                          }
+
+                          // Short or narrow layout: a compact sticky toolbar
+                          // (collection, search access, Books/Recent,
+                          // Shelf/List) stays visible at all times; secondary
+                          // controls (title, file-type filter, title search
+                          // box, alphabet row) collapse on downward scroll
+                          // and restore on upward scroll or at the top.
+                          final stickyToolbar = Column(
+                            key: const ValueKey('library-sticky-toolbar'),
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _CollectionFilterMenu(
+                                      currentValue: _collectionFilter,
+                                      options: collectionOptions,
+                                      onSelected:
+                                          _handleCollectionFilterSelected,
                                     ),
-                                    const SizedBox(height: 10),
-                                    _TabSelector(
-                                      selectedTab: _tab,
-                                      onChanged: _setTab,
-                                    ),
-                                    const SizedBox(height: 10),
-                                    if (_tab == _LibraryTab.books) ...[
-                                      _AlphabetStrip(
-                                        selectedInitialLetter:
-                                            _selectedInitialLetter,
-                                        availableInitialLetters:
-                                            _availableInitialLetters,
-                                        onChanged: _setInitialLetter,
-                                      ),
-                                      const SizedBox(height: 10),
-                                      _ViewToggleRow(
-                                        view: _view,
-                                        onViewChanged: _setView,
-                                      ),
-                                      const SizedBox(height: 10),
-                                    ],
-                                    Expanded(
-                                      child: AnimatedSwitcher(
-                                        duration: const Duration(
-                                          milliseconds: 180,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _SearchTextButton(
+                                    onPressed: () =>
+                                        showLibraryCatalogSearchDialog(
+                                          context,
+                                          fontScale: _viewerFontScale,
+                                          onReturnToBible:
+                                              _returnToBibleFromBookReader,
                                         ),
-                                        child: switch (_tab) {
-                                          _LibraryTab.books => _LibraryPane(
-                                            key: const ValueKey('books'),
-                                            books: _filteredBooks,
-                                            selectedBookId: _selectedBookId,
-                                            view: _view,
-                                            onSelectBook: _selectBook,
-                                            isEmptyMessage:
-                                                _booksEmptyMessage(),
-                                          ),
-                                          _LibraryTab.recent => _RecentPane(
-                                            key: const ValueKey('recent'),
-                                            books: _recentBooks,
-                                            selectedBookId: _selectedBookId,
-                                            onSelectBook: _selectBook,
-                                            isEmptyMessage:
-                                                _recentEmptyMessage(),
-                                          ),
-                                        },
-                                      ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  _TabSelector(
+                                    selectedTab: _tab,
+                                    onChanged: _setTab,
+                                  ),
+                                  if (_tab == _LibraryTab.books)
+                                    _ViewToggleRow(
+                                      view: _view,
+                                      onViewChanged: _setView,
                                     ),
-                                  ],
-                                );
+                                ],
+                              ),
+                            ],
+                          );
+
+                          final secondaryControls = <Widget>[
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Text(
+                                  'Library',
+                                  style: libraryScaledTextStyle(
+                                    theme.textTheme.headlineSmall,
+                                    libraryTitleScale(
+                                      libraryFontScaleOf(context),
+                                    ),
+                                    fontWeight: FontWeight.w800,
+                                    color: theme.colorScheme.onSurface,
+                                  ),
+                                ),
+                                _FileTypeFilterMenu(
+                                  currentValue: _fileTypeFilter,
+                                  onSelected: _setFileTypeFilter,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            _SearchField(
+                              key: _searchFieldKey,
+                              controller: _searchController,
+                              focusNode: _searchFocusNode,
+                              onChanged: _setSearchQuery,
+                              onSubmitted: (_) => _applySearchQueryFromField(),
+                              onApply: _applySearchQueryFromField,
+                              onClear: _clearSearchQuery,
+                            ),
+                            if (_tab == _LibraryTab.books) ...[
+                              const SizedBox(height: 10),
+                              _AlphabetStrip(
+                                selectedInitialLetter: _selectedInitialLetter,
+                                availableInitialLetters:
+                                    _availableInitialLetters,
+                                onChanged: _setInitialLetter,
+                              ),
+                            ],
+                          ];
+
+                          return Column(
+                            key: const ValueKey('library-standard-layout'),
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              stickyToolbar,
+                              AnimatedSize(
+                                duration: const Duration(milliseconds: 200),
+                                curve: Curves.easeInOut,
+                                alignment: Alignment.topCenter,
+                                child: _secondaryControlsCollapsed
+                                    ? const SizedBox(width: double.infinity)
+                                    : Padding(
+                                        key: const ValueKey(
+                                          'library-secondary-controls',
+                                        ),
+                                        padding: const EdgeInsets.only(top: 10),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: secondaryControls,
+                                        ),
+                                      ),
+                              ),
+                              const SizedBox(height: 10),
+                              Expanded(
+                                child: NotificationListener<ScrollNotification>(
+                                  onNotification:
+                                      _handleBookListScrollNotification,
+                                  child: catalogPane,
+                                ),
+                              ),
+                            ],
+                          );
                         },
                       ),
                     ),

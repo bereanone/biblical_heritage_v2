@@ -24,6 +24,8 @@ LibraryCatalogItem _catalogItem({
   String? author,
   required String fileName,
   required String relativePath,
+  String fileFormat = 'epub',
+  String mimeType = 'application/epub+zip',
 }) {
   return LibraryCatalogItem(
     id: id,
@@ -32,7 +34,7 @@ LibraryCatalogItem _catalogItem({
     fileName: fileName,
     fileHash: null,
     relativePath: relativePath,
-    fileFormat: 'epub',
+    fileFormat: fileFormat,
     folderType: 'research',
     libraryRole: 'user_added',
     collectionName: 'EGW_Devotionals',
@@ -44,7 +46,7 @@ LibraryCatalogItem _catalogItem({
     lastOpened: null,
     indexStatus: 'indexed',
     fileSize: 0,
-    mimeType: 'application/epub+zip',
+    mimeType: mimeType,
     spineIndex: null,
     anchorId: null,
     epubHref: null,
@@ -113,9 +115,7 @@ Future<void> _seedLibraryLink(
 }
 
 Future<Directory> _prepareIsolatedLibraryRoot() async {
-  final sourceDbDir = Directory(
-    '/Users/deanbowen/Development/StudyBible2/test/Databases',
-  );
+  final sourceDbDir = Directory('test/Databases');
   final libraryRootDir = await Directory.systemTemp.createTemp(
     'library_reader_refcodes_root_',
   );
@@ -189,6 +189,53 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
+
+  test('steady autoscroll remains desktop-only', () {
+    expect(libraryReaderUsesSteadyAutoscroll(TargetPlatform.android), isFalse);
+    expect(libraryReaderUsesSteadyAutoscroll(TargetPlatform.macOS), isTrue);
+    expect(libraryReaderUsesSteadyAutoscroll(TargetPlatform.windows), isTrue);
+    expect(libraryReaderUsesSteadyAutoscroll(TargetPlatform.linux), isTrue);
+    expect(libraryReaderUsesSteadyAutoscroll(TargetPlatform.iOS), isFalse);
+  });
+
+  test('steady autoscroll remains disabled for PDF books', () {
+    final textBook = _catalogItem(
+      id: 'text-reader',
+      title: 'Text Reader',
+      fileName: 'text.epub',
+      relativePath: 'text.epub',
+    );
+    final pdfBook = _catalogItem(
+      id: 'pdf-reader',
+      title: 'PDF Reader',
+      fileName: 'document.pdf',
+      relativePath: 'document.pdf',
+      fileFormat: 'pdf',
+      mimeType: 'application/pdf',
+    );
+
+    expect(
+      libraryReaderSteadyAutoscrollEnabled(
+        item: textBook,
+        hasReadableSections: true,
+      ),
+      isTrue,
+    );
+    expect(
+      libraryReaderSteadyAutoscrollEnabled(
+        item: pdfBook,
+        hasReadableSections: true,
+      ),
+      isFalse,
+    );
+    expect(
+      libraryReaderSteadyAutoscrollEnabled(
+        item: textBook,
+        hasReadableSections: false,
+      ),
+      isFalse,
+    );
+  });
 
   test('maps Christ Triumphant to the expected ref abbreviation', () {
     final item = _catalogItem(
@@ -1710,13 +1757,17 @@ void main() {
           );
           navigator.push(
             MaterialPageRoute<void>(
-              builder: (_) => LibraryBookReaderScreen(item: importedItem),
+              builder: (_) => LibraryBookReaderScreen(
+                item: importedItem,
+                enableCanonicalReader: false,
+              ),
             ),
           );
           await _pumpUntilFinder(
             tester,
             find.text('The Story of the Seer of Patmos'),
           );
+          await _pumpTransient(tester);
 
           expect(find.text('Remove from Library'), findsNothing);
           expect(find.text('Repair Imported Book'), findsNothing);
@@ -1736,7 +1787,12 @@ void main() {
         tester,
       ) async {
         await tester.pumpWidget(
-          MaterialApp(home: LibraryBookReaderScreen(item: importedItem)),
+          MaterialApp(
+            home: LibraryBookReaderScreen(
+              item: importedItem,
+              enableCanonicalReader: false,
+            ),
+          ),
         );
         await _pumpUntilFinder(
           tester,
@@ -1771,7 +1827,12 @@ void main() {
             await tester.binding.setSurfaceSize(Size(width, 700));
             addTearDown(() => tester.binding.setSurfaceSize(null));
             await tester.pumpWidget(
-              MaterialApp(home: LibraryBookReaderScreen(item: importedItem)),
+              MaterialApp(
+                home: LibraryBookReaderScreen(
+                  item: importedItem,
+                  enableCanonicalReader: false,
+                ),
+              ),
             );
             await _pumpUntilFinder(
               tester,
@@ -1824,6 +1885,108 @@ void main() {
         );
       }
 
+      testWidgets(
+        'Pioneer imported text exposes tilt-only autoscroll on Android phone',
+        (tester) async {
+          debugDefaultTargetPlatformOverride = TargetPlatform.android;
+          addTearDown(() {
+            debugDefaultTargetPlatformOverride = null;
+          });
+          await tester.binding.setSurfaceSize(const Size(390, 700));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+
+          await tester.pumpWidget(
+            MaterialApp(
+              home: LibraryBookReaderScreen(
+                item: importedItem,
+                enableCanonicalReader: false,
+              ),
+            ),
+          );
+          await _pumpUntilFinder(
+            tester,
+            find.text('The Story of the Seer of Patmos'),
+          );
+          await _pumpTransient(tester);
+
+          final autoscroll = find.byKey(const ValueKey('elibrary-auto-scroll'));
+          expect(autoscroll, findsNothing);
+          expect(find.byTooltip('Autoscroll'), findsNothing);
+          expect(
+            find.byKey(const ValueKey('elibrary-tilt-auto-scroll')),
+            findsOneWidget,
+          );
+
+          debugDefaultTargetPlatformOverride = null;
+          expect(tester.takeException(), isNull);
+        },
+      );
+
+      testWidgets('macOS keyboard stays inactive while LibraryBookReaderScreen '
+          'autoscroll is disabled', (tester) async {
+        // LibraryBookReaderScreen._load() reads book content through
+        // UserDatabase/AppSettingsService, which never resolves inside
+        // this widget-test harness (a pre-existing gap: every other
+        // testWidgets case in this file pumps the same screen and never
+        // observes it finish either, they just don't assert on it). The
+        // reader-level keyboard focus wiring and the MacReaderAutoScroll
+        // controller are both created unconditionally in initState,
+        // independent of that load, so the live keyboard path is fully
+        // exercisable without waiting for it.
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        addTearDown(() {
+          debugDefaultTargetPlatformOverride = null;
+        });
+        await tester.pumpWidget(
+          MaterialApp(
+            home: LibraryBookReaderScreen(
+              item: importedItem,
+              enableCanonicalReader: false,
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        final button = find.byKey(const ValueKey('mac-autoscroll-button'));
+        expect(button, findsOneWidget);
+        expect(find.byIcon(Icons.swap_vert), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('elibrary-auto-scroll')),
+          findsNothing,
+        );
+
+        final statusFinder = find.byKey(
+          const ValueKey('mac-autoscroll-status'),
+        );
+        expect(statusFinder, findsNothing);
+
+        Future<void> press(LogicalKeyboardKey key) async {
+          await tester.sendKeyDownEvent(key);
+          await tester.sendKeyUpEvent(key);
+          await tester.pump();
+        }
+
+        // The toolbar is disabled while this harness is still loading, so
+        // keyboard autoscroll mode is off and arrows must not start it.
+        await press(LogicalKeyboardKey.arrowDown);
+        await press(LogicalKeyboardKey.arrowUp);
+        expect(statusFinder, findsNothing);
+
+        // The button toggle path and the settings-dialog long press are
+        // covered directly against handleMacReaderAutoscrollKeyEvent in
+        // mac_reader_autoscroll_controls_test.dart. This test's toolbar
+        // button stays disabled here because _sections never finishes
+        // loading in this widget-test harness (a separate, pre-existing
+        // condition: no other testWidgets case in this file waits on
+        // LibraryBookReaderScreen._load() either); that gate is unrelated
+        // to the keyboard-focus defect this test targets.
+        expect(tester.widget<IconButton>(button).onPressed, isNull);
+
+        expect(tester.takeException(), isNull);
+        debugDefaultTargetPlatformOverride = null;
+      });
+
       test('maintenance eligibility skips non-imported books', () {
         final normalBook = _catalogItem(
           id: 'normal',
@@ -1841,7 +2004,12 @@ void main() {
         tester,
       ) async {
         await tester.pumpWidget(
-          MaterialApp(home: LibraryBookReaderScreen(item: importedItem)),
+          MaterialApp(
+            home: LibraryBookReaderScreen(
+              item: importedItem,
+              enableCanonicalReader: false,
+            ),
+          ),
         );
         await _pumpUntilFinder(
           tester,

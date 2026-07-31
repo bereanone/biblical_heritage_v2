@@ -499,8 +499,11 @@ String _presentationLabelOrFallback(String? value, {required String fallback}) {
 bool _looksLikeTechnicalPresentationText(String text) {
   final lower = text.toLowerCase();
   // Exact generic fallback type labels are never real user captions.
-  if (lower == 'image' || lower == 'media' || lower == 'attached' ||
-      lower == 'attached image' || lower == 'attached media') {
+  if (lower == 'image' ||
+      lower == 'media' ||
+      lower == 'attached' ||
+      lower == 'attached image' ||
+      lower == 'attached media') {
     return true;
   }
   if (lower.startsWith('note:')) return true;
@@ -766,17 +769,18 @@ class _PreviewTextBlock extends StatelessWidget {
             final rfs = (fs * 0.55).clamp(13.0, refScaleMax);
             final gap = math.max(4.0, math.min(fs * 0.28, 22.0));
             final bH = body.isNotEmpty
-                ? (_makePainterForFit(body, fs, bodyLineH)
-                      ..layout(maxWidth: availW))
-                    .height
+                ? (_makePainterForFit(
+                    body,
+                    fs,
+                    bodyLineH,
+                  )..layout(maxWidth: availW)).height
                 : 0.0;
             final rH = (_makePainterForFit(
-                  item.reference,
-                  rfs,
-                  refLineH,
-                  maxLines: 1,
-                )..layout(maxWidth: availW))
-                .height;
+              item.reference,
+              rfs,
+              refLineH,
+              maxLines: 1,
+            )..layout(maxWidth: availW)).height;
             if (bH + secGapH + secSlotH + gap + rH <= availH + 0.5) {
               bestFont = fs;
               break;
@@ -788,17 +792,18 @@ class _PreviewTextBlock extends StatelessWidget {
 
           // Re-measure at chosen font to compute centering offset.
           final finalBodyH = body.isNotEmpty
-              ? (_makePainterForFit(body, bestFont, bodyLineH)
-                    ..layout(maxWidth: availW))
-                  .height
+              ? (_makePainterForFit(
+                  body,
+                  bestFont,
+                  bodyLineH,
+                )..layout(maxWidth: availW)).height
               : 0.0;
           final finalRefH = (_makePainterForFit(
-                item.reference,
-                bestRfs,
-                refLineH,
-                maxLines: 1,
-              )..layout(maxWidth: availW))
-              .height;
+            item.reference,
+            bestRfs,
+            refLineH,
+            maxLines: 1,
+          )..layout(maxWidth: availW)).height;
 
           // Reserve space for secondary + gap + reference so the body SizedBox
           // never pushes the Column beyond availH (prevents overflow stripe).
@@ -983,8 +988,7 @@ class _PreviewNotePanel extends StatelessWidget {
         // Only show the reference label when it is a real citation/title, not
         // the generic fallback word "Note".
         final refLabel = item.reference.trim();
-        final hasRef =
-            refLabel.isNotEmpty && refLabel.toLowerCase() != 'note';
+        final hasRef = refLabel.isNotEmpty && refLabel.toLowerCase() != 'note';
 
         const bodyLineH = 1.20;
         const refLineH = 1.02;
@@ -1004,19 +1008,20 @@ class _PreviewNotePanel extends StatelessWidget {
         var bestFont = minFont;
         if (body.isNotEmpty) {
           for (var fs = maxFont; fs >= minFont; fs -= 1.0) {
-            final rfs = hasRef
-                ? (fs * 0.55).clamp(13.0, refScaleMax)
-                : 0.0;
-            final gap = hasRef
-                ? math.max(4.0, math.min(fs * 0.28, 20.0))
-                : 0.0;
-            final bH = (_makePainterForFit(body, fs, bodyLineH)
-                  ..layout(maxWidth: availW))
-                .height;
+            final rfs = hasRef ? (fs * 0.55).clamp(13.0, refScaleMax) : 0.0;
+            final gap = hasRef ? math.max(4.0, math.min(fs * 0.28, 20.0)) : 0.0;
+            final bH = (_makePainterForFit(
+              body,
+              fs,
+              bodyLineH,
+            )..layout(maxWidth: availW)).height;
             final rH = hasRef
-                ? (_makePainterForFit(refLabel, rfs, refLineH, maxLines: 1)
-                      ..layout(maxWidth: availW))
-                    .height
+                ? (_makePainterForFit(
+                    refLabel,
+                    rfs,
+                    refLineH,
+                    maxLines: 1,
+                  )..layout(maxWidth: availW)).height
                 : 0.0;
             if (bH + gap + rH <= availH + 0.5) {
               bestFont = fs;
@@ -1033,14 +1038,19 @@ class _PreviewNotePanel extends StatelessWidget {
             : 0.0;
 
         final finalBodyH = body.isNotEmpty
-            ? (_makePainterForFit(body, bestFont, bodyLineH)
-                  ..layout(maxWidth: availW))
-                .height
+            ? (_makePainterForFit(
+                body,
+                bestFont,
+                bodyLineH,
+              )..layout(maxWidth: availW)).height
             : 0.0;
         final finalRefH = hasRef
-            ? (_makePainterForFit(refLabel, bestRfs, refLineH, maxLines: 1)
-                  ..layout(maxWidth: availW))
-                .height
+            ? (_makePainterForFit(
+                refLabel,
+                bestRfs,
+                refLineH,
+                maxLines: 1,
+              )..layout(maxWidth: availW)).height
             : 0.0;
 
         // Cap body height so Column children never exceed availH.

@@ -32,7 +32,9 @@ class _BibleMemoryScreenState extends State<BibleMemoryScreen> {
     if (_selectedGroup == BibleMemorySupport.allGroups) return _items;
     if (_selectedGroup == BibleMemorySupport.ungrouped) {
       return _items
-          .where((item) => item.groupName == null || item.groupName!.trim().isEmpty)
+          .where(
+            (item) => item.groupName == null || item.groupName!.trim().isEmpty,
+          )
           .toList();
     }
     return _items
@@ -189,8 +191,10 @@ class _BibleMemoryScreenState extends State<BibleMemoryScreen> {
   }
 
   Future<void> _importTagGroup() async {
-    final result =
-        await BibleMemorySupport.importTagGroup(context, _repository);
+    final result = await BibleMemorySupport.importTagGroup(
+      context,
+      _repository,
+    );
     if (result == null) {
       _showSnack('No #tag lists found yet.');
       return;
@@ -200,7 +204,9 @@ class _BibleMemoryScreenState extends State<BibleMemoryScreen> {
     if (result.selectedGroup != null) {
       setState(() => _selectedGroup = result.selectedGroup!);
     }
-    _showSnack('Imported ${result.importedCount} verses from ${result.selectedGroup}');
+    _showSnack(
+      'Imported ${result.importedCount} verses from ${result.selectedGroup}',
+    );
   }
 
   Future<void> _importExternalList() async {
@@ -261,9 +267,9 @@ class _BibleMemoryScreenState extends State<BibleMemoryScreen> {
 
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -274,7 +280,9 @@ class _BibleMemoryScreenState extends State<BibleMemoryScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Bible Memory${_items.isEmpty ? '' : ' · ${_items.length}'}'),
+        title: Text(
+          'Bible Memory${_items.isEmpty ? '' : ' · ${_items.length}'}',
+        ),
         actions: [
           IconButton(
             tooltip: 'Add Verse',
@@ -374,7 +382,9 @@ class _BibleMemoryScreenState extends State<BibleMemoryScreen> {
                                 label: const Text('Export Group'),
                               ),
                               OutlinedButton.icon(
-                                onPressed: dueCount == 0 ? null : _startDueReview,
+                                onPressed: dueCount == 0
+                                    ? null
+                                    : _startDueReview,
                                 icon: const Icon(Icons.play_arrow),
                                 label: const Text('Start Due Review'),
                               ),
@@ -395,89 +405,96 @@ class _BibleMemoryScreenState extends State<BibleMemoryScreen> {
                           ),
                         )
                       : visibleItems.isEmpty
-                          ? Center(
-                              child: Text(
-                                'No verses in "$_selectedGroup".',
-                                textAlign: TextAlign.center,
-                                style: theme.textTheme.titleMedium,
-                              ),
-                            )
-                          : ListView.separated(
-                              padding: const EdgeInsets.fromLTRB(12, 4, 12, 18),
-                              itemCount: visibleItems.length,
-                              separatorBuilder: (context, index) =>
-                                  const SizedBox(height: 8),
-                              itemBuilder: (context, index) {
-                                final item = visibleItems[index];
-                                final dueNow = item.nextDueAt <=
-                                    DateTime.now().millisecondsSinceEpoch;
-                                return Material(
-                                  color: dueNow
-                                      ? theme.colorScheme.primary.withValues(alpha: 0.12)
-                                      : theme.colorScheme.surfaceContainerLow,
-                                  borderRadius: BorderRadius.circular(10),
-                                  child: ListTile(
-                                    onTap: () => _openPractice(item),
-                                    onLongPress: () => _deleteVerse(item),
-                                    leading: CircleAvatar(
-                                      backgroundColor: dueNow
-                                          ? theme.colorScheme.primary.withValues(alpha: 0.16)
-                                          : theme.colorScheme.surfaceContainerHighest,
-                                      child: Text(
-                                        item.rangeBadge,
-                                        style: theme.textTheme.labelSmall,
-                                      ),
-                                    ),
-                                    title: Text(
-                                      item.reference,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    subtitle: Text(
-                                      '${BibleMemorySupport.dueLabel(context, item)} · ${_repository.cadenceLabelForStep(item.reviewStep)}'
-                                      '${item.groupName == null || item.groupName!.trim().isEmpty ? '' : ' · ${item.groupName}'}\n'
-                                      '${item.verseText}',
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    trailing: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        IconButton(
-                                          tooltip: 'Drill memory verse',
-                                          onPressed: () => _openPractice(item),
-                                          icon: const Icon(
-                                            Icons.chevron_right,
-                                          ),
-                                          constraints: const BoxConstraints.tightFor(
+                      ? Center(
+                          child: Text(
+                            'No verses in "$_selectedGroup".',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.titleMedium,
+                          ),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(12, 4, 12, 18),
+                          itemCount: visibleItems.length,
+                          separatorBuilder: (context, index) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (context, index) {
+                            final item = visibleItems[index];
+                            final dueNow =
+                                item.nextDueAt <=
+                                DateTime.now().millisecondsSinceEpoch;
+                            return Material(
+                              color: dueNow
+                                  ? theme.colorScheme.primary.withValues(
+                                      alpha: 0.12,
+                                    )
+                                  : theme.colorScheme.surfaceContainerLow,
+                              borderRadius: BorderRadius.circular(10),
+                              child: ListTile(
+                                onTap: () => _openPractice(item),
+                                onLongPress: () => _deleteVerse(item),
+                                leading: CircleAvatar(
+                                  backgroundColor: dueNow
+                                      ? theme.colorScheme.primary.withValues(
+                                          alpha: 0.16,
+                                        )
+                                      : theme
+                                            .colorScheme
+                                            .surfaceContainerHighest,
+                                  child: Text(
+                                    item.rangeBadge,
+                                    style: theme.textTheme.labelSmall,
+                                  ),
+                                ),
+                                title: Text(
+                                  item.reference,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '${BibleMemorySupport.dueLabel(context, item)} · ${_repository.cadenceLabelForStep(item.reviewStep)}'
+                                  '${item.groupName == null || item.groupName!.trim().isEmpty ? '' : ' · ${item.groupName}'}\n'
+                                  '${item.verseText}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'Drill memory verse',
+                                      onPressed: () => _openPractice(item),
+                                      icon: const Icon(Icons.chevron_right),
+                                      constraints:
+                                          const BoxConstraints.tightFor(
                                             width: 40,
                                             height: 40,
                                           ),
-                                          padding: const EdgeInsets.all(6),
-                                          visualDensity: VisualDensity.compact,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        IconButton(
-                                          tooltip: 'Remove memory verse',
-                                          onPressed: () => _deleteVerse(item),
-                                          icon: Icon(
-                                            Icons.delete,
-                                            color: theme.colorScheme.error,
-                                          ),
-                                          constraints: const BoxConstraints.tightFor(
+                                      padding: const EdgeInsets.all(6),
+                                      visualDensity: VisualDensity.compact,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    IconButton(
+                                      tooltip: 'Remove memory verse',
+                                      onPressed: () => _deleteVerse(item),
+                                      icon: Icon(
+                                        Icons.delete,
+                                        color: theme.colorScheme.error,
+                                      ),
+                                      constraints:
+                                          const BoxConstraints.tightFor(
                                             width: 42,
                                             height: 42,
                                           ),
-                                          padding: const EdgeInsets.all(8),
-                                          visualDensity: VisualDensity.standard,
-                                        ),
-                                      ],
+                                      padding: const EdgeInsets.all(8),
+                                      visualDensity: VisualDensity.standard,
                                     ),
-                                  ),
-                                );
-                              },
-                            ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
                 ),
               ],
             ),

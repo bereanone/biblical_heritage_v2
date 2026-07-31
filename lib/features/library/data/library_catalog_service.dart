@@ -14,11 +14,15 @@ import '../../../core/database/elibrary_read_resolver.dart';
 import 'library_citation_display_helper.dart';
 import '../../search/search_highlight_helper.dart';
 import 'library_author_resolver.dart';
+import 'library_book_display_title.dart';
 import 'library_contributor.dart';
 import 'library_epub_metadata.dart';
+import 'library_item_availability.dart';
 import 'library_item_identity.dart';
+import 'library_search_navigation_target.dart';
 import '../../utilities/data/pioneer_capture_folder_metadata.dart';
 import '../../utilities/data/elibrary_folder_policy.dart';
+import '../../utilities/data/epub_download_validator.dart';
 
 part 'library_navigation_dedupe.dart';
 part 'library_catalog_text_helpers.dart';
@@ -229,11 +233,13 @@ class LibraryCatalogService {
         .toList(growable: false);
   }
 
-  Future<int> refreshManagedItemsFromDisk() async {
+  Future<int> refreshManagedItemsFromDisk({String? rootPathOverride}) async {
     final selection = await LibraryRootService.instance.loadSelection();
-    final rootPath =
-        (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
-        selection.path;
+    final override = rootPathOverride?.trim() ?? '';
+    final rootPath = override.isNotEmpty
+        ? p.normalize(override)
+        : (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
+              selection.path;
     if (rootPath == null || rootPath.trim().isEmpty) {
       return 0;
     }
@@ -258,6 +264,11 @@ class LibraryCatalogService {
         final ext = p.extension(entity.path).toLowerCase();
         if (ext != '.epub' && ext != '.pdf') continue;
 
+        // A production EGW recovery can contain hundreds of EPUBs. Yield once
+        // per candidate so metadata parsing cannot starve Flutter's UI/lifecycle
+        // event queue for the duration of the complete scan on Android.
+        await Future<void>.delayed(Duration.zero);
+
         final relativePath = await LibraryRootService.instance.relativePathFor(
           absolutePath: entity.path,
           rootPath: rootPath,
@@ -268,14 +279,27 @@ class LibraryCatalogService {
         );
         final stat = await entity.stat();
         final isEpub = ext == '.epub';
-        final existingRows = await db.query(
+        final matchingRows = await db.query(
           'library_items',
-          columns: const ['id', 'collection_name', 'cover_path'],
+          columns: const ['id', 'collection_name', 'cover_path', 'deleted_at'],
           where: 'id = ? OR LOWER(relative_path) = ?',
           whereArgs: [itemId, relativePath.toLowerCase()],
           limit: 1,
         );
-        final existingRow = existingRows.isEmpty ? null : existingRows.first;
+        final matchedRow = matchingRows.isEmpty ? null : matchingRows.first;
+        final matchedIsSoftRetired =
+            (matchedRow?['deleted_at'] as String?)?.trim().isNotEmpty == true;
+        if (matchedIsSoftRetired) {
+          // This exact managed path already has a soft-retired row (a
+          // duplicate that lost edition selection, or a shell deliberately
+          // archived as unreadable). The file being present on disk is not
+          // evidence it should come back — resurrecting it here is exactly
+          // the bug that let quarantined duplicates like the invalid IC/COS
+          // placeholders reappear after a refresh. Leave the retired row
+          // untouched and do not stand up a replacement active row for it.
+          continue;
+        }
+        final existingRow = matchedRow;
         final existingId = existingRow?['id']?.toString().trim() ?? '';
         final existingCollection =
             existingRow?['collection_name']?.toString().trim() ?? '';
@@ -290,12 +314,16 @@ class LibraryCatalogService {
         );
         final now = DateTime.now().toUtc().toIso8601String();
         final fileHash = '${stat.size}:${stat.modified.millisecondsSinceEpoch}';
+        final detectedWorkId = ELibraryFolderPolicy.detectedAbbreviation(
+          p.basename(entity.path),
+        );
         final updatePayload = <String, Object?>{
           'title': title,
           'author': author,
           'file_name': p.basename(entity.path),
           'relative_path': relativePath,
           'file_hash': fileHash,
+          if (detectedWorkId.isNotEmpty) 'source_work_id': detectedWorkId,
           'file_size': stat.size,
           'modified_at': stat.modified.toUtc().toIso8601String(),
           'mime_type': isEpub ? 'application/epub+zip' : 'application/pdf',
@@ -308,6 +336,24 @@ class LibraryCatalogService {
           'updated_at': now,
           'deleted_at': null,
         };
+        // Rule: file presence alone must never imply readability. A brand
+        // new managed EPUB (no existing row of any kind at this identity)
+        // is only ever seen by the app for the first time here, so it must
+        // be structurally validated before it is allowed to render as
+        // 'metadata_only' (readable) in the normal Library — otherwise a
+        // placeholder/teaser package briefly shows as a real book until a
+        // later indexing pass catches it. PDFs have no structural gate here.
+        var newItemIndexStatus = 'metadata_only';
+        String? newItemIndexError;
+        if (existingId.isEmpty && isEpub) {
+          final structural = EpubDownloadValidator.validate(
+            await entity.readAsBytes(),
+          );
+          if (!structural.isValid) {
+            newItemIndexStatus = 'needs_attention';
+            newItemIndexError = _structuralRejectionMessage(structural);
+          }
+        }
         final insertPayload = <String, Object?>{
           'id': itemId,
           ...updatePayload,
@@ -315,8 +361,8 @@ class LibraryCatalogService {
           'cover_path': existingCoverPath.isNotEmpty ? existingCoverPath : null,
           'date_added': now,
           'last_opened': null,
-          'index_status': 'metadata_only',
-          'index_error': null,
+          'index_status': newItemIndexStatus,
+          'index_error': newItemIndexError,
           'epub_href': null,
           'epub_cfi': null,
           'anchor_id': null,
@@ -364,6 +410,20 @@ class LibraryCatalogService {
     return touched;
   }
 
+  /// Mirrors `LibraryDocumentCanonicalizer._structuralRejectionMessage`'s
+  /// wording exactly (`Structurally invalid EPUB (reasonName): detail`) so a
+  /// placeholder caught here at discovery time is indistinguishable — to
+  /// [libraryItemAvailability]'s `_needsAttentionReasonPattern` matcher and
+  /// to the user — from one caught later by the canonicalizer's own gate.
+  String _structuralRejectionMessage(EpubDownloadValidationResult structural) {
+    final reasonName = structural.rejectionReason?.name;
+    final detail = structural.detail?.trim();
+    final label = reasonName == null
+        ? 'Structurally invalid EPUB'
+        : 'Structurally invalid EPUB ($reasonName)';
+    return detail == null || detail.isEmpty ? '$label.' : '$label: $detail';
+  }
+
   /// Returns the count of managed EPUB items that have not yet been indexed
   /// (index_status is not 'indexed' or 'indexed_empty').  These items appear
   /// in the Library catalog and can be opened in the reader, but their body
@@ -372,15 +432,18 @@ class LibraryCatalogService {
   /// broken source files) are excluded here since re-running the indexer
   /// cannot fix them — see [countNeedsAttentionManagedItems].
   Future<int> countUnindexedManagedItems() async {
-    final result = await _readResolver.readWithFallback<int>(
-      read: (db) async {
-        final rows = await db.rawQuery('''
+    // Indexing writes exclusively to eLibrary.db. A zero here is an
+    // authoritative result, not a reason to fall back to legacy user.db
+    // rows (which may still carry stale pending statuses).
+    final db = await _readResolver.primaryDatabase();
+    final rows = await db.rawQuery('''
       SELECT COUNT(*) AS cnt
       FROM library_items
       WHERE deleted_at IS NULL
         AND LOWER(COALESCE(file_format, '')) = 'epub'
         AND LOWER(COALESCE(folder_type, '')) IN ('commentary', 'research')
         AND LOWER(COALESCE(index_status, '')) != 'needs_attention'
+        AND LOWER(COALESCE(epub_storage_state, 'present')) = 'present'
         AND (
           LOWER(COALESCE(index_status, '')) NOT IN ('indexed', 'indexed_empty')
           OR NOT EXISTS (
@@ -388,21 +451,19 @@ class LibraryCatalogService {
           )
         )
     ''');
-        return (rows.first['cnt'] as num?)?.toInt() ?? 0;
-      },
-      hasData: (count) => count > 0,
-    );
-    return result.value;
+    return (rows.first['cnt'] as num?)?.toInt() ?? 0;
   }
 
   Future<List<LibraryCatalogItem>> listUnindexedManagedItems({
     int limit = 500,
   }) async {
+    final db = await _readResolver.primaryDatabase();
     return _queryItems(
       where: '''
         LOWER(COALESCE(li.file_format, '')) = 'epub'
         AND LOWER(COALESCE(li.folder_type, '')) IN ('commentary', 'research')
         AND LOWER(COALESCE(li.index_status, '')) != 'needs_attention'
+        AND LOWER(COALESCE(li.epub_storage_state, 'present')) = 'present'
         AND (
           LOWER(COALESCE(li.index_status, '')) NOT IN ('indexed', 'indexed_empty')
           OR NOT EXISTS (
@@ -413,6 +474,7 @@ class LibraryCatalogService {
       ''',
       args: const <Object?>[],
       limit: limit,
+      database: db,
     );
   }
 
@@ -420,9 +482,8 @@ class LibraryCatalogService {
   /// structural validation (missing OPF, empty spine, or zero readable
   /// content) and therefore cannot be indexed until the file is replaced.
   Future<int> countNeedsAttentionManagedItems() async {
-    final result = await _readResolver.readWithFallback<int>(
-      read: (db) async {
-        final rows = await db.rawQuery('''
+    final db = await _readResolver.primaryDatabase();
+    final rows = await db.rawQuery('''
       SELECT COUNT(*) AS cnt
       FROM library_items
       WHERE deleted_at IS NULL
@@ -430,17 +491,14 @@ class LibraryCatalogService {
         AND LOWER(COALESCE(folder_type, '')) IN ('commentary', 'research')
         AND LOWER(COALESCE(index_status, '')) = 'needs_attention'
     ''');
-        return (rows.first['cnt'] as num?)?.toInt() ?? 0;
-      },
-      hasData: (count) => count > 0,
-    );
-    return result.value;
+    return (rows.first['cnt'] as num?)?.toInt() ?? 0;
   }
 
   Future<List<LibraryCatalogItem>> listNeedsAttentionManagedItems({
     int limit = 500,
   }) async {
-    return _queryItems(
+    final db = await _readResolver.primaryDatabase();
+    final rows = await _queryItems(
       where: '''
         LOWER(COALESCE(li.file_format, '')) = 'epub'
         AND LOWER(COALESCE(li.folder_type, '')) IN ('commentary', 'research')
@@ -448,7 +506,12 @@ class LibraryCatalogService {
       ''',
       args: const <Object?>[],
       limit: limit,
+      database: db,
     );
+    // Two stale rows for the same work (e.g. a legacy-folder-layout copy and
+    // a current-layout copy) must surface as one maintenance entry, not one
+    // per row — reuse the same source_work_id grouping normal editions use.
+    return selectPreferredLibraryEditions(rows);
   }
 
   Future<int> countIndexedSearchableItems({String? collectionFilter}) async {
@@ -636,7 +699,13 @@ class LibraryCatalogService {
       return const [];
     }
 
-    final where = <String>['li.deleted_at IS NULL'];
+    final where = <String>[
+      'li.deleted_at IS NULL',
+      // Belt-and-suspenders alongside the text-block INNER JOIN below: a
+      // needs_attention item must never surface in search even if it
+      // retains stale blocks from before it was flagged unreadable.
+      "LOWER(COALESCE(li.index_status, '')) != 'needs_attention'",
+    ];
     final args = <Object?>[];
     final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
       collectionFilter ?? '',
@@ -646,10 +715,8 @@ class LibraryCatalogService {
       where.add(_libraryCollectionSearchClause(normalizedCollectionFilter));
       args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
     }
-    // Per-book deduplication: pick the earliest matching paragraph (MIN rowid)
-    // per book using a CTE with GROUP BY.  This is far faster than a correlated
-    // subquery because SQLite resolves GROUP BY + MIN(rowid) in a single scan
-    // rather than re-running the inner query for every candidate row.
+    // Keep every matching paragraph independently navigable, including
+    // multiple hits in the same Pioneer book.
     var termAdded = false;
     for (final term in normalizedTerms) {
       final normalizedTerm = _normalizedLibrarySearchText(term);
@@ -678,12 +745,12 @@ class LibraryCatalogService {
         .readWithFallback<List<Map<String, Object?>>>(
           read: (db) => db.rawQuery(
             '''
-      WITH best_hits AS (
-        SELECT ltb.library_item_id, MIN(ltb.rowid) AS best_rowid
+      WITH matching_hits AS (
+        SELECT ltb.rowid AS hit_rowid
         FROM library_text_blocks ltb
         INNER JOIN library_items li ON li.id = ltb.library_item_id
         WHERE $cteWhere
-        GROUP BY ltb.library_item_id
+        ORDER BY ltb.library_item_id, ltb.epub_href, ltb.paragraph_index
         LIMIT ?
       )
       SELECT
@@ -712,15 +779,19 @@ class LibraryCatalogService {
         li.anchor_id AS item_anchor_id,
         li.epub_href AS item_epub_href,
         li.paragraph_index AS item_paragraph_index,
+        ltb.id AS hit_text_block_id,
         ltb.epub_href AS hit_epub_href,
         ltb.spine_index AS hit_spine_index,
         ltb.paragraph_index AS hit_paragraph_index,
         ltb.section_title,
         ltb.paragraph_on_section,
         ltb.plain_text,
-        eri.ref_code AS hit_ref_code
-      FROM best_hits bh
-      INNER JOIN library_text_blocks ltb ON ltb.rowid = bh.best_rowid
+        eri.ref_code AS hit_ref_code,
+        eri.stable_ref AS hit_stable_ref,
+        eri.page_number AS hit_page_number,
+        eri.paragraph_on_page AS hit_paragraph_on_page
+      FROM matching_hits mh
+      INNER JOIN library_text_blocks ltb ON ltb.rowid = mh.hit_rowid
       INNER JOIN library_items li ON li.id = ltb.library_item_id
       LEFT JOIN elibrary_ref_index eri
         ON eri.library_item_id = ltb.library_item_id
@@ -811,6 +882,22 @@ class LibraryCatalogService {
             verseStart: null,
             verseEnd: null,
             score: score,
+            target: LibrarySearchNavigationTarget(
+              libraryItemId: item.id,
+              textBlockId: (row['hit_text_block_id'] as num?)?.toInt() ?? 0,
+              href: row['hit_epub_href']?.toString() ?? '',
+              paragraphIndex:
+                  (row['hit_paragraph_index'] as num?)?.toInt() ?? 0,
+              spineIndex: (row['hit_spine_index'] as num?)?.toInt(),
+              sectionTitle: sectionTitle,
+              paragraphOnSection: paragraphOnSection,
+              stableSourceReference: row['hit_stable_ref']?.toString(),
+              pageNumber: (row['hit_page_number'] as num?)?.toInt(),
+              paragraphOnPage: (row['hit_paragraph_on_page'] as num?)?.toInt(),
+              matchedText: fullParagraph,
+              sourceWorkId: row['source_work_id']?.toString(),
+              sourcePackageId: row['source_package_id']?.toString(),
+            ),
           );
         })
         .toList(growable: false);
@@ -1257,11 +1344,10 @@ class LibraryCatalogService {
     required String where,
     required List<Object?> args,
     required int limit,
+    Database? database,
   }) async {
-    final rowResult = await _readResolver
-        .readWithFallback<List<Map<String, Object?>>>(
-          read: (db) => db.rawQuery(
-            '''
+    Future<List<Map<String, Object?>>> read(Database db) => db.rawQuery(
+      '''
       SELECT
         li.id,
         li.title,
@@ -1276,6 +1362,8 @@ class LibraryCatalogService {
         li.source_site,
         li.source_url,
         li.source_type,
+        li.source_work_id,
+        li.source_package_id,
         li.cover_path,
         li.date_added,
         li.last_opened,
@@ -1302,10 +1390,18 @@ class LibraryCatalogService {
         li.file_name COLLATE NOCASE ASC
       LIMIT ?
       ''',
-            [...args, limit],
-          ),
-          hasData: (rows) => rows.isNotEmpty,
-        );
+      [...args, limit],
+    );
+    final rowResult = database == null
+        ? await _readResolver.readWithFallback<List<Map<String, Object?>>>(
+            read: read,
+            hasData: (rows) => rows.isNotEmpty,
+          )
+        : ELibraryReadResult<List<Map<String, Object?>>>(
+            database: database,
+            value: await read(database),
+            source: ELibraryReadSource.eLibraryDb,
+          );
     final rows = rowResult.value;
     final hydratedRows = await _hydrateCatalogRows(
       rows,
@@ -1695,6 +1791,9 @@ class LibraryCatalogService {
       final id = row['id']?.toString().trim() ?? '';
       final relativePath = row['relative_path']?.toString().trim() ?? '';
       if (id.isEmpty || relativePath.isEmpty) continue;
+      final sourceType =
+          row['source_type']?.toString().trim().toLowerCase() ?? '';
+      if (sourceType == 'pioneer_epub_import') continue;
       if (!isManagedEgwRelativePath(relativePath)) continue;
 
       final folderType =
@@ -2400,7 +2499,10 @@ class LibraryCatalogItem {
       final canonical = _canonicalPeriodicalTitle(trimmed);
       if (canonical != null) return canonical;
     }
-    return trimmed;
+    return normalizeBookDisplayTitle(
+      trimmed,
+      fallbacks: <String?>[_humanizeFileName(fileName)],
+    );
   }
 
   String get subtitle {
@@ -2477,6 +2579,7 @@ class LibraryCatalogSearchResult {
     this.chapterNumber,
     this.verseStart,
     this.verseEnd,
+    this.target,
   });
 
   final LibraryCatalogItem item;
@@ -2488,6 +2591,10 @@ class LibraryCatalogSearchResult {
   final int? chapterNumber;
   final int? verseStart;
   final int? verseEnd;
+  final LibrarySearchNavigationTarget? target;
+
+  LibrarySearchNavigationTarget? targetForQuery(String query) =>
+      target?.withQuery(query);
 }
 
 class LibraryCatalogSearchSession {
@@ -3018,7 +3125,7 @@ int _libraryItemSourcePriority(LibraryCatalogItem item) {
 }
 
 bool _isVisibleLibraryItem(LibraryCatalogItem item) {
-  return true;
+  return libraryItemIsNormallyReadable(item);
 }
 
 bool _isWaggonerOnRomansEdition(LibraryCatalogItem item) {

@@ -7,7 +7,8 @@ Future<bool> applyDefaultMarkup({
   required ViewerRangeSelection rangeSelection,
   required PassageData passage,
   required bool Function(VerseLine) isLineInRange,
-  required List<TokenHighlightSelection> Function(List<VerseLine>) buildTokenSelections,
+  required List<TokenHighlightSelection> Function(List<VerseLine>)
+  buildTokenSelections,
 }) async {
   if (!rangeSelection.hasCompletedRange) return false;
   final selectedLines = passage.lines.where(isLineInRange).toList();

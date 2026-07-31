@@ -15,9 +15,7 @@ Future<ViewerInterlinearSettings?> showViewerInterlinearSettingsSheet(
 }
 
 class _ViewerInterlinearSettingsScreen extends StatefulWidget {
-  const _ViewerInterlinearSettingsScreen({
-    required this.settings,
-  });
+  const _ViewerInterlinearSettingsScreen({required this.settings});
 
   final ViewerInterlinearSettings settings;
 

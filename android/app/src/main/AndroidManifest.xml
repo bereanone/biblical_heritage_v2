@@ -1,8 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Pioneer and EGW source downloads are available in release builds. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="Biblical Heritage"
+        android:label="Biblical Heritage #StudyBible"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
             android:exported="true"

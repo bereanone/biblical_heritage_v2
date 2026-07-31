@@ -19,12 +19,7 @@ String _compactBook(String name) {
   return token.length <= 5 ? token : '${token.substring(0, 4)}.';
 }
 
-bool _fits(
-  BuildContext context,
-  String text,
-  TextStyle style,
-  double width,
-) {
+bool _fits(BuildContext context, String text, TextStyle style, double width) {
   final painter = TextPainter(
     text: TextSpan(text: text, style: style),
     maxLines: 1,
@@ -57,7 +52,11 @@ _ViewerReferenceTitleResolution _resolveViewerReferenceTitle(
   final minFontSize = minimumFontSize.clamp(0, baseFontSize);
   final candidates = <String>[
     _referenceText(bookName, chapter, verse),
-    _referenceText(ViewerReferenceTitle._bookAbbreviations[bookName] ?? bookName, chapter, verse),
+    _referenceText(
+      ViewerReferenceTitle._bookAbbreviations[bookName] ?? bookName,
+      chapter,
+      verse,
+    ),
     _referenceText(_compactBook(bookName), chapter, verse),
   ];
 

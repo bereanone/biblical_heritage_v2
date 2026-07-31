@@ -39,19 +39,15 @@ Future<void> _seedEstimate({
   required String source,
 }) async {
   final now = DateTime.now().toUtc().toIso8601String();
-  await db.insert(
-    'elibrary_install_estimates',
-    <String, Object?>{
-      'collection_key': collectionKey,
-      'format': format,
-      'file_count': fileCount,
-      'total_size_bytes': 42,
-      'size_known': 1,
-      'last_checked_utc': now,
-      'source': source,
-    },
-    conflictAlgorithm: ConflictAlgorithm.replace,
-  );
+  await db.insert('elibrary_install_estimates', <String, Object?>{
+    'collection_key': collectionKey,
+    'format': format,
+    'file_count': fileCount,
+    'total_size_bytes': 42,
+    'size_known': 1,
+    'last_checked_utc': now,
+    'source': source,
+  }, conflictAlgorithm: ConflictAlgorithm.replace);
 }
 
 Future<int> _countEstimates(
@@ -80,9 +76,15 @@ void main() {
   late Directory libraryRootDir;
 
   setUp(() async {
-    supportDir = await Directory.systemTemp.createTemp('elibrary_estimate_support_');
-    documentsDir = await Directory.systemTemp.createTemp('elibrary_estimate_documents_');
-    libraryRootDir = await Directory.systemTemp.createTemp('elibrary_estimate_root_');
+    supportDir = await Directory.systemTemp.createTemp(
+      'elibrary_estimate_support_',
+    );
+    documentsDir = await Directory.systemTemp.createTemp(
+      'elibrary_estimate_documents_',
+    );
+    libraryRootDir = await Directory.systemTemp.createTemp(
+      'elibrary_estimate_root_',
+    );
     LibraryRootService.instance.invalidateCachedSelection();
     await _installPathProviderMocks(
       supportDir: supportDir,
@@ -112,70 +114,76 @@ void main() {
     }
   });
 
-  test('falls back to user.db when eLibrary.db has no install estimates', () async {
-    final userDb = await UserDatabase.instance.database;
-    await ELibraryDatabase.instance.database;
-    await _seedEstimate(
-      db: userDb,
-      collectionKey: 'egw_books',
-      format: 'epub',
-      fileCount: 12,
-      source: 'legacy-user-db',
-    );
-
-    final result = await ELibraryInstallEstimateRepository.instance
-        .loadByCollectionAndFormat();
-
-    expect(result['egw_books'], isNotNull);
-    expect(result['egw_books']!['epub'], isNotNull);
-    expect(result['egw_books']!['epub']!.fileCount, 12);
-    expect(result['egw_books']!['epub']!.source, 'legacy-user-db');
-  });
-
-  test('writes install estimates to eLibrary.db and prefers them on read', () async {
-    final userDb = await UserDatabase.instance.database;
-    final eLibraryDb = await ELibraryDatabase.instance.database;
-    await _seedEstimate(
-      db: userDb,
-      collectionKey: 'egw_books',
-      format: 'epub',
-      fileCount: 12,
-      source: 'legacy-user-db',
-    );
-
-    await ELibraryInstallEstimateRepository.instance.upsertCollectionCount(
-      collectionKey: 'egw_books',
-      format: 'epub',
-      fileCount: 7,
-      totalSizeBytes: 123,
-      sizeKnown: true,
-      source: 'scan',
-    );
-
-    expect(
-      await _countEstimates(
-        eLibraryDb,
+  test(
+    'falls back to user.db when eLibrary.db has no install estimates',
+    () async {
+      final userDb = await UserDatabase.instance.database;
+      await ELibraryDatabase.instance.database;
+      await _seedEstimate(
+        db: userDb,
         collectionKey: 'egw_books',
         format: 'epub',
-      ),
-      1,
-    );
-    expect(
-      await _countEstimates(
-        userDb,
+        fileCount: 12,
+        source: 'legacy-user-db',
+      );
+
+      final result = await ELibraryInstallEstimateRepository.instance
+          .loadByCollectionAndFormat();
+
+      expect(result['egw_books'], isNotNull);
+      expect(result['egw_books']!['epub'], isNotNull);
+      expect(result['egw_books']!['epub']!.fileCount, 12);
+      expect(result['egw_books']!['epub']!.source, 'legacy-user-db');
+    },
+  );
+
+  test(
+    'writes install estimates to eLibrary.db and prefers them on read',
+    () async {
+      final userDb = await UserDatabase.instance.database;
+      final eLibraryDb = await ELibraryDatabase.instance.database;
+      await _seedEstimate(
+        db: userDb,
         collectionKey: 'egw_books',
         format: 'epub',
-      ),
-      1,
-    );
+        fileCount: 12,
+        source: 'legacy-user-db',
+      );
 
-    final result = await ELibraryInstallEstimateRepository.instance
-        .loadByCollectionAndFormat();
+      await ELibraryInstallEstimateRepository.instance.upsertCollectionCount(
+        collectionKey: 'egw_books',
+        format: 'epub',
+        fileCount: 7,
+        totalSizeBytes: 123,
+        sizeKnown: true,
+        source: 'scan',
+      );
 
-    expect(result['egw_books'], isNotNull);
-    expect(result['egw_books']!['epub'], isNotNull);
-    expect(result['egw_books']!['epub']!.fileCount, 7);
-    expect(result['egw_books']!['epub']!.totalSizeBytes, 123);
-    expect(result['egw_books']!['epub']!.source, 'scan');
-  });
+      expect(
+        await _countEstimates(
+          eLibraryDb,
+          collectionKey: 'egw_books',
+          format: 'epub',
+        ),
+        1,
+      );
+      expect(
+        await _countEstimates(
+          userDb,
+          collectionKey: 'egw_books',
+          format: 'epub',
+        ),
+        1,
+      );
+
+      final result = await ELibraryInstallEstimateRepository.instance
+          .loadByCollectionAndFormat();
+
+      expect(result['egw_books'], isNotNull);
+      expect(result['egw_books']!['epub'], isNotNull);
+      expect(result['egw_books']!['epub']!.fileCount, 7);
+      expect(result['egw_books']!['epub']!.totalSizeBytes, 123);
+      expect(result['egw_books']!['epub']!.source, 'scan');
+    },
+  );
 }

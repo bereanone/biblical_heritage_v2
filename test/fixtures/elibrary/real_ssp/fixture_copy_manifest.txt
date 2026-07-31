@@ -1,0 +1,14 @@
+SSP development fixture copy manifest
+Copy date (UTC): 2026-07-17T20:34:54Z
+Source: recovery_backups/20260714_pre_install_iphone_container/Library/Application Support/ImportedCaptureClipper/SSP
+Source file count: 4
+Source total bytes: 3345421
+
+Relative path | bytes | SHA-256
+capture.html | 675421 | b9f2f5dfe0518d18c2eb4028009b04b55df7ba10129b3779868aca904d15c0ce
+images/image_0001.png | 2669099 | 27a5e6e439094075c0eaab84ff3bb5ad7b923861f3af46b94ad3d816fa7c5154
+manifest.json | 558 | 7deaadb231fcf7240866f1f79683eb3b2ac81a729bcdeacb73c5e21a834f50e9
+manifest.pre-schema2-repair.json | 343 | 554bb79c49f4ebf0633975820ddf3e96aee1e3975413f8cde13689c9c03f8663
+
+The manifest itself is destination-only and is excluded from source/destination
+file-count and byte-count comparisons.

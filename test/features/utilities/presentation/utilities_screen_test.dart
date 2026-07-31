@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:studybible2/core/theme/app_theme_mode.dart';
+import 'package:studybible2/features/library/presentation/import_pioneer_library_screen.dart';
 import 'package:studybible2/features/utilities/presentation/utilities_screen.dart';
 
 void main() {
@@ -20,9 +21,12 @@ void main() {
       find.text('Manage common app settings and protect your personal data.'),
       findsOneWidget,
     );
-    expect(find.text('eLibrary'), findsOneWidget);
+    expect(find.text('Existing eLibrary Tools (Advanced)'), findsOneWidget);
     expect(
-      find.text('Manage book storage, downloads, imports, and indexing.'),
+      find.text(
+        'Technical tools for storage, downloads, imports, and indexing. '
+        'Most people should use Set Up My Library above instead.',
+      ),
       findsOneWidget,
     );
     expect(find.text('Commentary & Sharing'), findsOneWidget);
@@ -36,16 +40,16 @@ void main() {
       findsOneWidget,
     );
 
-    expect(find.text('Church AutoMute'), findsOneWidget);
+    expect(find.text('Church AutoMute'), findsNothing);
     expect(find.text('Backup User Data'), findsOneWidget);
     expect(find.text('Restore Backup'), findsOneWidget);
     expect(find.text('eLibrary Setup'), findsOneWidget);
     expect(find.text('Download Books'), findsOneWidget);
-    expect(find.text('Import Pioneer Books'), findsOneWidget);
+    expect(find.text('Pioneer Library'), findsOneWidget);
     expect(find.text('Library Storage'), findsOneWidget);
     expect(find.text('Storage & Index Report'), findsOneWidget);
     expect(find.text('Commentary Instructions'), findsOneWidget);
-    expect(find.text('Commentary Block Sharing'), findsOneWidget);
+    expect(find.text('Commentary Block Sharing'), findsNothing);
     expect(find.text('Community Links'), findsOneWidget);
     expect(find.text('Support Biblical Heritage'), findsOneWidget);
     expect(find.text('Open Bible Explorer'), findsOneWidget);
@@ -85,6 +89,23 @@ void main() {
     expect(downloadBooksButton.dx, greaterThan(eLibrarySetupButton.dx));
   });
 
+  testWidgets('Pioneer Library utility opens the simplified screen', (
+    tester,
+  ) async {
+    await _pumpUtilitiesScreen(tester, const Size(1366, 1024));
+
+    final pioneerButton = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'Pioneer Library'),
+    );
+    pioneerButton.onPressed!();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text('Pioneer Library'), findsOneWidget);
+    expect(find.byType(ImportPioneerLibraryScreen), findsOneWidget);
+    expect(find.text('Import Selected'), findsNothing);
+  });
+
   testWidgets('utilities screen collapses to one column on narrow widths', (
     tester,
   ) async {
@@ -118,17 +139,6 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Church AutoMute'));
-    await tester.pumpAndSettle();
-    expect(find.text('Church AutoMute'), findsWidgets);
-    expect(
-      find.textContaining('planned for a future version.'),
-      findsOneWidget,
-    );
-
-    await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
 
     final bibleExplorerButton = tester.widget<OutlinedButton>(

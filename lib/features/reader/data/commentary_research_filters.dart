@@ -145,8 +145,7 @@ class CommentaryResearchFilters {
         _canonicalCommentaryText(text),
       ].join('::');
       final current = grouped[key];
-      if (current == null ||
-          _compareCommentaryQuality(match, current) > 0) {
+      if (current == null || _compareCommentaryQuality(match, current) > 0) {
         grouped[key] = match;
       }
     }
@@ -259,7 +258,13 @@ class CommentaryResearchFilters {
     if (trimmed.length < 80) return false;
     var terminal = trimmed;
     while (terminal.isNotEmpty &&
-        <String>{'"', "'", ')', ']', '}'}.contains(terminal[terminal.length - 1])) {
+        <String>{
+          '"',
+          "'",
+          ')',
+          ']',
+          '}',
+        }.contains(terminal[terminal.length - 1])) {
       terminal = terminal.substring(0, terminal.length - 1).trimRight();
     }
     if (!RegExp(r'[.!?]$').hasMatch(terminal)) return false;
@@ -367,13 +372,13 @@ class CommentaryResearchFilters {
     CommentaryResearchMatchItem a,
     CommentaryResearchMatchItem b,
   ) {
-    final scoreCmp = _commentaryQualityScore(a).compareTo(
-      _commentaryQualityScore(b),
-    );
+    final scoreCmp = _commentaryQualityScore(
+      a,
+    ).compareTo(_commentaryQualityScore(b));
     if (scoreCmp != 0) return scoreCmp;
-    return commentaryDisplayText(a).length.compareTo(
-      commentaryDisplayText(b).length,
-    );
+    return commentaryDisplayText(
+      a,
+    ).length.compareTo(commentaryDisplayText(b).length);
   }
 
   static int _commentaryQualityScore(CommentaryResearchMatchItem match) {

@@ -74,12 +74,7 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
     );
     final headerRow = Row(
       children: [
-        Expanded(
-          child: Text(
-            'Slide Controls',
-            style: headerStyle,
-          ),
-        ),
+        Expanded(child: Text('Slide Controls', style: headerStyle)),
         _SlideBadge(label: selectedSlideLabel, fontScale: widget.fontScale),
       ],
     );
@@ -103,11 +98,7 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,
-                children: [
-                  headerRow,
-                  const SizedBox(height: 8),
-                  body,
-                ],
+                children: [headerRow, const SizedBox(height: 8), body],
               );
             }
 
@@ -387,9 +378,7 @@ class _TagSlideNavigatorPanelState extends State<TagSlideNavigatorPanel> {
               style: OutlinedButton.styleFrom(textStyle: buttonTextStyle),
             ),
             OutlinedButton.icon(
-              onPressed: workspace.hasSlides
-                  ? widget.onSavePresentation
-                  : null,
+              onPressed: workspace.hasSlides ? widget.onSavePresentation : null,
               icon: const Icon(Icons.save_outlined),
               label: const Text('Save Presentation'),
               style: OutlinedButton.styleFrom(textStyle: buttonTextStyle),
@@ -551,8 +540,10 @@ class _DimensionStepper extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   child: Text('$value', style: valueStyle),
                 ),
               ),
@@ -592,7 +583,10 @@ class _DimensionStepper extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 child: Text('$value', style: valueStyle),
               ),
             ),

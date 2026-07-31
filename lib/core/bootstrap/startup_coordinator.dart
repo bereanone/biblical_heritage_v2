@@ -6,10 +6,13 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../database/elibrary_database.dart';
 import '../database/user_database.dart';
 import 'library_root_service.dart';
 import 'local_settings_store.dart';
 import 'sandbox_bootstrap.dart';
+import 'development_runtime_overrides.dart';
+import '../../features/library/data/canonical_epub_generation_repair_service.dart';
 import '../../features/utilities/data/pioneer_captured_html_import_availability_service.dart';
 
 enum StartupPhase {
@@ -147,6 +150,13 @@ class StartupCoordinator {
   Future<void> _runConfiguredCaptureFolderImport({
     ValueChanged<String>? onStatus,
   }) async {
+    if (shouldSkipCaptureClipperStartupScan()) {
+      onStatus?.call('CaptureClipper startup scan disabled for this run.');
+      debugPrint(
+        'CaptureClipper startup availability scan skipped by development override.',
+      );
+      return;
+    }
     final folderPath = await LocalSettingsStore.instance
         .loadPioneerCapturedHtmlFolderPath();
     if (folderPath == null || folderPath.trim().isEmpty) {
@@ -169,19 +179,64 @@ class StartupCoordinator {
           'CaptureClipper startup discovery found no importable folders at '
           '${report.rootPath}.',
         );
-        return;
+      } else {
+        onStatus?.call(
+          'CaptureClipper cloud import available: ${report.availableCount} '
+          'folder${report.availableCount == 1 ? '' : 's'}.',
+        );
+        debugPrint(
+          'CaptureClipper startup discovery found ${report.availableCount} '
+          'importable folder(s) under ${report.rootPath}.',
+        );
       }
-      onStatus?.call(
-        'CaptureClipper cloud import available: ${report.availableCount} '
-        'folder${report.availableCount == 1 ? '' : 's'}.',
-      );
-      debugPrint(
-        'CaptureClipper startup discovery found ${report.availableCount} '
-        'importable folder(s) under ${report.rootPath}.',
-      );
     } catch (error) {
       debugPrint(
         'CaptureClipper cloud discovery failed during startup: $error',
+      );
+    }
+
+    await _runCanonicalEpubGenerationRepair(onStatus: onStatus);
+  }
+
+  /// Best-effort, non-fatal repair pass for canonical EPUB data left over
+  /// from before the canonicalizer gained its structural validation gate
+  /// (see CanonicalEpubGenerationRepairService). Never blocks startup: any
+  /// failure here is logged and swallowed, matching the CaptureClipper scan
+  /// immediately above.
+  Future<void> _runCanonicalEpubGenerationRepair({
+    ValueChanged<String>? onStatus,
+  }) async {
+    try {
+      final rootPath =
+          (await LibraryRootService.instance.accessibleLibraryRootPath())
+              ?.trim();
+      if (rootPath == null || rootPath.isEmpty) return;
+      onStatus?.call('Checking canonical eLibrary data...');
+      debugPrint('Canonical EPUB repair pass started.');
+      final startedAt = DateTime.now();
+      final db = await ELibraryDatabase.instance.database;
+      final report = await CanonicalEpubGenerationRepairService.instance.repair(
+        db: db,
+        rootPath: rootPath,
+        // A version mismatch is not, by itself, authority for startup
+        // to rewrite every canonical EPUB. Broad upgrades are explicit
+        // maintenance operations; startup retains only the safe
+        // storage-state reconciliation below.
+        allowVersionUpgrade: false,
+      );
+      final finishedAt = DateTime.now();
+      debugPrint(
+        'Canonical EPUB repair pass complete in '
+        '${finishedAt.difference(startedAt).inMilliseconds}ms: '
+        'scanned=${report.staleGenerationsScanned} '
+        'regenerated=${report.regenerated} '
+        'rejected=${report.rejected} '
+        'skippedMissingFile=${report.skippedMissingFile} '
+        'staleStorageStatesRepaired=${report.staleStorageStatesRepaired}.',
+      );
+    } catch (error) {
+      debugPrint(
+        'Canonical EPUB generation repair failed during startup: $error',
       );
     }
   }

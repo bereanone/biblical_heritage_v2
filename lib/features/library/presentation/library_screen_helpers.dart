@@ -17,18 +17,6 @@ List<LibraryCatalogNavigationItem> _filterNavigation(
   }).toList();
 }
 
-String _fallbackSpineLabel(String title) {
-  final words = title
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim()
-      .split(' ')
-      .where((part) => part.isNotEmpty)
-      .take(4)
-      .toList();
-  if (words.isEmpty) return 'Book';
-  return words.join('\n');
-}
-
 String _stamp(DateTime value) {
   String two(int n) => n.toString().padLeft(2, '0');
   return '${value.year}-${two(value.month)}-${two(value.day)}';

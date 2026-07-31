@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum TextRangeSourceKind {
-  bible,
-  elibrary,
-}
+enum TextRangeSourceKind { bible, elibrary }
 
 @immutable
 class TextRangeLayoutSeed {
@@ -182,10 +179,7 @@ class TextRangeGeometryRegistry extends ChangeNotifier {
     notifyListeners();
   }
 
-  void clearScope(
-    String scopeId, {
-    TextRangeSourceKind? sourceKind,
-  }) {
+  void clearScope(String scopeId, {TextRangeSourceKind? sourceKind}) {
     final anchorsToRemove = _entries.keys
         .where((anchor) {
           final matchesScope = anchor.scopeId == scopeId;
@@ -262,14 +256,17 @@ class TextRangeGeometryRegistry extends ChangeNotifier {
     final comparison = _compareAnchors(start, end);
     final low = comparison <= 0 ? start : end;
     final high = comparison <= 0 ? end : start;
-    return _entries.values.where((geometry) {
-      final anchor = geometry.anchor;
-      if (anchor.sourceKind != low.sourceKind || anchor.scopeId != low.scopeId) {
-        return false;
-      }
-      return _compareAnchors(anchor, low) >= 0 &&
-          _compareAnchors(anchor, high) <= 0;
-    }).toList(growable: false);
+    return _entries.values
+        .where((geometry) {
+          final anchor = geometry.anchor;
+          if (anchor.sourceKind != low.sourceKind ||
+              anchor.scopeId != low.scopeId) {
+            return false;
+          }
+          return _compareAnchors(anchor, low) >= 0 &&
+              _compareAnchors(anchor, high) <= 0;
+        })
+        .toList(growable: false);
   }
 }
 
@@ -436,9 +433,11 @@ class _TextRangeGeometryReporterState extends State<TextRangeGeometryReporter> {
         TextSelection(baseOffset: start, extentOffset: end),
       );
       if (boxes.isEmpty) continue;
-      final rect = _unionRects(boxes.map((box) {
-        return Rect.fromLTRB(box.left, box.top, box.right, box.bottom);
-      }));
+      final rect = _unionRects(
+        boxes.map((box) {
+          return Rect.fromLTRB(box.left, box.top, box.right, box.bottom);
+        }),
+      );
       if (rect == null || rect.isEmpty) continue;
       geometries.add(
         TextRangeGeometry(
@@ -465,9 +464,6 @@ class _TextRangeGeometryReporterState extends State<TextRangeGeometryReporter> {
   @override
   Widget build(BuildContext context) {
     _scheduleMeasure();
-    return KeyedSubtree(
-      key: _childKey,
-      child: widget.child,
-    );
+    return KeyedSubtree(key: _childKey, child: widget.child);
   }
 }

@@ -24,11 +24,7 @@ class _ViewerStrongsPageOneState extends State<ViewerStrongsPageOne> {
   bool _showCopiedBanner = false;
 
   Future<void> _copyEntry(ViewerStrongsEntry entry) async {
-    await Clipboard.setData(
-      ClipboardData(
-        text: _buildClipboardText(entry),
-      ),
-    );
+    await Clipboard.setData(ClipboardData(text: _buildClipboardText(entry)));
     if (!mounted) return;
     setState(() {
       _showCopiedBanner = true;
@@ -68,9 +64,7 @@ class _ViewerStrongsPageOneState extends State<ViewerStrongsPageOne> {
                   ),
                   IconButton(
                     tooltip: 'Copy to Clipboard',
-                    onPressed: entry == null
-                        ? null
-                        : () => _copyEntry(entry),
+                    onPressed: entry == null ? null : () => _copyEntry(entry),
                     icon: const Icon(Icons.copy),
                   ),
                   IconButton(
@@ -116,7 +110,8 @@ class _ViewerStrongsPageOneState extends State<ViewerStrongsPageOne> {
                   padding: EdgeInsets.only(top: 20),
                   child: Center(child: CircularProgressIndicator()),
                 ),
-              if (snapshot.connectionState == ConnectionState.done && entry == null)
+              if (snapshot.connectionState == ConnectionState.done &&
+                  entry == null)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: Text(
@@ -150,7 +145,8 @@ class _ViewerStrongsPageOneState extends State<ViewerStrongsPageOne> {
                       style: theme.textTheme.bodyLarge,
                     ),
                   ),
-                if (entry.partOfSpeech.isNotEmpty || entry.pronunciation.isNotEmpty)
+                if (entry.partOfSpeech.isNotEmpty ||
+                    entry.pronunciation.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Text(
@@ -174,7 +170,9 @@ class _ViewerStrongsPageOneState extends State<ViewerStrongsPageOne> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  subtitle: const Text('Show page 2 with all verse occurrences'),
+                  subtitle: const Text(
+                    'Show page 2 with all verse occurrences',
+                  ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: widget.onOpenPageTwo,
                 ),
@@ -193,9 +191,7 @@ String _buildClipboardText(ViewerStrongsEntry entry) {
     'G' => 'Greek',
     _ => 'Original Language',
   };
-  final lines = <String>[
-    "Strong's ${entry.strongsId}",
-  ];
+  final lines = <String>["Strong's ${entry.strongsId}"];
 
   if (entry.lemma.isNotEmpty) {
     lines.add('Lemma: ${entry.lemma}');

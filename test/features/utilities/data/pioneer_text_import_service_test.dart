@@ -340,7 +340,7 @@ Future<int> _countRows(
 }
 
 void legacyEpubTest(String description, dynamic Function() body) {
-  test(description, body, skip: 'Legacy EPUB import path is disabled.');
+  test(description, body);
 }
 
 void main() {

@@ -3,6 +3,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../database/user_database.dart';
 import '../../features/library/presentation/mac_reader_autoscroll_controller.dart';
+import '../../features/library/presentation/reader_tilt_preferences.dart';
 import 'app_theme_mode.dart';
 import '../../features/reader/data/presentation/presentation_models.dart';
 import '../../features/reader/presentation/viewer_interlinear_settings.dart';
@@ -84,6 +85,30 @@ class AppSettingsService {
   static const _lastElibrarySearchSessionKey =
       'search.last_elibrary_search_session';
   static const _elibraryMediaFilterKey = 'library.media_filter';
+
+  /// Generic single-key string accessor for callers (e.g. platform storage
+  /// policy preferences) that don't warrant a dedicated typed key constant
+  /// pair here.
+  Future<String?> loadRawSetting(String key) async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      columns: const ['value'],
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['value']?.toString();
+  }
+
+  Future<void> saveRawSetting(String key, String value) async {
+    final db = await UserDatabase.instance.database;
+    await db.insert('app_settings', {
+      'key': key,
+      'value': value,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
 
   Future<String?> loadElibraryMediaFilter() async {
     final db = await UserDatabase.instance.database;
@@ -199,6 +224,7 @@ class AppSettingsService {
   static const _macAutoscrollMaximumStepKey = 'mac_autoscroll_maximum_step';
 
   Future<MacAutoscrollPreferences> loadMacAutoscrollPreferences() async {
+    final tiltPreferences = await const ReaderTiltPreferencesStore().load();
     final db = await UserDatabase.instance.database;
     final rows = await db.query(
       'app_settings',
@@ -218,12 +244,18 @@ class AppSettingsService {
       baseSpeed: values[_macAutoscrollBaseSpeedKey],
       lastNonzeroStep: values[_macAutoscrollLastStepKey],
       maximumStep: values[_macAutoscrollMaximumStepKey],
+      statusBannerMode: tiltPreferences.statusBannerMode,
     );
   }
 
   Future<void> saveMacAutoscrollPreferences(
     MacAutoscrollPreferences preferences,
   ) async {
+    final tiltStore = const ReaderTiltPreferencesStore();
+    final tiltPreferences = await tiltStore.load();
+    await tiltStore.save(
+      tiltPreferences.copyWith(statusBannerMode: preferences.statusBannerMode),
+    );
     final db = await UserDatabase.instance.database;
     final batch = db.batch();
     batch.insert('app_settings', {

@@ -45,7 +45,7 @@ const List<({String value, String label})> _kEgwCollectionFilters = [
   (value: 'egw_pamphlets', label: 'Pamphlets'),
   (value: 'egw_periodicals', label: 'Periodicals'),
   (value: 'egw_manuscript_releases', label: 'Manuscript Releases'),
-  (value: 'adventist_pioneer_library', label: 'Adventist Pioneer Library'),
+  (value: 'adventist_pioneer_library', label: 'Pioneer Library'),
 ];
 
 class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {

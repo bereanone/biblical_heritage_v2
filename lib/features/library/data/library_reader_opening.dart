@@ -117,6 +117,18 @@ int libraryReaderInitialSectionIndex({
         return savedIndex;
       }
     }
+    final savedSpine = item.spineIndex;
+    if (savedSpine != null && savedSpine > 0) {
+      final savedIndex = _sectionIndexForSpineIndex(
+        sections: sections,
+        navigationItems: navigationItems,
+        spineIndex: savedSpine,
+      );
+      if (savedIndex != null &&
+          _hasReadableSavedSectionContent(sections[savedIndex])) {
+        return savedIndex;
+      }
+    }
   }
 
   if (!devotionalMode && !item.isPeriodical) {

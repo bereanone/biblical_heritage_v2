@@ -11,6 +11,7 @@ import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/library_root_native.dart';
 import '../../../core/database/elibrary_database.dart';
+import '../../library/data/canonical_activation.dart';
 import '../../library/data/library_catalog_service.dart';
 import 'pioneer_capture_folder_metadata.dart';
 import 'pioneer_captured_html_import_review_store.dart';
@@ -1117,7 +1118,22 @@ class PioneerCapturedHtmlImportFolderService {
         'shared source folders are permanent read-only inventory.',
       );
     }
-    final accessibleRootPath = await _resolveAccessibleConfiguredRootPath();
+    final normalizedSelection = selectedFolderPaths
+        ?.map((path) => p.normalize(path.trim()))
+        .where((path) => path.isNotEmpty)
+        .toSet();
+    final normalizedManagedRoot = p.normalize(await managedImportRootPath());
+    final usesManagedSelection =
+        normalizedSelection != null &&
+        normalizedSelection.isNotEmpty &&
+        normalizedSelection.every(
+          (path) =>
+              p.equals(path, normalizedManagedRoot) ||
+              p.isWithin(normalizedManagedRoot, path),
+        );
+    final accessibleRootPath = usesManagedSelection
+        ? normalizedManagedRoot
+        : await _resolveAccessibleConfiguredRootPath();
     if (accessibleRootPath == null) {
       return PioneerCapturedHtmlCloudFolderImportReport(
         rootPath: '',
@@ -1139,20 +1155,21 @@ class PioneerCapturedHtmlImportFolderService {
       );
     }
 
-    final previews = await _scanConfiguredPreviews(
-      accessibleRootPath: accessibleRootPath,
-      catalog: catalog,
-    );
+    final previews = usesManagedSelection
+        ? await _scanPackageRoot(rootPath: accessibleRootPath, catalog: catalog)
+        : await _scanConfiguredPreviews(
+            accessibleRootPath: accessibleRootPath,
+            catalog: catalog,
+          );
 
-    final normalizedSelection = selectedFolderPaths
-        ?.map((path) => p.normalize(path.trim()).toLowerCase())
-        .where((path) => path.isNotEmpty)
+    final normalizedSelectionForComparison = normalizedSelection
+        ?.map((path) => path.toLowerCase())
         .toSet();
     final selectablePreviews = previews
         .where((preview) {
           if (!_isImportCandidate(preview)) return false;
-          if (normalizedSelection == null) return true;
-          return normalizedSelection.contains(
+          if (normalizedSelectionForComparison == null) return true;
+          return normalizedSelectionForComparison.contains(
             p.normalize(preview.folderPath).toLowerCase(),
           );
         })
@@ -1691,6 +1708,7 @@ class PioneerCapturedHtmlImportFolderService {
       );
     }
 
+    final loadedCatalog = catalog ?? await _loadConfiguredCatalog();
     final htmlFiles = await _discoverHtmlFiles(root);
     final db = await ELibraryDatabase.instance.database;
     final entries = <PioneerCapturedHtmlFileReport>[];
@@ -1702,7 +1720,7 @@ class PioneerCapturedHtmlImportFolderService {
           filePath: filePath,
           importFiles: importFiles,
           existingImportPolicy: existingImportPolicy,
-          catalog: catalog,
+          catalog: loadedCatalog,
         ),
       );
     }
@@ -1779,8 +1797,18 @@ class PioneerCapturedHtmlImportFolderService {
       filePath: filePath,
       catalog: catalog,
     );
+    final catalogWork = catalog == null
+        ? null
+        : _findCatalogWork(
+            catalog,
+            parsed: parsed,
+            metadata: metadata,
+            filePath: filePath,
+          );
     final resolvedCoverImagePath =
-        await _discoverFolderCoverImage(rootPath) ?? parsed.coverImagePath;
+        await _discoverFolderCoverImage(rootPath) ??
+        parsed.coverImagePath ??
+        catalogWork?.coverImagePath;
     final work = _workFromParsed(
       parsed: parsed,
       title: resolvedTitle,
@@ -1915,6 +1943,22 @@ class PioneerCapturedHtmlImportFolderService {
     final resolvedLibraryItemId = result == null
         ? ''
         : result.libraryItemId.trim();
+    if (resolvedLibraryItemId.isNotEmpty &&
+        (result!.status == PioneerImportWorkStatus.imported)) {
+      // Explicitly completes canonical activation for this capture right
+      // now, rather than leaving it to whenever the reader next happens to
+      // open the book (see supportsCanonicalCaptureClipperReader /
+      // prepareCanonicalCaptureClipperReader). No storage policy is applied
+      // here: a CaptureClipper source is never an app-managed EGW download,
+      // so EpubStoragePolicyService would never remove it anyway, and the
+      // reader's own lazy preparation has never applied it for this content
+      // type either.
+      await CanonicalActivation.activate(
+        db: db,
+        libraryItemId: resolvedLibraryItemId,
+        source: File(filePath),
+      );
+    }
     final fileStatus = result == null
         ? PioneerCapturedHtmlFileStatus.failed
         : switch (result.status) {

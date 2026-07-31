@@ -24,17 +24,17 @@ enum PresentationLayoutPreference {
 
 const List<PresentationLayoutPreference> presentationLayoutPreferenceOptions =
     <PresentationLayoutPreference>[
-  PresentationLayoutPreference.auto,
-  PresentationLayoutPreference.textOnly,
-  PresentationLayoutPreference.imageOnly,
-  PresentationLayoutPreference.textLeftImageRight,
-  PresentationLayoutPreference.imageLeftTextRight,
-  PresentationLayoutPreference.textTopImageBottom,
-  PresentationLayoutPreference.imageTopTextBottom,
-  PresentationLayoutPreference.textLeftTwoThirdsImageRightOneThird,
-  PresentationLayoutPreference.textLeftThreeQuarterImageRightOneQuarter,
-  PresentationLayoutPreference.imageBackgroundTextOverlay,
-];
+      PresentationLayoutPreference.auto,
+      PresentationLayoutPreference.textOnly,
+      PresentationLayoutPreference.imageOnly,
+      PresentationLayoutPreference.textLeftImageRight,
+      PresentationLayoutPreference.imageLeftTextRight,
+      PresentationLayoutPreference.textTopImageBottom,
+      PresentationLayoutPreference.imageTopTextBottom,
+      PresentationLayoutPreference.textLeftTwoThirdsImageRightOneThird,
+      PresentationLayoutPreference.textLeftThreeQuarterImageRightOneQuarter,
+      PresentationLayoutPreference.imageBackgroundTextOverlay,
+    ];
 
 String presentationLayoutPreferenceToJson(PresentationLayoutPreference value) {
   return switch (value) {
@@ -87,10 +87,14 @@ String presentationLayoutPreferenceLabel(PresentationLayoutPreference value) {
     PresentationLayoutPreference.auto => 'Auto',
     PresentationLayoutPreference.textOnly => 'Text Only',
     PresentationLayoutPreference.imageOnly => 'Image Only',
-    PresentationLayoutPreference.textLeftImageRight => 'Text Left / Image Right',
-    PresentationLayoutPreference.imageLeftTextRight => 'Image Left / Text Right',
-    PresentationLayoutPreference.textTopImageBottom => 'Text Top / Image Bottom',
-    PresentationLayoutPreference.imageTopTextBottom => 'Image Top / Text Bottom',
+    PresentationLayoutPreference.textLeftImageRight =>
+      'Text Left / Image Right',
+    PresentationLayoutPreference.imageLeftTextRight =>
+      'Image Left / Text Right',
+    PresentationLayoutPreference.textTopImageBottom =>
+      'Text Top / Image Bottom',
+    PresentationLayoutPreference.imageTopTextBottom =>
+      'Image Top / Text Bottom',
     PresentationLayoutPreference.textLeftTwoThirdsImageRightOneThird =>
       'Text 2/3 Left + Image 1/3 Right',
     PresentationLayoutPreference.textLeftThreeQuarterImageRightOneQuarter =>
@@ -119,17 +123,17 @@ enum PresentationItemPlacement {
 
 const List<PresentationItemPlacement> presentationItemPlacementOptions =
     <PresentationItemPlacement>[
-  PresentationItemPlacement.auto,
-  PresentationItemPlacement.full,
-  PresentationItemPlacement.left,
-  PresentationItemPlacement.right,
-  PresentationItemPlacement.top,
-  PresentationItemPlacement.bottom,
-  PresentationItemPlacement.center,
-  PresentationItemPlacement.background,
-  PresentationItemPlacement.notes,
-  PresentationItemPlacement.citation,
-];
+      PresentationItemPlacement.auto,
+      PresentationItemPlacement.full,
+      PresentationItemPlacement.left,
+      PresentationItemPlacement.right,
+      PresentationItemPlacement.top,
+      PresentationItemPlacement.bottom,
+      PresentationItemPlacement.center,
+      PresentationItemPlacement.background,
+      PresentationItemPlacement.notes,
+      PresentationItemPlacement.citation,
+    ];
 
 String presentationItemPlacementToJson(PresentationItemPlacement value) {
   return switch (value) {

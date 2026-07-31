@@ -17,8 +17,9 @@ class ViewerBookLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final brightness = ThemeData.estimateBrightnessForColor(color);
-    final textColor =
-        brightness == Brightness.light ? Colors.black : Colors.white;
+    final textColor = brightness == Brightness.light
+        ? Colors.black
+        : Colors.white;
 
     return Material(
       color: Colors.transparent,
@@ -34,8 +35,9 @@ class ViewerBookLabel extends StatelessWidget {
             style: TextStyle(
               fontSize: 14,
               fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
-              decoration:
-                  selected ? TextDecoration.underline : TextDecoration.none,
+              decoration: selected
+                  ? TextDecoration.underline
+                  : TextDecoration.none,
               color: textColor,
               height: 1.05,
             ),

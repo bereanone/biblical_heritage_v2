@@ -72,7 +72,12 @@ Future<int> _renameCategoryScoped(
     // Root/uncategorized — uses IS NULL, not name-only.
     where = 'tag = ? AND (category IS NULL OR TRIM(category) = \'\')';
   }
-  return db.update('hash_tags', {'tag': newTag}, where: where, whereArgs: whereArgs);
+  return db.update(
+    'hash_tags',
+    {'tag': newTag},
+    where: where,
+    whereArgs: whereArgs,
+  );
 }
 
 /// Category-scoped move: mirrors the fixed saveTagCategory() with
@@ -157,41 +162,67 @@ void main() {
     // -----------------------------------------------------------------------
     // 2. Renaming #faith in CategoryA does NOT rename #faith in CategoryB
     // -----------------------------------------------------------------------
-    test('category-scoped rename leaves same-name tag in other category intact',
-        () async {
-      await db.insert('hash_tags', {'tag': 'faith', 'category': 'CategoryA', 'verse_ref': '43:1:1'});
-      await db.insert('hash_tags', {'tag': 'faith', 'category': 'CategoryB', 'verse_ref': '43:1:2'});
+    test(
+      'category-scoped rename leaves same-name tag in other category intact',
+      () async {
+        await db.insert('hash_tags', {
+          'tag': 'faith',
+          'category': 'CategoryA',
+          'verse_ref': '43:1:1',
+        });
+        await db.insert('hash_tags', {
+          'tag': 'faith',
+          'category': 'CategoryB',
+          'verse_ref': '43:1:2',
+        });
 
-      final count = await _renameCategoryScoped(
-        db,
-        oldTag: 'faith',
-        newTag: 'trust',
-        category: 'CategoryA',
-      );
-      expect(count, equals(1));
+        final count = await _renameCategoryScoped(
+          db,
+          oldTag: 'faith',
+          newTag: 'trust',
+          category: 'CategoryA',
+        );
+        expect(count, equals(1));
 
-      final renamed = await db.query(
-        'hash_tags',
-        where: 'tag = ? AND category = ?',
-        whereArgs: ['trust', 'CategoryA'],
-      );
-      expect(renamed, hasLength(1));
+        final renamed = await db.query(
+          'hash_tags',
+          where: 'tag = ? AND category = ?',
+          whereArgs: ['trust', 'CategoryA'],
+        );
+        expect(renamed, hasLength(1));
 
-      final untouched = await db.query(
-        'hash_tags',
-        where: 'tag = ? AND category = ?',
-        whereArgs: ['faith', 'CategoryB'],
-      );
-      expect(untouched, hasLength(1), reason: '#faith in CategoryB must be untouched');
-    });
+        final untouched = await db.query(
+          'hash_tags',
+          where: 'tag = ? AND category = ?',
+          whereArgs: ['faith', 'CategoryB'],
+        );
+        expect(
+          untouched,
+          hasLength(1),
+          reason: '#faith in CategoryB must be untouched',
+        );
+      },
+    );
 
     // -----------------------------------------------------------------------
     // 3. Moving #faith from CategoryA to CategoryC preserves its rows
     // -----------------------------------------------------------------------
     test('moving tag to another category preserves all its rows', () async {
-      await db.insert('hash_tags', {'tag': 'faith', 'category': 'CategoryA', 'verse_ref': '43:1:1'});
-      await db.insert('hash_tags', {'tag': 'faith', 'category': 'CategoryA', 'verse_ref': '43:1:2'});
-      await db.insert('hash_tags', {'tag': 'faith', 'category': 'CategoryB', 'verse_ref': '43:1:3'});
+      await db.insert('hash_tags', {
+        'tag': 'faith',
+        'category': 'CategoryA',
+        'verse_ref': '43:1:1',
+      });
+      await db.insert('hash_tags', {
+        'tag': 'faith',
+        'category': 'CategoryA',
+        'verse_ref': '43:1:2',
+      });
+      await db.insert('hash_tags', {
+        'tag': 'faith',
+        'category': 'CategoryB',
+        'verse_ref': '43:1:3',
+      });
 
       final count = await _moveCategoryScoped(
         db,
@@ -199,14 +230,22 @@ void main() {
         newCategory: 'CategoryC',
         currentCategory: 'CategoryA',
       );
-      expect(count, equals(2), reason: 'Both CategoryA rows should move to CategoryC');
+      expect(
+        count,
+        equals(2),
+        reason: 'Both CategoryA rows should move to CategoryC',
+      );
 
       final movedRows = await db.query(
         'hash_tags',
         where: 'tag = ? AND category = ?',
         whereArgs: ['faith', 'CategoryC'],
       );
-      expect(movedRows, hasLength(2), reason: 'CategoryC now has both moved rows');
+      expect(
+        movedRows,
+        hasLength(2),
+        reason: 'CategoryC now has both moved rows',
+      );
 
       final bRows = await db.query(
         'hash_tags',
@@ -230,127 +269,194 @@ void main() {
     //    source category and the target count grew, not replaced.
     // -----------------------------------------------------------------------
     test(
-        'moving tag into category with same name accumulates rows, does not overwrite',
-        () async {
-      await db.insert('hash_tags', {'tag': 'faith', 'category': 'CategoryA', 'verse_ref': '43:1:1'});
-      await db.insert('hash_tags', {'tag': 'faith', 'category': 'CategoryB', 'verse_ref': '43:1:2'});
+      'moving tag into category with same name accumulates rows, does not overwrite',
+      () async {
+        await db.insert('hash_tags', {
+          'tag': 'faith',
+          'category': 'CategoryA',
+          'verse_ref': '43:1:1',
+        });
+        await db.insert('hash_tags', {
+          'tag': 'faith',
+          'category': 'CategoryB',
+          'verse_ref': '43:1:2',
+        });
 
-      final count = await _moveCategoryScoped(
-        db,
-        tag: 'faith',
-        newCategory: 'CategoryB',
-        currentCategory: 'CategoryA',
-      );
-      expect(count, equals(1));
+        final count = await _moveCategoryScoped(
+          db,
+          tag: 'faith',
+          newCategory: 'CategoryB',
+          currentCategory: 'CategoryA',
+        );
+        expect(count, equals(1));
 
-      // Both rows are now in CategoryB (the existing one + the moved one).
-      final bRows = await db.query(
-        'hash_tags',
-        where: 'tag = ? AND category = ?',
-        whereArgs: ['faith', 'CategoryB'],
-      );
-      expect(
-        bRows,
-        hasLength(2),
-        reason:
-            'The moved row joins the existing row; no row is silently deleted',
-      );
-    });
+        // Both rows are now in CategoryB (the existing one + the moved one).
+        final bRows = await db.query(
+          'hash_tags',
+          where: 'tag = ? AND category = ?',
+          whereArgs: ['faith', 'CategoryB'],
+        );
+        expect(
+          bRows,
+          hasLength(2),
+          reason:
+              'The moved row joins the existing row; no row is silently deleted',
+        );
+      },
+    );
 
     // -----------------------------------------------------------------------
     // 5. Unknown-category set only touches uncategorized rows, leaves
     //    categorized rows with the same name intact.
     // -----------------------------------------------------------------------
     test(
-        'unknown-category saveTagCategory only affects rows with no category',
-        () async {
-      // One row with no category, one with CategoryB.
-      await db.insert('hash_tags', {'tag': 'faith', 'category': null, 'verse_ref': '43:1:1'});
-      await db.insert('hash_tags', {'tag': 'faith', 'category': 'CategoryB', 'verse_ref': '43:1:2'});
+      'unknown-category saveTagCategory only affects rows with no category',
+      () async {
+        // One row with no category, one with CategoryB.
+        await db.insert('hash_tags', {
+          'tag': 'faith',
+          'category': null,
+          'verse_ref': '43:1:1',
+        });
+        await db.insert('hash_tags', {
+          'tag': 'faith',
+          'category': 'CategoryB',
+          'verse_ref': '43:1:2',
+        });
 
-      final count = await _setCategoryForUncategorized(
-        db,
-        tag: 'faith',
-        newCategory: 'CategoryA',
-      );
-      expect(count, equals(1), reason: 'Only the uncategorized row is updated');
+        final count = await _setCategoryForUncategorized(
+          db,
+          tag: 'faith',
+          newCategory: 'CategoryA',
+        );
+        expect(
+          count,
+          equals(1),
+          reason: 'Only the uncategorized row is updated',
+        );
 
-      final aRow = await db.query(
-        'hash_tags',
-        where: 'tag = ? AND category = ?',
-        whereArgs: ['faith', 'CategoryA'],
-      );
-      expect(aRow, hasLength(1));
+        final aRow = await db.query(
+          'hash_tags',
+          where: 'tag = ? AND category = ?',
+          whereArgs: ['faith', 'CategoryA'],
+        );
+        expect(aRow, hasLength(1));
 
-      final bRow = await db.query(
-        'hash_tags',
-        where: 'tag = ? AND category = ?',
-        whereArgs: ['faith', 'CategoryB'],
-      );
-      expect(bRow, hasLength(1), reason: 'CategoryB row must not be affected');
-    });
+        final bRow = await db.query(
+          'hash_tags',
+          where: 'tag = ? AND category = ?',
+          whereArgs: ['faith', 'CategoryB'],
+        );
+        expect(
+          bRow,
+          hasLength(1),
+          reason: 'CategoryB row must not be affected',
+        );
+      },
+    );
 
     // -----------------------------------------------------------------------
     // 6. NULL category comparison: IS NULL matches NULL rows, not '' rows
     //    (verifies correct SQLite NULL semantics used in the fixed code).
     // -----------------------------------------------------------------------
-    test('IS NULL correctly distinguishes NULL from empty-string category', () async {
-      await db.insert('hash_tags', {'tag': 'faith', 'category': null, 'verse_ref': '43:1:1'});
-      await db.insert('hash_tags', {'tag': 'faith', 'category': '', 'verse_ref': '43:1:2'});
-      await db.insert('hash_tags', {'tag': 'faith', 'category': 'CategoryA', 'verse_ref': '43:1:3'});
+    test(
+      'IS NULL correctly distinguishes NULL from empty-string category',
+      () async {
+        await db.insert('hash_tags', {
+          'tag': 'faith',
+          'category': null,
+          'verse_ref': '43:1:1',
+        });
+        await db.insert('hash_tags', {
+          'tag': 'faith',
+          'category': '',
+          'verse_ref': '43:1:2',
+        });
+        await db.insert('hash_tags', {
+          'tag': 'faith',
+          'category': 'CategoryA',
+          'verse_ref': '43:1:3',
+        });
 
-      // COALESCE(TRIM(category),'') = '' should match both NULL and empty.
-      final coalesceRows = await db.rawQuery(
-        "SELECT id FROM hash_tags WHERE tag = ? AND COALESCE(TRIM(category), '') = ''",
-        ['faith'],
-      );
-      expect(coalesceRows, hasLength(2), reason: 'NULL and empty are both root');
+        // COALESCE(TRIM(category),'') = '' should match both NULL and empty.
+        final coalesceRows = await db.rawQuery(
+          "SELECT id FROM hash_tags WHERE tag = ? AND COALESCE(TRIM(category), '') = ''",
+          ['faith'],
+        );
+        expect(
+          coalesceRows,
+          hasLength(2),
+          reason: 'NULL and empty are both root',
+        );
 
-      // (category IS NULL OR TRIM(category) = '') should also match both.
-      final isNullRows = await db.rawQuery(
-        "SELECT id FROM hash_tags WHERE tag = ? AND (category IS NULL OR TRIM(category) = '')",
-        ['faith'],
-      );
-      expect(isNullRows, hasLength(2), reason: 'IS NULL clause also covers empty');
+        // (category IS NULL OR TRIM(category) = '') should also match both.
+        final isNullRows = await db.rawQuery(
+          "SELECT id FROM hash_tags WHERE tag = ? AND (category IS NULL OR TRIM(category) = '')",
+          ['faith'],
+        );
+        expect(
+          isNullRows,
+          hasLength(2),
+          reason: 'IS NULL clause also covers empty',
+        );
 
-      // category = NULL should match nothing (SQLite NULL != NULL).
-      final eqNullRows = await db.rawQuery(
-        'SELECT id FROM hash_tags WHERE tag = ? AND category = NULL',
-        ['faith'],
-      );
-      expect(eqNullRows, isEmpty, reason: 'category = NULL never matches in SQLite');
-    });
+        // category = NULL should match nothing (SQLite NULL != NULL).
+        final eqNullRows = await db.rawQuery(
+          'SELECT id FROM hash_tags WHERE tag = ? AND category = NULL',
+          ['faith'],
+        );
+        expect(
+          eqNullRows,
+          isEmpty,
+          reason: 'category = NULL never matches in SQLite',
+        );
+      },
+    );
 
     // -----------------------------------------------------------------------
     // 7. Category-scoped rename of a root (NULL-category) tag does not affect
     //    a same-name tag in a named category.
     // -----------------------------------------------------------------------
-    test('renaming a root-category tag does not affect same-name categorized tag',
-        () async {
-      await db.insert('hash_tags', {'tag': 'faith', 'category': null, 'verse_ref': '43:1:1'});
-      await db.insert('hash_tags', {'tag': 'faith', 'category': 'CategoryA', 'verse_ref': '43:1:2'});
+    test(
+      'renaming a root-category tag does not affect same-name categorized tag',
+      () async {
+        await db.insert('hash_tags', {
+          'tag': 'faith',
+          'category': null,
+          'verse_ref': '43:1:1',
+        });
+        await db.insert('hash_tags', {
+          'tag': 'faith',
+          'category': 'CategoryA',
+          'verse_ref': '43:1:2',
+        });
 
-      final count = await _renameCategoryScoped(
-        db,
-        oldTag: 'faith',
-        newTag: 'trust',
-        category: null, // root tag rename
-      );
-      expect(count, equals(1));
+        final count = await _renameCategoryScoped(
+          db,
+          oldTag: 'faith',
+          newTag: 'trust',
+          category: null, // root tag rename
+        );
+        expect(count, equals(1));
 
-      final rootRow = await db.query(
-        'hash_tags',
-        where: "tag = ? AND (category IS NULL OR TRIM(category) = '')",
-        whereArgs: ['trust'],
-      );
-      expect(rootRow, hasLength(1), reason: 'root tag now has the new name');
+        final rootRow = await db.query(
+          'hash_tags',
+          where: "tag = ? AND (category IS NULL OR TRIM(category) = '')",
+          whereArgs: ['trust'],
+        );
+        expect(rootRow, hasLength(1), reason: 'root tag now has the new name');
 
-      final catARow = await db.query(
-        'hash_tags',
-        where: 'tag = ? AND category = ?',
-        whereArgs: ['faith', 'CategoryA'],
-      );
-      expect(catARow, hasLength(1), reason: 'CategoryA faith tag is untouched');
-    });
+        final catARow = await db.query(
+          'hash_tags',
+          where: 'tag = ? AND category = ?',
+          whereArgs: ['faith', 'CategoryA'],
+        );
+        expect(
+          catARow,
+          hasLength(1),
+          reason: 'CategoryA faith tag is untouched',
+        );
+      },
+    );
   });
 }

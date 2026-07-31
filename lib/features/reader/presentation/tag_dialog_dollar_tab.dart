@@ -3,10 +3,7 @@ import 'package:flutter/material.dart';
 import 'tag_dialog_styles.dart';
 
 class TagDialogDollarTab extends StatelessWidget {
-  const TagDialogDollarTab({
-    super.key,
-    required this.fontScale,
-  });
+  const TagDialogDollarTab({super.key, required this.fontScale});
 
   final double fontScale;
 

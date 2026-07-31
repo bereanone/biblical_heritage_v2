@@ -34,39 +34,53 @@ const String _fixtureHtml = '''
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('parses EllenWhiteAudio direct EPUB links from the pioneer page', () async {
-    final service = PioneerEllenWhiteAudioService(
-      fetcher: (uri) async {
-        expect(uri.toString(), PioneerEllenWhiteAudioService.collectionPageUrl);
-        return _fixtureHtml;
-      },
-    );
+  test(
+    'parses EllenWhiteAudio direct EPUB links from the pioneer page',
+    () async {
+      final service = PioneerEllenWhiteAudioService(
+        fetcher: (uri) async {
+          expect(
+            uri.toString(),
+            PioneerEllenWhiteAudioService.collectionPageUrl,
+          );
+          return _fixtureHtml;
+        },
+      );
 
-    final catalog = await service.loadCatalog(refresh: true);
-    final uriahSmith = catalog.authorById('uriah_smith');
+      final catalog = await service.loadCatalog(refresh: true);
+      final uriahSmith = catalog.authorById('uriah_smith');
 
-    expect(catalog.authorCount, 2);
-    expect(catalog.workCount, 3);
-    expect(uriahSmith, isNotNull);
-    expect(uriahSmith!.works.length, 2);
+      expect(catalog.authorCount, 2);
+      expect(catalog.workCount, 3);
+      expect(uriahSmith, isNotNull);
+      expect(uriahSmith!.works.length, 2);
 
-    final dar = catalog.workById('daniel_and_the_revelation');
-    expect(dar, isNotNull);
-    expect(dar!.title, 'Daniel and the Revelation');
-    expect(dar.authorName, 'Uriah Smith');
-    expect(dar.sourceType, 'directEpub');
-    expect(dar.sourceTypeLabel, 'DIRECT EPUB');
-    expect(dar.preferredImportCandidate, isNull);
-    expect(dar.isImportable, isFalse);
+      final dar = catalog.workById('daniel_and_the_revelation');
+      expect(dar, isNotNull);
+      expect(dar!.title, 'Daniel and the Revelation');
+      expect(dar.authorName, 'Uriah Smith');
+      expect(dar.sourceType, 'directEpub');
+      expect(dar.sourceTypeLabel, 'DIRECT EPUB');
+      expect(dar.preferredImportCandidate, isNotNull);
+      expect(dar.preferredImportCandidate!.sourceType, 'directEpub');
+      expect(dar.isImportable, isTrue);
 
-    final homeHere = catalog.workById('home_here_and_home_in_heaven_with_other_poems');
-    expect(homeHere, isNotNull);
-    expect(homeHere!.title, 'Home Here, and Home in Heaven; With Other Poems');
-    expect(homeHere.isImportable, isFalse);
+      final homeHere = catalog.workById(
+        'home_here_and_home_in_heaven_with_other_poems',
+      );
+      expect(homeHere, isNotNull);
+      expect(
+        homeHere!.title,
+        'Home Here, and Home in Heaven; With Other Poems',
+      );
+      expect(homeHere.isImportable, isTrue);
 
-    final livingFountains = catalog.workById('living_fountains_or_broken_cisterns');
-    expect(livingFountains, isNotNull);
-    expect(livingFountains!.isImportable, isFalse);
-    expect(livingFountains.hasDeferredPdfSource, isTrue);
-  });
+      final livingFountains = catalog.workById(
+        'living_fountains_or_broken_cisterns',
+      );
+      expect(livingFountains, isNotNull);
+      expect(livingFountains!.isImportable, isFalse);
+      expect(livingFountains.hasDeferredPdfSource, isTrue);
+    },
+  );
 }

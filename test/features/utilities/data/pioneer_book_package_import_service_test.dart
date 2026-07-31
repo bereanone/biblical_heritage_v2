@@ -77,6 +77,24 @@ const String _manifestJsonWithShortCode = '''
 }
 ''';
 
+// Matches a real-world legacy CaptureClipper manifest: no workId,
+// packageId, contentHash, or author fields, which predate schema 2.
+const String _legacySchema1ManifestJson = '''
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-07-05T16:13:30.739907Z",
+  "captureApp": "CaptureClipper",
+  "captureMode": "clipboard-html",
+  "title": "CWCP",
+  "shortCode": "CWCP",
+  "fromRef": "19",
+  "toRef": "23",
+  "coverImage": "images/image_0001.png",
+  "imageCount": 1,
+  "htmlFile": "capture.html"
+}
+''';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -129,6 +147,14 @@ void main() {
       expect(
         studybookBookCodeFromPackageName('/cloud/DAR1897-07-5-2026.zip'),
         'DAR1897',
+      );
+    });
+
+    test('strips a redundant .zip suffix appended after .studybook', () {
+      // Some export/backup tools produce a double extension like this.
+      expect(
+        studybookBookCodeFromPackageName('/cloud/CWCP07-05-2026.studybook.zip'),
+        'CWCP',
       );
     });
   });
@@ -215,6 +241,90 @@ void main() {
       isTrue,
     );
   });
+
+  test(
+    'imports a package with a redundant .studybook.zip double extension',
+    () async {
+      // Some export/backup tools append a redundant .zip suffix on top of
+      // .studybook; the importer must still accept and correctly name it.
+      final bytes = _zipBytes({
+        'manifest.json': _manifestJsonWithShortCode,
+        'capture.html': _captureHtml,
+      });
+      final package = await _writePackage(
+        sourceDir,
+        'CWCP07-05-2026.studybook.zip',
+        bytes,
+      );
+
+      final result = await service.importPackage(package.path);
+
+      expect(result.bookCode, 'SSP');
+      expect(
+        result.destinationFolderPath,
+        p.join(result.managedRootPath, 'SSP'),
+      );
+    },
+  );
+
+  test('imports a package wrapped in a single top-level folder '
+      '(e.g. macOS Finder "Compress")', () async {
+    final bytes = _zipBytes({
+      'CWCP07-05-2026/manifest.json': _manifestJsonWithShortCode,
+      'CWCP07-05-2026/capture.html': _captureHtml,
+      'CWCP07-05-2026/images/image_0001.png': 'png-bytes',
+    });
+    final package = await _writePackage(
+      sourceDir,
+      'CWCP07-05-2026.studybook',
+      bytes,
+    );
+
+    final result = await service.importPackage(package.path);
+
+    expect(result.bookCode, 'SSP');
+    expect(result.destinationFolderPath, p.join(result.managedRootPath, 'SSP'));
+    expect(
+      File(p.join(result.destinationFolderPath, 'capture.html')).existsSync(),
+      isTrue,
+    );
+    expect(
+      File(
+        p.join(result.destinationFolderPath, 'images', 'image_0001.png'),
+      ).existsSync(),
+      isTrue,
+    );
+  });
+
+  test(
+    'imports a legacy schema-1 package by synthesizing its identity',
+    () async {
+      final bytes = _zipBytes({
+        'manifest.json': _legacySchema1ManifestJson,
+        'capture.html': _captureHtml,
+        'images/image_0001.png': 'png-bytes',
+      });
+      final package = await _writePackage(
+        sourceDir,
+        'CWCP07-05-2026.studybook',
+        bytes,
+      );
+
+      final result = await service.importPackage(package.path);
+
+      expect(result.bookCode, 'CWCP');
+      expect(result.workId, 'CWCP');
+      expect(result.packageId, isNotEmpty);
+      expect(
+        result.destinationFolderPath,
+        p.join(result.managedRootPath, 'CWCP'),
+      );
+      expect(
+        File(p.join(result.destinationFolderPath, 'capture.html')).existsSync(),
+        isTrue,
+      );
+    },
+  );
 
   test('prefers the metadata shortCode over the package file name', () async {
     final bytes = _zipBytes({

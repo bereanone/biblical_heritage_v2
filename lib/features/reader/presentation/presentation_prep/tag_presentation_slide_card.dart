@@ -54,7 +54,10 @@ class TagPresentationSlideCard extends StatelessWidget {
                         '${slide.placedCardCount} item${slide.placedCardCount == 1 ? '' : 's'}',
                   ),
                   const SizedBox(width: 6),
-                  _SlideBadge(label: '${slide.gridLayout.rows}x${slide.gridLayout.columns}'),
+                  _SlideBadge(
+                    label:
+                        '${slide.gridLayout.rows}x${slide.gridLayout.columns}',
+                  ),
                   if (slide.isBlank) ...[
                     const SizedBox(width: 6),
                     _SlideBadge(label: 'Blank'),
@@ -69,10 +72,7 @@ class TagPresentationSlideCard extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               if (slide.isBlank)
-                Text(
-                  'Blank working slide.',
-                  style: theme.textTheme.bodySmall,
-                )
+                Text('Blank working slide.', style: theme.textTheme.bodySmall)
               else
                 Text(
                   _summaryText(),
@@ -121,9 +121,9 @@ class _SlideBadge extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         child: Text(
           label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
       ),
     );

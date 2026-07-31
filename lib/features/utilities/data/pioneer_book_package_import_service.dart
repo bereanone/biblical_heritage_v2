@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -14,7 +15,16 @@ import 'pioneer_capture_folder_metadata.dart';
 /// by stripping a trailing capture-date suffix:
 /// `CSCP07-5-2026` -> `CSCP`, `SDP07-5-2026` -> `SDP`, `DAR1897` -> `DAR1897`.
 String studybookBookCodeFromPackageName(String packagePath) {
-  final base = p.basenameWithoutExtension(packagePath).trim();
+  var base = p.basename(packagePath).trim();
+  // Some export/backup tools append a redundant .zip suffix on top of
+  // .studybook (e.g. "CWCP07-05-2026.studybook.zip"); strip whichever
+  // known package suffix is present before parsing the date suffix below.
+  for (final suffix in const ['.studybook.zip', '.studybook', '.zip']) {
+    if (base.toLowerCase().endsWith(suffix)) {
+      base = base.substring(0, base.length - suffix.length);
+      break;
+    }
+  }
   final stripped = base
       .replaceFirst(RegExp(r'[\s_.-]*\d{1,2}-\d{1,2}-\d{4}$'), '')
       .trim();
@@ -39,6 +49,8 @@ class PioneerBookPackageImportResult {
     required this.managedRootPath,
     required this.destinationFolderPath,
     required this.bookCode,
+    required this.workId,
+    required this.packageId,
     required this.extractedFilePaths,
     required this.htmlFileCount,
   });
@@ -47,6 +59,8 @@ class PioneerBookPackageImportResult {
   final String managedRootPath;
   final String destinationFolderPath;
   final String bookCode;
+  final String workId;
+  final String packageId;
   final List<String> extractedFilePaths;
   final int htmlFileCount;
 }
@@ -66,7 +80,10 @@ class PioneerBookPackageImportService {
 
   final LocalSettingsStore _settingsStore;
 
-  static const Set<String> supportedPackageExtensions = <String>{'.studybook'};
+  static const Set<String> supportedPackageExtensions = <String>{
+    '.studybook',
+    '.studybook.zip',
+  };
 
   static const Set<String> _htmlExtensions = <String>{'.html', '.htm'};
 
@@ -91,8 +108,12 @@ class PioneerBookPackageImportService {
         'No package file was selected.',
       );
     }
-    final packageExtension = p.extension(sourcePath).toLowerCase();
-    if (!supportedPackageExtensions.contains(packageExtension)) {
+    final lowerSourcePath = sourcePath.toLowerCase();
+    final isSupportedPackage = supportedPackageExtensions.any(
+      lowerSourcePath.endsWith,
+    );
+    if (!isSupportedPackage) {
+      final packageExtension = p.extension(sourcePath).toLowerCase();
       throw PioneerBookPackageImportException(
         'Unsupported package type "$packageExtension". Please select a '
         '.studybook CaptureClipper package.',
@@ -125,13 +146,43 @@ class PioneerBookPackageImportService {
       );
     }
 
+    // Detect a single top-level wrapper folder, which is the normal result
+    // of compressing a folder directly (e.g. macOS Finder's "Compress"),
+    // and treat its contents as the package root rather than requiring
+    // manifest.json to sit at the literal archive root.
+    String? commonRootPrefix;
+    {
+      final candidateNames = archive
+          .map((entry) => entry.name.replaceAll('\\', '/').trim())
+          .where((name) => name.isNotEmpty && !_isIgnoredArchivePath(name))
+          .toList(growable: false);
+      if (candidateNames.isNotEmpty) {
+        final firstSlash = candidateNames.first.indexOf('/');
+        if (firstSlash > 0) {
+          final prefix = candidateNames.first.substring(0, firstSlash + 1);
+          if (candidateNames.every((name) => name.startsWith(prefix))) {
+            commonRootPrefix = prefix;
+          }
+        }
+      }
+    }
+    String stripRootPrefix(String name) {
+      final prefix = commonRootPrefix;
+      if (prefix != null && name.startsWith(prefix)) {
+        return name.substring(prefix.length);
+      }
+      return name;
+    }
+
     final fileEntries = <ArchiveFile>[];
     const maxEntries = 10000;
     const maxExpandedBytes = 1024 * 1024 * 1024;
     var expandedBytes = 0;
     final entryNames = <String>{};
     for (final entry in archive) {
-      final entryName = entry.name.replaceAll('\\', '/').trim();
+      final entryName = stripRootPrefix(
+        entry.name.replaceAll('\\', '/').trim(),
+      );
       if (entryName.isEmpty || _isIgnoredArchivePath(entryName)) continue;
       _ensureSafeArchivePath(entryName);
       if (entry.isSymbolicLink) {
@@ -164,7 +215,11 @@ class PioneerBookPackageImportService {
       );
     }
     final manifests = fileEntries
-        .where((entry) => entry.name == 'manifest.json')
+        .where(
+          (entry) =>
+              stripRootPrefix(entry.name.replaceAll('\\', '/').trim()) ==
+              'manifest.json',
+        )
         .toList();
     if (manifests.length != 1) {
       throw const PioneerBookPackageImportException(
@@ -172,7 +227,7 @@ class PioneerBookPackageImportService {
       );
     }
     String relativeEntryPath(ArchiveFile entry) {
-      return entry.name.replaceAll('\\', '/').trim();
+      return stripRootPrefix(entry.name.replaceAll('\\', '/').trim());
     }
 
     final manifestData = json.decode(
@@ -183,15 +238,24 @@ class PioneerBookPackageImportService {
         'Manifest is not a JSON object.',
       );
     }
-    final metadata = PioneerCaptureFolderMetadata.fromManifestMap(
+    final parsedMetadata = PioneerCaptureFolderMetadata.fromManifestMap(
       manifestData,
       folderPath: '',
     );
-    if (metadata.schemaVersion != 2 || metadata.hasManifestError) {
-      throw PioneerBookPackageImportException(
-        metadata.manifestError ?? 'Only schema-2 packages are supported.',
+    if (parsedMetadata.hasManifestError) {
+      throw PioneerBookPackageImportException(parsedMetadata.manifestError!);
+    }
+    if (parsedMetadata.schemaVersion != 1 &&
+        parsedMetadata.schemaVersion != 2) {
+      throw const PioneerBookPackageImportException(
+        'Only schema-1 and schema-2 packages are supported.',
       );
     }
+    final metadata = _withSynthesizedLegacyIdentity(
+      parsedMetadata,
+      packageBytes: packageBytes,
+      sourcePath: sourcePath,
+    );
     if (!RegExp(r'^[A-Z][A-Z0-9_-]{1,63}$').hasMatch(metadata.workId ?? '') ||
         (metadata.packageId?.trim().isEmpty ?? true) ||
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(metadata.contentHash ?? '')) {
@@ -255,6 +319,8 @@ class PioneerBookPackageImportService {
           managedRootPath: rootPath,
           destinationFolderPath: destinationFolderPath,
           bookCode: bookCode,
+          workId: metadata.workId!,
+          packageId: metadata.packageId!,
           extractedFilePaths: existingFiles,
           htmlFileCount: existingFiles
               .where(
@@ -291,7 +357,11 @@ class PioneerBookPackageImportService {
       }
     }
 
-    final stagedMetadata = PioneerCaptureFolderMetadata.fromFolder(staging);
+    final stagedMetadata = _withSynthesizedLegacyIdentity(
+      PioneerCaptureFolderMetadata.fromFolder(staging),
+      packageBytes: packageBytes,
+      sourcePath: sourcePath,
+    );
     if (stagedMetadata.hasManifestError ||
         stagedMetadata.workId != metadata.workId ||
         stagedMetadata.packageId != metadata.packageId ||
@@ -346,8 +416,54 @@ class PioneerBookPackageImportService {
       managedRootPath: rootPath,
       destinationFolderPath: destinationFolderPath,
       bookCode: bookCode,
+      workId: metadata.workId!,
+      packageId: metadata.packageId!,
       extractedFilePaths: List<String>.unmodifiable(promotedPaths),
       htmlFileCount: htmlFileCount,
+    );
+  }
+
+  /// Schema-1 is CaptureClipper's original manifest format, which predates
+  /// the workId/packageId/contentHash package-identity fields. Synthesizes
+  /// stable equivalents from the short code and package bytes so these
+  /// older captures can still be imported and deduplicated like schema-2
+  /// packages, rather than rejecting them outright. Schema-2 metadata (or
+  /// any metadata that already has these fields) is returned unchanged.
+  PioneerCaptureFolderMetadata _withSynthesizedLegacyIdentity(
+    PioneerCaptureFolderMetadata parsed, {
+    required Uint8List packageBytes,
+    required String sourcePath,
+  }) {
+    if (parsed.workId != null &&
+        parsed.packageId != null &&
+        parsed.contentHash != null) {
+      return parsed;
+    }
+    return PioneerCaptureFolderMetadata(
+      schemaVersion: parsed.schemaVersion,
+      title: parsed.title,
+      abbreviation: parsed.abbreviation,
+      displayAbbreviation: parsed.displayAbbreviation,
+      workId: parsed.workId ?? parsed.preferredAbbreviation,
+      packageId:
+          parsed.packageId ??
+          'captureclipper:${parsed.preferredAbbreviation ?? studybookBookCodeFromPackageName(sourcePath)}',
+      contentHash:
+          parsed.contentHash ?? sha256.convert(packageBytes).toString(),
+      createdAt: parsed.createdAt,
+      updatedAt: parsed.updatedAt,
+      htmlFile: parsed.htmlFile,
+      imageCount: parsed.imageCount,
+      captureApp: parsed.captureApp,
+      captureMode: parsed.captureMode,
+      fromRef: parsed.fromRef,
+      toRef: parsed.toRef,
+      manifestError: parsed.manifestError,
+      sourceType: parsed.sourceType,
+      sourceSite: parsed.sourceSite,
+      sourceUrl: parsed.sourceUrl,
+      coverImagePath: parsed.coverImagePath,
+      contributors: parsed.contributors,
     );
   }
 

@@ -75,15 +75,11 @@ mixin _CommentaryResearchLibraryServiceElibraryRefIndexSupport {
         whereArgs: [libraryItemId],
       );
       for (final row in rows) {
-        await txn.insert(
-          'elibrary_ref_index',
-          {
-            ...row,
-            'created_at': now,
-            'updated_at': now,
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        await txn.insert('elibrary_ref_index', {
+          ...row,
+          'created_at': now,
+          'updated_at': now,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
     });
 
@@ -135,21 +131,20 @@ mixin _CommentaryResearchLibraryServiceElibraryRefIndexSupport {
     required Database db,
     required String libraryItemId,
   }) async {
-    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
-      List<Map<String, Object?>>
-    >(
-      read: (readDb) => readDb.rawQuery(
-        '''
+    final rowResult = await ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (readDb) => readDb.rawQuery(
+            '''
       SELECT href, paragraph_index, ref_code
       FROM elibrary_ref_index
       WHERE library_item_id = ?
       ORDER BY href ASC, paragraph_index ASC
       ''',
-        [libraryItemId],
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-      fallbackDatabase: Future.value(db),
-    );
+            [libraryItemId],
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+          fallbackDatabase: Future.value(db),
+        );
     final rows = rowResult.value;
     final result = <String, String>{};
     for (final row in rows) {
@@ -161,10 +156,11 @@ mixin _CommentaryResearchLibraryServiceElibraryRefIndexSupport {
       }
       if (refCode.isEmpty) continue;
       result[_refCodeLocationKey(
-        libraryItemId: libraryItemId,
-        href: href,
-        paragraphIndex: paragraphIndex,
-      )] = refCode;
+            libraryItemId: libraryItemId,
+            href: href,
+            paragraphIndex: paragraphIndex,
+          )] =
+          refCode;
     }
     return result;
   }
@@ -174,11 +170,10 @@ mixin _CommentaryResearchLibraryServiceElibraryRefIndexSupport {
     required String libraryItemId,
     required String href,
   }) async {
-    final rowResult = await ELibraryReadResolver.instance.readWithFallback<
-      List<Map<String, Object?>>
-    >(
-      read: (readDb) => readDb.rawQuery(
-        '''
+    final rowResult = await ELibraryReadResolver.instance
+        .readWithFallback<List<Map<String, Object?>>>(
+          read: (readDb) => readDb.rawQuery(
+            '''
       SELECT paragraph_index, ref_code, stable_ref, page_number,
              paragraph_on_page, ref_source, anchor_id, plain_text
       FROM elibrary_ref_index
@@ -186,11 +181,11 @@ mixin _CommentaryResearchLibraryServiceElibraryRefIndexSupport {
         AND LOWER(REPLACE(REPLACE(COALESCE(href, ''), '\\', '/'), './', '')) = ?
       ORDER BY paragraph_index ASC
       ''',
-        [libraryItemId, _sectionKey(href)],
-      ),
-      hasData: (rows) => rows.isNotEmpty,
-      fallbackDatabase: Future.value(db),
-    );
+            [libraryItemId, _sectionKey(href)],
+          ),
+          hasData: (rows) => rows.isNotEmpty,
+          fallbackDatabase: Future.value(db),
+        );
     final rows = rowResult.value;
 
     final result = <int, String>{};
@@ -259,8 +254,8 @@ mixin _CommentaryResearchLibraryServiceElibraryRefIndexSupport {
       if (currentPageNumber == null && firstMarkerInSection != null) {
         currentPageNumber = firstMarkerInSection.isInsideParagraph
             ? (firstMarkerInSection.pageNumber > 1
-                ? firstMarkerInSection.pageNumber - 1
-                : 1)
+                  ? firstMarkerInSection.pageNumber - 1
+                  : 1)
             : firstMarkerInSection.pageNumber;
       }
 
@@ -323,7 +318,8 @@ mixin _CommentaryResearchLibraryServiceElibraryRefIndexSupport {
           'ref_source': 'generated_from_page_marker',
         });
 
-        if (rows.length <= 5 || _sectionKey(section.entryName) == content02Href) {
+        if (rows.length <= 5 ||
+            _sectionKey(section.entryName) == content02Href) {
           sampleRows.add(
             'href=${section.entryName} '
             'paragraphIndex=$paragraphIndex '
@@ -475,7 +471,8 @@ class _EgwPageBreakMarkerOccurrence {
   final String preview;
 }
 
-class _EgwGeneratedPageBreakMarkerOccurrence extends _EgwPageBreakMarkerOccurrence {
+class _EgwGeneratedPageBreakMarkerOccurrence
+    extends _EgwPageBreakMarkerOccurrence {
   const _EgwGeneratedPageBreakMarkerOccurrence({
     required super.pageNumber,
     required super.isInsideParagraph,

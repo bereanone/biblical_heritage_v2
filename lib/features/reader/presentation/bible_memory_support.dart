@@ -21,14 +21,12 @@ class BibleMemorySupport {
 
   static Future<Set<String>> loadHashTagGroups() async {
     final db = await UserDatabase.instance.database;
-    final rows = await db.rawQuery(
-      '''
+    final rows = await db.rawQuery('''
       SELECT DISTINCT tag
       FROM hash_tags
       WHERE tag IS NOT NULL AND TRIM(tag) <> ''
       ORDER BY tag COLLATE NOCASE ASC
-      ''',
-    );
+      ''');
     return rows
         .map((row) => row['tag']?.toString().trim() ?? '')
         .where((tag) => tag.isNotEmpty)
@@ -114,14 +112,12 @@ class BibleMemorySupport {
     BibleMemoryRepository repository,
   ) async {
     final userDb = await UserDatabase.instance.database;
-    final tagRows = await userDb.rawQuery(
-      '''
+    final tagRows = await userDb.rawQuery('''
       SELECT DISTINCT tag
       FROM hash_tags
       WHERE tag IS NOT NULL AND TRIM(tag) <> ''
       ORDER BY tag COLLATE NOCASE ASC
-      ''',
-    );
+      ''');
     final tags = tagRows
         .map((row) => row['tag']?.toString() ?? '')
         .where((tag) => tag.trim().isNotEmpty)
@@ -143,8 +139,9 @@ class BibleMemorySupport {
       ),
     );
     if (selectedTag == null || !context.mounted) return null;
-    final displayTag =
-        selectedTag.startsWith('#') ? selectedTag : '#$selectedTag';
+    final displayTag = selectedTag.startsWith('#')
+        ? selectedTag
+        : '#$selectedTag';
     final verseRows = await userDb.rawQuery(
       '''
       SELECT DISTINCT book_number, chapter_number, verse_number
@@ -191,12 +188,7 @@ class BibleMemorySupport {
     required List<MemoryVerse> visibleItems,
   }) {
     final groupLabel = selectedGroup == ungrouped ? 'Ungrouped' : selectedGroup;
-    final lines = <String>[
-      memoryPromoHeader(),
-      '',
-      'Group: $groupLabel',
-      '',
-    ];
+    final lines = <String>[memoryPromoHeader(), '', 'Group: $groupLabel', ''];
     for (final entry in visibleItems) {
       lines.add(entry.reference);
       if (entry.verseText.trim().isNotEmpty) {
@@ -229,9 +221,7 @@ class BibleMemorySupport {
             readOnly: true,
             minLines: 10,
             maxLines: 18,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(border: OutlineInputBorder()),
           ),
         ),
         actions: [
@@ -252,7 +242,9 @@ class BibleMemorySupport {
     await Clipboard.setData(ClipboardData(text: exportText));
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Copied ${visibleItems.length} verses to clipboard.')),
+      SnackBar(
+        content: Text('Copied ${visibleItems.length} verses to clipboard.'),
+      ),
     );
   }
 
@@ -444,13 +436,21 @@ class BibleMemorySupport {
               SizedBox(height: 6),
               Text('• Add Range: memorize a passage range.'),
               SizedBox(height: 6),
-              Text('• Import #Tag Group: bring in an existing #tag list as a memory group.'),
+              Text(
+                '• Import #Tag Group: bring in an existing #tag list as a memory group.',
+              ),
               SizedBox(height: 6),
-              Text('• Import External: paste a formatted list from outside the app.'),
+              Text(
+                '• Import External: paste a formatted list from outside the app.',
+              ),
               SizedBox(height: 6),
-              Text('• Export Group: copy the current memory list into a shareable text format.'),
+              Text(
+                '• Export Group: copy the current memory list into a shareable text format.',
+              ),
               SizedBox(height: 6),
-              Text('• Start Due Review: open the verses that are scheduled for review right now.'),
+              Text(
+                '• Start Due Review: open the verses that are scheduled for review right now.',
+              ),
             ],
           ),
         ),
@@ -479,7 +479,10 @@ class BibleMemorySupport {
     final books = await StudyBibleDatabase.instance.loadBooks();
     final lookup = <String, (int, String)>{};
     for (final book in books) {
-      lookup[_normalizeBookKey(book.bookName)] = (book.bookNumber, book.bookName);
+      lookup[_normalizeBookKey(book.bookName)] = (
+        book.bookNumber,
+        book.bookName,
+      );
     }
     return lookup;
   }
@@ -489,8 +492,11 @@ class BibleMemorySupport {
   }
 
   static bool _isMemoryPromoLine(String input) {
-    final line =
-        input.trim().replaceAll('*', '').replaceAll('_', '').toLowerCase();
+    final line = input
+        .trim()
+        .replaceAll('*', '')
+        .replaceAll('_', '')
+        .toLowerCase();
     if (line.isEmpty) return false;
     return (line.contains('formatted bible memory list') &&
             line.contains('biblical heritage')) ||

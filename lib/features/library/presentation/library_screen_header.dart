@@ -146,13 +146,17 @@ class _LibraryHeader extends StatelessWidget {
       children: [
         Padding(padding: const EdgeInsets.only(left: 48), child: bibleButton),
         const SizedBox(width: 12),
-        Text(
-          'eLibrary',
-          style: libraryScaledTextStyle(
-            theme.textTheme.headlineMedium,
-            libraryTitleScale(fontScale),
-            fontWeight: FontWeight.w800,
-            color: theme.colorScheme.onSurface,
+        Flexible(
+          child: Text(
+            'eLibrary',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: libraryScaledTextStyle(
+              theme.textTheme.headlineMedium?.copyWith(fontFamily: 'Roboto'),
+              libraryTitleScale(fontScale),
+              fontWeight: FontWeight.w800,
+              color: theme.colorScheme.onSurface,
+            ),
           ),
         ),
         const Spacer(),

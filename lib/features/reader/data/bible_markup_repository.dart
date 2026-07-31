@@ -32,10 +32,7 @@ class BibleMarkupRepository {
       groupsByChapter
           .putIfAbsent(
             chapterKey,
-            () => _VerseChapterGroup(
-              bookNumber: bookNumber,
-              chapter: chapter,
-            ),
+            () => _VerseChapterGroup(bookNumber: bookNumber, chapter: chapter),
           )
           .verses
           .add(verse);
@@ -86,14 +83,11 @@ class BibleMarkupRepository {
       ...numericRefToVerseKey.keys,
     }.toList(growable: false);
     final placeholders = List.filled(verseRefs.length, '?').join(',');
-    final rows = await db.rawQuery(
-      '''
+    final rows = await db.rawQuery('''
       SELECT verse_ref
       FROM highlights
       WHERE verse_ref IN ($placeholders)
-      ''',
-      verseRefs,
-    );
+      ''', verseRefs);
     for (final row in rows) {
       final verseRef = row['verse_ref']?.toString().trim() ?? '';
       if (verseRef.isEmpty) continue;
@@ -118,7 +112,8 @@ class BibleMarkupRepository {
       final rows = await db.query(
         tableName,
         columns: ['verse_number'],
-        where: '''
+        where:
+            '''
           book_number = ?
           AND chapter_number = ?
           AND deleted_at_utc IS NULL
@@ -130,9 +125,7 @@ class BibleMarkupRepository {
       for (final row in rows) {
         final verse = (row['verse_number'] as num?)?.toInt();
         if (verse == null || verse <= 0) continue;
-        markedVerseKeys.add(
-          _verseKey(group.bookNumber, group.chapter, verse),
-        );
+        markedVerseKeys.add(_verseKey(group.bookNumber, group.chapter, verse));
       }
     }
   }
@@ -181,10 +174,7 @@ class BibleMarkupRepository {
 }
 
 class _VerseChapterGroup {
-  _VerseChapterGroup({
-    required this.bookNumber,
-    required this.chapter,
-  });
+  _VerseChapterGroup({required this.bookNumber, required this.chapter});
 
   final int bookNumber;
   final int chapter;

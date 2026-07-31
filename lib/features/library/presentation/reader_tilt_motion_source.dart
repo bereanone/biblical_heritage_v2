@@ -58,7 +58,7 @@ abstract interface class ReaderTiltMotionSource {
   Future<void> stop();
 }
 
-class IosReaderTiltMotionSource implements ReaderTiltMotionSource {
+class PlatformReaderTiltMotionSource implements ReaderTiltMotionSource {
   static const _events = EventChannel('studybible/reader_tilt_motion');
   StreamSubscription<Object?>? _subscription;
   final StreamController<ReaderTiltSample> _samples =
@@ -66,7 +66,9 @@ class IosReaderTiltMotionSource implements ReaderTiltMotionSource {
 
   @override
   bool get isSupported =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.android);
 
   @override
   Stream<ReaderTiltSample> start() {
@@ -106,6 +108,10 @@ class IosReaderTiltMotionSource implements ReaderTiltMotionSource {
     _subscription = null;
   }
 }
+
+/// Compatibility name for older call sites and tests.
+@Deprecated('Use PlatformReaderTiltMotionSource')
+class IosReaderTiltMotionSource extends PlatformReaderTiltMotionSource {}
 
 class FakeReaderTiltMotionSource implements ReaderTiltMotionSource {
   FakeReaderTiltMotionSource({this.isSupported = true});

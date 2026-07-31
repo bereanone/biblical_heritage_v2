@@ -812,6 +812,34 @@ class UserV2Schema {
       'paragraph_index',
       'INTEGER',
     );
+    await _addColumnIfMissing(
+      db,
+      'library_items',
+      itemColumns,
+      'epub_storage_state',
+      'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      'library_items',
+      itemColumns,
+      'epub_removed_at',
+      'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      'library_items',
+      itemColumns,
+      'pioneer_source_relative_path',
+      'TEXT',
+    );
+    await _addColumnIfMissing(
+      db,
+      'library_items',
+      itemColumns,
+      'pioneer_source_fingerprint',
+      'TEXT',
+    );
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_library_links_lookup
       ON library_links (link_type, book_id, chapter, verse_start, verse_end)

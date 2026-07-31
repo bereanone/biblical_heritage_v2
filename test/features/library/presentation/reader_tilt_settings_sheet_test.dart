@@ -50,8 +50,13 @@ void main() {
     await hold.up();
     await tester.pumpAndSettle();
     expect(find.text('Tilt Auto-scroll Settings'), findsOneWidget);
+    expect(find.byKey(const ValueKey('autoscroll-mode')), findsNothing);
+    expect(find.text('Steady'), findsNothing);
     expect(find.text('Tilt Sideways to Change Chapter'), findsOneWidget);
     expect(find.text('Set Current Angle as Neutral'), findsOneWidget);
+    expect(find.byKey(const ValueKey('tilt-maximum-speed')), findsNothing);
+    expect(find.byKey(const ValueKey('tilt-sensor-smoothing')), findsNothing);
+    expect(find.textContaining('Sensor smoothing'), findsNothing);
     expect(find.text('Restore Defaults'), findsOneWidget);
   });
 

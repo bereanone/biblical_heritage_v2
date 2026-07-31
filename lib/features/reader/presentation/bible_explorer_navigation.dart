@@ -45,7 +45,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
         _viewerLoadError = null;
         _navigationTick += 1;
       });
-      _liveVisibleLocation.update(
+      _liveVisibleLocation.updateSelected(
         BibleVisibleLocation(
           blockId: targetBlockId,
           bookNumber: targetBook,
@@ -91,10 +91,11 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
       chapter: line.chapter,
       verse: line.verse,
     );
+    _liveVisibleLocation.updateCentered(location);
+    if (_liveVisibleLocation.selected != null) return;
     _bookNumber = line.bookNumber;
     _chapter = line.chapter;
     _verse = line.verse;
-    _liveVisibleLocation.update(location);
     _locationPersistence.update(
       location,
       persistenceSuspended:
@@ -132,7 +133,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
       chapter: reference.chapter,
       verse: reference.verse,
     );
-    _liveVisibleLocation.update(location);
+    _liveVisibleLocation.updateSelected(location);
     _locationPersistence.update(location, persistenceSuspended: false);
     if (recordHistory) {
       await _recordHistory();

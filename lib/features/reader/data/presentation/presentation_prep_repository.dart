@@ -230,12 +230,14 @@ class PresentationPrepRepository {
       );
       final items = itemRows.map(PresentationItemRecord.fromRow).toList();
 
-      loadedSlides.add(PresentationLoadedSlide(
-        slide: slide,
-        profile: profile,
-        zones: zones,
-        items: items,
-      ));
+      loadedSlides.add(
+        PresentationLoadedSlide(
+          slide: slide,
+          profile: profile,
+          zones: zones,
+          items: items,
+        ),
+      );
     }
 
     return PresentationLoadedGroup(group: group, slides: loadedSlides);
@@ -245,7 +247,8 @@ class PresentationPrepRepository {
   /// Throws [StateError] if another presentation with that name already exists.
   Future<void> renamePresentation(int presentationId, String newName) async {
     final trimmed = newName.trim();
-    if (trimmed.isEmpty) throw ArgumentError('Presentation name cannot be empty.');
+    if (trimmed.isEmpty)
+      throw ArgumentError('Presentation name cannot be empty.');
 
     final db = await UserDatabase.instance.database;
 
@@ -299,23 +302,21 @@ class PresentationPrepRepository {
   Future<void> moveSlideUp({
     required int presentationId,
     required int slideId,
-  }) =>
-      _swapSlideOrder(
-        presentationId: presentationId,
-        slideId: slideId,
-        direction: -1,
-      );
+  }) => _swapSlideOrder(
+    presentationId: presentationId,
+    slideId: slideId,
+    direction: -1,
+  );
 
   /// Moves a slide one position later in the presentation. No-op if last.
   Future<void> moveSlideDown({
     required int presentationId,
     required int slideId,
-  }) =>
-      _swapSlideOrder(
-        presentationId: presentationId,
-        slideId: slideId,
-        direction: 1,
-      );
+  }) => _swapSlideOrder(
+    presentationId: presentationId,
+    slideId: slideId,
+    direction: 1,
+  );
 
   Future<void> _swapSlideOrder({
     required int presentationId,
@@ -575,8 +576,6 @@ class PresentationPrepRepository {
   String _utcNow() {
     final now = DateTime.now().toUtc();
     final iso = now.toIso8601String();
-    return iso.contains('.')
-        ? iso.replaceFirst(RegExp(r'\.\d+Z$'), 'Z')
-        : iso;
+    return iso.contains('.') ? iso.replaceFirst(RegExp(r'\.\d+Z$'), 'Z') : iso;
   }
 }

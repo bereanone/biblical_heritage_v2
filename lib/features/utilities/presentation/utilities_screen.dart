@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/theme/app_theme_mode.dart';
+import '../../library/data/library_setup_invitation_service.dart';
+import '../../library/presentation/set_up_my_library_screen.dart';
+import '../../library/presentation/import_pioneer_library_screen.dart';
 import '../data/study_bible_backup_service.dart';
 import '../data/study_bible_storage_index_report_service.dart';
-import 'pioneer_text_import_screen.dart';
 import 'library_root_setup_screen.dart';
 import '../../reader/presentation/bible_explorer_screen.dart';
 import 'elibrary_download_screen.dart';
@@ -30,26 +32,6 @@ class UtilitiesScreen extends StatelessWidget {
           themeMode: themeMode,
           onThemeChanged: onThemeChanged,
         ),
-      ),
-    );
-  }
-
-  Future<void> _showChurchAutoMuteDialog(BuildContext context) async {
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Church AutoMute'),
-        content: const Text(
-          'Church AutoMute is planned for a future version.\n\n'
-          'This feature will help silence your phone during church and restore normal sound afterward.\n\n'
-          'No location permission is requested yet because the automation feature is not active.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Close'),
-          ),
-        ],
       ),
     );
   }
@@ -80,6 +62,24 @@ class UtilitiesScreen extends StatelessWidget {
 
     if (!context.mounted || shouldStart != true) return;
     await _runBackup(context);
+  }
+
+  /// Restores the one-time "Set Up My Library" invitation so it will offer
+  /// itself again next time the app is idle at the Entry screen. Only ever
+  /// touches the small setup-invitation preference
+  /// ([LibrarySetupInvitationService.reset]) — never deletes books, clears
+  /// databases, removes source-folder permissions, or alters user data.
+  Future<void> _showLibrarySetupAgain(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    await LibrarySetupInvitationService.instance.reset();
+    if (!context.mounted) return;
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Library setup will be offered again next time you open the app.',
+        ),
+      ),
+    );
   }
 
   Future<void> _showRestoreBackupDialog(BuildContext context) async {
@@ -322,65 +322,6 @@ class UtilitiesScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _showCommentaryBlockSharingDialog(BuildContext context) async {
-    final selection = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Commentary Block Sharing'),
-        content: const SizedBox(
-          width: 540,
-          child: Text(
-            'Use this screen for bulk sharing of commentary blocks. Import is append-only and will not overwrite your existing notes.\n\n'
-            'Import tip: copy shared block text to clipboard, then tap Import Clipboard.',
-          ),
-        ),
-        actions: [
-          OutlinedButton(
-            onPressed: () => Navigator.of(dialogContext).pop('export'),
-            child: const Text('Export All'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop('import'),
-            child: const Text('Import Clipboard'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-
-    if (!context.mounted || selection == null) return;
-    if (selection == 'export') {
-      await Clipboard.setData(
-        const ClipboardData(
-          text: 'Commentary block export is not yet migrated into StudyBible2.',
-        ),
-      );
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Export placeholder copied to clipboard.'),
-        ),
-      );
-      return;
-    }
-
-    final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
-    final clipboardText = clipboard?.text?.trim();
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          clipboardText == null || clipboardText.isEmpty
-              ? 'Clipboard was empty.'
-              : 'Clipboard content ready to import.',
-        ),
-      ),
-    );
-  }
-
   Future<void> _showCommunityLinksDialog(BuildContext context) async {
     const websiteUrl = 'https://BiblicalHeritage.net';
     await showDialog<void>(
@@ -522,6 +463,55 @@ class UtilitiesScreen extends StatelessWidget {
                           textAlign: TextAlign.center,
                           style: theme.textTheme.bodyLarge,
                         ),
+                        const SizedBox(height: 16),
+                        Card(
+                          key: const Key('utilities-set-up-my-library'),
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => const SetUpMyLibraryScreen(),
+                                ),
+                              );
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.all(18),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.auto_stories_outlined,
+                                    size: 32,
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Set Up My Library',
+                                          style: theme.textTheme.titleMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Download books, import a Pioneer '
+                                          'collection, or add your own EPUB.',
+                                          style: theme.textTheme.bodySmall,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(Icons.chevron_right),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
                         const SizedBox(height: 20),
                         if (isTwoColumn)
                           _UtilitiesTwoColumnDashboard(
@@ -532,13 +522,6 @@ class UtilitiesScreen extends StatelessWidget {
                                 helperText:
                                     'Manage common app settings and protect your personal data.',
                                 actions: [
-                                  _UtilityActionButton(
-                                    label: 'Church AutoMute',
-                                    icon: Icons.phone_android,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _showChurchAutoMuteDialog(context),
-                                  ),
                                   _UtilityActionButton(
                                     label: 'Backup User Data',
                                     icon: Icons.cloud,
@@ -553,13 +536,20 @@ class UtilitiesScreen extends StatelessWidget {
                                     onPressed: () =>
                                         _showRestoreBackupDialog(context),
                                   ),
+                                  _UtilityActionButton(
+                                    label: 'Show Library Setup Again',
+                                    icon: Icons.replay_outlined,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _showLibrarySetupAgain(context),
+                                  ),
                                 ],
                               ),
                               _UtilitiesSectionCard(
                                 key: const Key('utilities-section-elibrary'),
-                                title: 'eLibrary',
+                                title: 'Existing eLibrary Tools (Advanced)',
                                 helperText:
-                                    'Manage book storage, downloads, imports, and indexing.',
+                                    'Technical tools for storage, downloads, imports, and indexing. Most people should use Set Up My Library above instead.',
                                 actions: [
                                   _UtilityActionButton(
                                     label: 'eLibrary Setup',
@@ -588,14 +578,14 @@ class UtilitiesScreen extends StatelessWidget {
                                     },
                                   ),
                                   _UtilityActionButton(
-                                    label: 'Import Pioneer Books',
+                                    label: 'Pioneer Library',
                                     icon: Icons.menu_book_outlined,
                                     filled: false,
                                     onPressed: () {
                                       Navigator.of(context).push(
                                         MaterialPageRoute<void>(
                                           builder: (_) =>
-                                              const PioneerTextImportScreen(),
+                                              const ImportPioneerLibraryScreen(),
                                         ),
                                       );
                                     },
@@ -638,15 +628,6 @@ class UtilitiesScreen extends StatelessWidget {
                                     filled: false,
                                     onPressed: () =>
                                         _showCommentaryInstructionsDialog(
-                                          context,
-                                        ),
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Commentary Block Sharing',
-                                    icon: Icons.import_export,
-                                    filled: true,
-                                    onPressed: () =>
-                                        _showCommentaryBlockSharingDialog(
                                           context,
                                         ),
                                   ),
@@ -694,13 +675,6 @@ class UtilitiesScreen extends StatelessWidget {
                                     'Manage common app settings and protect your personal data.',
                                 actions: [
                                   _UtilityActionButton(
-                                    label: 'Church AutoMute',
-                                    icon: Icons.phone_android,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _showChurchAutoMuteDialog(context),
-                                  ),
-                                  _UtilityActionButton(
                                     label: 'Backup User Data',
                                     icon: Icons.cloud,
                                     filled: true,
@@ -714,14 +688,21 @@ class UtilitiesScreen extends StatelessWidget {
                                     onPressed: () =>
                                         _showRestoreBackupDialog(context),
                                   ),
+                                  _UtilityActionButton(
+                                    label: 'Show Library Setup Again',
+                                    icon: Icons.replay_outlined,
+                                    filled: false,
+                                    onPressed: () =>
+                                        _showLibrarySetupAgain(context),
+                                  ),
                                 ],
                               ),
                               const SizedBox(height: 12),
                               _UtilitiesSectionCard(
                                 key: const Key('utilities-section-elibrary'),
-                                title: 'eLibrary',
+                                title: 'Existing eLibrary Tools (Advanced)',
                                 helperText:
-                                    'Manage book storage, downloads, imports, and indexing.',
+                                    'Technical tools for storage, downloads, imports, and indexing. Most people should use Set Up My Library above instead.',
                                 actions: [
                                   _UtilityActionButton(
                                     label: 'eLibrary Setup',
@@ -750,14 +731,14 @@ class UtilitiesScreen extends StatelessWidget {
                                     },
                                   ),
                                   _UtilityActionButton(
-                                    label: 'Import Pioneer Books',
+                                    label: 'Pioneer Library',
                                     icon: Icons.menu_book_outlined,
                                     filled: false,
                                     onPressed: () {
                                       Navigator.of(context).push(
                                         MaterialPageRoute<void>(
                                           builder: (_) =>
-                                              const PioneerTextImportScreen(),
+                                              const ImportPioneerLibraryScreen(),
                                         ),
                                       );
                                     },
@@ -799,15 +780,6 @@ class UtilitiesScreen extends StatelessWidget {
                                     filled: false,
                                     onPressed: () =>
                                         _showCommentaryInstructionsDialog(
-                                          context,
-                                        ),
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Commentary Block Sharing',
-                                    icon: Icons.import_export,
-                                    filled: true,
-                                    onPressed: () =>
-                                        _showCommentaryBlockSharingDialog(
                                           context,
                                         ),
                                   ),

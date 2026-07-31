@@ -452,8 +452,8 @@ class UtilityFolderSetupService {
   }
 
   Future<UtilityFolderConfig> _defaultConfig() async {
-    final explicitRoot =
-        await LibraryRootService.instance.explicitLibraryRootPath();
+    final explicitRoot = await LibraryRootService.instance
+        .explicitLibraryRootPath();
     if (explicitRoot != null) {
       return UtilityFolderConfig(
         commentaryLocalRoot: p.join(explicitRoot, 'Commentaries'),
@@ -475,12 +475,14 @@ class UtilityFolderSetupService {
     );
   }
 
-  Future<UtilityFolderConfig> _withLibraryRoot(UtilityFolderConfig config) async {
-    final libraryRoot =
-        await LibraryRootService.instance.explicitLibraryRootPath();
+  Future<UtilityFolderConfig> _withLibraryRoot(
+    UtilityFolderConfig config,
+  ) async {
+    final libraryRoot = await LibraryRootService.instance
+        .explicitLibraryRootPath();
     if (libraryRoot == null) {
-      final defaultRoot =
-          await LibraryRootService.instance.defaultAppLibraryRootPath();
+      final defaultRoot = await LibraryRootService.instance
+          .defaultAppLibraryRootPath();
       return UtilityFolderConfig(
         commentaryLocalRoot: p.join(defaultRoot, 'Commentary'),
         researchLocalRoot: p.join(defaultRoot, 'Research'),

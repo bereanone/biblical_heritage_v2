@@ -103,16 +103,14 @@ class TagAnchor {
          selectedText: selectedText,
        );
 
-  const TagAnchor.noteOnly({
-    this.verseRef,
-    this.selectedText,
-  }) : kind = TagAnchorKind.noteOnly,
-       bookNumber = null,
-       chapter = null,
-       verseStart = null,
-       verseEnd = null,
-       tokenStart = null,
-       tokenEnd = null;
+  const TagAnchor.noteOnly({this.verseRef, this.selectedText})
+    : kind = TagAnchorKind.noteOnly,
+      bookNumber = null,
+      chapter = null,
+      verseStart = null,
+      verseEnd = null,
+      tokenStart = null,
+      tokenEnd = null;
 
   final TagAnchorKind kind;
   final int? bookNumber;

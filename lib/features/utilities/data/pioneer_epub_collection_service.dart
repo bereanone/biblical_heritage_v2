@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
@@ -16,6 +17,7 @@ class PioneerEpubCollectionService {
     Future<String> Function()? cacheRootPathResolver,
     Future<PioneerSourceCatalog> Function()? catalogLoader,
     Future<PioneerSourceCatalog> Function(bool refresh)? directCatalogLoader,
+    Future<PioneerSourceCatalog> Function()? localCatalogLoader,
   }) : _fetcher = fetcher ?? _downloadBytes,
        _cacheRootPathResolver =
            cacheRootPathResolver ?? _defaultCacheRootPathResolver,
@@ -24,7 +26,9 @@ class PioneerEpubCollectionService {
            directCatalogLoader ??
            ((refresh) => PioneerEllenWhiteAudioService.instance.loadCatalog(
              refresh: refresh,
-           ));
+           )),
+       _localCatalogLoader =
+           localCatalogLoader ?? _loadDefaultLocalPioneerCatalog;
 
   static final PioneerEpubCollectionService instance =
       PioneerEpubCollectionService();
@@ -40,6 +44,7 @@ class PioneerEpubCollectionService {
   final Future<PioneerSourceCatalog> Function() _catalogLoader;
   final Future<PioneerSourceCatalog> Function(bool refresh)
   _directCatalogLoader;
+  final Future<PioneerSourceCatalog> Function() _localCatalogLoader;
 
   Future<PioneerSourceCatalog> loadCatalog({bool refresh = false}) async {
     final archiveBytes = await _loadArchiveBytes(refresh: refresh);
@@ -47,10 +52,12 @@ class PioneerEpubCollectionService {
     final archiveCatalog = _buildCatalog(archive);
     final directCatalog = await _directCatalogLoader(refresh);
     final curatedCatalog = await _catalogLoader();
+    final localCatalog = await _localCatalogLoader();
     final zipEntryCatalog = PioneerSourceCatalog.merge([
       archiveCatalog,
       directCatalog,
       curatedCatalog,
+      localCatalog,
     ]);
     return zipEntryCatalog.validateZipEntries(
       archive.files
@@ -221,6 +228,202 @@ class PioneerEpubCollectionService {
       ),
     );
   }
+}
+
+const String kPioneerEpubFolderRelativePath = 'ePubs/Pioneers';
+
+Future<PioneerSourceWork?> loadPioneerWorkFromFolderFile(
+  String filePath,
+) async {
+  final normalized = p.normalize(filePath.trim());
+  if (p.extension(normalized).toLowerCase() != '.epub' ||
+      p.basename(p.dirname(normalized)).toLowerCase() != 'pioneers') {
+    return null;
+  }
+  final catalog = await loadPioneerCatalogFromFolder(p.dirname(normalized));
+  return catalog.workById(p.basenameWithoutExtension(normalized));
+}
+
+Future<PioneerSourceCatalog> _loadDefaultLocalPioneerCatalog() async {
+  final root = await LibraryRootService.instance.accessibleLibraryRootPath();
+  if (root == null || root.trim().isEmpty) {
+    return PioneerSourceCatalog.fromJson(const {'authors': <Object?>[]});
+  }
+  return loadPioneerCatalogFromFolder(p.join(root, 'ePubs', 'Pioneers'));
+}
+
+Future<PioneerSourceCatalog> loadPioneerCatalogFromFolder(
+  String folderPath,
+) async {
+  final folder = Directory(folderPath);
+  if (!await folder.exists()) {
+    return PioneerSourceCatalog.fromJson(const {'authors': <Object?>[]});
+  }
+
+  final files = await folder
+      .list(followLinks: false)
+      .where(
+        (entity) =>
+            entity is File && p.extension(entity.path).toLowerCase() == '.epub',
+      )
+      .cast<File>()
+      .toList();
+  files.sort((left, right) => left.path.compareTo(right.path));
+
+  final authors = <String, _AuthorGroup>{};
+  final workIds = <String>{};
+  for (final file in files) {
+    final metadata = await _readLocalEpubMetadata(file);
+    if (metadata == null) continue;
+    final workId = _stableId(p.basenameWithoutExtension(file.path));
+    if (workId.isEmpty || !workIds.add(workId)) continue;
+    final authorId = _stableId(metadata.author);
+    final group = authors.putIfAbsent(
+      authorId,
+      () => _AuthorGroup(
+        id: authorId,
+        name: metadata.author,
+        sortKey: metadata.author.toLowerCase(),
+      ),
+    );
+    group.works.add(
+      PioneerSourceWork(
+        id: workId,
+        authorId: authorId,
+        authorName: metadata.author,
+        sourceFamily: 'CloudFiles Pioneer EPUB',
+        title: metadata.title,
+        abbreviation: _abbreviationForTitle(metadata.title),
+        group: 'Pioneer Authors',
+        subgroup: 'EPUB',
+        availability: PioneerSourceAvailability.available,
+        verified: true,
+        catalogImportable: true,
+        sourceType: 'epub',
+        sourceUrl: file.uri.toString(),
+        collectionUrl: null,
+        captureUrl: null,
+        readerUrl: null,
+        directFileUrl: file.uri.toString(),
+        directFileType: 'epub',
+        sourceLabel: 'CloudFiles',
+        notes: 'Discovered from $kPioneerEpubFolderRelativePath.',
+        sourceCandidates: [
+          PioneerSourceCandidate(
+            provider: 'cloudfiles',
+            sourceType: 'epub',
+            url: file.uri.toString(),
+            priority: 0,
+            qualityTier: 'epub',
+            availability: PioneerSourceAvailability.available,
+            notes: 'Permanent CloudFiles source.',
+          ),
+        ],
+      ),
+    );
+  }
+
+  final sourceAuthors =
+      authors.values
+          .map(
+            (group) => PioneerSourceAuthor(
+              id: group.id,
+              name: group.name,
+              sourceFamily: 'CloudFiles Pioneer EPUB',
+              works: List<PioneerSourceWork>.unmodifiable(
+                group.works
+                  ..sort((left, right) => left.title.compareTo(right.title)),
+              ),
+              sortKey: group.sortKey,
+            ),
+          )
+          .toList()
+        ..sort((left, right) => left.sortKey.compareTo(right.sortKey));
+  return PioneerSourceCatalog(
+    authors: List<PioneerSourceAuthor>.unmodifiable(sourceAuthors),
+    authorsById: Map<String, PioneerSourceAuthor>.unmodifiable({
+      for (final author in sourceAuthors) author.id: author,
+    }),
+    worksById: Map<String, PioneerSourceWork>.unmodifiable({
+      for (final author in sourceAuthors)
+        for (final work in author.works) work.id: work,
+    }),
+  );
+}
+
+class _LocalEpubMetadata {
+  const _LocalEpubMetadata({required this.title, required this.author});
+
+  final String title;
+  final String author;
+}
+
+Future<_LocalEpubMetadata?> _readLocalEpubMetadata(File file) async {
+  try {
+    final archive = ZipDecoder().decodeBytes(
+      await file.readAsBytes(),
+      verify: true,
+    );
+    final container = archive.files
+        .where(
+          (entry) =>
+              entry.isFile &&
+              p.posix.normalize(entry.name).toLowerCase() ==
+                  'meta-inf/container.xml',
+        )
+        .toList();
+    if (container.length != 1) return null;
+    final containerXml = utf8.decode(
+      container.single.readBytes()!,
+      allowMalformed: true,
+    );
+    final rootfile = RegExp(
+      r'''full-path\s*=\s*["']([^"']+)["']''',
+      caseSensitive: false,
+    ).firstMatch(containerXml);
+    final opfPath = rootfile?.group(1)?.trim();
+    if (opfPath == null || opfPath.isEmpty) return null;
+    final opfEntries = archive.files
+        .where(
+          (entry) =>
+              entry.isFile &&
+              p.posix.normalize(entry.name).toLowerCase() ==
+                  p.posix.normalize(opfPath).toLowerCase(),
+        )
+        .toList();
+    if (opfEntries.length != 1) return null;
+    final opf = utf8.decode(
+      opfEntries.single.readBytes()!,
+      allowMalformed: true,
+    );
+    final title = _epubMetadataValue(opf, 'title');
+    final author = _epubMetadataValue(opf, 'creator');
+    if (title == null || author == null) return null;
+    return _LocalEpubMetadata(title: title, author: author);
+  } catch (_) {
+    return null;
+  }
+}
+
+String? _epubMetadataValue(String opf, String localName) {
+  final match = RegExp(
+    '<(?:[a-zA-Z0-9_-]+:)?$localName\\b[^>]*>(.*?)'
+    '</(?:[a-zA-Z0-9_-]+:)?$localName>',
+    caseSensitive: false,
+    dotAll: true,
+  ).firstMatch(opf);
+  if (match == null) return null;
+  final value = match
+      .group(1)!
+      .replaceAll(RegExp(r'<[^>]+>'), ' ')
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  return value.isEmpty ? null : value;
 }
 
 class _AuthorGroup {

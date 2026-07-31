@@ -11,8 +11,6 @@ import 'egw_copied_range_parser.dart';
 import 'pioneer_source_catalog.dart';
 
 const String kDefaultPioneerHtmlCaptureRoot = 'assets/scans';
-const String kKnownDevPioneerHtmlCaptureRoot =
-    '/Users/deanbowen/Development/StudyBible2/assets/scans';
 
 typedef PioneerHtmlCaptureAssetStringLoader =
     Future<String> Function(String assetKey);
@@ -691,7 +689,7 @@ class PioneerHtmlCaptureFolderScanner {
     this.extractor = const EgwHtmlCaptureExtractor(),
     this.projectRootPath,
     this.currentDirectoryPath,
-    this.knownDevScanPath = kKnownDevPioneerHtmlCaptureRoot,
+    this.knownDevScanPath,
     this.assetManifestKeys,
     this.assetStringLoader,
     this.preferAssetManifest = true,
@@ -1285,7 +1283,9 @@ class PioneerHtmlCaptureFolderScanner {
       ),
       sourceFileHash: sourceFileHash,
       preferredCoverImagePath:
-          effectiveMetadata.coverImagePath ?? _preferredCoverImage(imageFiles),
+          effectiveMetadata.coverImagePath ??
+          _preferredCoverImage(imageFiles) ??
+          catalogWork?.coverImagePath,
       detectedTitle: catalogWork?.title ?? detectedTitle,
       detectedAuthor: detectedAuthor,
       detectedAbbreviation: effectiveDetectedAbbreviation,

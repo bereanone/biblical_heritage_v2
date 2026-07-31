@@ -32,10 +32,10 @@ Future<ReferenceSelection?> showViewerReferencePicker(
     barrierColor: Colors.black.withValues(alpha: 0.4),
     pageBuilder: (context, animation, secondaryAnimation) =>
         _ViewerReferencePickerDialog(
-      initialBookNumber: initialBookNumber,
-      initialChapter: initialChapter,
-      initialVerse: initialVerse,
-    ),
+          initialBookNumber: initialBookNumber,
+          initialChapter: initialChapter,
+          initialVerse: initialVerse,
+        ),
   );
 }
 
@@ -93,8 +93,9 @@ class _ViewerReferencePickerDialogState
       bookNumber: _bookNumber,
       chapter: safeChapter,
     );
-    final safeVerse =
-        verses.contains(_verse) ? _verse : (verses.isEmpty ? 1 : verses.first);
+    final safeVerse = verses.contains(_verse)
+        ? _verse
+        : (verses.isEmpty ? 1 : verses.first);
 
     if (!mounted) return;
     setState(() {
@@ -142,7 +143,9 @@ class _ViewerReferencePickerDialogState
     if (!mounted) return;
     setState(() {
       _verses = verses;
-      _verse = verses.contains(_verse) ? _verse : (verses.isEmpty ? 1 : verses.first);
+      _verse = verses.contains(_verse)
+          ? _verse
+          : (verses.isEmpty ? 1 : verses.first);
       _loading = false;
     });
   }
@@ -228,10 +231,7 @@ class _ViewerReferencePickerDialogState
                         ],
                       ),
                     ),
-                    Divider(
-                      height: 1,
-                      color: theme.colorScheme.outlineVariant,
-                    ),
+                    Divider(height: 1, color: theme.colorScheme.outlineVariant),
                     Flexible(
                       child: _loading
                           ? const Center(
@@ -357,8 +357,12 @@ class _BookList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final oldTestamentBooks = books.where((book) => book.bookNumber <= 39).toList();
-    final newTestamentBooks = books.where((book) => book.bookNumber > 39).toList();
+    final oldTestamentBooks = books
+        .where((book) => book.bookNumber <= 39)
+        .toList();
+    final newTestamentBooks = books
+        .where((book) => book.bookNumber > 39)
+        .toList();
 
     onInitialScroll();
 
@@ -371,8 +375,9 @@ class _BookList extends StatelessWidget {
           children: List.generate(oldTestamentBooks.length, (index) {
             final rowKey = rowKeys.putIfAbsent(index, () => GlobalKey());
             final leftBook = oldTestamentBooks[index];
-            final rightBook =
-                index < newTestamentBooks.length ? newTestamentBooks[index] : null;
+            final rightBook = index < newTestamentBooks.length
+                ? newTestamentBooks[index]
+                : null;
             final leftExpanded = expandedBookNumber == leftBook.bookNumber;
             final rightExpanded =
                 rightBook != null && expandedBookNumber == rightBook.bookNumber;
@@ -402,7 +407,9 @@ class _BookList extends StatelessWidget {
                               alignment: Alignment.centerLeft,
                               child: ViewerBookLabel(
                                 label: rightBook.bookName,
-                                color: viewerBookGroupColor(rightBook.bookNumber),
+                                color: viewerBookGroupColor(
+                                  rightBook.bookNumber,
+                                ),
                                 selected: rightExpanded,
                                 onTap: () => onToggleBook(rightBook),
                               ),

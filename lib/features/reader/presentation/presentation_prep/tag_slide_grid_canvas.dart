@@ -185,8 +185,11 @@ class TagSlideGridCanvas extends StatelessWidget {
                         body: Builder(
                           builder: (bodyCtx) {
                             final bodyLayout =
-                                TagPresentationSlideLayoutScope.maybeOf(bodyCtx);
-                            final gridSize = bodyLayout?.gridBodySize ??
+                                TagPresentationSlideLayoutScope.maybeOf(
+                                  bodyCtx,
+                                );
+                            final gridSize =
+                                bodyLayout?.gridBodySize ??
                                 Size(
                                   math.max(0.0, constraints.maxWidth),
                                   math.max(0.0, constraints.maxHeight),

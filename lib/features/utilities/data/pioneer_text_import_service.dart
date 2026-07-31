@@ -56,7 +56,7 @@ enum PioneerSourcePathPreference {
   sourceNeeded;
 
   String get label => switch (this) {
-    PioneerSourcePathPreference.epub => 'Capture needed',
+    PioneerSourcePathPreference.epub => 'Legacy EPUB fallback',
     PioneerSourcePathPreference.textCapture => 'Text/read capture',
     PioneerSourcePathPreference.userSuppliedCleanedSource =>
       'User-supplied cleaned source',
@@ -1349,6 +1349,75 @@ class PioneerTextImportService {
     }
 
     return PioneerImportBatchResult(workResults: results);
+  }
+
+  Future<PioneerImportWorkResult> importLocalEpubFile({
+    required PioneerSourceWork work,
+    required String filePath,
+    bool overwriteExisting = true,
+  }) async {
+    final sourceFile = File(filePath.trim());
+    if (!await sourceFile.exists()) {
+      throw StateError('The selected EPUB is no longer available.');
+    }
+    if (p.extension(sourceFile.path).toLowerCase() != '.epub') {
+      throw const FormatException('Choose a Pioneer EPUB file.');
+    }
+
+    final bytes = await sourceFile.readAsBytes();
+    final inspection = await inspectPioneerEpubBytes(bytes, work: work);
+    if (!inspection.isValidZip ||
+        !inspection.hasContainerXml ||
+        inspection.sectionCount == 0 ||
+        inspection.paragraphCountAfterFiltering == 0) {
+      throw PioneerImportDocumentTooSparseException(
+        sourceType: 'epub',
+        message: 'The selected EPUB has no readable book content.',
+        sectionsFound: inspection.sectionCount,
+        paragraphCount: inspection.paragraphCountAfterFiltering,
+      );
+    }
+
+    final document = await _parseDocument(work, bytes);
+    final qualityValidation = _validatePioneerEpubImportQuality(
+      work: work,
+      document: document,
+    );
+    if (!qualityValidation.isValid) {
+      throw PioneerImportQualityException(result: qualityValidation);
+    }
+
+    final db = await ELibraryDatabase.instance.database;
+    final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+    final coverPath = await cachePioneerCaptureCoverPath(
+      coverPath: work.coverImagePath,
+      itemId: work.stableLibraryItemId,
+    );
+    final downloadResult = PioneerSourceDownloadResult(
+      bytes: bytes,
+      httpStatusCode: null,
+      contentType: 'application/epub+zip',
+      resolvedUri: sourceFile.uri,
+    );
+    return _writeImportedWork(
+      db: db,
+      deviceId: deviceId,
+      work: work,
+      libraryItemId: work.stableLibraryItemId,
+      replaceCanonicalSiblings: overwriteExisting,
+      document: document,
+      sourceBytes: bytes,
+      downloadResult: downloadResult,
+      sourceMethod: PioneerImportSourceMethod.directUrl,
+      refCodeHandlingSummary:
+          'Local EPUB spine and chapter structure preserved during indexing.',
+      sourceUrl: sourceFile.uri.toString(),
+      sourceType: 'epub',
+      sourceSite: 'local_cloud_file',
+      relativePath: _buildVirtualRelativePath(work),
+      coverPath: coverPath,
+      qualityValidation: qualityValidation,
+    );
   }
 
   Future<PioneerImportBatchResult> importFromCapturedText(
@@ -2744,6 +2813,47 @@ class PioneerTextImportService {
         caseSensitive: false,
       ).hasMatch(label);
     });
+
+    // Captured EGW text can represent a chapter heading as an empty section
+    // followed by one or more named body sections (for example SSP Chapter
+    // III followed by EPHESUS). Preserve that source-order branch explicitly
+    // instead of leaving the heading and its content as unrelated root rows.
+    // This relationship is based only on contiguous source structure; labels
+    // are never used to borrow content from a duplicate or sibling chapter.
+    for (var index = 0; index < sectionRows.length; index++) {
+      final parent = sectionRows[index];
+      final parentHref = parent['href']?.toString().trim().toLowerCase() ?? '';
+      final parentLabel = parent['label']?.toString().trim() ?? '';
+      final isEmptyChapter =
+          !readableHrefs.contains(parentHref) &&
+          RegExp(
+            r'^chapter\s+(?:\d+|[ivxlcdm]+)\b',
+            caseSensitive: false,
+          ).hasMatch(parentLabel);
+      if (!isEmptyChapter) continue;
+
+      final parentId = parent['id']?.toString() ?? '';
+      if (parentId.isEmpty) continue;
+      for (
+        var childIndex = index + 1;
+        childIndex < sectionRows.length;
+        childIndex++
+      ) {
+        final child = sectionRows[childIndex];
+        final childLabel = child['label']?.toString().trim() ?? '';
+        if (RegExp(
+          r'^chapter\s+(?:\d+|[ivxlcdm]+)\b',
+          caseSensitive: false,
+        ).hasMatch(childLabel)) {
+          break;
+        }
+        final childHref = child['href']?.toString().trim().toLowerCase() ?? '';
+        if (!readableHrefs.contains(childHref)) continue;
+        child['parent_id'] = parentId;
+        child['depth'] = 1;
+        child['content_kind'] = 'body_subsection';
+      }
+    }
 
     final insertedParagraphCount = paragraphRows.length;
     final sectionCount = sectionRows.length;
@@ -4370,6 +4480,15 @@ PioneerImportWorkResult _buildFailedResult({
 }
 
 Future<PioneerSourceDownloadResult> _downloadSourceBytes(Uri uri) async {
+  if (uri.scheme == 'file') {
+    final bytes = await File.fromUri(uri).readAsBytes();
+    return PioneerSourceDownloadResult(
+      bytes: Uint8List.fromList(bytes),
+      httpStatusCode: null,
+      contentType: 'application/epub+zip',
+      resolvedUri: uri,
+    );
+  }
   final client = HttpClient();
   try {
     final request = await client.getUrl(uri);
@@ -5107,6 +5226,14 @@ Future<PioneerImportDocument> _parseEpubDocument(
   }
   final packageInfo = _readEpubPackageInfo(archive);
   final profile = PioneerEpubParserProfile.infer(work);
+  final anchoredSections = _parseNcxAnchoredEpubSections(
+    archive: archive,
+    work: work,
+    profile: profile,
+  );
+  if (anchoredSections.length >= 3) {
+    return PioneerImportDocument(title: work.title, sections: anchoredSections);
+  }
   final List<String> sourcePaths;
   if (packageInfo.spineOrderedPaths.isNotEmpty) {
     sourcePaths = packageInfo.spineOrderedPaths;
@@ -5149,6 +5276,111 @@ Future<PioneerImportDocument> _parseEpubDocument(
   }
 
   return PioneerImportDocument(title: work.title, sections: sections);
+}
+
+List<PioneerImportSection> _parseNcxAnchoredEpubSections({
+  required Archive archive,
+  required PioneerSourceWork work,
+  required PioneerEpubParserProfile profile,
+}) {
+  final ncxEntry = archive.files.cast<ArchiveFile?>().firstWhere(
+    (entry) =>
+        entry?.isFile == true &&
+        p.normalize(entry!.name).toLowerCase().endsWith('.ncx'),
+    orElse: () => null,
+  );
+  if (ncxEntry == null) return const <PioneerImportSection>[];
+
+  final ncxPath = p.normalize(ncxEntry.name);
+  final ncxDirectory = p.dirname(ncxPath);
+  final ncx = utf8.decode(ncxEntry.content as List<int>, allowMalformed: true);
+  final targetPattern = RegExp(
+    r'<navLabel\b[^>]*>\s*<text\b[^>]*>(.*?)</text>\s*</navLabel>\s*'
+    r'<content\b[^>]*\bsrc\s*=\s*["'
+    ']([^"'
+    ']+)["'
+    '][^>]*/?>',
+    caseSensitive: false,
+    dotAll: true,
+  );
+  final targets = <({String title, String path, String anchor})>[];
+  for (final match in targetPattern.allMatches(ncx)) {
+    final title = _cleanSectionTitle(
+      match.group(1) ?? '',
+      fallback: work.title,
+    );
+    final source = (match.group(2) ?? '').trim();
+    final hashIndex = source.indexOf('#');
+    if (hashIndex <= 0 || hashIndex >= source.length - 1) continue;
+    final encodedPath = source.substring(0, hashIndex);
+    final anchor = Uri.decodeComponent(source.substring(hashIndex + 1));
+    if (anchor.isEmpty) continue;
+    final decodedPath = Uri.decodeFull(encodedPath);
+    final resolvedPath = _normalizeEpubPath(
+      p.normalize(p.join(ncxDirectory, decodedPath)),
+    );
+    targets.add((title: title, path: resolvedPath, anchor: anchor));
+  }
+  if (targets.length < 3) return const <PioneerImportSection>[];
+
+  final sections = <PioneerImportSection>[];
+  var spineIndex = 1;
+  for (var targetIndex = 0; targetIndex < targets.length; targetIndex++) {
+    final target = targets[targetIndex];
+    final entry = _findArchiveFileByNormalizedName(archive, target.path);
+    if (entry == null || !entry.isFile) continue;
+    final raw = utf8.decode(entry.content as List<int>, allowMalformed: true);
+    final anchorPattern = RegExp(
+      '<[^>]*\\bid\\s*=\\s*["\\\']${RegExp.escape(target.anchor)}'
+      '["\\\'][^>]*>',
+      caseSensitive: false,
+    );
+    final startMatch = anchorPattern.firstMatch(raw);
+    if (startMatch == null) continue;
+
+    var end = raw.length;
+    for (
+      var nextIndex = targetIndex + 1;
+      nextIndex < targets.length;
+      nextIndex++
+    ) {
+      final next = targets[nextIndex];
+      if (next.path != target.path) break;
+      final nextPattern = RegExp(
+        '<[^>]*\\bid\\s*=\\s*["\\\']${RegExp.escape(next.anchor)}'
+        '["\\\'][^>]*>',
+        caseSensitive: false,
+      );
+      final nextMatches = nextPattern.allMatches(raw, startMatch.end);
+      final nextMatch = nextMatches.isEmpty ? null : nextMatches.first;
+      if (nextMatch != null) {
+        end = nextMatch.start;
+        break;
+      }
+    }
+
+    final fragment = raw.substring(startMatch.start, end);
+    final blocks = _extractHtmlBlocks(fragment, profile: profile);
+    final normalizedTitle = _normalizeText(target.title);
+    final paragraphs = <String>[];
+    for (final block in blocks) {
+      final text = block.text.trim();
+      if (text.isEmpty) continue;
+      if (paragraphs.isEmpty && _normalizeText(text) == normalizedTitle) {
+        continue;
+      }
+      paragraphs.add(text);
+    }
+    sections.add(
+      PioneerImportSection(
+        href: '${target.path}#${target.anchor}',
+        title: target.title,
+        paragraphs: List<String>.unmodifiable(paragraphs),
+        spineIndex: spineIndex++,
+      ),
+    );
+  }
+  return List<PioneerImportSection>.unmodifiable(sections);
 }
 
 Future<PioneerImportDocument> _parseHtmlDocument(

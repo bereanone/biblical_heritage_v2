@@ -8,14 +8,13 @@ import 'markup_settings_screen.dart';
 Future<bool?> showHighlightPopup(
   BuildContext context, {
   required List<String> verseRefs,
-  List<TokenHighlightSelection> tokenSelections = const <TokenHighlightSelection>[],
+  List<TokenHighlightSelection> tokenSelections =
+      const <TokenHighlightSelection>[],
 }) {
   return showDialog<bool>(
     context: context,
-    builder: (_) => _HighlightPopup(
-      verseRefs: verseRefs,
-      tokenSelections: tokenSelections,
-    ),
+    builder: (_) =>
+        _HighlightPopup(verseRefs: verseRefs, tokenSelections: tokenSelections),
   );
 }
 
@@ -86,9 +85,7 @@ class _HighlightPopupState extends State<_HighlightPopup> {
 
   Future<void> _openSettings() async {
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const MarkupSettingsScreen(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => const MarkupSettingsScreen()),
     );
     await _load();
   }
@@ -148,7 +145,8 @@ class _HighlightPopupState extends State<_HighlightPopup> {
                           ),
                         )
                         .toList(growable: false),
-                    onChanged: (value) => setState(() => _selectedGroupId = value),
+                    onChanged: (value) =>
+                        setState(() => _selectedGroupId = value),
                   ),
                   const SizedBox(height: 10),
                   Row(
@@ -176,7 +174,9 @@ class _HighlightPopupState extends State<_HighlightPopup> {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: _groups.isEmpty || _selectedGroupId == null ? null : _apply,
+          onPressed: _groups.isEmpty || _selectedGroupId == null
+              ? null
+              : _apply,
           child: const Text('Apply'),
         ),
       ],

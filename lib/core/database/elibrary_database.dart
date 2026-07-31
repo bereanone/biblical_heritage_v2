@@ -21,7 +21,9 @@ class ELibraryDatabase {
 
   Future<Database> get database async {
     SandboxBootstrap.ensureSqfliteInitializedOnce();
-    if (_database != null) return _database!;
+    if (_database != null) {
+      return _database!;
+    }
     _opening ??= _openDatabase();
     try {
       _database = await _opening!;
@@ -53,12 +55,14 @@ class ELibraryDatabase {
           label: 'eLibrary.db',
           actionLabel: 'enabling WAL',
           sql: 'PRAGMA journal_mode=WAL',
+          returnsRows: true,
         );
         await _executePragmaNonFatal(
           database,
           label: 'eLibrary.db',
           actionLabel: 'setting busy_timeout',
           sql: 'PRAGMA busy_timeout = 5000',
+          returnsRows: true,
         );
       },
       onCreate: (database, version) async {
@@ -76,9 +80,14 @@ class ELibraryDatabase {
     required String label,
     required String actionLabel,
     required String sql,
+    bool returnsRows = false,
   }) async {
     try {
-      await database.execute(sql);
+      if (returnsRows) {
+        await database.rawQuery(sql);
+      } else {
+        await database.execute(sql);
+      }
       debugPrint('ELibraryDatabase[$label]: $actionLabel succeeded.');
     } on DatabaseException catch (error) {
       if (_isKnownWalFalsePositive(error)) {
@@ -117,7 +126,9 @@ class ELibraryDatabase {
         );
         writableFile.createSync(recursive: true);
       } else {
-        debugPrint('ELibraryDatabase: asset copied successfully to $writablePath.');
+        debugPrint(
+          'ELibraryDatabase: asset copied successfully to $writablePath.',
+        );
       }
     } else {
       debugPrint('ELibraryDatabase: using existing DB at $writablePath.');

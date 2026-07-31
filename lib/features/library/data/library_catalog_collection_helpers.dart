@@ -14,8 +14,7 @@ const String _libraryAllCollectionsFilterValue = 'all';
 const String _libraryAllCollectionsFilterLabel = 'All Collections';
 const String _libraryPioneerCollectionsFilterValue =
     'adventist_pioneer_library';
-const String _libraryPioneerCollectionsFilterLabel =
-    'Adventist Pioneer Library';
+const String _libraryPioneerCollectionsFilterLabel = 'Pioneer Library';
 const List<String> _libraryCollectionFilterPriority = <String>[
   'egw_books',
   'egw_devotionals',
@@ -115,6 +114,7 @@ String libraryCollectionFilterLabelForValue(String value) {
     case 'egw_manuscript_releases':
       return 'EGW Manuscript Releases';
     case 'pioneer_authors':
+    case 'pioneer_library':
     case _libraryPioneerCollectionsFilterValue:
       return _libraryPioneerCollectionsFilterLabel;
   }
@@ -185,6 +185,7 @@ String _normalizeLibraryCollectionFilterValue(String value) {
 String _canonicalLibraryCollectionFilterValue(String normalizedValue) {
   switch (normalizedValue) {
     case 'pioneer_authors':
+    case 'pioneer_library':
     case 'adventist_pioneer_library':
       return _libraryPioneerCollectionsFilterValue;
   }

@@ -41,12 +41,12 @@ ViewerAutoScrollWindowAction viewerAutoScrollWindowAction({
 }) {
   if (delta > 0 && lastVisibleBlockId >= lastLoadedBlockId - guardBlocks) {
     return lastLoadedBlockId >= maxBlockId
-        ? ViewerAutoScrollWindowAction.stopAtEnd
+        ? ViewerAutoScrollWindowAction.scroll
         : ViewerAutoScrollWindowAction.extendForward;
   }
   if (delta < 0 && firstVisibleBlockId <= firstLoadedBlockId + guardBlocks) {
     return firstLoadedBlockId <= ViewerDataController.minId
-        ? ViewerAutoScrollWindowAction.stopAtStart
+        ? ViewerAutoScrollWindowAction.scroll
         : ViewerAutoScrollWindowAction.extendBackward;
   }
   return ViewerAutoScrollWindowAction.scroll;
@@ -372,17 +372,21 @@ class _ViewerBodyState extends State<ViewerBody> {
                 left.itemLeadingEdge.compareTo(right.itemLeadingEdge),
           );
     if (positions.isEmpty) return;
-
-    int? firstMeaningfulId;
-    for (final position in positions) {
-      final blockId = position.index + 1;
-      final line = widget.data.getBlock(blockId);
-      if (line == null || line.verse <= 0 || line.text.trim().isEmpty) continue;
-      firstMeaningfulId = blockId;
-      break;
-    }
-    if (firstMeaningfulId == null) return;
-    _queueVisibleBlockEmission(firstMeaningfulId);
+    final centeredBlockId = centeredBibleVerseBlockId(
+      positions.map((position) {
+        final blockId = position.index + 1;
+        final line = widget.data.getBlock(blockId);
+        return BibleViewportCandidate(
+          blockId: blockId,
+          leadingEdge: position.itemLeadingEdge,
+          trailingEdge: position.itemTrailingEdge,
+          isVerse:
+              line != null && line.verse > 0 && line.text.trim().isNotEmpty,
+        );
+      }),
+    );
+    if (centeredBlockId == null) return;
+    _queueVisibleBlockEmission(centeredBlockId);
   }
 
   void _queueVisibleBlockEmission(int blockId) {

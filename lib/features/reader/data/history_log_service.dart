@@ -1,10 +1,7 @@
 import '../../../core/database/user_database.dart';
 
 class HistoryLogEntry {
-  const HistoryLogEntry({
-    required this.blockId,
-    required this.timestamp,
-  });
+  const HistoryLogEntry({required this.blockId, required this.timestamp});
 
   factory HistoryLogEntry.fromMap(Map<String, Object?> row) {
     return HistoryLogEntry(
@@ -42,13 +39,7 @@ class HistoryLogService {
       return;
     }
 
-    await db.insert(
-      'history',
-      {
-        'block_id': blockId,
-        'ts': now,
-      },
-    );
+    await db.insert('history', {'block_id': blockId, 'ts': now});
   }
 
   Future<List<HistoryLogEntry>> fetchHistory({int limit = 100}) async {

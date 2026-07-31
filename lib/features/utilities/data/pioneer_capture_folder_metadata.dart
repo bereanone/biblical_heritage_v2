@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/library_root_service.dart';
@@ -549,7 +550,19 @@ Future<String?> cachePioneerCaptureCoverPath({
   final source = coverPath?.trim() ?? '';
   if (source.isEmpty) return null;
   final sourceFile = File(source);
-  if (!await sourceFile.exists()) {
+  final sourceFileExists = await sourceFile.exists();
+  Uint8List? assetBytes;
+  if (!sourceFileExists && source.replaceAll('\\', '/').startsWith('assets/')) {
+    try {
+      final data = await rootBundle.load(source.replaceAll('\\', '/'));
+      assetBytes = data.buffer.asUint8List(
+        data.offsetInBytes,
+        data.lengthInBytes,
+      );
+    } catch (_) {
+      return null;
+    }
+  } else if (!sourceFileExists) {
     return null;
   }
 
@@ -557,7 +570,7 @@ Future<String?> cachePioneerCaptureCoverPath({
       ? rootPath!.trim()
       : await LibraryRootService.instance.accessibleLibraryRootPath();
   if (resolvedRootPath == null || resolvedRootPath.trim().isEmpty) {
-    return sourceFile.path;
+    return sourceFileExists ? sourceFile.path : null;
   }
 
   final coverRoot = Directory(
@@ -565,10 +578,11 @@ Future<String?> cachePioneerCaptureCoverPath({
   );
   await coverRoot.create(recursive: true);
 
-  final sourcePath = p.normalize(sourceFile.path);
+  final sourcePath = p.normalize(source);
   final normalizedCoverRoot = p.normalize(coverRoot.path);
-  if (sourcePath.startsWith('$normalizedCoverRoot${p.separator}') ||
-      sourcePath == normalizedCoverRoot) {
+  if (sourceFileExists &&
+      (sourcePath.startsWith('$normalizedCoverRoot${p.separator}') ||
+          sourcePath == normalizedCoverRoot)) {
     return sourcePath;
   }
 
@@ -593,7 +607,11 @@ Future<String?> cachePioneerCaptureCoverPath({
   final targetName =
       'library_item_${identityDigest.substring(0, 20)}_${workId.isEmpty ? 'book' : workId}$targetExtension';
   final targetPath = p.join(normalizedCoverRoot, targetName);
-  await sourceFile.copy(targetPath);
+  if (assetBytes != null) {
+    await File(targetPath).writeAsBytes(assetBytes, flush: true);
+  } else {
+    await sourceFile.copy(targetPath);
+  }
   return targetPath;
 }
 

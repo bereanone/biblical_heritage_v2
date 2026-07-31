@@ -24,6 +24,7 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
   String? _mediaPath;
   String? _backupPath;
   ELibraryStorageSummary? _storageSummary;
+  AndroidLibraryAuthorization? _androidAuthorization;
   bool _loading = true;
   bool _indexing = false;
   bool _migrating = false;
@@ -39,9 +40,15 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
 
   Future<void> _load() async {
     final selection = await LibraryRootService.instance.loadSelection();
+    final androidAuthorization = LibraryRootNative.usesAndroidDocumentTree
+        ? await LibraryRootService.instance.validateAndroidAuthorization(
+            refresh: true,
+          )
+        : null;
     if (!mounted) return;
     setState(() {
       _selection = selection;
+      _androidAuthorization = androidAuthorization;
       _loading = false;
     });
     final rootPath = selection.path?.trim() ?? '';
@@ -108,8 +115,8 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
     }
     final defaultAppRoot = await LibraryRootService.instance
         .defaultAppLibraryRootPath();
-    final selectedSource = p.normalize(selectedPath.path) ==
-            p.normalize(defaultAppRoot)
+    final selectedSource =
+        p.normalize(selectedPath.path) == p.normalize(defaultAppRoot)
         ? LibraryRootSource.defaultAppFolder
         : LibraryRootSource.userSelected;
     await _applyLibraryRoot(
@@ -173,15 +180,16 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
         ? ''
         : p.normalize(currentPath);
     final currentExists = selection.exists;
-    final needsMigration = normalizedCurrentPath.isNotEmpty &&
+    final needsMigration =
+        normalizedCurrentPath.isNotEmpty &&
         normalizedCurrentPath != normalizedNewPath &&
         currentExists;
-
     if (needsMigration) {
-      final preview = await ELibraryRootMigrationService.instance.previewMigration(
-        sourceRootPath: normalizedCurrentPath,
-        destinationRootPath: normalizedNewPath,
-      );
+      final preview = await ELibraryRootMigrationService.instance
+          .previewMigration(
+            sourceRootPath: normalizedCurrentPath,
+            destinationRootPath: normalizedNewPath,
+          );
       if (preview.totalCount > 0) {
         final confirmed = await _confirmMigration(
           currentSelection: selection,
@@ -293,7 +301,8 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
           );
       if (!mounted) return;
 
-      final summary = 'Migration complete: moved ${report.movedCount}, '
+      final summary =
+          'Migration complete: moved ${report.movedCount}, '
           'skipped ${report.skippedCount}, conflicts ${report.conflictCount}, '
           'failed ${report.failedCount}.';
       if (report.failedCount > 0) {
@@ -311,16 +320,16 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
       );
       if (!mounted) return;
       setState(() => _migrationResult = summary);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$summary Library root updated.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$summary Library root updated.')));
       await _load();
     } catch (error) {
       if (!mounted) return;
       setState(() => _migrationResult = 'Migration failed: $error');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Migration failed: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Migration failed: $error')));
     } finally {
       if (mounted) {
         setState(() => _migrating = false);
@@ -333,9 +342,9 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
       return await LibraryRootNative.pickFolder();
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Folder picker failed: $error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Folder picker failed: $error')));
       }
       return null;
     }
@@ -370,7 +379,7 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
       _indexResult = total == 0
           ? 'Library is already indexed'
           : 'Indexing complete — ${result.indexed} indexed, '
-              '${result.skipped} skipped, ${result.failed} failed';
+                '${result.skipped} skipped, ${result.failed} failed';
     });
   }
 
@@ -396,7 +405,8 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
   @override
   Widget build(BuildContext context) {
     final selection = _selection;
-    final needsReconnect = selection?.path != null && selection?.exists == false;
+    final needsReconnect =
+        selection?.path != null && selection?.exists == false;
     final rootMessage = needsReconnect
         ? 'Library Root needs reconnecting.\nYour downloaded books have not been deleted. Reconnect or reselect your Library Root to use eLibrary.'
         : selection?.statusLabel ?? 'No Library Root selected.';
@@ -416,130 +426,196 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
             ? const Center(child: CircularProgressIndicator())
             : ListView(
                 padding: const EdgeInsets.all(20),
-              children: [
-                Text(
-                  'This selects the root folder for future user-owned databases, tags, markup, graphics, media, backups, and sync folders.',
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-                const SizedBox(height: 16),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          rootMessage,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        _pathLine('Status badge', selection?.badgeLabel),
-                        _pathLine('Root path', selection?.path),
-                        _pathLine('Root source', selection?.sourceLabel),
-                        _pathLine('Databases/user.db', _databasePath),
-                        _pathLine('Tags', _tagsPath),
-                        _pathLine('Markup', _markupPath),
-                        _pathLine('Graphics', _graphicsPath),
-                        _pathLine('Media', _mediaPath),
-                        _pathLine('Backups', _backupPath),
-                        _pathLine(
-                          'Downloaded EPUBs',
-                          _storageSummary == null
-                              ? null
-                              : '${_storageSummary!.epubCount}',
-                        ),
-                        _pathLine(
-                          'Downloaded PDFs',
-                          _storageSummary == null
-                              ? null
-                              : '${_storageSummary!.pdfCount}',
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
-                          children: [
-                            FilledButton(
-                              onPressed: _migrating
-                                  ? null
-                                  : _useThisFolderAsLibraryRoot,
-                              child: Text(primaryRootActionLabel),
-                            ),
-                            FilledButton.tonal(
-                              onPressed: _migrating ? null : _setRoot,
-                              child: const Text(
-                                'Choose Different Folder',
-                              ),
-                            ),
-                            OutlinedButton(
-                              onPressed: _migrating ? null : _useDefaultAppLibraryFolder,
-                              child: const Text('Use Default App Library Folder'),
-                            ),
-                            OutlinedButton(
-                              onPressed: _migrating ? null : _retryLoad,
-                              child: const Text('Retry'),
-                            ),
-                            TextButton(
-                              onPressed: _toggleAdvanced,
-                              child: Text(
-                                _showAdvanced
-                                    ? 'Hide Advanced Diagnostics'
-                                    : 'Advanced Diagnostics',
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (_showAdvanced) ...[
-                          const SizedBox(height: 12),
-                          const Text(
-                            'Advanced actions are for troubleshooting only. They do not delete downloaded books unless a user chooses a move operation.',
+                children: [
+                  Text(
+                    'This selects the root folder for future user-owned databases, tags, markup, graphics, media, backups, and sync folders.',
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 16),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            rootMessage,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          _pathLine('Status badge', selection?.badgeLabel),
+                          _pathLine('Root path', selection?.path),
+                          _pathLine('Root source', selection?.sourceLabel),
+                          _pathLine('Databases/user.db', _databasePath),
+                          _pathLine('Tags', _tagsPath),
+                          _pathLine('Markup', _markupPath),
+                          _pathLine('Graphics', _graphicsPath),
+                          _pathLine('Media', _mediaPath),
+                          _pathLine('Backups', _backupPath),
+                          _pathLine(
+                            'Downloaded EPUBs',
+                            _storageSummary == null
+                                ? null
+                                : '${_storageSummary!.epubCount}',
+                          ),
+                          _pathLine(
+                            'Downloaded PDFs',
+                            _storageSummary == null
+                                ? null
+                                : '${_storageSummary!.pdfCount}',
                           ),
                           const SizedBox(height: 12),
                           Wrap(
                             spacing: 12,
                             runSpacing: 12,
                             children: [
+                              FilledButton(
+                                onPressed: _migrating
+                                    ? null
+                                    : _useThisFolderAsLibraryRoot,
+                                child: Text(primaryRootActionLabel),
+                              ),
+                              FilledButton.tonal(
+                                onPressed: _migrating ? null : _setRoot,
+                                child: const Text('Choose Different Folder'),
+                              ),
                               OutlinedButton(
-                                onPressed: _migrating ? null : _resetLibraryRoot,
+                                onPressed: _migrating
+                                    ? null
+                                    : _useDefaultAppLibraryFolder,
                                 child: const Text(
-                                  'Clear saved Library Root setting',
+                                  'Use Default App Library Folder',
                                 ),
                               ),
                               OutlinedButton(
-                                onPressed: (_selection?.path?.isNotEmpty == true) &&
-                                        !_indexing &&
-                                        !_migrating
-                                    ? _indexBooks
-                                    : null,
+                                onPressed: _migrating ? null : _retryLoad,
+                                child: const Text('Retry'),
+                              ),
+                              TextButton(
+                                onPressed: _toggleAdvanced,
                                 child: Text(
-                                  _indexing
-                                      ? 'Indexing eLibrary books...'
-                                      : 'Index New/Changed Books',
+                                  _showAdvanced
+                                      ? 'Hide Advanced Diagnostics'
+                                      : 'Advanced Diagnostics',
                                 ),
-                              ),
-                              OutlinedButton(
-                                onPressed: _migrating ? null : _refresh,
-                                child: const Text('Refresh Folders'),
                               ),
                             ],
                           ),
+                          if (_showAdvanced) ...[
+                            const SizedBox(height: 12),
+                            const Text(
+                              'Advanced actions are for troubleshooting only. They do not delete downloaded books unless a user chooses a move operation.',
+                            ),
+                            if (LibraryRootNative.usesAndroidDocumentTree) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                'Library Storage Authorization',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              _pathLine(
+                                'Stored tree URI',
+                                _androidAuthorization?.treeUri,
+                              ),
+                              _pathLine(
+                                'Displayed folder name',
+                                _androidAuthorization?.displayName,
+                              ),
+                              _pathLine(
+                                'Legacy path hint',
+                                _selection?.needsReconnect == true
+                                    ? _selection?.path
+                                    : null,
+                              ),
+                              _pathLine(
+                                'Persisted read grant',
+                                _yesNo(_androidAuthorization?.persistedRead),
+                              ),
+                              _pathLine(
+                                'Persisted write grant',
+                                _yesNo(_androidAuthorization?.persistedWrite),
+                              ),
+                              _pathLine(
+                                'URI enumerates successfully',
+                                _yesNo(_androidAuthorization?.enumerates),
+                              ),
+                              _pathLine(
+                                'Expected library markers found',
+                                _yesNo(
+                                  _androidAuthorization?.expectedMarkersFound,
+                                ),
+                              ),
+                              _pathLine(
+                                'Current authorization state',
+                                _androidAuthorization?.authorizationState,
+                              ),
+                              _pathLine(
+                                'Last validation error',
+                                _androidAuthorization?.validationError,
+                              ),
+                              _pathLine(
+                                'Last authorization error',
+                                _androidAuthorization?.lastAuthorizationError,
+                              ),
+                              _pathLine(
+                                'Last reconnect',
+                                _timestamp(
+                                  _androidAuthorization?.lastReconnect,
+                                ),
+                              ),
+                              _pathLine(
+                                'Authorization timestamp',
+                                _authorizationTimestamp(),
+                              ),
+                            ],
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 12,
+                              runSpacing: 12,
+                              children: [
+                                OutlinedButton(
+                                  onPressed: _migrating
+                                      ? null
+                                      : _resetLibraryRoot,
+                                  child: const Text(
+                                    'Clear saved Library Root setting',
+                                  ),
+                                ),
+                                OutlinedButton(
+                                  onPressed:
+                                      (_selection?.path?.isNotEmpty == true) &&
+                                          !_indexing &&
+                                          !_migrating
+                                      ? _indexBooks
+                                      : null,
+                                  child: Text(
+                                    _indexing
+                                        ? 'Indexing eLibrary books...'
+                                        : 'Index New/Changed Books',
+                                  ),
+                                ),
+                                OutlinedButton(
+                                  onPressed: _migrating ? null : _refresh,
+                                  child: const Text('Refresh Folders'),
+                                ),
+                              ],
+                            ),
+                          ],
+                          if (_indexResult != null) ...[
+                            const SizedBox(height: 8),
+                            Text(_indexResult!),
+                          ],
                         ],
-                        if (_indexResult != null) ...[
-                          const SizedBox(height: 8),
-                          Text(_indexResult!),
-                        ],
-                      ],
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Choose a folder in the native folder picker, or use the default app-managed folder. The app will create the required subfolders inside the selected Library Root.',
-                ),
-                if (_migrationResult != null) ...[
                   const SizedBox(height: 12),
-                  Text(_migrationResult!),
-                ],
+                  const Text(
+                    'Choose a folder in the native folder picker, or use the default app-managed folder. The app will create the required subfolders inside the selected Library Root.',
+                  ),
+                  if (_migrationResult != null) ...[
+                    const SizedBox(height: 12),
+                    Text(_migrationResult!),
+                  ],
                 ],
               ),
       ),
@@ -556,5 +632,19 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
       unitIndex += 1;
     } while (value >= 1024 && unitIndex < units.length - 1);
     return '${value.toStringAsFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}';
+  }
+
+  String? _yesNo(bool? value) => value == null ? null : (value ? 'Yes' : 'No');
+
+  String? _authorizationTimestamp() {
+    return _timestamp(_androidAuthorization?.authorizationTimestamp);
+  }
+
+  String? _timestamp(int? millis) {
+    if (millis == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(
+      millis,
+      isUtc: true,
+    ).toIso8601String();
   }
 }

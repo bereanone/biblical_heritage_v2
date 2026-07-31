@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 
+import 'library_xml_html_entities.dart';
+
 class LibraryEpubMetadata {
   const LibraryEpubMetadata({required this.title, required this.creator});
 
@@ -61,5 +63,7 @@ Future<LibraryEpubMetadata?> readLibraryEpubMetadata(File file) async {
 String? _cleanXmlText(String? value) {
   final trimmed = value?.trim();
   if (trimmed == null || trimmed.isEmpty) return null;
-  return trimmed.replaceAll(RegExp(r'<[^>]+>'), '').trim();
+  final stripped = trimmed.replaceAll(RegExp(r'<[^>]+>'), '').trim();
+  final decoded = decodeXmlHtmlEntities(stripped).trim();
+  return decoded.isEmpty ? null : decoded;
 }

@@ -172,11 +172,50 @@ class ELibraryFolderPolicy {
 
   static const quarantineFolderSegment = '_quarantine_duplicates';
 
+  /// Where "Add My Own EPUB" copies a user-selected individual EPUB. Never
+  /// matched by [isManagedEgwFolderPath], so the storage policy never
+  /// considers a user-imported EPUB "positively app-managed" and therefore
+  /// never removes it regardless of retention preference.
+  static const userImportedEpubsRelativeFolder = 'ePubs/MyBooks';
+
+  /// Where "Import Pioneer Library" copies a valid EPUB discovered in a
+  /// user-selected raw Pioneer EPUB folder. The external source folder and
+  /// its files are never touched — this is only the app-managed copy the
+  /// canonical reader actually opens, and the copy (never the external
+  /// original) is what the device storage policy may later remove. This
+  /// exact folder name was already reserved by [isManagedEgwFolderPath]
+  /// below (see the historical `.studycollection` EPUB-import branch), so
+  /// storage-policy eligibility for it is unchanged by this addition.
+  static const pioneerImportedEpubsRelativeFolder = 'ImportedPioneerEpubs';
+
+  static bool isUserImportedEpubFolderPath(String path) {
+    final normalized = p.normalize(path).toLowerCase();
+    final pathSegments = p.split(normalized);
+    final targetSegments = p.split(
+      p.normalize(userImportedEpubsRelativeFolder).toLowerCase(),
+    );
+    return _containsPathSegments(pathSegments, targetSegments);
+  }
+
+  static bool isPioneerImportedEpubFolderPath(String path) {
+    final normalized = p.normalize(path).toLowerCase();
+    final pathSegments = p.split(normalized);
+    final targetSegments = p.split(
+      p.normalize(pioneerImportedEpubsRelativeFolder).toLowerCase(),
+    );
+    return _containsPathSegments(pathSegments, targetSegments);
+  }
+
   static bool isManagedEgwFolderPath(String path) {
     final normalized = p.normalize(path).toLowerCase();
     final pathSegments = p.split(normalized);
+    if (pathSegments.contains('importedpioneerepubs')) {
+      return true;
+    }
     for (final folder in allManagedEgwFolderDefinitions) {
-      final folderSegments = p.split(p.normalize(folder.relativeFolder).toLowerCase());
+      final folderSegments = p.split(
+        p.normalize(folder.relativeFolder).toLowerCase(),
+      );
       if (_containsPathSegments(pathSegments, folderSegments)) {
         return true;
       }

@@ -6,10 +6,9 @@ import 'tag_models.dart';
 import 'tag_repository.dart';
 
 class LegacyTagAdapter implements TagRepository {
-  LegacyTagAdapter({
-    TagDatabaseProvider? databaseProvider,
-  }) : _databaseProvider =
-           databaseProvider ?? (() => UserDatabase.instance.database);
+  LegacyTagAdapter({TagDatabaseProvider? databaseProvider})
+    : _databaseProvider =
+          databaseProvider ?? (() => UserDatabase.instance.database);
 
   final TagDatabaseProvider _databaseProvider;
 
@@ -110,9 +109,11 @@ class LegacyTagAdapter implements TagRepository {
     for (final entry in rowsByTag.entries) {
       final tag = entry.key;
       final groupId = _buildTagGroupId(mode, tag);
-      final legacyCategory = _firstNonEmpty(
-        [for (final row in entry.value) _readString(row['category'])],
-      ) ?? settingsCategories[tag];
+      final legacyCategory =
+          _firstNonEmpty([
+            for (final row in entry.value) _readString(row['category']),
+          ]) ??
+          settingsCategories[tag];
       final parentGroupId = legacyCategory == null || legacyCategory.isEmpty
           ? null
           : _buildCategoryGroupId(mode, legacyCategory);
@@ -194,10 +195,8 @@ class LegacyTagAdapter implements TagRepository {
       groupsByName.putIfAbsent(categoryName, () => categoryGroup);
     }
 
-    final groups = <TagGroup>[
-      ...categoryGroups.values,
-      ...tagGroups,
-    ]..sort((a, b) {
+    final groups = <TagGroup>[...categoryGroups.values, ...tagGroups]
+      ..sort((a, b) {
         final orderCompare = a.sortOrder.compareTo(b.sortOrder);
         if (orderCompare != 0) return orderCompare;
         final categoryCompare = a.isCategoryGroup == b.isCategoryGroup
@@ -269,7 +268,8 @@ class LegacyTagAdapter implements TagRepository {
     final verse = _intValueNullable(row['verse_number']);
     final verseRef = _readString(row['verse_ref']);
     final tokenNumber = _intValueNullable(row['token_number']);
-    final createdAt = _parseTimestamp(row['created_at_utc']) ??
+    final createdAt =
+        _parseTimestamp(row['created_at_utc']) ??
         _parseTimestamp(row['created_at']) ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
     final updatedAt = _parseTimestamp(row['updated_at_utc']) ?? createdAt;
@@ -280,7 +280,8 @@ class LegacyTagAdapter implements TagRepository {
       TagMode.quick => _readStringOrNull(row['note_text']),
       TagMode.studyList => _readStringOrNull(row['content_html']),
     };
-    final noteOnly = (bookNumber == null || bookNumber == 0) &&
+    final noteOnly =
+        (bookNumber == null || bookNumber == 0) &&
         (chapter == null || chapter == 0) &&
         (verse == null || verse == 0) &&
         (verseRef.isEmpty || verseRef.startsWith('note:'));
@@ -304,7 +305,8 @@ class LegacyTagAdapter implements TagRepository {
       kind: noteOnly ? TagItemKind.noteOnly : TagItemKind.verseReference,
       anchor: anchor,
       noteText: noteText,
-      sortOrder: _intValueNullable(row['sort_order']) ??
+      sortOrder:
+          _intValueNullable(row['sort_order']) ??
           _intValueNullable(row['study_order']) ??
           _intValueNullable(row['created_at']) ??
           0,
@@ -325,7 +327,9 @@ class LegacyTagAdapter implements TagRepository {
         legacyRowId: _readString(row['id']),
         legacyTag: tag,
         legacyCategory: legacyCategory,
-        legacyImportPackageId: _readStringOrNull(row['legacy_import_package_id']),
+        legacyImportPackageId: _readStringOrNull(
+          row['legacy_import_package_id'],
+        ),
         deviceId: _readStringOrNull(row['device_id']),
         sourceDeviceName: _readStringOrNull(row['source_device_name']),
         importedAt: createdAt,
@@ -408,10 +412,12 @@ class LegacyTagAdapter implements TagRepository {
 
   TagSyncMetadata? _syncFromRows(List<Map<String, Object?>> rows) {
     if (rows.isEmpty) return null;
-    final createdAt = _parseTimestamp(rows.first['created_at_utc']) ??
+    final createdAt =
+        _parseTimestamp(rows.first['created_at_utc']) ??
         _parseTimestamp(rows.first['created_at']) ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
-    final updatedAt = _parseTimestamp(rows.last['updated_at_utc']) ??
+    final updatedAt =
+        _parseTimestamp(rows.last['updated_at_utc']) ??
         _parseTimestamp(rows.last['created_at_utc']) ??
         _parseTimestamp(rows.last['created_at']) ??
         createdAt;
@@ -443,15 +449,19 @@ class LegacyTagAdapter implements TagRepository {
       legacyRowId: rows.isEmpty ? null : _readString(rows.first['id']),
       legacyTag: legacyTag,
       legacyCategory: legacyCategory,
-      legacyImportPackageId:
-          rows.isEmpty ? null : _readStringOrNull(rows.first['legacy_import_package_id']),
-      deviceId: rows.isEmpty ? null : _readStringOrNull(rows.first['device_id']),
-      sourceDeviceName:
-          rows.isEmpty ? null : _readStringOrNull(rows.first['source_device_name']),
+      legacyImportPackageId: rows.isEmpty
+          ? null
+          : _readStringOrNull(rows.first['legacy_import_package_id']),
+      deviceId: rows.isEmpty
+          ? null
+          : _readStringOrNull(rows.first['device_id']),
+      sourceDeviceName: rows.isEmpty
+          ? null
+          : _readStringOrNull(rows.first['source_device_name']),
       importedAt: rows.isEmpty
           ? null
           : (_parseTimestamp(rows.first['created_at_utc']) ??
-              _parseTimestamp(rows.first['created_at'])),
+                _parseTimestamp(rows.first['created_at'])),
     );
   }
 

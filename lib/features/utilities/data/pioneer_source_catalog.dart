@@ -7,6 +7,39 @@ import 'package:path/path.dart' as p;
 const String kPioneerSourceCatalogAssetPath =
     'assets/elibrary_sources/pioneer_sources.json';
 
+PioneerSourceWork? matchPioneerWorkForLocalEpub(
+  PioneerSourceCatalog catalog,
+  String filePath,
+) {
+  final stem = p.basenameWithoutExtension(filePath).trim();
+  if (stem.isEmpty) return null;
+  final normalizedStem = _stableId(stem);
+  final compactStem = normalizedStem.replaceAll('_', '');
+
+  for (final work in catalog.works) {
+    final abbreviation = _stableId(work.abbreviation);
+    if (abbreviation.isEmpty) continue;
+    final compactAbbreviation = abbreviation.replaceAll('_', '');
+    if (normalizedStem == abbreviation ||
+        compactStem == compactAbbreviation ||
+        RegExp(
+          '(^|_)${RegExp.escape(abbreviation)}(?:_|\\d|\$)',
+        ).hasMatch(normalizedStem)) {
+      return work;
+    }
+  }
+
+  for (final work in catalog.works) {
+    final normalizedTitle = _stableId(work.title);
+    if (normalizedTitle.isNotEmpty &&
+        (normalizedStem.contains(normalizedTitle) ||
+            normalizedTitle.contains(normalizedStem))) {
+      return work;
+    }
+  }
+  return null;
+}
+
 enum PioneerSourceAvailability {
   available,
   sourceNeeded,
@@ -158,7 +191,10 @@ class PioneerSourceCandidate {
       hasUrl &&
       () {
         final normalized = sourceType.trim().toLowerCase();
-        return normalized == 'capturedhtml' ||
+        return normalized == 'epub' ||
+            normalized == 'directepub' ||
+            normalized == 'epubzipentry' ||
+            normalized == 'capturedhtml' ||
             normalized == 'capturedhtmlpage' ||
             normalized == 'captured_html' ||
             normalized == 'pioneer_captured_html' ||
@@ -827,7 +863,9 @@ class PioneerSourceWork {
           effectiveSourceCandidates.any((candidate) => candidate.hasUrl));
 
   bool get hasSupportedImportSource =>
-      textReadAvailable || textCaptureAvailable;
+      preferredImportCandidate != null ||
+      textReadAvailable ||
+      textCaptureAvailable;
 
   String? get coverImagePath {
     final localThumbnail = cachedThumbnailPath?.trim();
@@ -964,7 +1002,7 @@ class PioneerSourceWork {
       hasVerifiedSource &&
       availability.isImportable &&
       catalogImportable &&
-      textReadAvailable;
+      preferredImportCandidate != null;
 
   String get sourceTypeLabel {
     final preferred = preferredSourceCandidate;

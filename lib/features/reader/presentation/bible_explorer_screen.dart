@@ -105,8 +105,6 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     debugLabel: 'bible-reader-keyboard-focus',
   );
   bool _readerShortcutsSuspended = false;
-  String? _macAutoscrollStatus;
-  Timer? _macAutoscrollStatusTimer;
   int _lastMacAutoscrollStatusRevision = 0;
   final ReaderTiltPreferencesStore _tiltPreferencesStore =
       const ReaderTiltPreferencesStore();
@@ -115,8 +113,6 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   int? _anchorBlockId;
   int? _selectedBlockId;
   bool _selectedIsVisible = false;
-  int? _headerPinnedBlockId;
-  Timer? _headerPinTimer;
   final Map<int, String> _bookNames = <int, String>{};
   final BibleLiveReferenceController _liveVisibleLocation =
       BibleLiveReferenceController();
@@ -136,7 +132,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       ),
     );
     _tiltAutoScroll = ReaderTiltAutoScrollController(
-      motionSource: IosReaderTiltMotionSource(),
+      motionSource: PlatformReaderTiltMotionSource(),
       scrollTarget: _tiltScrollTarget,
     )..addListener(_onTiltAutoScrollChanged);
     _usesMacAutoscroll = Platform.isMacOS;
@@ -255,20 +251,20 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                   ValueListenableBuilder<BibleVisibleLocation?>(
                     valueListenable: _liveVisibleLocation,
                     builder: (context, liveLocation, _) {
-                      final pinnedLine = _displayHeaderLine();
-                      final displayBookNumber =
-                          pinnedLine?.bookNumber ??
-                          liveLocation?.bookNumber ??
-                          _bookNumber;
+                      final displayLocation = resolveBibleReaderLocation(
+                        visibleLocation: liveLocation,
+                        fallbackLocation: BibleVisibleLocation(
+                          blockId: _anchorBlockId!,
+                          bookNumber: _bookNumber,
+                          chapter: _chapter,
+                          verse: _verse,
+                        ),
+                        bookNamesByNumber: _bookNames,
+                      );
                       return ViewerTopBar(
-                        bookName:
-                            _bookNames[displayBookNumber] ?? 'Bible Explorer',
-                        chapter:
-                            pinnedLine?.chapter ??
-                            liveLocation?.chapter ??
-                            _chapter,
-                        verse:
-                            pinnedLine?.verse ?? liveLocation?.verse ?? _verse,
+                        bookName: displayLocation.bookName,
+                        chapter: displayLocation.chapter,
+                        verse: displayLocation.verse,
                         fontScale: _fontScale,
                         baseBibleFontSize: baseBibleFontSize,
                         onSearch: () {
@@ -356,9 +352,11 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                               highlightRefreshTick: _highlightRefreshTick,
                               navigationTick: _navigationTick,
                               autoScrollTarget: _tiltScrollTarget,
-                              onManualScroll: _usesMacAutoscroll
-                                  ? _macAutoScroll!.stopForManualInteraction
-                                  : _tiltAutoScroll.stopForManualInteraction,
+                              onManualScroll: () {
+                                _liveVisibleLocation.clearSelected();
+                                _macAutoScroll?.stopForManualInteraction();
+                                _tiltAutoScroll.stopForManualInteraction();
+                              },
                             ),
                     ),
                   ),
@@ -401,11 +399,12 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                 ],
               ),
             ),
-            MacReaderAutoscrollStatusOverlay(
-              status: _macAutoscrollStatus,
-              foregroundColor: theme.colorScheme.onSurface,
-              backgroundColor: theme.colorScheme.surface,
-            ),
+            if (_macAutoScroll != null)
+              MacReaderAutoscrollStatusOverlay(
+                controller: _macAutoScroll!,
+                foregroundColor: theme.colorScheme.onSurface,
+                backgroundColor: theme.colorScheme.surface,
+              ),
           ],
         ),
       ),
@@ -454,37 +453,15 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     AppSettingsService.instance.saveInterlinearEnabled(next);
   }
 
-  void _pinHeaderToSelectedVerse(int? blockId) {
-    _headerPinTimer?.cancel();
-    if (mounted) {
-      setState(() {
-        _headerPinnedBlockId = blockId;
-      });
-    } else {
-      _headerPinnedBlockId = blockId;
-    }
-    if (blockId == null) return;
-    _headerPinTimer = Timer(const Duration(milliseconds: 500), () {
-      if (!mounted) return;
-      setState(() {
-        if (_headerPinnedBlockId == blockId) {
-          _headerPinnedBlockId = null;
-        }
-      });
-    });
-  }
-
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _macAutoscrollStatusTimer?.cancel();
     _macAutoScroll
       ?..removeListener(_onMacAutoscrollChanged)
       ..dispose();
     _tiltAutoScroll
       ..removeListener(_onTiltAutoScrollChanged)
       ..dispose();
-    _headerPinTimer?.cancel();
     _readerFocusNode.dispose();
     _liveVisibleLocation.dispose();
     _locationPersistence.dispose();
@@ -510,33 +487,33 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     final controller = _macAutoScroll;
     if (!mounted || controller == null) return;
     _updateAutoscrollPersistenceSuspension();
-    if (controller.statusRevision == _lastMacAutoscrollStatusRevision) {
-      setState(() {});
-      return;
-    }
+    if (controller.statusRevision == _lastMacAutoscrollStatusRevision) return;
     _lastMacAutoscrollStatusRevision = controller.statusRevision;
-    _macAutoscrollStatusTimer?.cancel();
-    setState(() => _macAutoscrollStatus = controller.statusLabel);
-    _macAutoscrollStatusTimer = Timer(const Duration(seconds: 1), () {
-      if (mounted) setState(() => _macAutoscrollStatus = null);
-    });
     unawaited(
       AppSettingsService.instance.saveMacAutoscrollPreferences(
         MacAutoscrollPreferences(
           baseSpeed: controller.baseSpeed,
           lastNonzeroStep: controller.lastNonzeroStep,
           maximumStep: controller.maximumStep,
+          statusBannerMode: controller.statusBannerMode,
         ),
       ),
     );
   }
 
   void _toggleMacAutoscroll() {
+    if (!_macAutoScroll!.isActive) {
+      _tiltAutoScroll.stop(notify: false);
+    }
     _macAutoScroll!.toggle();
     _readerFocusNode.requestFocus();
   }
 
   Future<void> _openMacAutoscrollSettings() async {
+    if (!Platform.isMacOS && _tiltAutoScroll.motionSource.isSupported) {
+      await _openTiltSettings();
+      return;
+    }
     final controller = _macAutoScroll!;
     _readerShortcutsSuspended = true;
     final result = await showMacAutoscrollSettingsDialog(
@@ -545,6 +522,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         baseSpeed: controller.baseSpeed,
         lastNonzeroStep: controller.lastNonzeroStep,
         maximumStep: controller.maximumStep,
+        statusBannerMode: controller.statusBannerMode,
       ),
     );
     if (!mounted) return;
@@ -557,17 +535,15 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   }
 
   void _stopReaderAutoscroll() {
-    if (_usesMacAutoscroll) {
-      _macAutoScroll?.stopForManualInteraction();
-    } else {
-      _tiltAutoScroll.stop();
-    }
+    _macAutoScroll?.stopForManualInteraction();
+    _tiltAutoScroll.stop();
   }
 
   void _toggleTiltAutoScroll() {
     if (_tiltAutoScroll.isActive) {
       _tiltAutoScroll.stop();
     } else {
+      _macAutoScroll?.stopWithoutNotification();
       _tiltAutoScroll.activate();
     }
   }
@@ -669,15 +645,6 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       chapter: _chapter,
       lines: lines,
     );
-  }
-
-  VerseLine? _displayHeaderLine() {
-    final pinnedBlockId = _headerPinnedBlockId;
-    if (pinnedBlockId != null) {
-      final pinnedLine = _viewerData.getBlock(pinnedBlockId);
-      if (pinnedLine != null) return pinnedLine;
-    }
-    return null;
   }
 
   void _handleSelectedVisibilityChanged(bool isVisible) {

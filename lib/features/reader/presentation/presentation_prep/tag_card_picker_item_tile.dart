@@ -266,9 +266,8 @@ class _TagCardPickerItemTileState extends State<TagCardPickerItemTile> {
           body: _noteBody(item),
           secondary:
               (noteSnapshot != null && !_isTechnicalFilename(noteSnapshot))
-                  ? noteSnapshot
-                  : _mediaSourceLabel(mediaSource) ??
-                        _cleanText(item.htmlContent),
+              ? noteSnapshot
+              : _mediaSourceLabel(mediaSource) ?? _cleanText(item.htmlContent),
         );
       case UnifiedTagItemType.image:
       case UnifiedTagItemType.media:
@@ -662,9 +661,7 @@ class _TagCardPickerItemTileState extends State<TagCardPickerItemTile> {
     // Long name ending in image extension with no spaces (hash/timestamp filename)
     if (!name.contains(' ') &&
         name.length > 20 &&
-        RegExp(
-          r'\.(png|jpg|jpeg|gif|webp|bmp|heic)$',
-        ).hasMatch(lower)) {
+        RegExp(r'\.(png|jpg|jpeg|gif|webp|bmp|heic)$').hasMatch(lower)) {
       return true;
     }
     // Pure hex hash (optionally with one extension)

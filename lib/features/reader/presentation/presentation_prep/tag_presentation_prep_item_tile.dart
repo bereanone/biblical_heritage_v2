@@ -127,10 +127,7 @@ class TagPresentationPrepItemTile extends StatelessWidget {
     return 'Untitled item';
   }
 
-  String? _displaySubtitle(
-    UnifiedTagChainItem item, {
-    required bool compact,
-  }) {
+  String? _displaySubtitle(UnifiedTagChainItem item, {required bool compact}) {
     final text = item.textSnapshot?.trim() ?? '';
     if (text.isNotEmpty && text != _displayTitle(item)) {
       return _shorten(text, maxChars: compact ? 72 : 140);
@@ -181,9 +178,9 @@ class _Pill extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         child: Text(
           label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
         ),
       ),
     );

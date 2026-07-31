@@ -44,6 +44,33 @@ Future<Database> _openUserDatabase() async {
   return UserDatabase.instance.database;
 }
 
+String _entryKind(HashTagEntry entry) =>
+    entry.bookNumber > 0 ? 'scripture' : 'note';
+
+String _realisticHashExport(String tag, List<String> blocks) =>
+    '''
+*The following is a formatted sharing list for use in the Biblical Heritage #StudyBible app. Learn more at BiblicalHeritage.net for tutorials, downloads, shared lists, and related links.*
+
+$tag (${blocks.length} items)
+
+${blocks.join('\n\n')}
+''';
+
+String _reExportLoaded(String tag, List<HashTagEntry> entries) {
+  var noteNumber = 0;
+  final blocks = <String>[];
+  for (final entry in entries) {
+    if (entry.bookNumber > 0) {
+      blocks.add('John ${entry.chapter}:${entry.verse}\nCanonical verse text');
+    } else {
+      noteNumber++;
+      final friendlyTag = tag.replaceFirst(RegExp(r'^[#\$@]+'), '');
+      blocks.add('$friendlyTag Note $noteNumber\n${entry.noteText ?? ''}');
+    }
+  }
+  return _realisticHashExport(tag, blocks);
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
@@ -209,6 +236,109 @@ For God so loved the world that he gave his only begotten Son.
       expect(importEntries2, hasLength(1));
     },
   );
+
+  group('mixed #tag import order', () {
+    final cases = <String, ({List<String> blocks, List<String> kinds})>{
+      'alternating items': (
+        blocks: [
+          'John 3:16\nFor God so loved the world.',
+          'Mixed Note 1\nNote A',
+          'John 3:17\nGod sent not his Son to condemn the world.',
+          'Mixed Note 2\nNote B',
+        ],
+        kinds: ['scripture', 'note', 'scripture', 'note'],
+      ),
+      'notes surrounding a scripture': (
+        blocks: [
+          'Mixed Note 1\nNote A',
+          'John 3:16\nFor God so loved the world.',
+          'Mixed Note 2\nNote B',
+        ],
+        kinds: ['note', 'scripture', 'note'],
+      ),
+      'consecutive item types': (
+        blocks: [
+          'John 3:16\nFor God so loved the world.',
+          'John 3:17\nGod sent not his Son to condemn the world.',
+          'Mixed Note 1\nNote A',
+          'Mixed Note 2\nNote B',
+          'John 3:18\nHe that believeth on him is not condemned.',
+        ],
+        kinds: ['scripture', 'scripture', 'note', 'note', 'scripture'],
+      ),
+      'duplicate references': (
+        blocks: [
+          'John 3:16\nFor God so loved the world.',
+          'Mixed Note 1\nNote A',
+          'John 3:16\nFor God so loved the world.',
+          'Mixed Note 2\nNote B',
+        ],
+        kinds: ['scripture', 'note', 'scripture', 'note'],
+      ),
+      'scripture only': (
+        blocks: [
+          'John 3:16\nFor God so loved the world.',
+          'John 3:17\nGod sent not his Son to condemn the world.',
+        ],
+        kinds: ['scripture', 'scripture'],
+      ),
+      'note only': (
+        blocks: ['Mixed Note 1\nNote A', 'Mixed Note 2\nNote B'],
+        kinds: ['note', 'note'],
+      ),
+    };
+
+    for (final testCase in cases.entries) {
+      test('${testCase.key} persists and loads in source order', () async {
+        final repo = HashTagRepository();
+        final result = await repo.importSharedListFromText(
+          _realisticHashExport('#Mixed', testCase.value.blocks),
+          targetCategory: 'Imported',
+        );
+
+        expect(result, isNotNull);
+        final entries = await repo.loadEntries(result!.tag);
+        expect(entries.map(_entryKind).toList(), testCase.value.kinds);
+        expect(entries.map((entry) => entry.sortOrder).toList(), [
+          for (var i = 1; i <= entries.length; i++) i,
+        ]);
+        expect(
+          entries
+              .where((entry) => entry.bookNumber == 0)
+              .map((e) => e.noteText),
+          testCase.value.blocks
+              .where((block) => block.startsWith('Mixed Note'))
+              .map((block) => block.split('\n').skip(1).join('\n')),
+        );
+      });
+    }
+
+    test(
+      'export import export preserves loaded type and content sequence',
+      () async {
+        final repo = HashTagRepository();
+        final first = await repo.importSharedListFromText(
+          _realisticHashExport('#RoundTrip', [
+            'John 3:16\nFor God so loved the world.',
+            'RoundTrip Note 1\nExplanation A',
+            'John 3:17\nGod sent not his Son to condemn the world.',
+            'RoundTrip Note 2\nExplanation B',
+          ]),
+        );
+        final firstEntries = await repo.loadEntries(first!.tag);
+        final second = await repo.importSharedListFromText(
+          _reExportLoaded('#RoundTripCopy', firstEntries),
+        );
+        final secondEntries = await repo.loadEntries(second!.tag);
+
+        expect(secondEntries.map(_entryKind), firstEntries.map(_entryKind));
+        expect(
+          secondEntries.map((e) => e.noteText ?? e.verseRef),
+          firstEntries.map((e) => e.noteText ?? e.verseRef),
+        );
+      },
+    );
+  });
 
   test('changing category does not change membership', () async {
     final repo = HashTagRepository();

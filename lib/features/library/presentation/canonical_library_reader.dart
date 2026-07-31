@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../core/database/elibrary_database.dart';
@@ -10,12 +11,15 @@ import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/theme/app_theme_mode.dart';
 import '../../../core/theme/app_settings_service.dart';
+import '../data/canonical_activation.dart';
 import '../data/library_catalog_service.dart';
 import '../data/library_document_canonicalizer.dart';
 import '../data/library_document_models.dart';
 import '../data/library_document_repository.dart';
+import '../data/library_item_identity.dart';
 import '../data/elibrary_markup_repository.dart';
 import '../data/library_reader_state_writer.dart';
+import '../data/library_search_navigation_target.dart';
 import 'canonical_local_image.dart';
 import 'canonical_scroll_diagnostics.dart';
 import 'elibrary_highlight_color_picker.dart';
@@ -23,16 +27,21 @@ import 'library_document_controller.dart';
 import 'reader_tilt_autoscroll_controller.dart';
 import 'reader_tilt_autoscroll_controls.dart';
 import 'reader_tilt_motion_source.dart';
+import 'reader_tilt_preferences.dart';
 import 'mac_reader_autoscroll_controller.dart';
 import 'mac_reader_autoscroll_controls.dart';
 
+/// Legacy developer override retained for proof-harness compatibility.
+///
+/// Production routing no longer depends on this value. Supported readable
+/// documents always attempt canonical preparation and safely fall back when
+/// preparation is unavailable.
 const bool useCanonicalCaptureClipperReader = bool.fromEnvironment(
   'USE_CANONICAL_CAPTURECLIPPER_READER',
   defaultValue: false,
 );
 
-// Retained for proof-harness compatibility. Production routing uses the
-// narrower CaptureClipper-only flag above.
+// Retained for proof-harness compatibility only.
 const bool useCanonicalLibraryReader = useCanonicalCaptureClipperReader;
 
 enum LibraryReaderImplementation { legacy, canonical }
@@ -52,11 +61,36 @@ bool supportsCanonicalCaptureClipperReader(LibraryCatalogItem item) {
       sourceType.contains('pioneer_captured_html');
 }
 
+/// Whether normal production routing should attempt the canonical pipeline.
+///
+/// This is capability-based and deliberately independent of compile-time
+/// rollout flags. The gate still falls back to the established reader when
+/// preparation cannot produce a current, complete canonical generation.
+bool supportsCanonicalDocumentReader(LibraryCatalogItem item) =>
+    supportsCanonicalCaptureClipperReader(item) ||
+    supportsCanonicalEpubReader(item);
+
+bool shouldAttemptCanonicalDocumentReader({
+  required LibraryCatalogItem item,
+  bool routingEnabled = true,
+}) => routingEnabled && supportsCanonicalDocumentReader(item);
+
 bool shouldUseMacReaderAutoscroll({
   required bool isMacOS,
   required bool isProofHarness,
   bool? override,
-}) => override ?? (isMacOS && !isProofHarness);
+}) => shouldUseSteadyReaderAutoscroll(
+  isIOS: !isMacOS,
+  isProofHarness: isProofHarness,
+  override: override,
+);
+
+bool shouldUseSteadyReaderAutoscroll({
+  required bool isIOS,
+  bool isAndroid = false,
+  required bool isProofHarness,
+  bool? override,
+}) => override ?? (!isIOS && !isAndroid && !isProofHarness);
 
 String? canonicalVisibleReaderSubtitle(LibraryDocumentLocation? location) {
   final heading = location?.heading?.plainText.trim() ?? '';
@@ -165,22 +199,118 @@ Future<CanonicalReaderPreparation?> prepareCanonicalCaptureClipperReader(
   if (!await source.exists()) return null;
 
   final db = await ELibraryDatabase.instance.database;
-  await const LibraryDocumentCanonicalizer().canonicalize(
+  final outcome = await CanonicalActivation.activate(
     db: db,
     libraryItemId: item.id,
     source: source,
   );
-  final repository = LibraryDocumentRepository(db);
-  if (!await repository.isCurrentComplete(
-    item.id,
-    canonicalizerVersion: LibraryDocumentCanonicalizer.version,
-  )) {
-    return null;
-  }
+  if (!outcome.isReady) return null;
   return CanonicalReaderPreparation(
-    repository: repository,
+    repository: LibraryDocumentRepository(db),
     sourceRoot: source.parent,
   );
+}
+
+/// Legacy developer override retained for proof-harness compatibility.
+///
+/// Production routing is capability-based and does not consult this value.
+const bool useCanonicalEpubReader = bool.fromEnvironment(
+  'USE_CANONICAL_EPUB_READER',
+  defaultValue: false,
+);
+
+/// General capability/provenance eligibility for routing a real downloaded
+/// EPUB through the canonical database-backed reader. Deliberately not a
+/// hardcoded per-title allowlist: any EPUB that is (a) actually an EPUB, (b)
+/// downloaded via the official managed pipeline, and (c) physically stored
+/// under one of the app's recognized managed EGW folders is *eligible* to
+/// attempt canonical routing. Eligibility alone does not mean the book opens
+/// canonically — [prepareCanonicalEpubReader] still requires a validated,
+/// activated canonical generation (see [LibraryDocumentRepository.isCurrentComplete])
+/// before it ever routes away from the legacy reader, so a failed or
+/// not-yet-indexed EPUB always keeps its existing fallback behavior.
+bool supportsCanonicalEpubReader(LibraryCatalogItem item) {
+  if ((item.fileFormat ?? '').trim().toLowerCase() != 'epub') return false;
+  final relativePath = item.relativePath.trim();
+  if (relativePath.isEmpty) return false;
+  final sourceType = (item.sourceType ?? '').trim().toLowerCase();
+  if (sourceType == 'official_download') {
+    return isManagedEgwRelativePath(relativePath);
+  }
+  // Added for "Add My Own EPUB" (Phase 2): a user-selected individual EPUB
+  // is only eligible when it was actually copied into the dedicated
+  // user-imports folder by that flow — never an arbitrary path, and never
+  // any other source type. Official EGW eligibility above is unchanged.
+  if (sourceType == 'user_import') {
+    return isUserImportedEpubRelativePath(relativePath);
+  }
+  // Added for the raw Pioneer EPUB folder bulk import (Phase 3): a Pioneer
+  // EPUB is only eligible when it was actually copied into the dedicated
+  // ImportedPioneerEpubs folder by that flow — never an arbitrary path, and
+  // never any other source type.
+  if (sourceType == 'pioneer_epub_import') {
+    return isPioneerImportedEpubRelativePath(relativePath);
+  }
+  return false;
+}
+
+/// Canonicalizes (if needed) and prepares a real downloaded EPUB for the
+/// canonical reader. If the canonical generation is already complete, the
+/// EPUB archive is never even checked for existence — the book must open
+/// independently of it, since the storage policy may have already removed
+/// it. Only reaches for the EPUB file when a (re)canonicalization is
+/// actually required, and only applies the storage policy immediately after
+/// a freshly validated + activated import.
+Future<CanonicalReaderPreparation?> prepareCanonicalEpubReader(
+  LibraryCatalogItem item,
+) async {
+  if (!supportsCanonicalEpubReader(item)) return null;
+  final relativePath = item.relativePath.trim();
+  if (relativePath.isEmpty) return null;
+  final rootPath =
+      (await LibraryRootService.instance.accessibleLibraryRootPath())?.trim();
+  if (rootPath == null || rootPath.isEmpty) return null;
+  final resolvedPath = await LibraryRootService.instance.resolveRelativePath(
+    relativePath: relativePath,
+    rootPath: rootPath,
+  );
+  final source = File(resolvedPath);
+
+  final db = await ELibraryDatabase.instance.database;
+  final repository = LibraryDocumentRepository(db);
+  final alreadyComplete = await repository.isCurrentComplete(
+    item.id,
+    canonicalizerVersion: LibraryDocumentCanonicalizer.version,
+  );
+  if (!alreadyComplete) {
+    if (!await source.exists()) return null;
+    final outcome = await CanonicalActivation.activate(
+      db: db,
+      libraryItemId: item.id,
+      source: source,
+      applyStoragePolicy: true,
+      rootPath: rootPath,
+    );
+    if (!outcome.isReady) return null;
+  }
+
+  final assetDirectory = Directory(
+    p.join(source.parent.path, '_canonical_assets', item.id),
+  );
+  return CanonicalReaderPreparation(
+    repository: repository,
+    sourceRoot: await assetDirectory.exists() ? assetDirectory : source.parent,
+  );
+}
+
+/// Dispatcher used as the default `prepare` for [CanonicalLibraryReaderGate]:
+/// tries CaptureClipper first, then managed EPUB preparation.
+Future<CanonicalReaderPreparation?> prepareCanonicalDocumentReader(
+  LibraryCatalogItem item,
+) async {
+  final captureClipper = await prepareCanonicalCaptureClipperReader(item);
+  if (captureClipper != null) return captureClipper;
+  return prepareCanonicalEpubReader(item);
 }
 
 class CanonicalLibraryReaderGate extends StatefulWidget {
@@ -189,13 +319,14 @@ class CanonicalLibraryReaderGate extends StatefulWidget {
     required this.item,
     required this.legacyBuilder,
     this.themeMode,
-    this.prepare = prepareCanonicalCaptureClipperReader,
+    this.prepare = prepareCanonicalDocumentReader,
     this.onThemeChanged,
     this.actionsBuilder,
     this.macosAutoscroll,
     this.onBack,
     this.onSearch,
     this.onLibrary,
+    this.searchTarget,
   });
 
   final LibraryCatalogItem item;
@@ -208,6 +339,7 @@ class CanonicalLibraryReaderGate extends StatefulWidget {
   final VoidCallback? onBack;
   final VoidCallback? onSearch;
   final VoidCallback? onLibrary;
+  final LibrarySearchNavigationTarget? searchTarget;
 
   @override
   State<CanonicalLibraryReaderGate> createState() =>
@@ -253,6 +385,7 @@ class _CanonicalLibraryReaderGateState
             onBack: widget.onBack,
             onSearch: widget.onSearch,
             onLibrary: widget.onLibrary,
+            searchTarget: widget.searchTarget,
           );
         },
       );
@@ -274,6 +407,7 @@ class CanonicalLibraryReaderScreen extends StatefulWidget {
     this.onBack,
     this.onSearch,
     this.onLibrary,
+    this.searchTarget,
   });
   final LibraryCatalogItem item;
   final LibraryDocumentRepository repository;
@@ -288,6 +422,7 @@ class CanonicalLibraryReaderScreen extends StatefulWidget {
   final VoidCallback? onBack;
   final VoidCallback? onSearch;
   final VoidCallback? onLibrary;
+  final LibrarySearchNavigationTarget? searchTarget;
 
   @override
   State<CanonicalLibraryReaderScreen> createState() =>
@@ -324,19 +459,20 @@ class CanonicalSspProofHarness extends StatelessWidget {
 }
 
 class _CanonicalLibraryReaderScreenState
-    extends State<CanonicalLibraryReaderScreen> {
+    extends State<CanonicalLibraryReaderScreen>
+    with WidgetsBindingObserver {
   late final LibraryDocumentController _controller;
   final CallbackReaderAutoScrollTarget _scrollTarget =
       CallbackReaderAutoScrollTarget();
   late final ReaderTiltAutoScrollController _autoScroll;
+  final ReaderTiltPreferencesStore _tiltPreferencesStore =
+      const ReaderTiltPreferencesStore();
   MacReaderAutoScrollController? _macAutoScroll;
   late final bool _usesMacAutoscroll;
   final FocusNode _readerFocusNode = FocusNode(
     debugLabel: 'canonical-reader-keyboard-focus',
   );
   bool _readerShortcutsSuspended = false;
-  String? _macStatus;
-  Timer? _macStatusTimer;
   int _lastMacStatusRevision = 0;
   LibraryDocumentLocation? _location;
   Timer? _visibleThrottle;
@@ -345,6 +481,8 @@ class _CanonicalLibraryReaderScreenState
   List<LibraryDocumentBlock> _searchResults = const <LibraryDocumentBlock>[];
   int _searchResultIndex = -1;
   String? _activeSearchBlockId;
+  int? _initialSearchOrder;
+  bool _searchTargetPositioned = false;
   LibraryDocumentBlock? _selectedMarkupBlock;
   TextSelection? _selectedMarkupRange;
   Map<String, List<ElibraryMarkupRecord>> _canonicalHighlights =
@@ -353,16 +491,21 @@ class _CanonicalLibraryReaderScreenState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller = LibraryDocumentController(
       libraryItemId: widget.item.id,
       repository: widget.repository,
     )..addListener(_changed);
     _autoScroll = ReaderTiltAutoScrollController(
-      motionSource: widget.motionSource ?? IosReaderTiltMotionSource(),
+      motionSource: widget.motionSource ?? PlatformReaderTiltMotionSource(),
       scrollTarget: _scrollTarget,
     );
-    _usesMacAutoscroll = shouldUseMacReaderAutoscroll(
-      isMacOS: Platform.isMacOS,
+    _tiltPreferencesStore.load().then((value) {
+      if (mounted) _autoScroll.updatePreferences(value, showBanner: false);
+    });
+    _usesMacAutoscroll = shouldUseSteadyReaderAutoscroll(
+      isIOS: Platform.isIOS,
+      isAndroid: Platform.isAndroid,
       isProofHarness: widget.proofLabel != null,
       override: widget.macosAutoscroll,
     );
@@ -374,7 +517,7 @@ class _CanonicalLibraryReaderScreenState
         if (mounted) _macAutoScroll?.updatePreferences(value);
       });
     }
-    _controller.initialize();
+    _initializeAtSearchTarget();
     LocalSettingsStore.instance
         .loadLibraryReaderShowRefCodes()
         .then((value) {
@@ -389,6 +532,92 @@ class _CanonicalLibraryReaderScreenState
 
   void _changed() {
     if (mounted) setState(() {});
+  }
+
+  Future<void> _initializeAtSearchTarget() async {
+    final target = widget.searchTarget;
+    if (target == null) {
+      debugPrint(
+        'default_open_resolution_started workId=${widget.item.id} '
+        'sourceEditionId=${widget.item.sourceWorkId ?? widget.item.id}',
+      );
+      final savedOrder = widget.item.lastOpened != null
+          ? widget.item.paragraphIndex
+          : null;
+      if (savedOrder != null &&
+          await widget.repository.containsDisplayOrder(
+            widget.item.id,
+            savedOrder,
+          )) {
+        debugPrint(
+          'default_open_saved_position_used workId=${widget.item.id} '
+          'selectedSectionId=${widget.item.epubHref ?? "(canonical)"} '
+          'selectedSectionTitle=(saved) reason=valid_saved_position',
+        );
+        _initialSearchOrder = savedOrder;
+        await _controller.initialize(centerOrder: savedOrder);
+        return;
+      }
+      final openingOrder = await widget.repository.openingDisplayOrder(
+        widget.item.id,
+        bookTitle: widget.item.displayTitle,
+      );
+      _initialSearchOrder = openingOrder;
+      if (savedOrder != null) {
+        debugPrint(
+          'default_open_saved_position_repaired workId=${widget.item.id} '
+          'selectedSectionId=(canonical) selectedSectionTitle=(resolved) '
+          'reason=saved_display_order_missing',
+        );
+      }
+      debugPrint(
+        openingOrder == null
+            ? 'default_open_fallback_used workId=${widget.item.id} '
+                  'selectedSectionId=(first) selectedSectionTitle=(first) '
+                  'reason=no_substantive_section'
+            : 'default_open_front_matter_skipped workId=${widget.item.id} '
+                  'skippedSectionIds=(canonical-front-matter) '
+                  'selectedSectionId=(canonical-order-$openingOrder) '
+                  'selectedSectionTitle=(resolved) '
+                  'reason=first_substantive_section',
+      );
+      if (openingOrder != null) {
+        debugPrint(
+          'default_open_substantive_section_selected '
+          'workId=${widget.item.id} sourceEditionId='
+          '${widget.item.sourceWorkId ?? widget.item.id} '
+          'selectedSectionId=(canonical-order-$openingOrder) '
+          'selectedSectionTitle=(resolved) '
+          'reason=first_substantive_section',
+        );
+      }
+      await _controller.initialize(centerOrder: openingOrder ?? 0);
+      return;
+    }
+    debugPrint('search_target_received ${target.diagnosticSummary}');
+    final order = await widget.repository.displayOrderForSearchTarget(target);
+    if (order == null) {
+      debugPrint(
+        'search_target_resolution_failed ${target.diagnosticSummary} '
+        'reason=canonical source map did not resolve',
+      );
+      await _controller.initialize();
+      if (!mounted) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('The exact search location could not be positioned.'),
+          ),
+        );
+      });
+      return;
+    }
+    _initialSearchOrder = order;
+    debugPrint(
+      'search_target_section_loaded ${target.diagnosticSummary} order=$order',
+    );
+    await _controller.initialize(centerOrder: order);
   }
 
   void _visible(int order) {
@@ -406,9 +635,9 @@ class _CanonicalLibraryReaderScreenState
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     unawaited(_saveCurrentLocation());
     _visibleThrottle?.cancel();
-    _macStatusTimer?.cancel();
     _macAutoScroll
       ?..removeListener(_macAutoscrollChanged)
       ..dispose();
@@ -421,6 +650,7 @@ class _CanonicalLibraryReaderScreenState
   }
 
   Future<void> _saveCurrentLocation() async {
+    if (widget.searchTarget != null && !_searchTargetPositioned) return;
     final block = _location?.block;
     if (block == null) return;
     await LibraryReaderStateWriter.instance.saveCurrentLocation(
@@ -500,7 +730,10 @@ class _CanonicalLibraryReaderScreenState
                   onVisibleOrderChanged: _visible,
                   textColor: foreground,
                   onManualScroll: _usesMacAutoscroll
-                      ? _macAutoScroll!.stopForManualInteraction
+                      ? () {
+                          _macAutoScroll!.stopForManualInteraction();
+                          _autoScroll.stopForManualInteraction();
+                        }
                       : _autoScroll.stopForManualInteraction,
                   onReaderInteraction: _readerFocusNode.requestFocus,
                   sourceRoot: widget.sourceRoot,
@@ -509,6 +742,17 @@ class _CanonicalLibraryReaderScreenState
                   fontScale: _fontScale,
                   showRefCodes: _showRefCodes,
                   activeSearchBlockId: _activeSearchBlockId,
+                  initialScrollOrder: _initialSearchOrder,
+                  onInitialScrollCompleted: () {
+                    _searchTargetPositioned = true;
+                    final target = widget.searchTarget;
+                    if (target != null) {
+                      debugPrint(
+                        'search_target_scroll_completed '
+                        '${target.diagnosticSummary}',
+                      );
+                    }
+                  },
                   highlightedBlockIds: _canonicalHighlights.keys
                       .map((key) => key.substring('canonical:'.length))
                       .toSet(),
@@ -574,24 +818,43 @@ class _CanonicalLibraryReaderScreenState
                             onZoomIn: () => _setFontScale(_fontScale + .1),
                           ),
                           const SizedBox(width: 12),
-                          _usesMacAutoscroll
-                              ? MacReaderAutoScrollButton(
-                                  controller: _macAutoScroll!,
-                                  onPressed: () {
-                                    _macAutoScroll!.toggle();
-                                    _readerFocusNode.requestFocus();
-                                  },
-                                  onLongPress: _openMacAutoscrollSettings,
+                          _usesMacAutoscroll &&
+                                  !Platform.isMacOS &&
+                                  _autoScroll.motionSource.isSupported
+                              ? Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    ReaderTiltAutoScrollIconButton(
+                                      controller: _autoScroll,
+                                      onPressed: _toggleTiltAutoscroll,
+                                      onLongPress: _openTiltAutoscrollSettings,
+                                    ),
+                                    ReaderAutoScrollButton(
+                                      controller: _macAutoScroll!,
+                                      onPressed: _toggleSteadyAutoscroll,
+                                      onLongPress: _openMacAutoscrollSettings,
+                                    ),
+                                  ],
                                 )
+                              : _usesMacAutoscroll
+                              ? Platform.isMacOS
+                                    ? MacReaderAutoScrollButton(
+                                        controller: _macAutoScroll!,
+                                        onPressed: _toggleSteadyAutoscroll,
+                                        onLongPress: _openMacAutoscrollSettings,
+                                      )
+                                    : ReaderAutoScrollButton(
+                                        controller: _macAutoScroll!,
+                                        onPressed: () {
+                                          _macAutoScroll!.toggle();
+                                          _readerFocusNode.requestFocus();
+                                        },
+                                        onLongPress: _openMacAutoscrollSettings,
+                                      )
                               : ReaderTiltAutoScrollIconButton(
                                   controller: _autoScroll,
-                                  onPressed: () {
-                                    if (_autoScroll.isActive) {
-                                      _autoScroll.stop();
-                                    } else {
-                                      _autoScroll.activate();
-                                    }
-                                  },
+                                  onPressed: _toggleTiltAutoscroll,
+                                  onLongPress: _openTiltAutoscrollSettings,
                                 ),
                           const SizedBox(width: 12),
                           _CanonicalNavCluster(
@@ -607,15 +870,16 @@ class _CanonicalLibraryReaderScreenState
                 ),
             ],
           ),
-          MacReaderAutoscrollStatusOverlay(
-            status: _macStatus,
-            foregroundColor: foreground,
-            backgroundColor: background,
-          ),
+          if (_macAutoScroll != null)
+            MacReaderAutoscrollStatusOverlay(
+              controller: _macAutoScroll!,
+              foregroundColor: foreground,
+              backgroundColor: background,
+            ),
         ],
       ),
     );
-    if (!_usesMacAutoscroll) return scaffold;
+    if (!_usesMacAutoscroll || !Platform.isMacOS) return scaffold;
     return Focus(
       focusNode: _readerFocusNode,
       autofocus: true,
@@ -632,38 +896,40 @@ class _CanonicalLibraryReaderScreenState
   void _macAutoscrollChanged() {
     final controller = _macAutoScroll;
     if (!mounted || controller == null) return;
-    if (controller.statusRevision != _lastMacStatusRevision) {
-      _lastMacStatusRevision = controller.statusRevision;
-      _macStatusTimer?.cancel();
-      setState(() => _macStatus = controller.statusLabel);
-      _macStatusTimer = Timer(const Duration(seconds: 1), () {
-        if (mounted) setState(() => _macStatus = null);
-      });
-      unawaited(
-        AppSettingsService.instance.saveMacAutoscrollPreferences(
-          MacAutoscrollPreferences(
-            baseSpeed: controller.baseSpeed,
-            lastNonzeroStep: controller.lastNonzeroStep,
-            maximumStep: controller.maximumStep,
-          ),
+    if (controller.statusRevision == _lastMacStatusRevision) return;
+    _lastMacStatusRevision = controller.statusRevision;
+    unawaited(
+      AppSettingsService.instance.saveMacAutoscrollPreferences(
+        MacAutoscrollPreferences(
+          baseSpeed: controller.baseSpeed,
+          lastNonzeroStep: controller.lastNonzeroStep,
+          maximumStep: controller.maximumStep,
+          statusBannerMode: controller.statusBannerMode,
         ),
-      );
-    } else {
-      setState(() {});
-    }
+      ),
+    );
   }
 
   Future<void> _openMacAutoscrollSettings() async {
+    if (!Platform.isMacOS && _autoScroll.motionSource.isSupported) {
+      await _openTiltAutoscrollSettings();
+      return;
+    }
     final controller = _macAutoScroll!;
     _readerShortcutsSuspended = true;
-    final result = await showMacAutoscrollSettingsDialog(
-      context: context,
-      initial: MacAutoscrollPreferences(
-        baseSpeed: controller.baseSpeed,
-        lastNonzeroStep: controller.lastNonzeroStep,
-        maximumStep: controller.maximumStep,
-      ),
+    final initial = MacAutoscrollPreferences(
+      baseSpeed: controller.baseSpeed,
+      lastNonzeroStep: controller.lastNonzeroStep,
+      maximumStep: controller.maximumStep,
+      statusBannerMode: controller.statusBannerMode,
     );
+    final dialog = Platform.isMacOS
+        ? showMacAutoscrollSettingsDialog(context: context, initial: initial)
+        : showReaderAutoscrollSettingsDialog(
+            context: context,
+            initial: initial,
+          );
+    final result = await dialog;
     if (!mounted) return;
     _readerShortcutsSuspended = false;
     if (result != null) {
@@ -671,6 +937,48 @@ class _CanonicalLibraryReaderScreenState
       await AppSettingsService.instance.saveMacAutoscrollPreferences(result);
     }
     _readerFocusNode.requestFocus();
+  }
+
+  void _toggleSteadyAutoscroll() {
+    if (!_macAutoScroll!.isActive) _autoScroll.stop(notify: false);
+    _macAutoScroll!.toggle();
+    _readerFocusNode.requestFocus();
+  }
+
+  void _toggleTiltAutoscroll() {
+    if (_autoScroll.isActive) {
+      _autoScroll.stop();
+    } else {
+      _macAutoScroll?.stopWithoutNotification();
+      _autoScroll.activate();
+    }
+  }
+
+  Future<void> _openTiltAutoscrollSettings() async {
+    await _autoScroll.stop();
+    if (!mounted) return;
+    await showReaderTiltSettingsSheet(
+      context,
+      preferences: _autoScroll.preferences,
+      includeChapterTilt: false,
+      onChanged: (preferences) async {
+        _autoScroll.updatePreferences(preferences);
+        await _tiltPreferencesStore.save(preferences);
+      },
+      onRecalibrate: () {
+        Navigator.of(context).pop();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _autoScroll.activate();
+        });
+      },
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) return;
+    _autoScroll.stop(notify: false);
+    _macAutoScroll?.stopWithoutNotification();
   }
 
   void _setFontScale(double value) {
@@ -959,6 +1267,7 @@ class _CanonicalProductionHeader extends StatelessWidget {
     final title = Text(
       'eLibrary',
       style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+        fontFamily: 'Roboto',
         color: foreground,
         fontWeight: FontWeight.w800,
       ),
@@ -1046,9 +1355,10 @@ class _CanonicalProductionHeader extends StatelessWidget {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  if ((item.author ?? '').trim().isNotEmpty)
+                  if (item.displayAuthor.trim().isNotEmpty &&
+                      item.displayAuthor != 'Unknown author')
                     Text(
-                      item.author!.trim(),
+                      item.displayAuthor,
                       style: TextStyle(color: foreground),
                     ),
                 ],
@@ -1173,6 +1483,8 @@ class CanonicalLibraryDocumentBody extends StatefulWidget {
     this.onReaderInteraction,
     this.showRefCodes = false,
     this.activeSearchBlockId,
+    this.initialScrollOrder,
+    this.onInitialScrollCompleted,
     this.highlightedBlockIds = const <String>{},
     this.onSelectionChanged,
     this.onOpenSelectionMenu,
@@ -1189,6 +1501,8 @@ class CanonicalLibraryDocumentBody extends StatefulWidget {
   final VoidCallback? onReaderInteraction;
   final bool showRefCodes;
   final String? activeSearchBlockId;
+  final int? initialScrollOrder;
+  final VoidCallback? onInitialScrollCompleted;
   final Set<String> highlightedBlockIds;
   final void Function(LibraryDocumentBlock block, TextSelection selection)?
   onSelectionChanged;
@@ -1208,6 +1522,7 @@ class _CanonicalLibraryDocumentBodyState
   );
   ScrollPosition? _position;
   int _firstVisibleOrder = 0;
+  bool _initialScrollApplied = false;
 
   void _captureVisiblePosition() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1232,8 +1547,30 @@ class _CanonicalLibraryDocumentBodyState
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.autoScrollTarget.attach(_scrollByPixels);
       widget.proofCommands?._attach(_jumpToOrder);
+      _applyInitialScroll();
     });
     _captureVisiblePosition();
+  }
+
+  void _applyInitialScroll() {
+    if (_initialScrollApplied) return;
+    final order = widget.initialScrollOrder;
+    if (order == null || !_itemController.isAttached) return;
+    _initialScrollApplied = true;
+    debugPrint('search_target_widget_found order=$order');
+    _itemController.jumpTo(index: order, alignment: 0.08);
+    widget.onInitialScrollCompleted?.call();
+  }
+
+  @override
+  void didUpdateWidget(covariant CanonicalLibraryDocumentBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialScrollOrder != widget.initialScrollOrder) {
+      _initialScrollApplied = false;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _applyInitialScroll(),
+      );
+    }
   }
 
   void _jumpToOrder(int order) {
@@ -1305,53 +1642,61 @@ class _CanonicalLibraryDocumentBodyState
 
   @override
   Widget build(BuildContext context) =>
-      NotificationListener<ScrollNotification>(
+      NotificationListener<ScrollMetricsNotification>(
         onNotification: (notification) {
-          final notificationContext = notification.context;
-          if (notificationContext != null) {
-            _position = Scrollable.maybeOf(notificationContext)?.position;
-          }
-          if (readerScrollNotificationIsManual(notification)) {
-            widget.onManualScroll?.call();
-          }
+          _position = Scrollable.maybeOf(notification.context)?.position;
           return false;
         },
-        child: Listener(
-          onPointerDown: (_) => widget.onReaderInteraction?.call(),
-          child: KeyedSubtree(
-            key: const ValueKey('canonical-flat-list'),
-            child: ScrollablePositionedList.builder(
-              key: _visibleListKey,
-              itemCount: widget.controller.blockCount,
-              itemScrollController: _itemController,
-              itemPositionsListener: _positions,
-              padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
-              itemBuilder: (context, order) {
-                _position ??= Scrollable.maybeOf(context)?.position;
-                if (_position == null || !_position!.hasPixels) {
-                  _captureVisiblePosition();
-                }
-                final block = widget.controller.blockAt(order);
-                if (block == null) {
-                  widget.controller.ensureWindow(order);
-                  return const SizedBox(height: 42);
-                }
-                return KeyedSubtree(
-                  key: ValueKey(block.id),
-                  child: _CanonicalBlockView(
-                    block: block,
-                    color: widget.textColor,
-                    sourceRoot: widget.sourceRoot,
-                    fontScale: widget.fontScale,
-                    showRefCode: widget.showRefCodes,
-                    searchActive: widget.activeSearchBlockId == block.id,
-                    highlighted: widget.highlightedBlockIds.contains(block.id),
-                    onSelectionChanged: (selection) =>
-                        widget.onSelectionChanged?.call(block, selection),
-                    onOpenSelectionMenu: widget.onOpenSelectionMenu,
-                  ),
-                );
-              },
+        child: NotificationListener<ScrollNotification>(
+          onNotification: (notification) {
+            final notificationContext = notification.context;
+            if (notificationContext != null) {
+              _position = Scrollable.maybeOf(notificationContext)?.position;
+            }
+            if (readerScrollNotificationIsManual(notification)) {
+              widget.onManualScroll?.call();
+            }
+            return false;
+          },
+          child: Listener(
+            onPointerDown: (_) => widget.onReaderInteraction?.call(),
+            child: KeyedSubtree(
+              key: const ValueKey('canonical-flat-list'),
+              child: ScrollablePositionedList.builder(
+                key: _visibleListKey,
+                itemCount: widget.controller.blockCount,
+                itemScrollController: _itemController,
+                itemPositionsListener: _positions,
+                padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
+                itemBuilder: (context, order) {
+                  _position ??= Scrollable.maybeOf(context)?.position;
+                  if (_position == null || !_position!.hasPixels) {
+                    _captureVisiblePosition();
+                  }
+                  final block = widget.controller.blockAt(order);
+                  if (block == null) {
+                    widget.controller.ensureWindow(order);
+                    return const SizedBox(height: 42);
+                  }
+                  return KeyedSubtree(
+                    key: ValueKey(block.id),
+                    child: _CanonicalBlockView(
+                      block: block,
+                      color: widget.textColor,
+                      sourceRoot: widget.sourceRoot,
+                      fontScale: widget.fontScale,
+                      showRefCode: widget.showRefCodes,
+                      searchActive: widget.activeSearchBlockId == block.id,
+                      highlighted: widget.highlightedBlockIds.contains(
+                        block.id,
+                      ),
+                      onSelectionChanged: (selection) =>
+                          widget.onSelectionChanged?.call(block, selection),
+                      onOpenSelectionMenu: widget.onOpenSelectionMenu,
+                    ),
+                  );
+                },
+              ),
             ),
           ),
         ),

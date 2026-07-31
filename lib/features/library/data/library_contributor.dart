@@ -103,7 +103,9 @@ class ImportContributorSpec {
 
 /// Returns contributor display names joined with "; ".
 /// e.g. "A. T. Jones; E. J. Waggoner"
-String displayAuthorsFromContributors(List<LibraryItemContributor> contributors) {
+String displayAuthorsFromContributors(
+  List<LibraryItemContributor> contributors,
+) {
   if (contributors.isEmpty) return '';
   final sorted = [...contributors]
     ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
@@ -119,13 +121,19 @@ String shortAuthorsFromContributors(List<LibraryItemContributor> contributors) {
   }
   final sorted = [...contributors]
     ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
-  final lastNames = sorted.map((c) => _extractLastName(c.contributor.displayName)).toList();
+  final lastNames = sorted
+      .map((c) => _extractLastName(c.contributor.displayName))
+      .toList();
   return lastNames.join(' & ');
 }
 
 /// Parses "A. T. Jones; E. J. Waggoner" into last-name tokens.
 String shortAuthorsFromDisplayString(String authorField) {
-  final names = authorField.split(';').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+  final names = authorField
+      .split(';')
+      .map((s) => s.trim())
+      .where((s) => s.isNotEmpty)
+      .toList();
   if (names.isEmpty) return authorField;
   if (names.length == 1) return names.first;
   final lastNames = names.map(_extractLastName).toList();

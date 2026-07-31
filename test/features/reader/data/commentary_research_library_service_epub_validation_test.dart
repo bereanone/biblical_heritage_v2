@@ -10,6 +10,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:studybible2/core/bootstrap/library_root_service.dart';
 import 'package:studybible2/core/database/elibrary_database.dart';
 import 'package:studybible2/core/database/user_database.dart';
+import 'package:studybible2/features/library/data/library_catalog_service.dart';
 import 'package:studybible2/features/library/data/library_item_identity.dart';
 import 'package:studybible2/features/reader/data/commentary_research_library_service.dart';
 
@@ -199,6 +200,64 @@ void main() {
     );
     return rows.length;
   }
+
+  test(
+    'retained EPUB recovery discovers and indexes the explicit download root',
+    () async {
+      final retainedRoot = Directory(p.join(supportDir.path, 'retained_root'));
+      final retainedFile = _writeEpub(
+        File(
+          p.join(
+            retainedRoot.path,
+            'ePubs',
+            'EGW',
+            'EGW_Books',
+            'en_Test.epub',
+          ),
+        ),
+        {
+          'META-INF/container.xml': _containerXml,
+          'OEBPS/content.opf': _opfXml(includeSpine: true),
+          'OEBPS/content1.xhtml': _healthyContentXhtml,
+        },
+      );
+
+      final discovered = await LibraryCatalogService.instance
+          .refreshManagedItemsFromDisk(rootPathOverride: retainedRoot.path);
+      final candidates = await LibraryCatalogService.instance
+          .listUnindexedManagedItems();
+      final result = await CommentaryResearchLibraryService.instance
+          .indexLocalCatalogedEpubs(rootPathOverride: retainedRoot.path);
+
+      expect(await retainedFile.exists(), isTrue);
+      expect(discovered, 1);
+      expect(candidates, hasLength(1));
+      expect(result, (indexed: 1, skipped: 0, failed: 0));
+
+      final db = await ELibraryDatabase.instance.database;
+      final rows = await db.query(
+        'library_items',
+        columns: const ['index_status'],
+        where: 'file_name = ?',
+        whereArgs: const ['en_Test.epub'],
+      );
+      expect(rows, hasLength(1));
+      expect(rows.single['index_status'], 'indexed');
+
+      await LibraryCatalogService.instance.refreshManagedItemsFromDisk(
+        rootPathOverride: retainedRoot.path,
+      );
+      final repeated = await CommentaryResearchLibraryService.instance
+          .indexLocalCatalogedEpubs(rootPathOverride: retainedRoot.path);
+      final duplicateRows = await db.query(
+        'library_items',
+        where: 'file_name = ?',
+        whereArgs: const ['en_Test.epub'],
+      );
+      expect(repeated, (indexed: 0, skipped: 0, failed: 0));
+      expect(duplicateRows, hasLength(1));
+    },
+  );
 
   test('missing OPF is flagged needs_attention, not indexed_empty', () async {
     final seeded = await seedCatalogRow(fileName: 'missing_opf.epub');

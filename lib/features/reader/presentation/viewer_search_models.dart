@@ -29,8 +29,7 @@ class BibleSearchSession {
 
   bool get hasPrevious => results.isNotEmpty && currentIndex > 0;
 
-  bool get hasNext =>
-      results.isNotEmpty && currentIndex < results.length - 1;
+  bool get hasNext => results.isNotEmpty && currentIndex < results.length - 1;
 
   BibleSearchSession copyWithIndex(int index) {
     if (results.isEmpty || index < 0 || index >= results.length) {
@@ -124,7 +123,8 @@ class BibleSearchSessionSnapshot {
           decoded['lookupByHighlight']?.toString() == 'true';
       final highlightGroupId = (decoded['highlightGroupId'] as num?)?.toInt();
       final currentIndex = (decoded['currentIndex'] as num?)?.toInt();
-      final totalResultCount = (decoded['totalResultCount'] as num?)?.toInt() ?? 0;
+      final totalResultCount =
+          (decoded['totalResultCount'] as num?)?.toInt() ?? 0;
       if (query.isEmpty &&
           section.isEmpty &&
           bookNumber == null &&

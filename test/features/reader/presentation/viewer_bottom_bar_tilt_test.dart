@@ -8,62 +8,70 @@ import 'package:studybible2/features/library/presentation/reader_tilt_motion_sou
 import 'package:studybible2/features/reader/presentation/viewer_bottom_bar.dart';
 
 void main() {
-  testWidgets('Bible bottom bar uses the shared Mac control when provided', (
-    tester,
-  ) async {
-    final motion = FakeReaderTiltMotionSource();
-    final target = CallbackReaderAutoScrollTarget();
-    final tiltController = ReaderTiltAutoScrollController(
-      motionSource: motion,
-      scrollTarget: target,
-    );
-    final macController = MacReaderAutoScrollController(
-      scrollTarget: target,
-      driveFrames: false,
-    );
-    var settingsCount = 0;
-    addTearDown(() async {
-      macController.dispose();
-      tiltController.dispose();
-      await motion.dispose();
-    });
+  testWidgets(
+    'Bible bottom bar exposes one canonical tilt control when steady is also available',
+    (tester) async {
+      final motion = FakeReaderTiltMotionSource();
+      final target = CallbackReaderAutoScrollTarget();
+      final tiltController = ReaderTiltAutoScrollController(
+        motionSource: motion,
+        scrollTarget: target,
+      );
+      final macController = MacReaderAutoScrollController(
+        scrollTarget: target,
+        driveFrames: false,
+      );
+      var toggleCount = 0;
+      var settingsCount = 0;
+      addTearDown(() async {
+        macController.dispose();
+        tiltController.dispose();
+        await motion.dispose();
+      });
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          bottomNavigationBar: ViewerBottomBar(
-            themeMode: AppThemeMode.sepia,
-            onToggleThemeMode: () {},
-            bookNumber: 1,
-            interlinearEnabled: false,
-            onToggleInterlinear: () {},
-            onMode: () {},
-            onHistory: () {},
-            onLibrary: () {},
-            onDecreaseFont: () {},
-            onIncreaseFont: () {},
-            tiltAutoScrollController: tiltController,
-            onToggleTiltAutoScroll: () {},
-            onOpenTiltAutoScrollSettings: () {},
-            macAutoScrollController: macController,
-            onToggleMacAutoScroll: macController.toggle,
-            onOpenMacAutoScrollSettings: () => settingsCount++,
-            onCommentary: () {},
-            canDecreaseFont: true,
-            canIncreaseFont: true,
-            backgroundColor: Colors.white,
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            bottomNavigationBar: ViewerBottomBar(
+              themeMode: AppThemeMode.sepia,
+              onToggleThemeMode: () {},
+              bookNumber: 1,
+              interlinearEnabled: false,
+              onToggleInterlinear: () {},
+              onMode: () {},
+              onHistory: () {},
+              onLibrary: () {},
+              onDecreaseFont: () {},
+              onIncreaseFont: () {},
+              tiltAutoScrollController: tiltController,
+              onToggleTiltAutoScroll: () => toggleCount++,
+              onOpenTiltAutoScrollSettings: () => settingsCount++,
+              macAutoScrollController: macController,
+              onToggleMacAutoScroll: macController.toggle,
+              onOpenMacAutoScrollSettings: () {},
+              onCommentary: () {},
+              canDecreaseFont: true,
+              canIncreaseFont: true,
+              backgroundColor: Colors.white,
+            ),
           ),
         ),
-      ),
-    );
+      );
 
-    expect(find.byTooltip('Mac Autoscroll'), findsOneWidget);
-    expect(find.byTooltip('Tilt Auto-scroll'), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('mac-autoscroll-button')));
-    expect(macController.signedStep, 1);
-    await tester.longPress(find.byKey(const ValueKey('mac-autoscroll-button')));
-    expect(settingsCount, 1);
-  });
+      expect(find.byTooltip('Autoscroll'), findsNothing);
+      expect(find.byTooltip('Tilt Auto-scroll'), findsOneWidget);
+      expect(find.byIcon(Icons.swap_vert_rounded), findsOneWidget);
+      await tester.tap(find.byTooltip('Tilt Auto-scroll'));
+      expect(toggleCount, 1);
+      final hold = await tester.startGesture(
+        tester.getCenter(find.byTooltip('Tilt Auto-scroll')),
+      );
+      await tester.pump(ReaderTiltAutoScrollIconButton.longPressDuration);
+      await hold.up();
+      await tester.pump();
+      expect(settingsCount, 1);
+    },
+  );
 
   for (final width in [300.0, 390.0, 800.0]) {
     testWidgets('tilt control follows A+ without overflow at $width px', (

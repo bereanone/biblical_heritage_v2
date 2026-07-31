@@ -16,6 +16,296 @@ BibleVisibleLocation location(
 );
 
 void main() {
+  const canonicalBookNames = <String>[
+    'Genesis',
+    'Exodus',
+    'Leviticus',
+    'Numbers',
+    'Deuteronomy',
+    'Joshua',
+    'Judges',
+    'Ruth',
+    '1 Samuel',
+    '2 Samuel',
+    '1 Kings',
+    '2 Kings',
+    '1 Chronicles',
+    '2 Chronicles',
+    'Ezra',
+    'Nehemiah',
+    'Esther',
+    'Job',
+    'Psalms',
+    'Proverbs',
+    'Ecclesiastes',
+    'Song of Solomon',
+    'Isaiah',
+    'Jeremiah',
+    'Lamentations',
+    'Ezekiel',
+    'Daniel',
+    'Hosea',
+    'Joel',
+    'Amos',
+    'Obadiah',
+    'Jonah',
+    'Micah',
+    'Nahum',
+    'Habakkuk',
+    'Zephaniah',
+    'Haggai',
+    'Zechariah',
+    'Malachi',
+    'Matthew',
+    'Mark',
+    'Luke',
+    'John',
+    'Acts',
+    'Romans',
+    '1 Corinthians',
+    '2 Corinthians',
+    'Galatians',
+    'Ephesians',
+    'Philippians',
+    'Colossians',
+    '1 Thessalonians',
+    '2 Thessalonians',
+    '1 Timothy',
+    '2 Timothy',
+    'Titus',
+    'Philemon',
+    'Hebrews',
+    'James',
+    '1 Peter',
+    '2 Peter',
+    '1 John',
+    '2 John',
+    '3 John',
+    'Jude',
+    'Revelation',
+  ];
+  final canonicalNamesByNumber = <int, String>{
+    for (var index = 0; index < canonicalBookNames.length; index++)
+      index + 1: canonicalBookNames[index],
+  };
+
+  test('all 66 canonical identifiers resolve without an off-by-one shift', () {
+    expect(canonicalBookNames, hasLength(66));
+    for (var bookNumber = 1; bookNumber <= 66; bookNumber++) {
+      final visible = location(
+        bookNumber * 1000,
+        book: bookNumber,
+        chapter: 1,
+        verse: 1,
+      );
+      final resolved = resolveBibleReaderLocation(
+        visibleLocation: visible,
+        fallbackLocation: location(
+          999,
+          book: bookNumber == 1 ? 2 : bookNumber - 1,
+        ),
+        bookNamesByNumber: canonicalNamesByNumber,
+      );
+      expect(resolved.bookNumber, bookNumber);
+      expect(resolved.bookName, canonicalBookNames[bookNumber - 1]);
+      expect(resolved.label, '${canonicalBookNames[bookNumber - 1]} 1:1');
+    }
+  });
+
+  test('boundary transitions replace stale fallback header locations', () {
+    final cases =
+        <({BibleVisibleLocation from, BibleVisibleLocation to, String label})>[
+          (
+            from: location(211212, book: 21, chapter: 12, verse: 12),
+            to: location(220101, book: 22, chapter: 1, verse: 1),
+            label: 'Song of Solomon 1:1',
+          ),
+          (
+            from: location(390406, book: 39, chapter: 4, verse: 6),
+            to: location(400101, book: 40, chapter: 1, verse: 1),
+            label: 'Matthew 1:1',
+          ),
+          (
+            from: location(442831, book: 44, chapter: 28, verse: 31),
+            to: location(450101, book: 45, chapter: 1, verse: 1),
+            label: 'Romans 1:1',
+          ),
+          (
+            from: location(90101, book: 9, chapter: 1, verse: 1),
+            to: location(100101, book: 10, chapter: 1, verse: 1),
+            label: '2 Samuel 1:1',
+          ),
+        ];
+
+    for (final testCase in cases) {
+      final resolved = resolveBibleReaderLocation(
+        visibleLocation: testCase.to,
+        fallbackLocation: testCase.from,
+        bookNamesByNumber: canonicalNamesByNumber,
+      );
+      expect(resolved.label, testCase.label);
+    }
+  });
+
+  test('direct jump and restored endpoints become the authoritative label', () {
+    final live = BibleLiveReferenceController();
+    addTearDown(live.dispose);
+
+    live.update(location(1, book: 1, chapter: 1, verse: 1));
+    expect(
+      resolveBibleReaderLocation(
+        visibleLocation: live.value,
+        fallbackLocation: location(777, book: 21, chapter: 12, verse: 12),
+        bookNamesByNumber: canonicalNamesByNumber,
+      ).label,
+      'Genesis 1:1',
+    );
+
+    live.update(location(662221, book: 66, chapter: 22, verse: 21));
+    expect(
+      resolveBibleReaderLocation(
+        visibleLocation: live.value,
+        fallbackLocation: location(1),
+        bookNamesByNumber: canonicalNamesByNumber,
+      ).label,
+      'Revelation 22:21',
+    );
+  });
+
+  test('selected verse overrides centered and first-available verses', () {
+    final live = BibleLiveReferenceController();
+    addTearDown(live.dispose);
+    live.updateFirstAvailable(location(1, book: 1, chapter: 1, verse: 1));
+    live.updateCentered(location(211209, book: 21, chapter: 12, verse: 9));
+    live.updateSelected(location(211212, book: 21, chapter: 12, verse: 12));
+
+    expect(live.value!.verse, 12);
+    live.updateCentered(location(220104, book: 22, chapter: 1, verse: 4));
+    expect(live.value!.bookNumber, 21);
+    expect(live.value!.verse, 12);
+  });
+
+  test('manual selection release promotes the centered verse', () {
+    final live = BibleLiveReferenceController();
+    addTearDown(live.dispose);
+    live.updateSelected(location(220101, book: 22, chapter: 1, verse: 1));
+    live.updateCentered(location(220104, book: 22, chapter: 1, verse: 4));
+    expect(live.value!.verse, 1);
+
+    live.clearSelected();
+    expect(live.value!.verse, 4);
+  });
+
+  test('direct navigation target survives premature visibility callbacks', () {
+    final live = BibleLiveReferenceController();
+    addTearDown(live.dispose);
+    live.updateSelected(location(220101, book: 22, chapter: 1, verse: 1));
+    live.updateCentered(location(211212, book: 21, chapter: 12, verse: 12));
+    live.updateCentered(location(220104, book: 22, chapter: 1, verse: 4));
+
+    expect(live.value!.bookNumber, 22);
+    expect(live.value!.chapter, 1);
+    expect(live.value!.verse, 1);
+  });
+
+  test('selected override releases once live centering settles on that verse, '
+      'so scrolling away keeps updating the label instead of freezing', () {
+    final live = BibleLiveReferenceController();
+    addTearDown(live.dispose);
+
+    // Reader opens at Genesis 1:23 (an explicit selection/navigation).
+    final opened = location(1023, book: 1, chapter: 1, verse: 23);
+    live.updateSelected(opened);
+    expect(live.value, opened);
+
+    // The scroll list settles on the exact opened verse (recenter completes).
+    live.updateCentered(opened);
+    expect(live.value, opened);
+
+    // No drag-based "manual scroll" signal ever fires (e.g. macOS
+    // autoscroll or a mouse-wheel/trackpad scroll instead of a drag), but
+    // live centering keeps reporting new verses as the reader scrolls.
+    final genesis416 = location(1120, book: 1, chapter: 4, verse: 16);
+    live.updateCentered(genesis416);
+
+    expect(live.value, isNot(opened));
+    expect(live.value!.bookNumber, 1);
+    expect(live.value!.chapter, 4);
+    expect(live.value!.verse, 16);
+  });
+
+  test(
+    'settled selection continues to track further live centering updates',
+    () {
+      final live = BibleLiveReferenceController();
+      addTearDown(live.dispose);
+      final selected = location(220101, book: 22, chapter: 1, verse: 1);
+      live.updateSelected(selected);
+      live.updateCentered(selected);
+
+      live.updateCentered(location(220102, book: 22, chapter: 1, verse: 2));
+      expect(live.value!.verse, 2);
+      live.updateCentered(location(220103, book: 22, chapter: 1, verse: 3));
+      expect(live.value!.verse, 3);
+    },
+  );
+
+  test('center resolver ignores headings and partially visible top verses', () {
+    final centered = centeredBibleVerseBlockId(const [
+      BibleViewportCandidate(
+        blockId: 9,
+        leadingEdge: -0.25,
+        trailingEdge: 0.08,
+        isVerse: true,
+      ),
+      BibleViewportCandidate(
+        blockId: 10,
+        leadingEdge: 0.30,
+        trailingEdge: 0.47,
+        isVerse: false,
+      ),
+      BibleViewportCandidate(
+        blockId: 12,
+        leadingEdge: 0.44,
+        trailingEdge: 0.69,
+        isVerse: true,
+      ),
+      BibleViewportCandidate(
+        blockId: 13,
+        leadingEdge: 0.69,
+        trailingEdge: 0.92,
+        isVerse: true,
+      ),
+    ]);
+
+    expect(centered, 12);
+  });
+
+  test('center resolver chooses nearest verse when center is on a heading', () {
+    final centered = centeredBibleVerseBlockId(const [
+      BibleViewportCandidate(
+        blockId: 20,
+        leadingEdge: 0.31,
+        trailingEdge: 0.43,
+        isVerse: true,
+      ),
+      BibleViewportCandidate(
+        blockId: 21,
+        leadingEdge: 0.43,
+        trailingEdge: 0.57,
+        isVerse: false,
+      ),
+      BibleViewportCandidate(
+        blockId: 22,
+        leadingEdge: 0.57,
+        trailingEdge: 0.72,
+        isVerse: true,
+      ),
+    ]);
+
+    expect(centered, 20);
+  });
+
   test('live reference updates across chapter and book boundaries', () {
     final live = BibleLiveReferenceController();
     addTearDown(live.dispose);

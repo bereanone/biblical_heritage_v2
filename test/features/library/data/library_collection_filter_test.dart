@@ -79,7 +79,7 @@ void main() {
     ]);
   });
 
-  test('classifies Pioneer rows as Adventist Pioneer Library', () {
+  test('classifies Pioneer rows as Pioneer Library', () {
     final item = _item(
       title: 'Home Here, and Home in Heaven; With Other Poems',
       collectionName: 'Pioneer Authors',
@@ -87,7 +87,7 @@ void main() {
     );
 
     expect(item.collectionGroupKey, 'adventist_pioneer_library');
-    expect(item.collectionGroupLabel, 'Adventist Pioneer Library');
+    expect(item.collectionGroupLabel, 'Pioneer Library');
     expect(
       libraryItemMatchesCollectionFilter(item, 'adventist_pioneer_library'),
       isTrue,
@@ -95,7 +95,22 @@ void main() {
     expect(libraryItemMatchesCollectionFilter(item, 'egw_books'), isFalse);
   });
 
-  test('includes Adventist Pioneer Library in collection options', () {
+  test('classifies imported Pioneer EPUB rows as Pioneer Library', () {
+    final item = _item(
+      title: 'Christ and His Righteousness',
+      collectionName: 'Pioneer Library',
+      relativePath: 'ImportedPioneerEpubs/christ_and_his_righteousness.epub',
+    );
+
+    expect(item.collectionGroupKey, 'adventist_pioneer_library');
+    expect(item.collectionGroupLabel, 'Pioneer Library');
+    expect(
+      libraryItemMatchesCollectionFilter(item, 'adventist_pioneer_library'),
+      isTrue,
+    );
+  });
+
+  test('includes Pioneer Library in collection options', () {
     final options = buildLibraryCollectionFilterOptions([
       _item(
         title: 'Home Here, and Home in Heaven; With Other Poems',
@@ -112,7 +127,7 @@ void main() {
     expect(options.map((option) => option.label).toList(), <String>[
       'All Collections',
       'EGW Books',
-      'Adventist Pioneer Library',
+      'Pioneer Library',
     ]);
   });
 }

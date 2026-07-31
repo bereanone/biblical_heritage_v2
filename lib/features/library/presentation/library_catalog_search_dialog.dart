@@ -7,6 +7,7 @@ import '../data/library_catalog_service.dart';
 import 'library_book_reader_screen.dart';
 import 'library_catalog_search_panel.dart';
 import 'library_font_scale.dart';
+import 'library_item_open_guard.dart';
 import '../../reader/presentation/tag_quick_apply_helper.dart';
 
 double _libraryCatalogSearchDialogWidthFor(double screenWidth) {
@@ -50,12 +51,20 @@ class _LibraryCatalogSearchDialog extends StatelessWidget {
     final resolvedItem =
         await LibraryCatalogService.instance.loadItemById(result.item.id) ??
         result.item;
+    if (!context.mounted) return;
+    if (!await ensureLibraryItemOpenable(context, resolvedItem)) return;
+    if (!context.mounted) return;
     navigator.pop();
     final session = LibraryCatalogSearchSession(
       query: searchQuery,
       collectionFilter: collectionFilter == 'all' ? null : collectionFilter,
       results: List<LibraryCatalogSearchResult>.unmodifiable(results),
       currentIndex: index,
+    );
+    final target = result.targetForQuery(searchQuery);
+    debugPrint(
+      'search_result_open_requested '
+      '${target?.diagnosticSummary ?? "work=${result.item.id} target=(none)"}',
     );
     unawaited(
       AppSettingsService.instance.saveLastElibrarySearchSessionJson(
@@ -70,10 +79,7 @@ class _LibraryCatalogSearchDialog extends StatelessWidget {
           MaterialPageRoute<void>(
             builder: (_) => LibraryBookReaderScreen(
               item: resolvedItem,
-              initialHref: resolvedItem.epubHref,
-              initialAnchorId: resolvedItem.anchorId,
-              initialSpineIndex: resolvedItem.spineIndex,
-              initialParagraphIndex: resolvedItem.paragraphIndex,
+              searchTarget: target,
               searchQuery: searchQuery,
               highlightTerms: extractLibrarySearchHighlightTerms(searchQuery),
               searchSession: session,
@@ -86,6 +92,12 @@ class _LibraryCatalogSearchDialog extends StatelessWidget {
   }
 
   String _stableRefForResult(LibraryCatalogSearchResult result) {
+    final target = result.target;
+    if (target != null) {
+      return target.stableSourceReference?.trim().isNotEmpty == true
+          ? target.stableSourceReference!.trim()
+          : 'elibrary:${target.libraryItemId}:block:${target.textBlockId}';
+    }
     final item = result.item;
     return [
       'elibrary',

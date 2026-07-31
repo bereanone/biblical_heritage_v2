@@ -119,6 +119,7 @@ class _RecentPane extends StatelessWidget {
 
 class _SearchField extends StatelessWidget {
   const _SearchField({
+    super.key,
     required this.controller,
     required this.focusNode,
     required this.onChanged,
@@ -493,28 +494,29 @@ class _ViewToggleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: SegmentedButton<_LibraryView>(
-        style: _librarySegmentedButtonStyle(context),
-        segments: [
-          ButtonSegment(
-            value: _LibraryView.shelf,
-            icon: Icon(Icons.grid_view_rounded),
-            label: const Text('Shelf'),
-          ),
-          ButtonSegment(
-            value: _LibraryView.list,
-            icon: Icon(Icons.view_list_rounded),
-            label: const Text('List'),
-          ),
-        ],
-        selected: {view},
-        onSelectionChanged: (selection) {
-          if (selection.isEmpty) return;
-          onViewChanged(selection.first);
-        },
-      ),
+    // No outer Align: this widget is used both inside a start-aligned
+    // Column (large layout) and inside a Wrap (compact sticky toolbar),
+    // and Wrap gives children unbounded constraints that a bare Align
+    // cannot resolve without a width/height factor.
+    return SegmentedButton<_LibraryView>(
+      style: _librarySegmentedButtonStyle(context),
+      segments: [
+        ButtonSegment(
+          value: _LibraryView.shelf,
+          icon: Icon(Icons.grid_view_rounded),
+          label: const Text('Shelf'),
+        ),
+        ButtonSegment(
+          value: _LibraryView.list,
+          icon: Icon(Icons.view_list_rounded),
+          label: const Text('List'),
+        ),
+      ],
+      selected: {view},
+      onSelectionChanged: (selection) {
+        if (selection.isEmpty) return;
+        onViewChanged(selection.first);
+      },
     );
   }
 }
@@ -552,7 +554,11 @@ ButtonStyle _librarySegmentedButtonStyle(BuildContext context) {
   );
 }
 
-class _AlphabetStrip extends StatelessWidget {
+// Renders the A-Z filter as a single horizontally scrollable row rather than
+// a multi-line Wrap, so it never grows to consume several rows of vertical
+// space on short or narrow layouts. Also honors vertical mouse-wheel input
+// (redirected to horizontal scroll) for desktop/trackpad usability.
+class _AlphabetStrip extends StatefulWidget {
   const _AlphabetStrip({
     required this.selectedInitialLetter,
     required this.availableInitialLetters,
@@ -564,27 +570,76 @@ class _AlphabetStrip extends StatelessWidget {
   final ValueChanged<String?> onChanged;
 
   @override
+  State<_AlphabetStrip> createState() => _AlphabetStripState();
+}
+
+class _AlphabetStripState extends State<_AlphabetStrip> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent || !_scrollController.hasClients) {
+      return;
+    }
+    final position = _scrollController.position;
+    final delta = event.scrollDelta.dy.abs() > event.scrollDelta.dx.abs()
+        ? event.scrollDelta.dy
+        : event.scrollDelta.dx;
+    if (delta == 0) return;
+    final target = (position.pixels + delta).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    _scrollController.jumpTo(target);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (availableInitialLetters.isEmpty) {
+    if (widget.availableInitialLetters.isEmpty) {
       return const SizedBox.shrink();
     }
 
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
-      children: [
-        _LetterChip(
-          label: 'All',
-          selected: selectedInitialLetter == null,
-          onPressed: () => onChanged(null),
-        ),
-        for (final letter in availableInitialLetters)
-          _LetterChip(
-            label: letter,
-            selected: selectedInitialLetter == letter,
-            onPressed: () => onChanged(letter),
+    // A visible, draggable Scrollbar is the affordance that lets a desktop
+    // user reach letters past the visible edge — relying on trackpad swipe
+    // or the wheel-redirect above alone leaves no discoverable way to tell
+    // there's more to scroll to, or a fallback if a given input device
+    // doesn't trigger a horizontal drag/scroll gesture.
+    return SizedBox(
+      key: const ValueKey('library-alphabet-strip'),
+      height: 52,
+      child: Listener(
+        onPointerSignal: _handlePointerSignal,
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          trackVisibility: true,
+          child: ListView(
+            controller: _scrollController,
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
+            children: [
+              _LetterChip(
+                label: 'All',
+                selected: widget.selectedInitialLetter == null,
+                onPressed: () => widget.onChanged(null),
+              ),
+              for (final letter in widget.availableInitialLetters) ...[
+                const SizedBox(width: 6),
+                _LetterChip(
+                  label: letter,
+                  selected: widget.selectedInitialLetter == letter,
+                  onPressed: () => widget.onChanged(letter),
+                ),
+              ],
+            ],
           ),
-      ],
+        ),
+      ),
     );
   }
 }
@@ -629,12 +684,10 @@ Widget _bookCoverFrame({
   required BorderRadius borderRadius,
   required bool compact,
   required bool showCaption,
-  required bool showCenterTitle,
 }) {
   final theme = Theme.of(context);
   final fillColor = _libraryFallbackCoverColor(theme);
   final accentColor = _placeholderAccentColor(title);
-  final monogram = _thumbnailMonogram(title);
   final fontScale = libraryFontScaleOf(context);
   final titleStyle = libraryScaledTextStyle(
     compact ? theme.textTheme.labelMedium : theme.textTheme.titleSmall,
@@ -715,85 +768,14 @@ Widget _bookCoverFrame({
               ),
             ),
           ),
-          if (showCenterTitle)
-            Center(
-              child: Padding(
-                padding: EdgeInsets.all(compact ? 8 : 10),
-                child: Text(
-                  _fallbackSpineLabel(title),
-                  textAlign: TextAlign.center,
-                  maxLines: compact ? 3 : 4,
-                  overflow: TextOverflow.ellipsis,
-                  style: titleStyle,
-                ),
-              ),
+          if (!showCaption)
+            _FallbackBookCoverContent(
+              title: title,
+              author: subtitle,
+              compact: compact,
+              titleStyle: titleStyle,
+              authorStyle: subtitleStyle,
             ),
-          if (!showCenterTitle && !showCaption)
-            if (compact)
-              Center(
-                child: Text(
-                  monogram,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.clip,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.1,
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.78),
-                  ),
-                ),
-              )
-            else
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 52,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surface.withValues(
-                            alpha: theme.brightness == Brightness.dark
-                                ? 0.22
-                                : 0.30,
-                          ),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: theme.colorScheme.onSurface.withValues(
-                              alpha: 0.12,
-                            ),
-                          ),
-                        ),
-                        child: Center(
-                          child: Text(
-                            monogram,
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.clip,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 1.1,
-                              color: theme.colorScheme.onSurface.withValues(
-                                alpha: 0.78,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Icon(
-                        Icons.menu_book_outlined,
-                        size: 20,
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.28,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
           if (showCaption)
             Positioned(
               left: captionSide,
@@ -832,6 +814,119 @@ Widget _bookCoverFrame({
       ),
     ),
   );
+}
+
+class _FallbackBookCoverContent extends StatelessWidget {
+  const _FallbackBookCoverContent({
+    required this.title,
+    required this.author,
+    required this.compact,
+    required this.titleStyle,
+    required this.authorStyle,
+  });
+
+  final String title;
+  final String author;
+  final bool compact;
+  final TextStyle titleStyle;
+  final TextStyle authorStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    final horizontalPadding = compact ? 8.0 : 14.0;
+    final verticalPadding = compact ? 8.0 : 14.0;
+    final cleanTitle = normalizeBookDisplayTitle(title);
+    final cleanAuthor = normalizeBookDisplayAuthor(author);
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        horizontalPadding + (compact ? 2 : 4),
+        verticalPadding,
+        horizontalPadding,
+        verticalPadding,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: _BoundedCoverText(
+              text: cleanTitle,
+              style: titleStyle,
+              minFontSize: compact ? 8 : 10,
+              maxFontSize: compact ? 14 : 18,
+              maxLines: 6,
+              alignment: Alignment.center,
+            ),
+          ),
+          SizedBox(height: compact ? 4 : 8),
+          _BoundedCoverText(
+            key: const ValueKey('library-fallback-cover-author'),
+            text: cleanAuthor,
+            style: authorStyle.copyWith(fontWeight: FontWeight.w600),
+            minFontSize: compact ? 7 : 9,
+            maxFontSize: compact ? 10 : 12,
+            maxLines: 2,
+            alignment: Alignment.bottomCenter,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BoundedCoverText extends StatelessWidget {
+  const _BoundedCoverText({
+    super.key,
+    required this.text,
+    required this.style,
+    required this.minFontSize,
+    required this.maxFontSize,
+    required this.maxLines,
+    required this.alignment,
+  });
+
+  final String text;
+  final TextStyle style;
+  final double minFontSize;
+  final double maxFontSize;
+  final int maxLines;
+  final Alignment alignment;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        var fontSize = maxFontSize;
+        while (fontSize > minFontSize) {
+          final painter = TextPainter(
+            text: TextSpan(
+              text: text,
+              style: style.copyWith(fontSize: fontSize, height: 1.08),
+            ),
+            textAlign: TextAlign.center,
+            textDirection: Directionality.of(context),
+            maxLines: maxLines,
+          )..layout(maxWidth: constraints.maxWidth);
+          if (!painter.didExceedMaxLines &&
+              painter.height <= constraints.maxHeight) {
+            break;
+          }
+          fontSize -= 0.5;
+        }
+        return Align(
+          alignment: alignment,
+          child: Text(
+            text,
+            textAlign: TextAlign.center,
+            softWrap: true,
+            maxLines: maxLines,
+            overflow: TextOverflow.clip,
+            style: style.copyWith(fontSize: fontSize, height: 1.08),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _BookCoverCard extends StatelessWidget {
@@ -915,73 +1010,6 @@ Color _placeholderAccentColor(String title) {
   final normalized = title.trim();
   final index = normalized.hashCode.abs() % palette.length;
   return palette[index];
-}
-
-String _thumbnailMonogram(String title) {
-  final normalized = title
-      .replaceAll(RegExp(r'[_\-]+'), ' ')
-      .replaceAll(RegExp(r'[^a-zA-Z0-9 ]+'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  if (normalized.isEmpty) return 'BK';
-
-  final stopWords = <String>{
-    'the',
-    'a',
-    'an',
-    'of',
-    'and',
-    'to',
-    'in',
-    'on',
-    'for',
-    'from',
-    'by',
-    'with',
-    'at',
-    'into',
-    'over',
-    'under',
-  };
-  final words = normalized
-      .split(' ')
-      .where((word) => word.isNotEmpty)
-      .where((word) => !stopWords.contains(word.toLowerCase()))
-      .toList(growable: false);
-  final sourceWords = words.isNotEmpty
-      ? words
-      : normalized.split(' ').where((word) => word.isNotEmpty).toList();
-  if (sourceWords.isEmpty) return 'BK';
-
-  final letters = <String>[];
-  for (final word in sourceWords) {
-    final firstLetter = RegExp(r'[A-Za-z0-9]').firstMatch(word)?.group(0);
-    if (firstLetter == null) continue;
-    letters.add(firstLetter.toUpperCase());
-    if (letters.length >= 3) break;
-  }
-
-  if (letters.isNotEmpty) {
-    if (letters.length == 1) {
-      final compactWord = sourceWords.first.replaceAll(
-        RegExp(r'[^A-Za-z0-9]+'),
-        '',
-      );
-      if (compactWord.length >= 2) {
-        return compactWord.substring(0, 2).toUpperCase();
-      }
-    }
-    return letters.join();
-  }
-
-  final compactWord = sourceWords.first.replaceAll(
-    RegExp(r'[^A-Za-z0-9]+'),
-    '',
-  );
-  if (compactWord.isEmpty) return 'BK';
-  return compactWord.length >= 2
-      ? compactWord.substring(0, 2).toUpperCase()
-      : compactWord.toUpperCase();
 }
 
 class _BookListTile extends StatelessWidget {
@@ -1099,6 +1127,7 @@ class _BookThumbnail extends StatelessWidget {
     final coverPath = item.coverPath?.trim() ?? '';
     if (coverPath.isNotEmpty) {
       return ClipRRect(
+        key: ValueKey('library-artwork-cover-${item.id}'),
         borderRadius: borderRadius,
         child: Stack(
           fit: StackFit.expand,
@@ -1126,16 +1155,30 @@ class _BookThumbnail extends StatelessWidget {
   }
 
   Widget _fallbackThumbnail(BuildContext context) {
-    return _bookCoverFrame(
-      context: context,
-      title: item.displayTitle,
-      subtitle: item.displayAuthor,
-      borderRadius: borderRadius,
-      compact: compact,
-      showCaption: false,
-      showCenterTitle: false,
+    return KeyedSubtree(
+      key: ValueKey('library-metadata-fallback-cover-${item.id}'),
+      child: _bookCoverFrame(
+        context: context,
+        title: item.displayTitle,
+        subtitle: item.displayAuthor,
+        borderRadius: borderRadius,
+        compact: compact,
+        showCaption: false,
+      ),
     );
   }
+}
+
+@visibleForTesting
+Widget buildLibraryShelfCoverForTesting({
+  required LibraryCatalogItem item,
+  bool compact = false,
+}) {
+  return _BookThumbnail(
+    item: item,
+    borderRadius: BorderRadius.circular(14),
+    compact: compact,
+  );
 }
 
 bool _isLibraryAssetCoverPath(String path) {

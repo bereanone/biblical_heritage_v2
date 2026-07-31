@@ -56,7 +56,9 @@ class PioneerEllenWhiteAudioService {
       caseSensitive: false,
       dotAll: true,
     );
-    final headingMatches = headingPattern.allMatches(html).toList(growable: false);
+    final headingMatches = headingPattern
+        .allMatches(html)
+        .toList(growable: false);
     if (headingMatches.isEmpty) {
       return PioneerSourceCatalog(
         authors: const <PioneerSourceAuthor>[],
@@ -72,8 +74,9 @@ class PioneerEllenWhiteAudioService {
       if (!_looksLikeAuthorHeading(headingText)) continue;
 
       final sectionStart = headingMatch.end;
-      final sectionEnd =
-          i + 1 < headingMatches.length ? headingMatches[i + 1].start : html.length;
+      final sectionEnd = i + 1 < headingMatches.length
+          ? headingMatches[i + 1].start
+          : html.length;
       final sectionHtml = html.substring(sectionStart, sectionEnd);
       final works = _parseWorksForAuthor(headingText, sectionHtml);
       if (works.isEmpty) continue;
@@ -100,8 +103,7 @@ class PioneerEllenWhiteAudioService {
     };
     final worksById = <String, PioneerSourceWork>{
       for (final author in authors)
-        for (final work in author.works)
-          work.id: work,
+        for (final work in author.works) work.id: work,
     };
     return PioneerSourceCatalog(
       authors: List<PioneerSourceAuthor>.unmodifiable(authors),
@@ -119,7 +121,9 @@ class PioneerEllenWhiteAudioService {
       caseSensitive: false,
       dotAll: true,
     );
-    final anchors = anchorPattern.allMatches(sectionHtml).toList(growable: false);
+    final anchors = anchorPattern
+        .allMatches(sectionHtml)
+        .toList(growable: false);
     if (anchors.isEmpty) return const <PioneerSourceWork>[];
 
     final imageAnchors = <RegExpMatch>[];
@@ -136,8 +140,9 @@ class PioneerEllenWhiteAudioService {
     for (var i = 0; i < imageAnchors.length; i++) {
       final imageAnchor = imageAnchors[i];
       final rowStart = imageAnchor.start;
-      final rowEnd =
-          i + 1 < imageAnchors.length ? imageAnchors[i + 1].start : sectionHtml.length;
+      final rowEnd = i + 1 < imageAnchors.length
+          ? imageAnchors[i + 1].start
+          : sectionHtml.length;
       final rowHtml = sectionHtml.substring(rowStart, rowEnd);
       final work = _parseWorkRow(authorName, rowHtml);
       if (work != null) {
@@ -156,7 +161,9 @@ class PioneerEllenWhiteAudioService {
     final fileAnchors = anchors.where(_isFileAnchor).toList(growable: false);
     for (var i = 0; i < fileAnchors.length; i++) {
       final rowStart = i == 0 ? 0 : fileAnchors[i - 1].end;
-      final rowEnd = i + 1 < fileAnchors.length ? fileAnchors[i + 1].start : sectionHtml.length;
+      final rowEnd = i + 1 < fileAnchors.length
+          ? fileAnchors[i + 1].start
+          : sectionHtml.length;
       final rowHtml = sectionHtml.substring(rowStart, rowEnd);
       final work = _parseWorkRow(authorName, rowHtml);
       if (work != null) {
@@ -166,10 +173,7 @@ class PioneerEllenWhiteAudioService {
     return works;
   }
 
-  PioneerSourceWork? _parseWorkRow(
-    String authorName,
-    String rowHtml,
-  ) {
+  PioneerSourceWork? _parseWorkRow(String authorName, String rowHtml) {
     final anchorPattern = RegExp(
       r'<a\b([^>]*)href="([^"]+)"([^>]*)>(.*?)</a>',
       caseSensitive: false,
@@ -211,7 +215,9 @@ class PioneerEllenWhiteAudioService {
     final titleStart = imageAnchor.end;
     final titleEnd = firstFileAnchor?.start ?? rowHtml.length;
     final rawTitle = _cleanText(rowHtml.substring(titleStart, titleEnd));
-    final title = rawTitle.isNotEmpty ? rawTitle : _titleFromUrl(epubUrl ?? pdfUrl ?? mobiUrl);
+    final title = rawTitle.isNotEmpty
+        ? rawTitle
+        : _titleFromUrl(epubUrl ?? pdfUrl ?? mobiUrl);
     if (title.isEmpty) return null;
 
     final hasEpub = epubUrl != null;
@@ -350,10 +356,7 @@ Future<String> _downloadHtml(Uri uri) async {
     );
     final response = await request.close();
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HttpException(
-        'Unexpected HTTP ${response.statusCode}',
-        uri: uri,
-      );
+      throw HttpException('Unexpected HTTP ${response.statusCode}', uri: uri);
     }
     final bytes = await _consolidateHttpClientResponseBytes(response);
     return utf8.decode(bytes);

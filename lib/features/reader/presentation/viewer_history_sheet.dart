@@ -19,8 +19,8 @@ class ViewerHistorySheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textStyle = Theme.of(context).textTheme.bodyLarge?.copyWith(
-          fontSize: (16 * fontScale).clamp(14.0, 22.0),
-        );
+      fontSize: (16 * fontScale).clamp(14.0, 22.0),
+    );
 
     return SafeArea(
       child: ListView.separated(
@@ -30,7 +30,8 @@ class ViewerHistorySheet extends StatelessWidget {
         itemBuilder: (context, index) {
           final entry = entries[index];
           final when = DateTime.fromMillisecondsSinceEpoch(entry.timestamp);
-          final ref = referencesByBlockId[entry.blockId] ?? 'Block ${entry.blockId}';
+          final ref =
+              referencesByBlockId[entry.blockId] ?? 'Block ${entry.blockId}';
           final stamp =
               '${when.month.toString().padLeft(2, '0')}/${when.day.toString().padLeft(2, '0')}/${(when.year % 100).toString().padLeft(2, '0')} ${_formatHour(when.hour)}:${when.minute.toString().padLeft(2, '0')} ${when.hour >= 12 ? 'PM' : 'AM'}';
 

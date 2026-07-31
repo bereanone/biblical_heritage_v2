@@ -90,10 +90,11 @@ class ELibraryDuplicateCleanupService {
           continue;
         }
 
-        final canonicalFiles = files
-            .where((file) => _isCanonicalManagedPath(file.path))
-            .toList(growable: false)
-          ..sort((left, right) => left.path.compareTo(right.path));
+        final canonicalFiles =
+            files
+                .where((file) => _isCanonicalManagedPath(file.path))
+                .toList(growable: false)
+              ..sort((left, right) => left.path.compareTo(right.path));
 
         if (canonicalFiles.isEmpty) {
           report.groupsWithoutCanonical += 1;
@@ -149,14 +150,20 @@ class ELibraryDuplicateCleanupService {
 
           final sourceSize = await file.length();
           final sourceHash = await _sha256ForFile(file);
-          final identical = sourceSize == (await canonicalFile.length()) &&
+          final identical =
+              sourceSize == (await canonicalFile.length()) &&
               sourceHash == canonicalHash;
           final quarantinePath = _uniqueQuarantinePath(
             rootPath: rootPath,
             sourcePath: file.path,
             suffix: identical ? 'duplicate' : 'conflict',
           );
-          await _copyVerified(file, File(quarantinePath), sourceSize, sourceHash);
+          await _copyVerified(
+            file,
+            File(quarantinePath),
+            sourceSize,
+            sourceHash,
+          );
           await file.delete();
           report.filesQuarantined += 1;
           if (identical) {
@@ -320,7 +327,8 @@ class ELibraryDuplicateCleanupService {
   }
 
   Future<String?> _writableLibraryRootPath() async {
-    final explicit = await LibraryRootService.instance.explicitLibraryRootPath();
+    final explicit = await LibraryRootService.instance
+        .explicitLibraryRootPath();
     if (explicit != null && explicit.trim().isNotEmpty) return explicit;
     return null;
   }

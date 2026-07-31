@@ -5,79 +5,6 @@ import 'viewer_reference_title.dart';
 import 'reader_tag_button.dart';
 import 'viewer_search_models.dart';
 
-// SBL-style abbreviations used on phone/narrow layouts.
-String _phoneBookAbbr(String bookName) {
-  const abbr = <String, String>{
-    'Genesis': 'Gen',
-    'Exodus': 'Exod',
-    'Leviticus': 'Lev',
-    'Numbers': 'Num',
-    'Deuteronomy': 'Deut',
-    'Joshua': 'Josh',
-    'Judges': 'Judg',
-    'Ruth': 'Ruth',
-    '1 Samuel': '1 Sam',
-    '2 Samuel': '2 Sam',
-    '1 Kings': '1 Kgs',
-    '2 Kings': '2 Kgs',
-    '1 Chronicles': '1 Chr',
-    '2 Chronicles': '2 Chr',
-    'Ezra': 'Ezra',
-    'Nehemiah': 'Neh',
-    'Esther': 'Esth',
-    'Job': 'Job',
-    'Psalms': 'Ps',
-    'Proverbs': 'Prov',
-    'Ecclesiastes': 'Eccl',
-    'Song of Solomon': 'Song',
-    'Isaiah': 'Isa',
-    'Jeremiah': 'Jer',
-    'Lamentations': 'Lam',
-    'Ezekiel': 'Ezek',
-    'Daniel': 'Dan',
-    'Hosea': 'Hos',
-    'Joel': 'Joel',
-    'Amos': 'Amos',
-    'Obadiah': 'Obad',
-    'Jonah': 'Jonah',
-    'Micah': 'Mic',
-    'Nahum': 'Nah',
-    'Habakkuk': 'Hab',
-    'Zephaniah': 'Zeph',
-    'Haggai': 'Hag',
-    'Zechariah': 'Zech',
-    'Malachi': 'Mal',
-    'Matthew': 'Matt',
-    'Mark': 'Mark',
-    'Luke': 'Luke',
-    'John': 'John',
-    'Acts': 'Acts',
-    'Romans': 'Rom',
-    '1 Corinthians': '1 Cor',
-    '2 Corinthians': '2 Cor',
-    'Galatians': 'Gal',
-    'Ephesians': 'Eph',
-    'Philippians': 'Phil',
-    'Colossians': 'Col',
-    '1 Thessalonians': '1 Thess',
-    '2 Thessalonians': '2 Thess',
-    '1 Timothy': '1 Tim',
-    '2 Timothy': '2 Tim',
-    'Titus': 'Titus',
-    'Philemon': 'Phlm',
-    'Hebrews': 'Heb',
-    'James': 'Jas',
-    '1 Peter': '1 Pet',
-    '2 Peter': '2 Pet',
-    '1 John': '1 John',
-    '2 John': '2 John',
-    '3 John': '3 John',
-    'Jude': 'Jude',
-    'Revelation': 'Rev',
-  };
-  return abbr[bookName] ?? bookName;
-}
-
 class ViewerTopBar extends StatelessWidget {
   const ViewerTopBar({
     super.key,
@@ -143,79 +70,23 @@ class ViewerTopBar extends StatelessWidget {
         ) ??
         const TextStyle(fontSize: 20, fontWeight: FontWeight.w700);
 
-    final shortName = _phoneBookAbbr(bookName);
-    final titleText =
-        verse != null ? '$shortName $chapter:$verse' : '$shortName $chapter';
+    final titleText = verse != null
+        ? '$bookName $chapter:$verse'
+        : '$bookName $chapter';
 
-    // Compute cluster widths for the one-row threshold check.
-    // Tag button size mirrors ReaderTagButtons' internal buttonExtent.
-    final tagButtonSize = presentationScaledSize(
-      context,
-      compact ? 40 : 42,
-      fontScale,
-      min: 40,
-      max: 52,
-    );
-    // Right cluster: # | Topics | !
-    final rightW = tagButtonSize + 4 + actionExtent + 4 + tagButtonSize;
-    // Left cluster: back + search + optional search-nav (estimated at 120px).
-    final leftW =
-        actionExtent * 2 + (_showBibleSearchNavigator ? 8 + 120.0 : 0);
-    const minTitleW = 60.0;
-
-    return LayoutBuilder(
-      builder: (ctx, constraints) {
-        final avail = constraints.maxWidth - 2 * inset;
-        final fitsOneRow = leftW + rightW + minTitleW <= avail;
-
-        return Material(
-          color: theme.colorScheme.surface,
-          child: SafeArea(
-            bottom: false,
-            child: fitsOneRow
-                ? _phoneSingleRow(
-                    ctx,
-                    actionExtent: actionExtent,
-                    inset: inset,
-                    iconSize: iconSize,
-                    titleStyle: titleStyle,
-                    titleText: titleText,
-                    compact: compact,
-                  )
-                : _phoneTwoRows(
-                    ctx,
-                    actionExtent: actionExtent,
-                    inset: inset,
-                    iconSize: iconSize,
-                    titleStyle: titleStyle,
-                    titleText: titleText,
-                    compact: compact,
-                  ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _phoneSingleRow(
-    BuildContext context, {
-    required double actionExtent,
-    required double inset,
-    required double iconSize,
-    required TextStyle titleStyle,
-    required String titleText,
-    required bool compact,
-  }) {
-    return SizedBox(
-      height: kToolbarHeight,
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: inset),
-        child: Row(
-          children: [
-            ..._leftButtons(context, actionExtent: actionExtent, iconSize: iconSize, compact: compact),
-            Expanded(child: _titleInkWell(titleText, titleStyle)),
-            ..._rightButtons(context, actionExtent: actionExtent, iconSize: iconSize),
-          ],
+    return Material(
+      key: const ValueKey('viewer-phone-two-row-toolbar'),
+      color: theme.colorScheme.surface,
+      child: SafeArea(
+        bottom: false,
+        child: _phoneTwoRows(
+          context,
+          actionExtent: actionExtent,
+          inset: inset,
+          iconSize: iconSize,
+          titleStyle: titleStyle,
+          titleText: titleText,
+          compact: compact,
         ),
       ),
     );
@@ -235,24 +106,34 @@ class ViewerTopBar extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
+          key: const ValueKey('viewer-phone-toolbar-row-1'),
           height: kToolbarHeight,
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: inset),
             child: Row(
               children: [
-                ..._leftButtons(context, actionExtent: actionExtent, iconSize: iconSize, compact: compact),
+                ..._leftButtons(
+                  context,
+                  actionExtent: actionExtent,
+                  iconSize: iconSize,
+                  compact: compact,
+                ),
                 Expanded(child: _titleInkWell(titleText, titleStyle)),
               ],
             ),
           ),
         ),
         SizedBox(
+          key: const ValueKey('viewer-phone-toolbar-row-2'),
           height: kToolbarHeight,
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: inset),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: _rightButtons(context, actionExtent: actionExtent, iconSize: iconSize),
+              children: _rightButtons(
+                context,
+                actionExtent: actionExtent,
+                iconSize: iconSize,
+              ),
             ),
           ),
         ),
@@ -268,6 +149,7 @@ class ViewerTopBar extends StatelessWidget {
   }) {
     return [
       IconButton(
+        key: const ValueKey('viewer-back-button'),
         constraints: BoxConstraints.tightFor(
           width: actionExtent,
           height: actionExtent,
@@ -277,6 +159,7 @@ class ViewerTopBar extends StatelessWidget {
         icon: Icon(Icons.arrow_back, size: iconSize),
       ),
       IconButton(
+        key: const ValueKey('viewer-search-button'),
         constraints: BoxConstraints.tightFor(
           width: actionExtent,
           height: actionExtent,
@@ -297,50 +180,97 @@ class ViewerTopBar extends StatelessWidget {
     ];
   }
 
-  // Right cluster for phone: # | Topics | !
+  // Equal-width cells spread the phone actions across the complete second row
+  // while preserving the wide toolbar order.
   List<Widget> _rightButtons(
     BuildContext context, {
     required double actionExtent,
     required double iconSize,
   }) {
+    Widget cell(String key, Widget child) {
+      return Expanded(
+        key: ValueKey(key),
+        child: Center(child: child),
+      );
+    }
+
     return [
-      ReaderTagButtons(
-        fontScale: fontScale,
-        activeFamily: activeFamily,
-        showStandard: true,
-        showDollar: false,
-        showRapid: false,
-        onStandardTap: onStandardTag,
-        onDollarTap: onDollarTag,
-        onRapidTap: onRapidTag,
-      ),
-      const SizedBox(width: 4),
-      IconButton(
-        constraints: BoxConstraints.tightFor(
-          width: actionExtent,
-          height: actionExtent,
+      cell(
+        'viewer-phone-action-cell-saved-presentations',
+        IconButton(
+          key: const ValueKey('viewer-saved-presentations-button'),
+          constraints: BoxConstraints.tightFor(
+            width: actionExtent,
+            height: actionExtent,
+          ),
+          padding: EdgeInsets.zero,
+          onPressed: onSavedPresentations,
+          icon: Icon(Icons.folder_open_outlined, size: iconSize),
+          tooltip: 'Saved Presentations',
         ),
-        padding: EdgeInsets.zero,
-        onPressed: onTopics,
-        icon: Icon(Icons.list_alt, size: iconSize),
-        tooltip: 'Topics',
       ),
-      const SizedBox(width: 4),
-      ReaderTagButtons(
-        fontScale: fontScale,
-        activeFamily: activeFamily,
-        showStandard: false,
-        showDollar: false,
-        showRapid: true,
-        onStandardTap: onStandardTag,
-        onDollarTap: onDollarTag,
-        onRapidTap: onRapidTag,
+      cell(
+        'viewer-phone-action-cell-presentation-setup',
+        IconButton(
+          key: const ValueKey('viewer-presentation-setup-button'),
+          constraints: BoxConstraints.tightFor(
+            width: actionExtent,
+            height: actionExtent,
+          ),
+          padding: EdgeInsets.zero,
+          onPressed: onDollarTag,
+          icon: Icon(Icons.slideshow_outlined, size: iconSize),
+          tooltip: 'Presentation Setup',
+        ),
+      ),
+      cell(
+        'viewer-phone-action-cell-standard-tag',
+        ReaderTagButtons(
+          fontScale: fontScale,
+          minimumButtonExtent: 44,
+          activeFamily: activeFamily,
+          showStandard: true,
+          showDollar: false,
+          showRapid: false,
+          onStandardTap: onStandardTag,
+          onDollarTap: onDollarTag,
+          onRapidTap: onRapidTag,
+        ),
+      ),
+      cell(
+        'viewer-phone-action-cell-topics',
+        IconButton(
+          key: const ValueKey('viewer-topics-button'),
+          constraints: BoxConstraints.tightFor(
+            width: actionExtent,
+            height: actionExtent,
+          ),
+          padding: EdgeInsets.zero,
+          onPressed: onTopics,
+          icon: Icon(Icons.list_alt, size: iconSize),
+          tooltip: 'Topics',
+        ),
+      ),
+      cell(
+        'viewer-phone-action-cell-rapid-tag',
+        ReaderTagButtons(
+          fontScale: fontScale,
+          minimumButtonExtent: 44,
+          activeFamily: activeFamily,
+          showStandard: false,
+          showDollar: false,
+          showRapid: true,
+          onStandardTap: onStandardTag,
+          onDollarTap: onDollarTag,
+          onRapidTap: onRapidTag,
+        ),
       ),
     ];
   }
 
   Widget _titleInkWell(String titleText, TextStyle titleStyle) {
     return InkWell(
+      key: const ValueKey('viewer-reference-control'),
       borderRadius: BorderRadius.circular(6),
       onTap: onChoosePassage,
       child: Padding(
@@ -359,7 +289,7 @@ class ViewerTopBar extends StatelessWidget {
   // ─── Wide layout (iPad / macOS) ───────────────────────────────────────────
 
   // Keeps the safe presLeft clamp from commit 256b35c.
-  // Presentation cluster (connected_tv + slideshow) is shown only here.
+  // Presentation cluster (saved presentations + setup) is shown only here.
   Widget _buildWide(BuildContext context) {
     final theme = Theme.of(context);
     const actionExtent = 48.0;
@@ -390,10 +320,14 @@ class ViewerTopBar extends StatelessWidget {
         final presClusterW = 2.0 * actionExtent + 8.0;
 
         // Safe clamp: narrow bars can produce lower > upper; clamp lower first.
-        final presClampMax =
-            (halfBar - presClusterW).clamp(0.0, double.infinity);
-        final presClampMin =
-            (24.0 + 2.0 * actionExtent + 8.0).clamp(0.0, presClampMax);
+        final presClampMax = (halfBar - presClusterW).clamp(
+          0.0,
+          double.infinity,
+        );
+        final presClampMin = (24.0 + 2.0 * actionExtent + 8.0).clamp(
+          0.0,
+          presClampMax,
+        );
         final presLeft = (halfBar - halfTitle - clusterGap - presClusterW)
             .clamp(presClampMin, presClampMax);
         final tagLeft = halfBar + halfTitle + clusterGap;
@@ -484,7 +418,10 @@ class ViewerTopBar extends StatelessWidget {
                             ),
                             padding: EdgeInsets.zero,
                             onPressed: onSavedPresentations,
-                            icon: Icon(Icons.connected_tv, size: iconSize),
+                            icon: Icon(
+                              Icons.folder_open_outlined,
+                              size: iconSize,
+                            ),
                             tooltip: 'Saved Presentations',
                           ),
                           const SizedBox(width: 8),

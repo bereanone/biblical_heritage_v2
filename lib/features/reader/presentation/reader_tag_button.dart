@@ -15,6 +15,7 @@ class ReaderTagButtons extends StatelessWidget {
     this.showStandard = true,
     this.showDollar = true,
     this.showRapid = true,
+    this.minimumButtonExtent = 40,
   });
 
   final double fontScale;
@@ -25,6 +26,7 @@ class ReaderTagButtons extends StatelessWidget {
   final bool showStandard;
   final bool showDollar;
   final bool showRapid;
+  final double minimumButtonExtent;
 
   @override
   Widget build(BuildContext context) {
@@ -35,7 +37,7 @@ class ReaderTagButtons extends StatelessWidget {
       context,
       isWide ? 44 : (compact ? 40 : 42),
       fontScale,
-      min: 40,
+      min: minimumButtonExtent,
       max: 52,
     );
     final glyphFontSize = presentationScaledSize(
@@ -138,10 +140,7 @@ class ReaderTagButtons extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: children,
-    );
+    return Row(mainAxisSize: MainAxisSize.min, children: children);
   }
 }
 

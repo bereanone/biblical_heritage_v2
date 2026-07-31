@@ -289,18 +289,17 @@ class ELibraryFileManagementService {
   }) async {
     final now = DateTime.now().toUtc().toIso8601String();
     for (final relativePath in removedRelativePaths) {
-      final rowResult = await ELibraryReadResolver.instance.readWithFallback<
-        List<Map<String, Object?>>
-      >(
-        read: (db) => db.query(
-          'library_items',
-          columns: const ['id'],
-          where: 'LOWER(relative_path) = ?',
-          whereArgs: [relativePath.toLowerCase()],
-          limit: 1,
-        ),
-        hasData: (rows) => rows.isNotEmpty,
-      );
+      final rowResult = await ELibraryReadResolver.instance
+          .readWithFallback<List<Map<String, Object?>>>(
+            read: (db) => db.query(
+              'library_items',
+              columns: const ['id'],
+              where: 'LOWER(relative_path) = ?',
+              whereArgs: [relativePath.toLowerCase()],
+              limit: 1,
+            ),
+            hasData: (rows) => rows.isNotEmpty,
+          );
       final rows = rowResult.value;
       if (rows.isEmpty) continue;
       final db = rowResult.database;

@@ -30,8 +30,7 @@ class ViewerInterlinearSettings {
       englishOrder: englishOrder ?? this.englishOrder,
       showEnglishGloss: showEnglishGloss ?? this.showEnglishGloss,
       showOriginalText: showOriginalText ?? this.showOriginalText,
-      showTransliteration:
-          showTransliteration ?? this.showTransliteration,
+      showTransliteration: showTransliteration ?? this.showTransliteration,
       showPronunciation: showPronunciation ?? this.showPronunciation,
       showStrongsNumber: showStrongsNumber ?? this.showStrongsNumber,
       showMorphology: showMorphology ?? this.showMorphology,

@@ -37,6 +37,9 @@ void main() {
     );
 
     expect(combined, hasLength(2));
-    expect(combined.map((reference) => reference.bookId), containsAll(<int>[43, 62]));
+    expect(
+      combined.map((reference) => reference.bookId),
+      containsAll(<int>[43, 62]),
+    );
   });
 }

@@ -26,8 +26,7 @@ extension _ViewerBodyHelpers on _ViewerBodyState {
     if (positions.isEmpty) return false;
     for (final position in positions) {
       if (position.index != targetIndex) continue;
-      final center =
-          (position.itemLeadingEdge + position.itemTrailingEdge) / 2;
+      final center = (position.itemLeadingEdge + position.itemTrailingEdge) / 2;
       return (center - 0.5).abs() <= tolerance;
     }
     return false;
@@ -75,8 +74,7 @@ extension _ViewerBodyHelpers on _ViewerBodyState {
             _lastScrolledBlockId = blockId;
             return;
           }
-          final shouldCenter =
-              !isVisible || !_isVerseNearCenter(blockId);
+          final shouldCenter = !isVisible || !_isVerseNearCenter(blockId);
           if (shouldCenter) {
             _suppressUserScroll = true;
             try {

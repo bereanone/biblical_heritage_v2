@@ -24,12 +24,7 @@ List<ViewerRenderItem> resolveViewerRenderItems(
     final headings = headingsByBlockId[blockId] ?? const <String>[];
     for (final heading in headings) {
       if (heading.trim().isEmpty) continue;
-      items.add(
-        ViewerHeadingItem(
-          blockId: blockId,
-          text: heading,
-        ),
-      );
+      items.add(ViewerHeadingItem(blockId: blockId, text: heading));
     }
     items.add(ViewerVerseItem(line: line));
   }

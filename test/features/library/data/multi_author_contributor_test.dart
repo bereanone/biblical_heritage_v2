@@ -771,7 +771,8 @@ void main() {
         final result = await PioneerTextImportService()
             .importHtmlCaptureFolders(
               [preview],
-              existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+              existingImportPolicy:
+                  PioneerExistingImportPolicy.overwriteExisting,
             );
         expect(
           result.importedCount,

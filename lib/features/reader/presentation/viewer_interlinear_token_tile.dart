@@ -25,29 +25,36 @@ class ViewerInterlinearTokenTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final englishText =
         (token.english.trim().isNotEmpty && token.english != '.')
-            ? token.english.replaceAll('-', '\u2011')
-            : ' ';
+        ? token.english.replaceAll('-', '\u2011')
+        : ' ';
     final originalText =
         (token.original.trim().isNotEmpty && token.original != '.')
-            ? token.original
-            : ' ';
-    final transliterationText =
-        token.transliteration.trim().isNotEmpty ? token.transliteration : ' ';
-    final pronunciationText =
-        token.pronunciation.trim().isNotEmpty ? token.pronunciation : ' ';
-    final strongsText =
-        token.strongsNumber.trim().isNotEmpty ? token.strongsNumber : ' ';
+        ? token.original
+        : ' ';
+    final transliterationText = token.transliteration.trim().isNotEmpty
+        ? token.transliteration
+        : ' ';
+    final pronunciationText = token.pronunciation.trim().isNotEmpty
+        ? token.pronunciation
+        : ' ';
+    final strongsText = token.strongsNumber.trim().isNotEmpty
+        ? token.strongsNumber
+        : ' ';
     final morphologyText = token.morphology.trim();
     final canOpenStrongs = token.strongsNumber.trim().isNotEmpty;
     final linkColor = Theme.of(context).colorScheme.primary;
     final linkedOriginalStyle = originalStyle.copyWith(
       color: canOpenStrongs ? linkColor : originalStyle.color,
-      decoration: canOpenStrongs ? TextDecoration.underline : TextDecoration.none,
+      decoration: canOpenStrongs
+          ? TextDecoration.underline
+          : TextDecoration.none,
       decorationColor: canOpenStrongs ? linkColor : null,
     );
     final linkedMetaStyle = metaStyle.copyWith(
       color: canOpenStrongs ? linkColor : metaStyle.color,
-      decoration: canOpenStrongs ? TextDecoration.underline : TextDecoration.none,
+      decoration: canOpenStrongs
+          ? TextDecoration.underline
+          : TextDecoration.none,
       decorationColor: canOpenStrongs ? linkColor : null,
       fontWeight: canOpenStrongs ? FontWeight.w700 : metaStyle.fontWeight,
     );
@@ -64,11 +71,7 @@ class ViewerInterlinearTokenTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           if (settings.showEnglishGloss)
-            Text(
-              englishText,
-              style: englishStyle,
-              textAlign: TextAlign.center,
-            ),
+            Text(englishText, style: englishStyle, textAlign: TextAlign.center),
           if (settings.showOriginalText)
             GestureDetector(
               onTap: canOpenStrongs ? open : null,
@@ -116,10 +119,7 @@ class ViewerInterlinearTokenTile extends StatelessWidget {
 }
 
 class _MorphologyBubble extends StatelessWidget {
-  const _MorphologyBubble({
-    required this.morphology,
-    required this.style,
-  });
+  const _MorphologyBubble({required this.morphology, required this.style});
 
   final String morphology;
   final TextStyle style;
@@ -136,11 +136,7 @@ class _MorphologyBubble extends StatelessWidget {
         color: _morphColor(compact),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Text(
-        compact,
-        style: style,
-        textAlign: TextAlign.center,
-      ),
+      child: Text(compact, style: style, textAlign: TextAlign.center),
     );
   }
 }

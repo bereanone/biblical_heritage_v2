@@ -14,6 +14,7 @@ import 'package:studybible2/features/library/data/library_contributor.dart';
 import 'package:studybible2/features/library/data/library_recent_items.dart';
 import 'package:studybible2/features/reader/data/commentary_research_library_service.dart';
 import 'package:studybible2/features/utilities/data/pioneer_capture_folder_metadata.dart';
+import 'package:studybible2/features/utilities/data/pioneer_book_package_import_service.dart';
 import 'package:studybible2/features/utilities/data/pioneer_captured_html_import_availability_service.dart';
 import 'package:studybible2/features/utilities/data/pioneer_captured_html_import_review_store.dart';
 import 'package:studybible2/features/utilities/data/pioneer_captured_html_import_folder_service.dart';
@@ -730,6 +731,92 @@ void main() {
   );
 
   test(
+    'real production SSP package makes Chapter III compose its Ephesus body',
+    () async {
+      final package = File(
+        p.join(
+          Directory.current.path,
+          'recovery_backups',
+          '20260713_124503_pre_tilt_banner_install_iphone_container',
+          'Library',
+          'Caches',
+          'FilesProviderImports',
+          '49EBC255-CC3C-4936-ABE6-C408FEA70753-SSP.studybook',
+        ),
+      );
+      expect(
+        package.existsSync(),
+        isTrue,
+        reason: 'The read-only production SSP package fixture is required.',
+      );
+      final sourceBytes = await package.readAsBytes();
+      final sourceModified = (await package.stat()).modified;
+
+      final unpacked = await PioneerBookPackageImportService.instance
+          .importPackage(package.path);
+      final report = await PioneerCapturedHtmlImportFolderService.instance
+          .importConfiguredCloudFolder(
+            selectedFolderPaths: <String>[unpacked.destinationFolderPath],
+            archiveImportedFolders: false,
+            existingImportPolicy: PioneerExistingImportPolicy.overwriteExisting,
+          );
+      expect(
+        _successfulCloudImportCount(report),
+        1,
+        reason: report.entries
+            .map((entry) => '${entry.importStatus}: ${entry.reason}')
+            .join('\n'),
+      );
+      final itemId = report.entries.single.libraryItemId!;
+      final db = await ELibraryDatabase.instance.database;
+      final chapterRows = await db.query(
+        'library_navigation_items',
+        where: 'library_item_id = ? AND label = ?',
+        whereArgs: <Object?>[
+          itemId,
+          'CHAPTER III. THE MESSAGE TO THE CHURCHES.',
+        ],
+        orderBy: 'sort_order ASC',
+      );
+      expect(chapterRows, hasLength(2));
+      final chapter = chapterRows.first;
+      final chapterHref = chapter['href']!.toString();
+      expect(
+        await _countRows(
+          db,
+          'library_text_blocks',
+          where: 'library_item_id = ? AND epub_href = ?',
+          whereArgs: <Object?>[itemId, chapterHref],
+        ),
+        0,
+      );
+
+      final descendants = await db.query(
+        'library_navigation_items',
+        where: 'library_item_id = ? AND parent_id = ?',
+        whereArgs: <Object?>[itemId, chapter['id']],
+        orderBy: 'sort_order ASC',
+      );
+      expect(descendants, isNotEmpty);
+      expect(descendants.first['label'], 'EPHESUS.');
+      expect(descendants.first['depth'], 1);
+      expect(descendants.first['content_kind'], 'body_subsection');
+      expect(
+        await _countRows(
+          db,
+          'library_text_blocks',
+          where: 'library_item_id = ? AND epub_href = ?',
+          whereArgs: <Object?>[itemId, descendants.first['href']],
+        ),
+        greaterThan(0),
+      );
+
+      expect(await package.readAsBytes(), sourceBytes);
+      expect((await package.stat()).modified, sourceModified);
+    },
+  );
+
+  test(
     'resolves FP187 through the catalog instead of importing a copied-range blob',
     () async {
       final folder = await _createCaptureClipperFolder(
@@ -898,6 +985,47 @@ void main() {
       expect(repairedItem!.displayTitle, 'The Story of the Seer of Patmos');
       expect(repairedItem.displayAuthor, 'S. N. Haskell');
       expect(folder.existsSync(), isTrue);
+    },
+  );
+
+  test(
+    'imports an explicitly selected app-managed package without a configured cloud root',
+    () async {
+      final managedRoot = Directory(
+        p.join(
+          supportDir.path,
+          PioneerCapturedHtmlImportFolderService.managedImportFolderName,
+        ),
+      );
+      final folder = await _createCaptureFolder(
+        root: managedRoot,
+        folderName: 'WOR',
+        title: 'SSP',
+        abbreviation: 'SSP',
+        workId: 'managed_package_ssp',
+        sourceUrl: 'https://example.invalid/ssp-managed-package',
+        authorName: 'Unknown',
+        bodyHtml: _sspImportHtml,
+        underBooksRoot: false,
+      );
+
+      final report = await PioneerCapturedHtmlImportFolderService.instance
+          .importConfiguredCloudFolder(selectedFolderPaths: [folder.path]);
+
+      expect(report.rootPath, managedRoot.path);
+      expect(report.entries, hasLength(1));
+      expect(report.entries.single.imported, isTrue);
+      expect(report.entries.single.libraryItemId, isNotEmpty);
+      expect(
+        await LibraryCatalogService.instance.loadItemById(
+          report.entries.single.libraryItemId!,
+        ),
+        isNotNull,
+      );
+      expect(
+        await LocalSettingsStore.instance.loadPioneerCapturedHtmlFolderPath(),
+        isNull,
+      );
     },
   );
 
@@ -2408,6 +2536,135 @@ CIS 247.2</p>
       );
     },
   );
+
+  test(
+    'imports recovered LOF schema-2 HTML without EGW paragraph ref codes',
+    () async {
+      final folder = Directory(p.join(captureRootDir.path, 'LOF'));
+      await folder.create(recursive: true);
+      await File(p.join(folder.path, 'manifest.json')).writeAsString('''
+{
+  "schemaVersion": 2,
+  "workId": "LOF",
+  "packageId": "recovered-ipad-index:LOF",
+  "contentHash": "e91fbee2b635f83480ea77a10386b34d2973f4933c7980a5441a2421690bc6e2",
+  "captureMode": "recovered-indexed-text",
+  "title": "Lessons on Faith",
+  "author": "A. T. Jones and E. J. Waggoner",
+  "shortCode": "LOF",
+  "imageCount": 0,
+  "htmlFile": "capture.html"
+}
+''');
+      await File(p.join(folder.path, 'capture.html')).writeAsString('''
+<!doctype html>
+<html>
+  <head><title>Lessons on Faith</title></head>
+  <body>
+    <main>
+      <h1>Lessons on Faith</h1>
+      <p><strong>A. T. Jones and E. J. Waggoner</strong></p>
+      <h2>Chapter 1 — Living By Faith</h2>
+      <p data-spine="1" data-paragraph="1">
+        The just shall live by faith. This recovered paragraph has no LOF
+        reference-code suffix.
+      </p>
+      <h2>Chapter 2 — Lessons On Faith</h2>
+      <p data-spine="2" data-paragraph="1">
+        Without faith it is impossible to please God.
+      </p>
+    </main>
+  </body>
+</html>
+''');
+
+      final report = await PioneerCapturedHtmlImportFolderService.instance
+          .scanFolder(folderPath: folder.path, importFiles: true);
+
+      expect(report.files, hasLength(1));
+      final imported = report.files.single;
+      expect(imported.status, PioneerCapturedHtmlFileStatus.imported);
+      expect(imported.title, 'Lessons on Faith');
+      expect(imported.libraryItemId, isNotNull);
+      expect(imported.sectionCount, greaterThanOrEqualTo(2));
+      expect(imported.coverImported, isTrue);
+      expect(imported.coverImagePath, isNotNull);
+
+      final catalogItem = await LibraryCatalogService.instance.loadItemById(
+        imported.libraryItemId!,
+      );
+      expect(catalogItem, isNotNull);
+      expect(catalogItem!.displayTitle, 'Lessons on Faith');
+      expect(catalogItem.coverPath, isNotNull);
+      expect(File(catalogItem.coverPath!).existsSync(), isTrue);
+
+      final searchResults = await LibraryCatalogService.instance.searchContent(
+        query: 'recovered paragraph',
+        collectionFilter: 'adventist_pioneer_library',
+      );
+      expect(
+        searchResults.any((result) => result.item.id == imported.libraryItemId),
+        isTrue,
+      );
+    },
+  );
+
+  test('imports recovered DAR HTML with the catalog front cover', () async {
+    final folder = Directory(p.join(captureRootDir.path, 'DAR'));
+    await folder.create(recursive: true);
+    await File(p.join(folder.path, 'manifest.json')).writeAsString('''
+{
+  "schemaVersion": 2,
+  "workId": "DAR",
+  "packageId": "recovered-ipad-index:DAR",
+  "contentHash": "a91fbee2b635f83480ea77a10386b34d2973f4933c7980a5441a2421690bc6e2",
+  "captureMode": "recovered-indexed-text",
+  "title": "Daniel and the Revelation",
+  "author": "Uriah Smith",
+  "shortCode": "DAR",
+  "imageCount": 0,
+  "htmlFile": "capture.html"
+}
+''');
+    await File(p.join(folder.path, 'capture.html')).writeAsString('''
+<!doctype html>
+<html>
+  <head><title>Daniel and the Revelation</title></head>
+  <body>
+    <main>
+      <h1>Daniel and the Revelation</h1>
+      <p><strong>Uriah Smith</strong></p>
+      <h2>Chapter 1 — The Prophecies of Daniel</h2>
+      <p data-spine="1" data-paragraph="1">
+        The prophetic record opens with Daniel in Babylon.
+      </p>
+      <h2>Chapter 2 — The Great Image</h2>
+      <p data-spine="2" data-paragraph="1">
+        The image revealed the course of earthly kingdoms.
+      </p>
+    </main>
+  </body>
+</html>
+''');
+
+    final report = await PioneerCapturedHtmlImportFolderService.instance
+        .scanFolder(folderPath: folder.path, importFiles: true);
+
+    expect(report.files, hasLength(1));
+    final imported = report.files.single;
+    expect(imported.status, PioneerCapturedHtmlFileStatus.imported);
+    expect(imported.title, 'Daniel and the Revelation');
+    expect(imported.coverImported, isTrue);
+    expect(imported.libraryItemId, isNotNull);
+
+    final catalogItem = await LibraryCatalogService.instance.loadItemById(
+      imported.libraryItemId!,
+    );
+    expect(catalogItem, isNotNull);
+    expect(catalogItem!.displayTitle, 'Daniel and the Revelation');
+    expect(catalogItem.coverPath, isNotNull);
+    expect(File(catalogItem.coverPath!).existsSync(), isTrue);
+  });
 
   test(
     'discovers ready CaptureClipper folders without touching source folders',

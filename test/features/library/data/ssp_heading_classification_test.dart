@@ -53,20 +53,28 @@ void main() {
 
   tearDownAll(() async => db.close());
 
-  test('fixture is unchanged and conversion is isolated version 3', () async {
-    for (final entry in _hashes.entries) {
+  test(
+    'fixture is unchanged and conversion is isolated at the current version',
+    () async {
+      for (final entry in _hashes.entries) {
+        expect(
+          sha256
+              .convert(
+                await File(p.join(_fixtureRoot, entry.key)).readAsBytes(),
+              )
+              .toString(),
+          entry.value,
+        );
+      }
+      expect(db.path, startsWith(temporaryRoot.path));
+      final conversion = await db.query('library_document_conversion');
       expect(
-        sha256
-            .convert(await File(p.join(_fixtureRoot, entry.key)).readAsBytes())
-            .toString(),
-        entry.value,
+        conversion.single['canonicalizer_version'],
+        LibraryDocumentCanonicalizer.version,
       );
-    }
-    expect(db.path, startsWith(temporaryRoot.path));
-    final conversion = await db.query('library_document_conversion');
-    expect(conversion.single['canonicalizer_version'], 3);
-    expect(conversion.single['status'], 'complete');
-  });
+      expect(conversion.single['status'], 'complete');
+    },
+  );
 
   test('SSP roles preserve 24 chapters and legitimate structural headings', () {
     final headings = blocks.where((block) => block.isHeading).toList();

@@ -86,9 +86,8 @@ class PioneerCapturedHtmlImportReviewEntry {
 }
 
 class PioneerCapturedHtmlImportReviewStore {
-  PioneerCapturedHtmlImportReviewStore({
-    LocalSettingsStore? settingsStore,
-  }) : _settingsStore = settingsStore ?? LocalSettingsStore.instance;
+  PioneerCapturedHtmlImportReviewStore({LocalSettingsStore? settingsStore})
+    : _settingsStore = settingsStore ?? LocalSettingsStore.instance;
 
   static final PioneerCapturedHtmlImportReviewStore instance =
       PioneerCapturedHtmlImportReviewStore();

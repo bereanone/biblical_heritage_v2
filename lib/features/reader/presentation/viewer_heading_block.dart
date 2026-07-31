@@ -34,11 +34,7 @@ class ViewerHeadingBlock extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           color: theme.colorScheme.surfaceContainerHigh,
           child: Center(
-            child: Text(
-              text,
-              textAlign: TextAlign.center,
-              style: style,
-            ),
+            child: Text(text, textAlign: TextAlign.center, style: style),
           ),
         ),
       ),

@@ -4,11 +4,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'elibrary_database.dart';
 import 'user_database.dart';
 
-enum ELibraryReadSource {
-  eLibraryDb,
-  userDbFallback,
-  empty,
-}
+enum ELibraryReadSource { eLibraryDb, userDbFallback, empty }
 
 class ELibraryReadResult<T> {
   const ELibraryReadResult({
@@ -104,12 +100,10 @@ class ELibraryReadResolver {
       debugPrintStack(stackTrace: stackTrace);
     }
 
-    final Database fallbackDb = await (
-      fallbackDatabase ?? this.fallbackDatabase()
-    );
+    final Database fallbackDb =
+        await (fallbackDatabase ?? this.fallbackDatabase());
     final fallbackResult = await read(fallbackDb);
-    final source =
-        hasData(fallbackResult)
+    final source = hasData(fallbackResult)
         ? ELibraryReadSource.userDbFallback
         : ELibraryReadSource.empty;
     return ELibraryReadResult<T>(

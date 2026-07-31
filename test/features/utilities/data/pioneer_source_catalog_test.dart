@@ -17,11 +17,15 @@ void main() {
       );
       expect(danielAndTheRevelation, isNotNull);
       expect(danielAndTheRevelation!.abbreviation, 'DAR');
+      expect(
+        danielAndTheRevelation.coverImagePath,
+        'assets/library_covers/thumbs/DAR.png',
+      );
       expect(danielAndTheRevelation.sourceTypeLabel, 'EGW Reader Capture');
       expect(danielAndTheRevelation.sourceSiteLabel, 'EGW Writings');
       expect(danielAndTheRevelation.launchUrl, contains('egwwritings.org'));
       expect(danielAndTheRevelation.textCaptureStatus.label, 'Capture needed');
-      expect(danielAndTheRevelation.isImportable, isFalse);
+      expect(danielAndTheRevelation.isImportable, isTrue);
       expect(danielAndTheRevelation.compactImportStatusLabel, 'Capture needed');
       expect(
         danielAndTheRevelation.effectiveSourceCandidates
@@ -36,6 +40,13 @@ void main() {
       expect(
         danielAndTheRevelation.stableLibraryItemId,
         'library_item_research_pioneer_uriah_smith_daniel_and_the_revelation',
+      );
+
+      final lessonsOnFaith = catalog.workById('lessons_on_faith');
+      expect(lessonsOnFaith, isNotNull);
+      expect(
+        lessonsOnFaith!.coverImagePath,
+        'assets/library_covers/thumbs/LOF_ATJ.png',
       );
 
       final crossAndShadow = catalog.workById('the_cross_and_its_shadow');
@@ -88,6 +99,30 @@ void main() {
     expect(work.fallbackCoverLabel, 'TAP');
     expect(work.launchUrl, 'https://egwwritings.org/read?panels=p1200.2');
     expect(work.textCaptureStatus, PioneerTextCaptureStatus.captureNeeded);
+  });
+
+  test('matches local Pioneer EPUB filenames to catalog works', () async {
+    final catalog = await PioneerSourceCatalog.load();
+
+    expect(
+      matchPioneerWorkForLocalEpub(catalog, '/CloudFiles/DAR1897.epub')?.id,
+      'daniel_and_the_revelation',
+    );
+    expect(
+      matchPioneerWorkForLocalEpub(
+        catalog,
+        '/CloudFiles/Daniel and the Revelation.epub',
+      )?.id,
+      'daniel_and_the_revelation',
+    );
+    expect(
+      matchPioneerWorkForLocalEpub(catalog, '/CloudFiles/LOF.epub')?.id,
+      'lessons_on_faith',
+    );
+    expect(
+      matchPioneerWorkForLocalEpub(catalog, '/CloudFiles/unknown.epub'),
+      isNull,
+    );
   });
 
   test('captured text source is importable and selected for import', () {
@@ -155,7 +190,7 @@ void main() {
     );
   });
 
-  test('direct file candidates are hidden from source preference', () {
+  test('verified direct EPUB candidates are available for import', () {
     final catalog = PioneerSourceCatalog.fromJson({
       'authors': [
         {
@@ -201,7 +236,8 @@ void main() {
     final work = catalog.workById('daniel_and_the_revelation')!;
     expect(work.preferredSourceCandidate!.providerLabel, 'EGW Writings');
     expect(work.sourceTypeLabel, 'EGW Reader Capture');
-    expect(work.preferredImportCandidate, isNull);
+    expect(work.preferredImportCandidate, isNotNull);
+    expect(work.preferredImportCandidate!.sourceType, 'epubZipEntry');
     expect(work.compactImportStatusLabel, 'Capture needed');
   });
 

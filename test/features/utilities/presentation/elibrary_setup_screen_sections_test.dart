@@ -106,17 +106,21 @@ void main() {
     var packageCount = 0;
     var capturedCount = 0;
     var locationCount = 0;
+    var downloadCount = 0;
 
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: CaptureClipperImportsSection(
+            isIOS: false,
             statusLabel: '✓ Import location is ready',
             helperText:
                 'Import CaptureClipper book packages or captured books into the Pioneer library.',
             disableActions: false,
-            onImportBookPackage: () => packageCount += 1,
-            onImportCapturedBooks: () => capturedCount += 1,
+            onCheckForNewBooks: () => packageCount += 1,
+            onDownloadPioneerBooks: () => downloadCount += 1,
+            onImportBookPackage: () => capturedCount += 1,
+            onImportCapturedBooks: _noop,
             onChangeImportLocation: () => locationCount += 1,
             lastCheckedLabel: 'Last checked:\nPioneers\nToday',
           ),
@@ -127,24 +131,110 @@ void main() {
     expect(find.text('✓ Import location is ready'), findsOneWidget);
     expect(
       find.text(
-        'Choose Pioneers.studycollection from the Collections folder in your cloud storage. StudyBible2 will show new and updated books before importing anything.',
+        'Get missing Pioneer books from verified public sources, or choose Pioneers.studycollection from the Collections folder in your cloud storage. StudyBible2 shows what will change before importing.',
       ),
       findsOneWidget,
     );
     expect(find.textContaining('/private/var'), findsNothing);
     expect(find.text('Last checked:\nPioneers\nToday'), findsOneWidget);
     expect(find.text('Check for New Books'), findsOneWidget);
+    expect(find.text('Get Pioneer Books Online'), findsOneWidget);
     expect(find.text('Import One Book Package'), findsOneWidget);
-    expect(find.text('Change Import Location'), findsNothing);
+    expect(find.text('Choose CloudFiles Folder'), findsOneWidget);
 
     await tester.tap(find.text('Check for New Books'));
+    await tester.tap(find.text('Get Pioneer Books Online'));
     await tester.tap(find.text('Import One Book Package'));
     await tester.pump();
 
     expect(packageCount, 1);
+    expect(downloadCount, 1);
     expect(capturedCount, 1);
     expect(locationCount, 0);
   });
+
+  testWidgets('iOS uses copied package and file imports without folder roots', (
+    tester,
+  ) async {
+    var downloadCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CaptureClipperImportsSection(
+            isIOS: true,
+            statusLabel: 'Ready to import',
+            helperText: 'Local copied imports',
+            disableActions: false,
+            onCheckForNewBooks: _noop,
+            onDownloadPioneerBooks: () => downloadCount += 1,
+            onImportBookPackage: _noop,
+            onImportCapturedBooks: _noop,
+            onChangeImportLocation: _noop,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Get Pioneer Books Online'), findsOneWidget);
+    expect(find.text('Import StudyBible Book'), findsOneWidget);
+    expect(find.text('Import CaptureClipper Files'), findsOneWidget);
+    expect(find.text('Choose CloudFiles Folder'), findsNothing);
+    expect(find.textContaining('persistent'), findsNothing);
+    expect(
+      find.text(
+        'Get available Pioneer books from verified public sources, or choose a book package from OneDrive, iCloud Drive, or another Files location. StudyBible copies it locally so it remains available offline.',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Get Pioneer Books Online'));
+    expect(downloadCount, 1);
+  });
+
+  testWidgets(
+    'Android offers online Pioneer books and separate copy-based package imports',
+    (tester) async {
+      var downloadCount = 0;
+      var collectionCount = 0;
+      var bookCount = 0;
+      var locationCount = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CaptureClipperImportsSection(
+              isIOS: false,
+              isAndroid: true,
+              statusLabel: 'Ready',
+              helperText: 'Android Pioneer books',
+              disableActions: false,
+              onCheckForNewBooks: () => collectionCount += 1,
+              onDownloadPioneerBooks: () => downloadCount += 1,
+              onImportBookPackage: () => bookCount += 1,
+              onImportCapturedBooks: _noop,
+              onChangeImportLocation: () => locationCount += 1,
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Get Pioneer Books Online'), findsOneWidget);
+      expect(find.text('Import Pioneer Collection'), findsOneWidget);
+      expect(find.text('Import One Pioneer Book'), findsOneWidget);
+      expect(find.text('Choose CloudFiles Folder'), findsNothing);
+      expect(find.textContaining('Pioneers.studycollection'), findsOneWidget);
+      expect(find.textContaining('.studybook'), findsOneWidget);
+
+      await tester.tap(find.text('Get Pioneer Books Online'));
+      await tester.tap(find.text('Import Pioneer Collection'));
+      await tester.tap(find.text('Import One Pioneer Book'));
+
+      expect(downloadCount, 1);
+      expect(collectionCount, 1);
+      expect(bookCount, 1);
+      expect(locationCount, 0);
+    },
+  );
 
   testWidgets(
     'install collections section hides empty estimates and uses compact labels',
@@ -430,6 +520,7 @@ void main() {
           body: ListView(
             children: [
               ELibrarySetupAdvancedSection(
+                isIOS: false,
                 selection: selection,
                 captureFolderPath:
                     '/private/var/mobile/Containers/Data/Application/DEF/Documents/ImportedCaptureClipper',
@@ -594,30 +685,44 @@ void main() {
     expect(removeAllCount, 1);
   });
 
-  testWidgets('needs attention card still renders the compact summary', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: LibraryNeedsAttentionCard(
-            items: const [
-              LibraryNeedsAttentionEntry(
-                title: 'Broken book',
-                fileName: 'broken-book.epub',
-                reason: 'No readable text content found',
-              ),
-            ],
+  testWidgets(
+    'set-aside books render as a compact notice with dialog details',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LibraryNeedsAttentionCard(
+              items: const [
+                LibraryNeedsAttentionEntry(
+                  title: 'Broken book',
+                  fileName: 'broken-book.epub',
+                  reason: 'No readable text content found',
+                ),
+              ],
+            ),
           ),
         ),
-      ),
-    );
+      );
 
-    expect(find.text('1 book needs attention'), findsOneWidget);
-    expect(find.text('Broken book'), findsNothing);
-    expect(find.text('No readable book content was found.'), findsNothing);
-    expect(find.text('Review Details'), findsOneWidget);
-  });
+      expect(find.text('1 unreadable book set aside'), findsOneWidget);
+      expect(
+        find.text('Hidden from the library; original files were preserved.'),
+        findsOneWidget,
+      );
+      expect(find.text('Broken book'), findsNothing);
+      expect(find.text('No readable book content was found.'), findsNothing);
+      expect(find.text('Review'), findsOneWidget);
+
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Broken book'), findsOneWidget);
+      expect(
+        find.text('Reason: No readable book content was found.'),
+        findsOneWidget,
+      );
+    },
+  );
 }
 
 void _noop() {}

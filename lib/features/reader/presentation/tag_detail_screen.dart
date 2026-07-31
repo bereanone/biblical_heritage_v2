@@ -14,6 +14,7 @@ import '../../../core/theme/app_settings_service.dart';
 import '../../library/data/library_catalog_service.dart';
 import '../../library/data/library_citation_display_helper.dart';
 import '../../library/presentation/library_book_reader_screen.dart';
+import '../../library/presentation/library_item_open_guard.dart';
 import '../data/presentation/presentation_models.dart';
 import '../data/presentation/presentation_text_format.dart';
 import 'presentation_prep/presentation_ui_helpers.dart';
@@ -1291,6 +1292,8 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       );
       if (item != null) {
         if (!mounted) return;
+        if (!await ensureLibraryItemOpenable(context, item)) return;
+        if (!mounted) return;
         final navigator = Navigator.of(context, rootNavigator: true);
         navigator.pop();
         await Future<void>.microtask(() {
@@ -1364,6 +1367,158 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                 final displayTag = _resolvedCategory != null
                     ? '${widget.tag} · ${_resolvedCategory!}'
                     : widget.tag;
+                Widget buildTitle({bool includeCount = true}) => Text(
+                  includeCount
+                      ? '$displayTag · ${_entries.length}'
+                      : displayTag,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: presentationTextStyle(
+                    context,
+                    theme.textTheme.titleLarge,
+                    widget.fontScale,
+                    fontSize: 18,
+                    color: titleColor,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.2,
+                    height: 1.0,
+                    minFontSize: 18,
+                    maxFontSize: 26,
+                  ),
+                );
+                if (compactHeader) {
+                  const phoneActionSize = 44.0;
+                  Widget phoneAction({
+                    required IconData icon,
+                    required String label,
+                    required String tooltip,
+                    required VoidCallback? onPressed,
+                    Color? foregroundColor,
+                  }) => SizedBox(
+                    height: phoneActionSize,
+                    child: _HeaderActionChip(
+                      icon: icon,
+                      label: label,
+                      tooltip: tooltip,
+                      onPressed: onPressed,
+                      foregroundColor:
+                          foregroundColor ?? headerButtonForeground,
+                      phoneCompact: true,
+                    ),
+                  );
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(child: buildTitle(includeCount: false)),
+                          Text(
+                            '· ${_entries.length}',
+                            key: const ValueKey('phone-tag-item-count'),
+                            style: presentationTextStyle(
+                              context,
+                              theme.textTheme.titleLarge,
+                              widget.fontScale,
+                              fontSize: 18,
+                              color: titleColor,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.2,
+                              height: 1.0,
+                              minFontSize: 18,
+                              maxFontSize: 26,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            onPressed: _closeDetail,
+                            icon: const Icon(Icons.close),
+                            color: titleColor,
+                            constraints: const BoxConstraints.tightFor(
+                              width: phoneActionSize,
+                              height: phoneActionSize,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Column(
+                        key: const ValueKey('phone-tag-toolbar-wrap'),
+                        children: [
+                          Wrap(
+                            spacing: 4,
+                            children: [
+                              phoneAction(
+                                icon: defaultActive
+                                    ? Icons.check_circle
+                                    : Icons.check_circle_outline,
+                                label: 'Default',
+                                tooltip: defaultActive
+                                    ? 'Current default tag'
+                                    : 'Set as default tag',
+                                onPressed: _makeDefault,
+                              ),
+                              phoneAction(
+                                icon: Icons.help_outline,
+                                label: 'Info',
+                                tooltip: 'Show instructions',
+                                onPressed: _showInstructions,
+                              ),
+                              phoneAction(
+                                icon: Icons.note_add_outlined,
+                                label: 'Add',
+                                tooltip: _isDollarRepository
+                                    ? 'Add Note Slide'
+                                    : 'Add Content Item',
+                                onPressed: _isDollarRepository
+                                    ? _addNoteSlide
+                                    : _addContentItem,
+                              ),
+                              phoneAction(
+                                icon: Icons.slideshow_rounded,
+                                label: 'Presentation',
+                                tooltip: 'Presentation Mode',
+                                onPressed: focusedEntry == null
+                                    ? null
+                                    : _openPresentationMode,
+                              ),
+                            ],
+                          ),
+                          Wrap(
+                            spacing: 4,
+                            children: [
+                              phoneAction(
+                                icon: Icons.arrow_upward_rounded,
+                                label: 'Export',
+                                tooltip: 'Export to clipboard',
+                                onPressed: _entries.isEmpty
+                                    ? null
+                                    : _exportToClipboard,
+                              ),
+                              phoneAction(
+                                icon: Icons.edit_outlined,
+                                label: 'Rename',
+                                tooltip: 'Rename',
+                                onPressed: _renameTag,
+                              ),
+                              phoneAction(
+                                icon: Icons.drive_file_move_outline,
+                                label: 'Move',
+                                tooltip: 'Move to category',
+                                onPressed: _changeCategory,
+                              ),
+                              phoneAction(
+                                icon: Icons.delete_forever,
+                                label: 'Delete',
+                                tooltip: 'Delete entire tag',
+                                onPressed: _deleteTag,
+                                foregroundColor: theme.colorScheme.error,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  );
+                }
                 return Row(
                   children: [
                     Expanded(
@@ -2663,16 +2818,45 @@ class _HeaderActionChip extends StatelessWidget {
     required this.onPressed,
     required this.foregroundColor,
     this.tooltip,
+    this.phoneCompact = false,
   });
 
   final IconData icon;
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final Color foregroundColor;
   final String? tooltip;
+  final bool phoneCompact;
 
   @override
   Widget build(BuildContext context) {
+    final labelText = tooltip ?? label;
+    if (phoneCompact) {
+      return Tooltip(
+        message: labelText,
+        child: TextButton(
+          onPressed: onPressed,
+          style: TextButton.styleFrom(
+            foregroundColor: foregroundColor,
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            minimumSize: const Size(0, 44),
+            textStyle: const TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 11.5,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18),
+              const SizedBox(width: 3),
+              Text(label, maxLines: 1, softWrap: false),
+            ],
+          ),
+        ),
+      );
+    }
     final button = TextButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 17),
@@ -2687,7 +2871,6 @@ class _HeaderActionChip extends StatelessWidget {
         textStyle: const TextStyle(fontWeight: FontWeight.w700),
       ),
     );
-    final labelText = tooltip ?? label;
     return Tooltip(message: labelText, child: button);
   }
 }

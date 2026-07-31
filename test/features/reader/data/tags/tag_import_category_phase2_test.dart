@@ -181,134 +181,125 @@ void main() {
   // -------------------------------------------------------------------------
 
   group('loadCategoryOptions root tag_group names (Change 2)', () {
-    test(
-      'includes root tag_group names for matching tag_kind',
-      () async {
-        final testDb = await _openTestDatabase();
-        final db = testDb.db;
-        final tempDir = testDb.dir;
-        addTearDown(() async {
-          await db.close();
-          await tempDir.delete(recursive: true);
-        });
+    test('includes root tag_group names for matching tag_kind', () async {
+      final testDb = await _openTestDatabase();
+      final db = testDb.db;
+      final tempDir = testDb.dir;
+      addTearDown(() async {
+        await db.close();
+        await tempDir.delete(recursive: true);
+      });
 
-        // A normal root hash category group (created by saveTagCategory logic).
-        await db.insert('tag_groups', {
-          'id': 'cat_prophecy',
-          'parent_group_id': null,
-          'tag_kind': 'hash',
-          'name': 'Prophecy',
-        });
-        // A normal root dollar category group.
-        await db.insert('tag_groups', {
-          'id': 'cat_dollar_study',
-          'parent_group_id': null,
-          'tag_kind': 'dollar',
-          'name': 'DollarStudy',
-        });
-        // A hash tag group that is a child of the Prophecy category.
-        await db.insert('tag_groups', {
-          'id': 'tag_grace',
-          'parent_group_id': 'cat_prophecy',
-          'tag_kind': 'hash',
-          'name': '#Grace',
-        });
+      // A normal root hash category group (created by saveTagCategory logic).
+      await db.insert('tag_groups', {
+        'id': 'cat_prophecy',
+        'parent_group_id': null,
+        'tag_kind': 'hash',
+        'name': 'Prophecy',
+      });
+      // A normal root dollar category group.
+      await db.insert('tag_groups', {
+        'id': 'cat_dollar_study',
+        'parent_group_id': null,
+        'tag_kind': 'dollar',
+        'name': 'DollarStudy',
+      });
+      // A hash tag group that is a child of the Prophecy category.
+      await db.insert('tag_groups', {
+        'id': 'tag_grace',
+        'parent_group_id': 'cat_prophecy',
+        'tag_kind': 'hash',
+        'name': '#Grace',
+      });
 
-        final hashCategories = await _queryRootCategoryNames(db, 'hash');
-        expect(hashCategories, contains('Prophecy'));
-        // #Grace is a child group, not a root — should not appear.
-        expect(hashCategories, isNot(contains('#Grace')));
-        // DollarStudy belongs to dollar, not hash.
-        expect(hashCategories, isNot(contains('DollarStudy')));
+      final hashCategories = await _queryRootCategoryNames(db, 'hash');
+      expect(hashCategories, contains('Prophecy'));
+      // #Grace is a child group, not a root — should not appear.
+      expect(hashCategories, isNot(contains('#Grace')));
+      // DollarStudy belongs to dollar, not hash.
+      expect(hashCategories, isNot(contains('DollarStudy')));
 
-        final dollarCategories = await _queryRootCategoryNames(db, 'dollar');
-        expect(dollarCategories, contains('DollarStudy'));
-        expect(dollarCategories, isNot(contains('Prophecy')));
-      },
-    );
+      final dollarCategories = await _queryRootCategoryNames(db, 'dollar');
+      expect(dollarCategories, contains('DollarStudy'));
+      expect(dollarCategories, isNot(contains('Prophecy')));
+    });
 
-    test(
-      'excludes import_root and import_package groups',
-      () async {
-        final testDb = await _openTestDatabase();
-        final db = testDb.db;
-        final tempDir = testDb.dir;
-        addTearDown(() async {
-          await db.close();
-          await tempDir.delete(recursive: true);
-        });
+    test('excludes import_root and import_package groups', () async {
+      final testDb = await _openTestDatabase();
+      final db = testDb.db;
+      final tempDir = testDb.dir;
+      addTearDown(() async {
+        await db.close();
+        await tempDir.delete(recursive: true);
+      });
 
-        // import_root container group.
-        await db.insert('tag_groups', {
-          'id': 'import_root_1',
-          'parent_group_id': null,
-          'tag_kind': 'import_root',
-          'name': 'Imported Tags',
-        });
-        // import_package group under import_root.
-        await db.insert('tag_groups', {
-          'id': 'import_pkg_1',
-          'parent_group_id': 'import_root_1',
-          'tag_kind': 'import_package',
-          'name': 'iPhone Import - 2024-01-15',
-        });
-        // Real imported hash tag group under import_package.
-        await db.insert('tag_groups', {
-          'id': 'imported_tag_1',
-          'parent_group_id': 'import_pkg_1',
-          'tag_kind': 'hash',
-          'name': '#FaithStudy',
-        });
-        // A legitimate root hash category group.
-        await db.insert('tag_groups', {
-          'id': 'cat_favorites',
-          'parent_group_id': null,
-          'tag_kind': 'hash',
-          'name': 'Favorites',
-        });
+      // import_root container group.
+      await db.insert('tag_groups', {
+        'id': 'import_root_1',
+        'parent_group_id': null,
+        'tag_kind': 'import_root',
+        'name': 'Imported Tags',
+      });
+      // import_package group under import_root.
+      await db.insert('tag_groups', {
+        'id': 'import_pkg_1',
+        'parent_group_id': 'import_root_1',
+        'tag_kind': 'import_package',
+        'name': 'iPhone Import - 2024-01-15',
+      });
+      // Real imported hash tag group under import_package.
+      await db.insert('tag_groups', {
+        'id': 'imported_tag_1',
+        'parent_group_id': 'import_pkg_1',
+        'tag_kind': 'hash',
+        'name': '#FaithStudy',
+      });
+      // A legitimate root hash category group.
+      await db.insert('tag_groups', {
+        'id': 'cat_favorites',
+        'parent_group_id': null,
+        'tag_kind': 'hash',
+        'name': 'Favorites',
+      });
 
-        final hashCategories = await _queryRootCategoryNames(db, 'hash');
+      final hashCategories = await _queryRootCategoryNames(db, 'hash');
 
-        // Legitimate category should appear.
-        expect(hashCategories, contains('Favorites'));
-        // import_root and import_package groups must NOT appear.
-        expect(hashCategories, isNot(contains('Imported Tags')));
-        expect(hashCategories, isNot(contains('iPhone Import - 2024-01-15')));
-        // The real imported tag has a non-null parent, so it's not root.
-        expect(hashCategories, isNot(contains('#FaithStudy')));
-      },
-    );
+      // Legitimate category should appear.
+      expect(hashCategories, contains('Favorites'));
+      // import_root and import_package groups must NOT appear.
+      expect(hashCategories, isNot(contains('Imported Tags')));
+      expect(hashCategories, isNot(contains('iPhone Import - 2024-01-15')));
+      // The real imported tag has a non-null parent, so it's not root.
+      expect(hashCategories, isNot(contains('#FaithStudy')));
+    });
 
-    test(
-      'soft-deleted groups are excluded',
-      () async {
-        final testDb = await _openTestDatabase();
-        final db = testDb.db;
-        final tempDir = testDb.dir;
-        addTearDown(() async {
-          await db.close();
-          await tempDir.delete(recursive: true);
-        });
+    test('soft-deleted groups are excluded', () async {
+      final testDb = await _openTestDatabase();
+      final db = testDb.db;
+      final tempDir = testDb.dir;
+      addTearDown(() async {
+        await db.close();
+        await tempDir.delete(recursive: true);
+      });
 
-        await db.insert('tag_groups', {
-          'id': 'cat_deleted',
-          'parent_group_id': null,
-          'tag_kind': 'hash',
-          'name': 'DeletedCategory',
-          'deleted_at': '2026-01-01T00:00:00Z',
-        });
-        await db.insert('tag_groups', {
-          'id': 'cat_active',
-          'parent_group_id': null,
-          'tag_kind': 'hash',
-          'name': 'ActiveCategory',
-        });
+      await db.insert('tag_groups', {
+        'id': 'cat_deleted',
+        'parent_group_id': null,
+        'tag_kind': 'hash',
+        'name': 'DeletedCategory',
+        'deleted_at': '2026-01-01T00:00:00Z',
+      });
+      await db.insert('tag_groups', {
+        'id': 'cat_active',
+        'parent_group_id': null,
+        'tag_kind': 'hash',
+        'name': 'ActiveCategory',
+      });
 
-        final hashCategories = await _queryRootCategoryNames(db, 'hash');
-        expect(hashCategories, contains('ActiveCategory'));
-        expect(hashCategories, isNot(contains('DeletedCategory')));
-      },
-    );
+      final hashCategories = await _queryRootCategoryNames(db, 'hash');
+      expect(hashCategories, contains('ActiveCategory'));
+      expect(hashCategories, isNot(contains('DeletedCategory')));
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -435,8 +426,9 @@ void main() {
           bookNamesProvider: () async => {43: 'John', 45: 'Romans'},
         );
         final snapshot = await adapter.loadSnapshot();
-        final chain =
-            snapshot.chains.where((c) => c.name == '#Salvation').firstOrNull;
+        final chain = snapshot.chains
+            .where((c) => c.name == '#Salvation')
+            .firstOrNull;
 
         expect(chain, isNotNull);
         expect(chain!.items.length, equals(2));

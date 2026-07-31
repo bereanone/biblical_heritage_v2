@@ -36,21 +36,21 @@ class TagPresentationSlideFrame extends StatelessWidget {
         final topHeight = topBand != null
             ? (topBandHeightOverride ?? 40.0)
             : topText == null
-                ? 0.0
-                : topBandHeightOverride ??
-                      TagPresentationSlideFrameLayout.bandHeight(
-                        availableHeight,
-                        topText,
-                      );
+            ? 0.0
+            : topBandHeightOverride ??
+                  TagPresentationSlideFrameLayout.bandHeight(
+                    availableHeight,
+                    topText,
+                  );
         final bottomHeight = bottomBand != null
             ? (bottomBandHeightOverride ?? 40.0)
             : bottomText == null
-                ? 0.0
-                : bottomBandHeightOverride ??
-                      TagPresentationSlideFrameLayout.bandHeight(
-                        availableHeight,
-                        bottomText,
-                      );
+            ? 0.0
+            : bottomBandHeightOverride ??
+                  TagPresentationSlideFrameLayout.bandHeight(
+                    availableHeight,
+                    bottomText,
+                  );
         final layout = TagPresentationSlideFrameLayout(
           slideSize: Size(constraints.maxWidth, constraints.maxHeight),
           topBandHeight: topHeight,

@@ -22,19 +22,22 @@ Future<Database> _openReadOnlyDiagnosticDatabase() async {
 }
 
 String _summarizeGroup(TagGroup group, List<TagItem> items) {
-  final itemLines = items.take(3).map((item) {
-    final anchor = item.anchor;
-    final anchorLabel = switch (anchor.kind) {
-      TagAnchorKind.verseReference =>
-        '${anchor.bookNumber}:${anchor.chapter}:${anchor.verseStart}',
-      TagAnchorKind.selectedText =>
-        '${anchor.bookNumber}:${anchor.chapter}:${anchor.verseStart}',
-      TagAnchorKind.noteOnly => 'note-only',
-    };
-    final noteText = item.noteText?.trim();
-    return '  - ${item.id} | ${item.kind.name} | $anchorLabel'
-        '${noteText == null || noteText.isEmpty ? '' : ' | note="${noteText.replaceAll('"', "'")}"'}';
-  }).join('\n');
+  final itemLines = items
+      .take(3)
+      .map((item) {
+        final anchor = item.anchor;
+        final anchorLabel = switch (anchor.kind) {
+          TagAnchorKind.verseReference =>
+            '${anchor.bookNumber}:${anchor.chapter}:${anchor.verseStart}',
+          TagAnchorKind.selectedText =>
+            '${anchor.bookNumber}:${anchor.chapter}:${anchor.verseStart}',
+          TagAnchorKind.noteOnly => 'note-only',
+        };
+        final noteText = item.noteText?.trim();
+        return '  - ${item.id} | ${item.kind.name} | $anchorLabel'
+            '${noteText == null || noteText.isEmpty ? '' : ' | note="${noteText.replaceAll('"', "'")}"'}';
+      })
+      .join('\n');
   return [
     'group=${group.name} | id=${group.id} | default=${group.isDefault}',
     if (itemLines.isNotEmpty) itemLines else '  - no items',
@@ -55,20 +58,26 @@ void main() {
 
     final adapter = LegacyTagAdapter(databaseProvider: () async => db);
 
-    final quickGroups = (await adapter.loadGroups(mode: TagMode.quick))
-        .where((group) => !group.isCategoryGroup)
-        .toList(growable: false);
-    final studyGroups = (await adapter.loadGroups(mode: TagMode.studyList))
-        .where((group) => !group.isCategoryGroup)
-        .toList(growable: false);
+    final quickGroups = (await adapter.loadGroups(
+      mode: TagMode.quick,
+    )).where((group) => !group.isCategoryGroup).toList(growable: false);
+    final studyGroups = (await adapter.loadGroups(
+      mode: TagMode.studyList,
+    )).where((group) => !group.isCategoryGroup).toList(growable: false);
 
     final quickItemsByGroup = <String, List<TagItem>>{
       for (final group in quickGroups)
-        group.id: await adapter.loadItems(mode: TagMode.quick, groupId: group.id),
+        group.id: await adapter.loadItems(
+          mode: TagMode.quick,
+          groupId: group.id,
+        ),
     };
     final studyItemsByGroup = <String, List<TagItem>>{
       for (final group in studyGroups)
-        group.id: await adapter.loadItems(mode: TagMode.studyList, groupId: group.id),
+        group.id: await adapter.loadItems(
+          mode: TagMode.studyList,
+          groupId: group.id,
+        ),
     };
 
     final quickItemCount = quickItemsByGroup.values.fold<int>(
@@ -93,23 +102,27 @@ void main() {
             orElse: () => studyGroups.first,
           );
 
-    final quickExampleItems =
-        quickExampleGroup == null ? const <TagItem>[] : quickItemsByGroup[quickExampleGroup.id] ?? const <TagItem>[];
-    final studyExampleItems =
-        studyExampleGroup == null ? const <TagItem>[] : studyItemsByGroup[studyExampleGroup.id] ?? const <TagItem>[];
+    final quickExampleItems = quickExampleGroup == null
+        ? const <TagItem>[]
+        : quickItemsByGroup[quickExampleGroup.id] ?? const <TagItem>[];
+    final studyExampleItems = studyExampleGroup == null
+        ? const <TagItem>[]
+        : studyItemsByGroup[studyExampleGroup.id] ?? const <TagItem>[];
 
     final quickMediaMapped = quickGroups.any(
-      (group) => quickItemsByGroup[group.id]!.any((item) => item.noteText?.isNotEmpty == true),
+      (group) => quickItemsByGroup[group.id]!.any(
+        (item) => item.noteText?.isNotEmpty == true,
+      ),
     );
     final studyMediaMapped = studyItemsByGroup.values.any(
       (items) => items.any((item) => item.noteText?.isNotEmpty == true),
     );
-    final studyHasMediaRefs = studyExampleItems.isNotEmpty &&
+    final studyHasMediaRefs =
+        studyExampleItems.isNotEmpty &&
         (await adapter.loadMedia(
           mode: TagMode.studyList,
           itemId: studyExampleItems.first.id,
-        ))
-            .isNotEmpty;
+        )).isNotEmpty;
 
     // Temporary diagnostic output. Keep this helper only as long as it is useful.
     stdout.writeln('Quick tag groups: ${quickGroups.length}');
@@ -121,20 +134,14 @@ void main() {
     stdout.writeln(
       quickExampleGroup == null
           ? '  - none'
-          : _summarizeGroup(
-              quickExampleGroup,
-              quickExampleItems,
-            ),
+          : _summarizeGroup(quickExampleGroup, quickExampleItems),
     );
     stdout.writeln('');
     stdout.writeln('Example \$tag group');
     stdout.writeln(
       studyExampleGroup == null
           ? '  - none'
-          : _summarizeGroup(
-              studyExampleGroup,
-              studyExampleItems,
-            ),
+          : _summarizeGroup(studyExampleGroup, studyExampleItems),
     );
     stdout.writeln('');
     stdout.writeln('Mapping checks');

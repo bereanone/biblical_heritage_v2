@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'library_root_service.dart';
+import 'development_runtime_overrides.dart';
 
 class SandboxBootstrap {
   SandboxBootstrap._();
@@ -22,6 +23,11 @@ class SandboxBootstrap {
   }
 
   static Future<String> userDatabasePath() async {
+    final override = developmentUserDatabaseOverride();
+    if (override != null) {
+      debugPrint('StudyBible2 development user.db override active: $override');
+      return override;
+    }
     final root = await LibraryRootService.instance.accessibleLibraryRootPath();
     if (root != null) {
       final supportDir = await getApplicationDocumentsDirectory();
@@ -35,6 +41,13 @@ class SandboxBootstrap {
   }
 
   static Future<String> eLibraryDatabasePath() async {
+    final override = developmentELibraryDatabaseOverride();
+    if (override != null) {
+      debugPrint(
+        'StudyBible2 development eLibrary.db override active: $override',
+      );
+      return override;
+    }
     final root = await LibraryRootService.instance.accessibleLibraryRootPath();
     if (root != null) {
       final supportDir = await getApplicationDocumentsDirectory();

@@ -116,57 +116,57 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                         icon: Icons.copy_outlined,
                         label: 'Copy No Citation',
                         fontScale: fontScale,
-                        onTap: () => Navigator.of(sheetContext).pop(
-                          ViewerRangeAction.copyNoCitation,
-                        ),
+                        onTap: () => Navigator.of(
+                          sheetContext,
+                        ).pop(ViewerRangeAction.copyNoCitation),
                       ),
                       _ActionButton(
                         icon: Icons.assignment_outlined,
                         label: 'Copy With Citation',
                         fontScale: fontScale,
-                        onTap: () => Navigator.of(sheetContext).pop(
-                          ViewerRangeAction.copyWithCitation,
-                        ),
+                        onTap: () => Navigator.of(
+                          sheetContext,
+                        ).pop(ViewerRangeAction.copyWithCitation),
                       ),
                       _ActionButton(
                         icon: Icons.format_paint_outlined,
                         label: 'Highlight',
                         fontScale: fontScale,
-                        onTap: () => Navigator.of(sheetContext).pop(
-                          ViewerRangeAction.highlight,
-                        ),
+                        onTap: () => Navigator.of(
+                          sheetContext,
+                        ).pop(ViewerRangeAction.highlight),
                       ),
                       _ActionButton(
                         icon: Icons.layers_clear_outlined,
                         label: 'Clear Markup',
                         fontScale: fontScale,
-                        onTap: () => Navigator.of(sheetContext).pop(
-                          ViewerRangeAction.clearMarkup,
-                        ),
+                        onTap: () => Navigator.of(
+                          sheetContext,
+                        ).pop(ViewerRangeAction.clearMarkup),
                       ),
                       _ActionButton(
                         icon: Icons.tag_outlined,
                         label: 'Add # Tag',
                         fontScale: fontScale,
-                        onTap: () => Navigator.of(sheetContext).pop(
-                          ViewerRangeAction.addHashTag,
-                        ),
+                        onTap: () => Navigator.of(
+                          sheetContext,
+                        ).pop(ViewerRangeAction.addHashTag),
                       ),
                       _ActionButton(
                         icon: Icons.attach_money_outlined,
                         label: 'Choose # Tag',
                         fontScale: fontScale,
-                        onTap: () => Navigator.of(sheetContext).pop(
-                          ViewerRangeAction.addDollarTag,
-                        ),
+                        onTap: () => Navigator.of(
+                          sheetContext,
+                        ).pop(ViewerRangeAction.addDollarTag),
                       ),
                       _ActionButton(
                         icon: Icons.menu_book_outlined,
                         label: 'Add to Memory',
                         fontScale: fontScale,
-                        onTap: () => Navigator.of(sheetContext).pop(
-                          ViewerRangeAction.addToMemory,
-                        ),
+                        onTap: () => Navigator.of(
+                          sheetContext,
+                        ).pop(ViewerRangeAction.addToMemory),
                       ),
                       _ActionButton(
                         icon: Icons.translate_outlined,
@@ -174,18 +174,18 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                         fontScale: fontScale,
                         enabled: enableStrongs,
                         onTap: enableStrongs
-                            ? () => Navigator.of(sheetContext).pop(
-                                  ViewerRangeAction.strongs,
-                                )
+                            ? () => Navigator.of(
+                                sheetContext,
+                              ).pop(ViewerRangeAction.strongs)
                             : null,
                       ),
                       _ActionButton(
                         icon: Icons.close_rounded,
                         label: 'Reset Range',
                         fontScale: fontScale,
-                        onTap: () => Navigator.of(sheetContext).pop(
-                          ViewerRangeAction.resetRange,
-                        ),
+                        onTap: () => Navigator.of(
+                          sheetContext,
+                        ).pop(ViewerRangeAction.resetRange),
                       ),
                     ],
                   ),
@@ -242,9 +242,7 @@ class _ActionButton extends StatelessWidget {
               : colorScheme.outline.withValues(alpha: 0.20),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }

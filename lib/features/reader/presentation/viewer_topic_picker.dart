@@ -21,8 +21,8 @@ Future<int?> showViewerTopicPicker(
             final dialogWidth = maxWidth < 700
                 ? maxWidth * 0.85
                 : maxWidth < 1100
-                    ? maxWidth * 0.62
-                    : 560.0;
+                ? maxWidth * 0.62
+                : 560.0;
             return SizedBox(
               width: dialogWidth.clamp(280.0, 560.0),
               height: constraints.maxHeight * 0.98,
@@ -39,7 +39,10 @@ Future<int?> showViewerTopicPicker(
       );
     },
     transitionBuilder: (context, animation, _, child) {
-      final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+      );
       return FadeTransition(
         opacity: curved,
         child: ScaleTransition(
@@ -52,10 +55,7 @@ Future<int?> showViewerTopicPicker(
 }
 
 class ViewerTopicPicker extends StatefulWidget {
-  const ViewerTopicPicker({
-    super.key,
-    required this.fontScale,
-  });
+  const ViewerTopicPicker({super.key, required this.fontScale});
 
   final double fontScale;
 
@@ -98,9 +98,9 @@ class _ViewerTopicPickerState extends State<ViewerTopicPicker> {
     }
 
     return MediaQuery(
-      data: MediaQuery.of(context).copyWith(
-        textScaler: const TextScaler.linear(1.0),
-      ),
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: const TextScaler.linear(1.0)),
       child: LayoutBuilder(
         builder: (context, constraints) {
           return _buildLoaded(context, constraints);
@@ -117,8 +117,10 @@ class _ViewerTopicPickerState extends State<ViewerTopicPicker> {
     final bookItems = _bookGraphItems(selectedSection);
     final summaryHeight = resolvedViewerTopicSummaryBarHeight(widget.fontScale);
     final chromeHeight = summaryHeight + 1.0 + 1.0;
-    final availableAfterChrome =
-        (constraints.maxHeight - chromeHeight).clamp(0.0, constraints.maxHeight);
+    final availableAfterChrome = (constraints.maxHeight - chromeHeight).clamp(
+      0.0,
+      constraints.maxHeight,
+    );
     double graphMaxHeight = availableAfterChrome - 140.0;
     if (graphMaxHeight < 72.0) {
       graphMaxHeight = availableAfterChrome * 0.55;
@@ -169,15 +171,22 @@ class _ViewerTopicPickerState extends State<ViewerTopicPicker> {
               controller: _topicsScrollController,
               padding: EdgeInsets.zero,
               itemCount: filteredTopics.length,
-              separatorBuilder: (_, __) => const Divider(height: 0.5, thickness: 0.5),
+              separatorBuilder: (_, __) =>
+                  const Divider(height: 0.5, thickness: 0.5),
               itemBuilder: (context, index) {
                 final topic = filteredTopics[index];
-                final topicFontSize = (14.0 * widget.fontScale).clamp(13.0, 22.0);
+                final topicFontSize = (14.0 * widget.fontScale).clamp(
+                  13.0,
+                  22.0,
+                );
                 final topicRowHeight = (topicFontSize * 1.9).clamp(30.0, 54.0);
                 const nameStyle = TextStyle(height: 1.1);
                 return InkWell(
                   onTap: () {
-                    Navigator.of(context, rootNavigator: true).pop(topic.blockId);
+                    Navigator.of(
+                      context,
+                      rootNavigator: true,
+                    ).pop(topic.blockId);
                   },
                   child: SizedBox(
                     height: topicRowHeight,
@@ -207,22 +216,26 @@ class _ViewerTopicPickerState extends State<ViewerTopicPicker> {
 
   List<TopicEntry> _filteredTopics() {
     final data = _data!;
-    return data.topics.where((topic) {
-      if (_selectedSectionId != null) {
-        final section = data.sections
-            .where((item) => item.id == _selectedSectionId)
-            .cast<TopicSection?>()
-            .firstWhere((item) => item != null, orElse: () => null);
-        if (section == null) return false;
-        if (topic.blockId < section.minBlockId || topic.blockId > section.maxBlockId) {
-          return false;
-        }
-      }
-      if (_selectedBookNumber != null && topic.bookNumber != _selectedBookNumber) {
-        return false;
-      }
-      return true;
-    }).toList(growable: false);
+    return data.topics
+        .where((topic) {
+          if (_selectedSectionId != null) {
+            final section = data.sections
+                .where((item) => item.id == _selectedSectionId)
+                .cast<TopicSection?>()
+                .firstWhere((item) => item != null, orElse: () => null);
+            if (section == null) return false;
+            if (topic.blockId < section.minBlockId ||
+                topic.blockId > section.maxBlockId) {
+              return false;
+            }
+          }
+          if (_selectedBookNumber != null &&
+              topic.bookNumber != _selectedBookNumber) {
+            return false;
+          }
+          return true;
+        })
+        .toList(growable: false);
   }
 
   TopicSection? _selectedSection() {
@@ -234,28 +247,32 @@ class _ViewerTopicPickerState extends State<ViewerTopicPicker> {
 
   List<ViewerTopicGraphItem> _sectionGraphItems() {
     final data = _data!;
-    return data.sections.map((section) {
-      final count = data.topics
-          .where(
-            (topic) =>
-                topic.blockId >= section.minBlockId &&
-                topic.blockId <= section.maxBlockId,
-          )
-          .length;
-      return ViewerTopicGraphItem(
-        id: section.id,
-        label: section.name,
-        count: count,
-        color: _parseHexColor(section.colorHex),
-      );
-    }).toList(growable: false);
+    return data.sections
+        .map((section) {
+          final count = data.topics
+              .where(
+                (topic) =>
+                    topic.blockId >= section.minBlockId &&
+                    topic.blockId <= section.maxBlockId,
+              )
+              .length;
+          return ViewerTopicGraphItem(
+            id: section.id,
+            label: section.name,
+            count: count,
+            color: _parseHexColor(section.colorHex),
+          );
+        })
+        .toList(growable: false);
   }
 
   List<ViewerTopicGraphItem> _bookGraphItems(TopicSection? section) {
     if (section == null) return const [];
     final data = _data!;
     final filteredBySection = data.topics.where(
-      (topic) => topic.blockId >= section.minBlockId && topic.blockId <= section.maxBlockId,
+      (topic) =>
+          topic.blockId >= section.minBlockId &&
+          topic.blockId <= section.maxBlockId,
     );
     final counts = <int, int>{};
     for (final topic in filteredBySection) {

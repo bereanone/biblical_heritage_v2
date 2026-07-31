@@ -7,6 +7,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../app/study_bible_app.dart';
 import '../../features/utilities/presentation/library_root_setup_screen.dart';
+import '../../features/library/presentation/library_access_required_screen.dart';
+import 'library_root_native.dart';
 import 'library_root_service.dart';
 import 'sandbox_bootstrap.dart';
 import 'startup_coordinator.dart';
@@ -32,6 +34,7 @@ class _BootstrapGateState extends State<BootstrapGate> {
   String? _lastStep;
   Future<StartupDiagnostics>? _diagnosticsFuture;
   Timer? _startupWatchdog;
+  bool _libraryAuthorizationRequired = false;
 
   @override
   void initState() {
@@ -72,6 +75,22 @@ class _BootstrapGateState extends State<BootstrapGate> {
       });
     });
     try {
+      if (LibraryRootNative.usesAndroidDocumentTree) {
+        _updateStatus('Validating library folder authorization...');
+        final authorization = await LibraryRootService.instance
+            .validateAndroidAuthorization(refresh: true);
+        if (!authorization.isAuthorized) {
+          _startupWatchdog?.cancel();
+          if (!mounted || attempt != _bootstrapAttempt) return;
+          setState(() {
+            _libraryAuthorizationRequired = true;
+            _busy = false;
+            _status = 'Library access required.';
+            _lastStep = 'Android library authorization validation';
+          });
+          return;
+        }
+      }
       final snapshot = await StartupCoordinator.instance.initialize(
         onStatus: _updateStatus,
       );
@@ -168,6 +187,15 @@ class _BootstrapGateState extends State<BootstrapGate> {
     await _initialize();
   }
 
+  void _resumeAfterLibraryReconnect() {
+    if (!mounted) return;
+    setState(() {
+      _libraryAuthorizationRequired = false;
+      _snapshot = null;
+    });
+    _initialize();
+  }
+
   Future<void> _continueToBibleOnly() async {
     if (!mounted) return;
     _startupWatchdog?.cancel();
@@ -212,6 +240,15 @@ class _BootstrapGateState extends State<BootstrapGate> {
 
   @override
   Widget build(BuildContext context) {
+    if (_libraryAuthorizationRequired) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData.dark(useMaterial3: true),
+        home: LibraryAccessRequiredScreen(
+          onAccessRestored: _resumeAfterLibraryReconnect,
+        ),
+      );
+    }
     if (_launchBibleOnly) {
       return const StudyBibleApp();
     }

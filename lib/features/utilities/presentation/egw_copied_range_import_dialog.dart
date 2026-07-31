@@ -20,7 +20,8 @@ class EgwCopiedRangeImportDialog extends StatefulWidget {
       _EgwCopiedRangeImportDialogState();
 }
 
-class _EgwCopiedRangeImportDialogState extends State<EgwCopiedRangeImportDialog> {
+class _EgwCopiedRangeImportDialogState
+    extends State<EgwCopiedRangeImportDialog> {
   final TextEditingController _textController = TextEditingController();
   EgwCopiedRangeParseResult? _preview;
   bool _busy = false;
@@ -80,7 +81,8 @@ class _EgwCopiedRangeImportDialogState extends State<EgwCopiedRangeImportDialog>
       });
       return;
     }
-    final preview = _preview ??
+    final preview =
+        _preview ??
         parseEgwCopiedRangeText(
           text,
           workAbbreviation: widget.work.abbreviation.trim().isNotEmpty
@@ -221,10 +223,22 @@ class _EgwCopiedRangeImportDialogState extends State<EgwCopiedRangeImportDialog>
                   ),
                 ),
                 const SizedBox(height: 8),
-                _PreviewLine(label: 'Heading count', value: '${report.headingCount}'),
-                _PreviewLine(label: 'Paragraph count', value: '${report.paragraphCount}'),
-                _PreviewLine(label: 'First ref', value: report.firstRef ?? 'None'),
-                _PreviewLine(label: 'Last ref', value: report.lastRef ?? 'None'),
+                _PreviewLine(
+                  label: 'Heading count',
+                  value: '${report.headingCount}',
+                ),
+                _PreviewLine(
+                  label: 'Paragraph count',
+                  value: '${report.paragraphCount}',
+                ),
+                _PreviewLine(
+                  label: 'First ref',
+                  value: report.firstRef ?? 'None',
+                ),
+                _PreviewLine(
+                  label: 'Last ref',
+                  value: report.lastRef ?? 'None',
+                ),
                 _PreviewLine(
                   label: 'Duplicate refs',
                   value: report.duplicateRefs.isEmpty
@@ -248,9 +262,7 @@ class _EgwCopiedRangeImportDialogState extends State<EgwCopiedRangeImportDialog>
                 for (final sample in report.sampleParagraphs)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
-                    child: SelectableText(
-                      '${sample.ref}: ${sample.snippet}',
-                    ),
+                    child: SelectableText('${sample.ref}: ${sample.snippet}'),
                   ),
               ],
             ],
@@ -268,10 +280,7 @@ class _EgwCopiedRangeImportDialogState extends State<EgwCopiedRangeImportDialog>
 }
 
 class _PreviewLine extends StatelessWidget {
-  const _PreviewLine({
-    required this.label,
-    required this.value,
-  });
+  const _PreviewLine({required this.label, required this.value});
 
   final String label;
   final String value;

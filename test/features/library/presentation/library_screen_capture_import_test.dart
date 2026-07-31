@@ -119,9 +119,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: LibraryScreen(
-          initialCapturedImportReport: _emptyImportReport(),
-        ),
+        home: LibraryScreen(initialCapturedImportReport: _emptyImportReport()),
       ),
     );
     await tester.pumpAndSettle();

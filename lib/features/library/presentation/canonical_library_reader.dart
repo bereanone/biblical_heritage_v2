@@ -476,6 +476,7 @@ class _CanonicalLibraryReaderScreenState
   int _lastMacStatusRevision = 0;
   LibraryDocumentLocation? _location;
   Timer? _visibleThrottle;
+  int _latestVisibleOrder = 0;
   double _fontScale = 1;
   bool _showRefCodes = false;
   List<LibraryDocumentBlock> _searchResults = const <LibraryDocumentBlock>[];
@@ -621,15 +622,20 @@ class _CanonicalLibraryReaderScreenState
   }
 
   void _visible(int order) {
+    _latestVisibleOrder = order;
     _controller.ensureWindow(order);
     if (_visibleThrottle != null) return;
-    _visibleThrottle = Timer(const Duration(milliseconds: 120), () async {
+    _visibleThrottle = Timer(const Duration(milliseconds: 400), () async {
       _visibleThrottle = null;
       final location = await widget.repository.resolveLocation(
         widget.item.id,
-        order,
+        _latestVisibleOrder,
       );
-      if (mounted && location != null) setState(() => _location = location);
+      if (!mounted || location == null) return;
+      final oldSubtitle = canonicalVisibleReaderSubtitle(_location);
+      final newSubtitle = canonicalVisibleReaderSubtitle(location);
+      _location = location;
+      if (oldSubtitle != newSubtitle) setState(() {});
     });
   }
 
@@ -879,7 +885,26 @@ class _CanonicalLibraryReaderScreenState
         ],
       ),
     );
-    if (!_usesMacAutoscroll || !Platform.isMacOS) return scaffold;
+    final guardedScaffold = Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        scaffold,
+        ReaderAutoscrollTapShield(
+          listenables: <Listenable>[_autoScroll, ?_macAutoScroll],
+          isScrolling: () =>
+              _autoScroll.isActive || (_macAutoScroll?.isScrolling ?? false),
+          onStop: () {
+            _macAutoScroll?.stopForManualInteraction();
+            _autoScroll.stopSynchronously(
+              diagnosticCause: 'pointer-interaction',
+            );
+          },
+        ),
+      ],
+    );
+    if (!_usesMacAutoscroll || (!Platform.isMacOS && !Platform.isWindows)) {
+      return guardedScaffold;
+    }
     return Focus(
       focusNode: _readerFocusNode,
       autofocus: true,
@@ -889,7 +914,7 @@ class _CanonicalLibraryReaderScreenState
         controller: _macAutoScroll!,
         suspended: _readerShortcutsSuspended,
       ),
-      child: scaffold,
+      child: guardedScaffold,
     );
   }
 
@@ -1523,6 +1548,10 @@ class _CanonicalLibraryDocumentBodyState
   ScrollPosition? _position;
   int _firstVisibleOrder = 0;
   bool _initialScrollApplied = false;
+  Timer? _autoScrollIdleTimer;
+  bool _frameAutoScrollActive = false;
+  int _frameAutoScrollDirection = 1;
+  DateTime? _lastAutoScrollFrame;
 
   void _captureVisiblePosition() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1594,6 +1623,19 @@ class _CanonicalLibraryDocumentBodyState
     if ((target - position.pixels).abs() <= .01) {
       return false;
     }
+    final direction = delta < 0 ? -1 : 1;
+    _lastAutoScrollFrame = DateTime.now();
+    if (!_frameAutoScrollActive || direction != _frameAutoScrollDirection) {
+      _frameAutoScrollActive = true;
+      _frameAutoScrollDirection = direction;
+      unawaited(
+        widget.controller.beginAutoScroll(
+          _firstVisibleOrder,
+          direction: direction,
+        ),
+      );
+      _scheduleAutoScrollIdleCheck();
+    }
     final before = position.pixels;
     position.jumpTo(target);
     final appliedDelta = position.pixels - before;
@@ -1617,6 +1659,22 @@ class _CanonicalLibraryDocumentBodyState
     return appliedDelta.abs() > .01;
   }
 
+  void _scheduleAutoScrollIdleCheck() {
+    if (_autoScrollIdleTimer != null) return;
+    _autoScrollIdleTimer = Timer(const Duration(milliseconds: 350), () {
+      _autoScrollIdleTimer = null;
+      final lastFrame = _lastAutoScrollFrame;
+      if (lastFrame != null &&
+          DateTime.now().difference(lastFrame) <
+              const Duration(milliseconds: 300)) {
+        _scheduleAutoScrollIdleCheck();
+        return;
+      }
+      _frameAutoScrollActive = false;
+      widget.controller.endAutoScroll(_firstVisibleOrder);
+    });
+  }
+
   void _onPositions() {
     final samples = _positions.itemPositions.value.map(
       (item) => (
@@ -1627,13 +1685,24 @@ class _CanonicalLibraryDocumentBodyState
     );
     final order = firstMeaningfullyVisibleCanonicalOrder(samples);
     if (order >= 0) {
+      final changed = order != _firstVisibleOrder;
       _firstVisibleOrder = order;
+      if (changed && _frameAutoScrollActive) {
+        unawaited(
+          widget.controller.beginAutoScroll(
+            order,
+            direction: _frameAutoScrollDirection,
+          ),
+        );
+      }
       widget.onVisibleOrderChanged(order);
     }
   }
 
   @override
   void dispose() {
+    _autoScrollIdleTimer?.cancel();
+    widget.controller.endAutoScroll(_firstVisibleOrder);
     widget.autoScrollTarget.detach();
     widget.proofCommands?._detach();
     _positions.itemPositions.removeListener(_onPositions);
@@ -1676,7 +1745,10 @@ class _CanonicalLibraryDocumentBodyState
                   final block = widget.controller.blockAt(order);
                   if (block == null) {
                     widget.controller.ensureWindow(order);
-                    return const SizedBox(height: 42);
+                    // Directional prefetch keeps ordinary sequential scrolling
+                    // out of this path. Do not inject a fabricated row height:
+                    // it changes the sliver geometry when real content arrives.
+                    return const SizedBox.shrink();
                   }
                   return KeyedSubtree(
                     key: ValueKey(block.id),

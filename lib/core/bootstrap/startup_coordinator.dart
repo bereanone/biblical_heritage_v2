@@ -14,6 +14,7 @@ import 'sandbox_bootstrap.dart';
 import 'development_runtime_overrides.dart';
 import '../../features/library/data/canonical_epub_generation_repair_service.dart';
 import '../../features/utilities/data/pioneer_captured_html_import_availability_service.dart';
+import '../../features/utilities/data/elibrary_catalog_duplicate_repair_service.dart';
 
 enum StartupPhase {
   noLegacyFound,
@@ -82,6 +83,7 @@ class StartupCoordinator {
         errorMessage: migrationState['error_message']?.toString(),
         sourceDeviceName: _sourceDeviceName(),
       );
+      await _runLegacyEgwCatalogRepair(onStatus: onStatus);
       await _runConfiguredCaptureFolderImport(onStatus: onStatus);
       return StartupSnapshot(
         phase: StartupPhase.ready,
@@ -117,6 +119,7 @@ class StartupCoordinator {
         'status': 'no_legacy_found',
         'error_message': null,
       });
+      await _runLegacyEgwCatalogRepair(onStatus: onStatus);
       await _runConfiguredCaptureFolderImport(onStatus: onStatus);
       return const StartupSnapshot(
         phase: StartupPhase.noLegacyFound,
@@ -138,6 +141,7 @@ class StartupCoordinator {
       _ => 'Legacy writable user data was found.',
     };
 
+    await _runLegacyEgwCatalogRepair(onStatus: onStatus);
     await _runConfiguredCaptureFolderImport(onStatus: onStatus);
     return StartupSnapshot(
       phase: StartupPhase.legacyFoundWaitingForUser,
@@ -196,6 +200,18 @@ class StartupCoordinator {
     }
 
     await _runCanonicalEpubGenerationRepair(onStatus: onStatus);
+  }
+
+  Future<void> _runLegacyEgwCatalogRepair({
+    ValueChanged<String>? onStatus,
+  }) async {
+    try {
+      onStatus?.call('Checking eLibrary catalog identities...');
+      final db = await ELibraryDatabase.instance.database;
+      await ELibraryCatalogDuplicateRepairService.instance.repair(db: db);
+    } catch (error) {
+      debugPrint('Legacy EGW catalog duplicate repair failed: $error');
+    }
   }
 
   /// Best-effort, non-fatal repair pass for canonical EPUB data left over

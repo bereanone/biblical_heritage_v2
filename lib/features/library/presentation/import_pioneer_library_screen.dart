@@ -6,6 +6,7 @@ import '../../../core/bootstrap/library_root_native.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../utilities/data/pioneer_epub_bulk_import_service.dart';
 import '../../utilities/data/pioneer_epub_folder_inventory_service.dart';
+import '../../utilities/data/pioneer_zip_extract_service.dart';
 import '../../utilities/presentation/pioneer_text_import_screen.dart';
 import '../data/canonical_activation.dart';
 import '../data/library_acquisition_batch_runner.dart';
@@ -15,6 +16,8 @@ import 'library_acquisition_progress_view.dart';
 
 typedef PioneerFolderPicker =
     Future<({String path, String bookmark})?> Function();
+typedef PioneerZipPicker = Future<String?> Function();
+typedef PioneerZipExtractor = Future<String> Function(String zipPath);
 typedef PioneerFolderSurvey =
     Future<PioneerEpubFolderInventory> Function(
       Directory folder, {
@@ -39,6 +42,8 @@ class ImportPioneerLibraryScreen extends StatefulWidget {
   const ImportPioneerLibraryScreen({
     super.key,
     this.pickFolder,
+    this.pickZipFile,
+    this.extractZip,
     this.surveyFolder,
     this.prepareImport,
     this.activateBatch,
@@ -48,6 +53,8 @@ class ImportPioneerLibraryScreen extends StatefulWidget {
   });
 
   final PioneerFolderPicker? pickFolder;
+  final PioneerZipPicker? pickZipFile;
+  final PioneerZipExtractor? extractZip;
   final PioneerFolderSurvey? surveyFolder;
   final PioneerImportPreparer? prepareImport;
   final PioneerBatchActivator? activateBatch;
@@ -120,7 +127,7 @@ class _ImportPioneerLibraryScreenState
           bookmark: picked.bookmark,
         );
       }
-      await _scan(folder);
+      await _useFolder(folder);
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -129,6 +136,69 @@ class _ImportPioneerLibraryScreenState
         _message =
             'That folder could not be opened. Choose the Pioneer Library folder and try again.';
       });
+    }
+  }
+
+  /// Lets the user pick the Pioneer Library ZIP file directly instead of
+  /// navigating a folder-tree picker. Selecting a single file is far more
+  /// reliable across cloud storage apps (Google Drive's folder picker in
+  /// particular tends to just list every file with no clear way to select
+  /// the enclosing folder) than the standard SAF folder picker.
+  Future<void> _chooseZipFile() async {
+    try {
+      final zipPath =
+          await (widget.pickZipFile?.call() ??
+              LibraryRootNative.pickPioneerZipFile());
+      if (zipPath == null) return;
+      setState(() {
+        _loading = false;
+        _scanning = true;
+        _message = null;
+        _result = null;
+        _inventory = null;
+      });
+      final extractedPath =
+          await (widget.extractZip ??
+              PioneerZipExtractService.instance.extractToWorkingFolder)(
+            zipPath,
+          );
+      final folder = Directory(extractedPath);
+      if (widget.saveFolder != null) {
+        await widget.saveFolder!(extractedPath, '');
+      } else {
+        await LocalSettingsStore.instance.savePioneerEpubSourceFolder(
+          path: extractedPath,
+          bookmark: '',
+        );
+      }
+      await _useFolder(folder);
+    } on FormatException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _scanning = false;
+        _message = error.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _scanning = false;
+        _message =
+            'That ZIP file could not be opened. Choose the Pioneer Library '
+            'ZIP file and try again.';
+      });
+    }
+  }
+
+  Future<void> _useFolder(Directory folder) async {
+    await _scan(folder);
+    // A folder/ZIP the user just picked is a clear, deliberate action: go
+    // straight to importing instead of making them tap a second button.
+    // (A folder loaded automatically from a previously saved location on
+    // screen open is not auto-imported — only a fresh, explicit pick is.)
+    if (mounted && (_inventory?.validCount ?? 0) > 0) {
+      await _importOrUpdate();
     }
   }
 
@@ -351,8 +421,17 @@ class _ImportPioneerLibraryScreenState
         ),
         const SizedBox(height: 18),
         Text(
-          'Choose the folder that contains your Pioneer Library books.',
+          'Add your Pioneer Library books.',
           style: Theme.of(context).textTheme.titleLarge,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'If you have the Pioneer Library ZIP file, choose it below — '
+          'StudyBible unpacks and imports it automatically. Selecting a '
+          'cloud storage folder directly (Google Drive especially) often '
+          "does not offer a clear way to pick the folder itself.",
+          style: Theme.of(context).textTheme.bodyMedium,
           textAlign: TextAlign.center,
         ),
         if (_message != null) ...[
@@ -363,10 +442,20 @@ class _ImportPioneerLibraryScreenState
         SizedBox(
           height: 52,
           child: FilledButton.icon(
+            key: const Key('pioneer-zip-action'),
+            onPressed: _chooseZipFile,
+            icon: const Icon(Icons.folder_zip_outlined),
+            label: const Text('Choose Pioneer Library ZIP File'),
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 52,
+          child: OutlinedButton.icon(
             key: const Key('pioneer-primary-action'),
             onPressed: _chooseFolder,
             icon: const Icon(Icons.folder_open),
-            label: const Text('Choose Pioneer Library Folder'),
+            label: const Text('Choose an Already-Extracted Folder Instead'),
           ),
         ),
         const SizedBox(height: 12),

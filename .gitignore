@@ -50,6 +50,9 @@ app.*.map.json
 # Local distribution builds (APKs, zips) built for tester handoff.
 /dist/
 
+# Local tutorial-production files retained outside version control.
+/Tutorials/
+
 # Local project planning notes
 UpgradePath.txt
 

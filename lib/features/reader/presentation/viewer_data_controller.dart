@@ -18,6 +18,9 @@ class ViewerDataController extends ChangeNotifier {
   int _maxBlockId = 1;
   int _currentCenter = -1;
   int? _pendingCenter;
+  int? _pendingRadius;
+  bool _retainWindowForAutoScroll = false;
+  bool _preserveExpandedCache = false;
 
   bool get isLoading => _isLoading;
   int get maxBlockId => _maxBlockId;
@@ -61,10 +64,23 @@ class ViewerDataController extends ChangeNotifier {
     _initialized = true;
   }
 
-  Future<void> ensureWindow(int centerId) async {
+  Future<void> ensureWindow(int centerId) =>
+      _ensureWindow(centerId, radius: windowRadius);
+
+  Future<void> ensureAutoScrollWindow(int visibleId, {required int direction}) {
+    beginAutoScroll();
+    const activeRadius = 125;
+    const directionalOffset = 75;
+    final target = (visibleId + (direction < 0 ? -1 : 1) * directionalOffset)
+        .clamp(minId, _maxBlockId);
+    return _ensureWindow(target, radius: activeRadius);
+  }
+
+  Future<void> _ensureWindow(int centerId, {required int radius}) async {
     await initialize();
     if (_isLoading) {
       _pendingCenter = centerId;
+      _pendingRadius = radius;
       return;
     }
     if ((centerId - _currentCenter).abs() < 15 && _blocks.isNotEmpty) {
@@ -76,7 +92,7 @@ class ViewerDataController extends ChangeNotifier {
       final targetCenter = centerId.clamp(minId, _maxBlockId);
       var fetched = await _database.loadBlockWindowById(
         targetCenter,
-        windowRadius: windowRadius,
+        windowRadius: radius,
       );
       if (fetched.isEmpty) {
         fetched = await _chapterFallback(targetCenter);
@@ -92,9 +108,7 @@ class ViewerDataController extends ChangeNotifier {
         _blocks[blockId] = line;
       }
 
-      final minKeep = targetCenter - windowRadius;
-      final maxKeep = targetCenter + windowRadius;
-      _blocks.removeWhere((id, _) => id < minKeep || id > maxKeep);
+      if (!_preserveExpandedCache) _trimWindow(targetCenter);
 
       _currentCenter = targetCenter;
       notifyListeners();
@@ -102,10 +116,30 @@ class ViewerDataController extends ChangeNotifier {
       _isLoading = false;
       if (_pendingCenter != null) {
         final next = _pendingCenter!;
+        final nextRadius = _pendingRadius ?? windowRadius;
         _pendingCenter = null;
-        ensureWindow(next);
+        _pendingRadius = null;
+        _ensureWindow(next, radius: nextRadius);
       }
     }
+  }
+
+  void beginAutoScroll() {
+    _retainWindowForAutoScroll = true;
+    _preserveExpandedCache = true;
+  }
+
+  void endAutoScroll(int centerId) {
+    if (!_retainWindowForAutoScroll) return;
+    _retainWindowForAutoScroll = false;
+    final targetCenter = centerId.clamp(minId, _maxBlockId);
+    _currentCenter = targetCenter;
+  }
+
+  void _trimWindow(int centerId) {
+    final minKeep = centerId - windowRadius;
+    final maxKeep = centerId + windowRadius;
+    _blocks.removeWhere((id, _) => id < minKeep || id > maxKeep);
   }
 
   Future<List<Map<String, Object?>>> _chapterFallback(int centerId) async {

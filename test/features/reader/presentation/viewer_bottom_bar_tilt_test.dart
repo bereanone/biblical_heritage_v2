@@ -248,63 +248,70 @@ void main() {
     ], everyElement(0));
   });
 
-  testWidgets('secondary actions scroll before fixed phone controls move', (
-    tester,
-  ) async {
-    final motion = FakeReaderTiltMotionSource();
-    final controller = ReaderTiltAutoScrollController(
-      motionSource: motion,
-      scrollTarget: CallbackReaderAutoScrollTarget(),
-    );
-    var modeCount = 0;
-    await tester.binding.setSurfaceSize(const Size(300, 180));
-    addTearDown(() async {
-      await tester.binding.setSurfaceSize(null);
-      controller.dispose();
-      await motion.dispose();
-    });
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          bottomNavigationBar: ViewerBottomBar(
-            themeMode: AppThemeMode.sepia,
-            onToggleThemeMode: () {},
-            bookNumber: 1,
-            interlinearEnabled: false,
-            onToggleInterlinear: () {},
-            onMode: () => modeCount += 1,
-            onHistory: () {},
-            onLibrary: () {},
-            onDecreaseFont: () {},
-            onIncreaseFont: () {},
-            tiltAutoScrollController: controller,
-            onToggleTiltAutoScroll: () {},
-            onOpenTiltAutoScrollSettings: () {},
-            onCommentary: () {},
-            canDecreaseFont: true,
-            canIncreaseFont: true,
-            backgroundColor: Colors.white,
+  testWidgets(
+    'Commentary and eLibrary stay fixed and visible; only lower-priority '
+    'actions scroll',
+    (tester) async {
+      final motion = FakeReaderTiltMotionSource();
+      final controller = ReaderTiltAutoScrollController(
+        motionSource: motion,
+        scrollTarget: CallbackReaderAutoScrollTarget(),
+      );
+      await tester.binding.setSurfaceSize(const Size(300, 180));
+      addTearDown(() async {
+        await tester.binding.setSurfaceSize(null);
+        controller.dispose();
+        await motion.dispose();
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            bottomNavigationBar: ViewerBottomBar(
+              themeMode: AppThemeMode.sepia,
+              onToggleThemeMode: () {},
+              bookNumber: 1,
+              interlinearEnabled: false,
+              onToggleInterlinear: () {},
+              onMode: () {},
+              onHistory: () {},
+              onLibrary: () {},
+              onDecreaseFont: () {},
+              onIncreaseFont: () {},
+              tiltAutoScrollController: controller,
+              onToggleTiltAutoScroll: () {},
+              onOpenTiltAutoScrollSettings: () {},
+              onCommentary: () {},
+              canDecreaseFont: true,
+              canIncreaseFont: true,
+              backgroundColor: Colors.white,
+            ),
           ),
         ),
-      ),
-    );
+      );
 
-    final tilt = find.byTooltip('Tilt Auto-scroll');
-    final before = tester.getRect(tilt);
-    expect(before.right, lessThanOrEqualTo(300));
-    expect(tester.getRect(find.byTooltip('Mode')).right, greaterThan(300));
+      expect(tester.takeException(), isNull);
+      final tilt = find.byTooltip('Tilt Auto-scroll');
+      final before = tester.getRect(tilt);
+      final commentaryBefore = tester.getRect(find.byTooltip('Commentary'));
+      final libraryBefore = tester.getRect(find.byTooltip('eLibrary'));
+      expect(before.right, lessThanOrEqualTo(300));
+      // Commentary and eLibrary are fixed/always-visible: no scrolling
+      // should ever be required to reach them.
+      expect(commentaryBefore.right, lessThanOrEqualTo(300));
+      expect(libraryBefore.right, lessThanOrEqualTo(300));
+      expect(tester.getRect(find.byTooltip('Mode')).right, greaterThan(300));
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-240, 0),
-    );
-    await tester.pumpAndSettle();
-    expect(tester.getRect(tilt), before);
-    expect(
-      tester.getRect(find.byTooltip('Mode')).right,
-      lessThanOrEqualTo(300),
-    );
-    await tester.tap(find.byTooltip('Mode'));
-    expect(modeCount, 1);
-  });
+      await tester.drag(
+        find.byType(SingleChildScrollView),
+        const Offset(-400, 0),
+      );
+      await tester.pumpAndSettle();
+      // Scrolling to reach a lower-priority action must never move the
+      // fixed, always-visible controls.
+      expect(tester.getRect(tilt), before);
+      expect(tester.getRect(find.byTooltip('Commentary')), commentaryBefore);
+      expect(tester.getRect(find.byTooltip('eLibrary')), libraryBefore);
+      expect(find.byTooltip('Mode'), findsOneWidget);
+    },
+  );
 }

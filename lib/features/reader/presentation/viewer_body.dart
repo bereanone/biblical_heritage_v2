@@ -17,10 +17,18 @@ import 'viewer_range_selection.dart';
 import 'viewer_verse_line.dart';
 import 'text_range_geometry.dart';
 import '../../library/presentation/reader_tilt_autoscroll_controller.dart';
+import '../../library/presentation/mac_reader_autoscroll_controller.dart';
 
 part 'viewer_body_helpers.dart';
 
 const bool _enableTextRangeGeometry = false;
+const int viewerMaximumAutomaticBlockLeap = 100;
+
+bool viewerAutomaticBlockTransitionIsSafe({
+  required int previousBlockId,
+  required int candidateBlockId,
+  int maximumLeap = viewerMaximumAutomaticBlockLeap,
+}) => (candidateBlockId - previousBlockId).abs() <= maximumLeap;
 
 enum ViewerAutoScrollWindowAction {
   scroll,
@@ -145,6 +153,10 @@ class _ViewerBodyState extends State<ViewerBody> {
   BibleVisibleLocation? _lastEmittedVisibleLocation;
   int? _pendingVisibleBlockId;
   int _visibleLocationGeneration = 0;
+  bool _automaticPixelScrollActive = false;
+  bool _restoringSafeAutomaticPosition = false;
+  Timer? _automaticPixelScrollIdleTimer;
+  DateTime? _lastAutomaticPixelScroll;
 
   static const _visibleLocationInterval = Duration(milliseconds: 120);
 
@@ -189,7 +201,17 @@ class _ViewerBodyState extends State<ViewerBody> {
       case ViewerAutoScrollWindowAction.scroll:
         break;
     }
-    final target = (position.pixels + delta).clamp(
+    _automaticPixelScrollActive = true;
+    widget.data.beginAutoScroll();
+    _lastAutomaticPixelScroll = DateTime.now();
+    _scheduleAutomaticPixelScrollIdleCheck();
+    final safeDelta = delta
+        .clamp(
+          -macAutoscrollMaximumFrameDeltaPixels,
+          macAutoscrollMaximumFrameDeltaPixels,
+        )
+        .toDouble();
+    final target = (position.pixels + safeDelta).clamp(
       position.minScrollExtent,
       position.maxScrollExtent,
     );
@@ -197,6 +219,27 @@ class _ViewerBodyState extends State<ViewerBody> {
     final before = position.pixels;
     position.jumpTo(target);
     return (position.pixels - before).abs() > 0.01;
+  }
+
+  void _scheduleAutomaticPixelScrollIdleCheck() {
+    if (_automaticPixelScrollIdleTimer != null) return;
+    _automaticPixelScrollIdleTimer = Timer(
+      const Duration(milliseconds: 350),
+      () {
+        _automaticPixelScrollIdleTimer = null;
+        final last = _lastAutomaticPixelScroll;
+        if (last != null &&
+            DateTime.now().difference(last) <
+                const Duration(milliseconds: 300)) {
+          _scheduleAutomaticPixelScrollIdleCheck();
+          return;
+        }
+        _automaticPixelScrollActive = false;
+        widget.data.endAutoScroll(
+          _lastEmittedVisibleLocation?.blockId ?? widget.anchorBlockId,
+        );
+      },
+    );
   }
 
   ViewerAutoScrollWindowAction _loadedWindowActionBeforeAutoScroll(
@@ -216,7 +259,6 @@ class _ViewerBodyState extends State<ViewerBody> {
       if (blockId < firstVisible) firstVisible = blockId;
       if (blockId > lastVisible) lastVisible = blockId;
     }
-    const extensionBlocks = 15;
     final action = viewerAutoScrollWindowAction(
       delta: delta,
       firstVisibleBlockId: firstVisible,
@@ -224,6 +266,7 @@ class _ViewerBodyState extends State<ViewerBody> {
       firstLoadedBlockId: firstLoaded,
       lastLoadedBlockId: lastLoaded,
       maxBlockId: widget.data.maxBlockId,
+      guardBlocks: 40,
     );
     switch (action) {
       case ViewerAutoScrollWindowAction.scroll:
@@ -232,19 +275,17 @@ class _ViewerBodyState extends State<ViewerBody> {
       case ViewerAutoScrollWindowAction.stopAtEnd:
         return action;
       case ViewerAutoScrollWindowAction.extendForward:
-        final center = (lastLoaded + extensionBlocks).clamp(
-          ViewerDataController.minId,
-          widget.data.maxBlockId,
+        unawaited(
+          widget.data.ensureAutoScrollWindow(firstVisible, direction: 1),
         );
-        unawaited(widget.data.ensureWindow(center));
-        return action;
+        // There are still 40 loaded blocks ahead, so do not introduce a
+        // deliberate stopped frame while the asynchronous prefetch runs.
+        return ViewerAutoScrollWindowAction.scroll;
       case ViewerAutoScrollWindowAction.extendBackward:
-        final center = (firstLoaded - extensionBlocks).clamp(
-          ViewerDataController.minId,
-          widget.data.maxBlockId,
+        unawaited(
+          widget.data.ensureAutoScrollWindow(lastVisible, direction: -1),
         );
-        unawaited(widget.data.ensureWindow(center));
-        return action;
+        return ViewerAutoScrollWindowAction.scroll;
     }
   }
 
@@ -259,6 +300,7 @@ class _ViewerBodyState extends State<ViewerBody> {
     }
     if (oldWidget.anchorBlockId != widget.anchorBlockId ||
         oldWidget.data != widget.data) {
+      _automaticPixelScrollActive = false;
       _visibleLocationGeneration += 1;
       _scrollDebounce?.cancel();
       _scrollDebounce = null;
@@ -280,6 +322,7 @@ class _ViewerBodyState extends State<ViewerBody> {
   @override
   void dispose() {
     widget.autoScrollTarget?.detach();
+    _automaticPixelScrollIdleTimer?.cancel();
     _scrollDebounce?.cancel();
     _geometryDebounce?.cancel();
     _itemPositionsListener.itemPositions.removeListener(_onScroll);
@@ -386,7 +429,33 @@ class _ViewerBodyState extends State<ViewerBody> {
       }),
     );
     if (centeredBlockId == null) return;
+    final previous = _lastEmittedVisibleLocation;
+    if (_automaticPixelScrollActive &&
+        previous != null &&
+        !viewerAutomaticBlockTransitionIsSafe(
+          previousBlockId: previous.blockId,
+          candidateBlockId: centeredBlockId,
+        )) {
+      _restoreLastSafeAutomaticPosition(previous.blockId);
+      return;
+    }
     _queueVisibleBlockEmission(centeredBlockId);
+  }
+
+  void _restoreLastSafeAutomaticPosition(int blockId) {
+    if (_restoringSafeAutomaticPosition || !_itemScrollController.isAttached) {
+      return;
+    }
+    _restoringSafeAutomaticPosition = true;
+    _automaticPixelScrollActive = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_itemScrollController.isAttached) return;
+      _itemScrollController.jumpTo(
+        index: _indexForBlockId(blockId),
+        alignment: 0.35,
+      );
+      _restoringSafeAutomaticPosition = false;
+    });
   }
 
   void _queueVisibleBlockEmission(int blockId) {
@@ -578,6 +647,7 @@ class _ViewerBodyState extends State<ViewerBody> {
             }
             final manualStart = readerScrollNotificationIsManual(notification);
             if (manualStart && !_suppressUserScroll) {
+              _automaticPixelScrollActive = false;
               widget.onManualScroll?.call();
             }
             final isScrolling = notification is ScrollStartNotification

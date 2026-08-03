@@ -137,7 +137,7 @@ class CommentaryResearchFilters {
       final text = commentaryDisplayText(match);
       if (text.isEmpty) continue;
       final key = [
-        normalizeForSearch(match.libraryItemId),
+        _logicalBookIdentity(match),
         match.bookId.toString(),
         match.chapter.toString(),
         match.verseStart.toString(),
@@ -324,11 +324,18 @@ class CommentaryResearchFilters {
 
   static String researchParagraphKey(CommentaryResearchMatchItem match) {
     return [
-      normalizeForSearch(match.libraryItemId),
-      normalizeForSearch(match.relativePath),
-      normalizeForSearch(match.itemTitle),
-      normalizeForSearch(match.anchor ?? match.originalReferenceText),
+      _logicalBookIdentity(match),
+      normalizeForSearch(match.epubHref ?? ''),
+      (match.paragraphIndex ?? -1).toString(),
+      normalizeForSearch(match.originalReferenceText),
+      normalizeForSearch(match.anchor ?? match.fullParagraph ?? ''),
     ].join('::');
+  }
+
+  static String _logicalBookIdentity(CommentaryResearchMatchItem match) {
+    final fileName = normalizeForSearch(match.fileName);
+    final title = normalizeForSearch(match.itemTitle);
+    return fileName.isNotEmpty ? '$fileName::$title' : title;
   }
 
   static int _researchPriority(

@@ -237,6 +237,51 @@ void main() {
     expect(controller.blockAt(targetOrder), isNotNull);
   });
 
+  test(
+    'autoscroll cache remains stable through stop for the session',
+    () async {
+      final html = StringBuffer('<html><body><h1>Chapter 1</h1>');
+      for (var index = 0; index < 420; index++) {
+        html.write('<p>Paragraph $index has enough readable body text.</p>');
+      }
+      html.write('</body></html>');
+      await source.writeAsString(html.toString(), flush: true);
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'long-book',
+        source: source,
+      );
+      final controller = LibraryDocumentController(
+        libraryItemId: 'long-book',
+        repository: LibraryDocumentRepository(db),
+        windowRadius: 50,
+      );
+      await controller.initialize(centerOrder: 100);
+      expect(controller.blockAt(50), isNotNull);
+
+      await controller.beginAutoScroll(100, direction: 1);
+      expect(controller.blockAt(50), isNotNull, reason: 'retain blocks behind');
+      expect(controller.blockAt(300), isNotNull, reason: 'prefetch 200 ahead');
+
+      await controller.beginAutoScroll(170, direction: 1);
+      expect(
+        controller.blockAt(50),
+        isNotNull,
+        reason: 'do not evict in motion',
+      );
+      expect(controller.blockAt(370), isNotNull);
+
+      controller.endAutoScroll(170);
+      expect(
+        controller.blockAt(50),
+        isNotNull,
+        reason: 'stopping must not mutate visible scroll geometry',
+      );
+      expect(controller.blockAt(170), isNotNull);
+      expect(controller.blockAt(300), isNotNull);
+    },
+  );
+
   test('canonical ordinary opening skips front matter for Chapter 1', () async {
     await source.writeAsString('''
       <html><body>

@@ -45,12 +45,7 @@ void main() {
       'android/app/src/main/AndroidManifest.xml',
     ).readAsStringSync();
 
-    expect(
-      manifest,
-      contains(
-        'android:label="Biblical Heritage #StudyBible — Version 2 Test Build"',
-      ),
-    );
+    expect(manifest, contains('android:label="Biblical Heritage #StudyBible"'));
     expect(manifest, contains('android:icon="@mipmap/ic_launcher"'));
     expect(manifest, contains('android:roundIcon="@mipmap/ic_launcher"'));
 

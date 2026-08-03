@@ -88,10 +88,11 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
             result.error("picker_busy", "A library folder picker is already open.", null)
             return
         }
-        val initial = Uri.parse(
-            "content://com.android.externalstorage.documents/document/" +
-                "primary%3ADocuments%2FStudyBible",
-        )
+        // No EXTRA_INITIAL_URI hint here: this same picker is reused for
+        // multiple purposes (app library root, Pioneer source folder, etc.),
+        // and hardcoding a hint toward the app's own internal library folder
+        // sent users into the wrong place (and confused some document
+        // providers) when picking an unrelated external folder.
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
@@ -99,9 +100,6 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
                     Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
                     Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
             )
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                putExtra(DocumentsContract.EXTRA_INITIAL_URI, initial)
-            }
             putExtra("studybible_require_existing", requireExisting)
         }
         pendingLibraryTreeResult = result

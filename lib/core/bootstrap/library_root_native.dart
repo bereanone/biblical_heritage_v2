@@ -171,6 +171,21 @@ class LibraryRootNative {
   /// allow images, CSS, and text files.
   static Future<List<String>?> pickImportFiles({String kind = 'html'}) async {
     if (Platform.isAndroid || defaultTargetPlatform == TargetPlatform.android) {
+      if (kind == 'pioneerZip') {
+        final zipPath =
+            (await _androidDocumentPickerChannel.invokeMethod<String>(
+              'pickFile',
+              {'kind': kind},
+            ))?.trim() ??
+            '';
+        if (zipPath.isEmpty) return null;
+        if (!zipPath.toLowerCase().endsWith('.zip')) {
+          throw const FormatException(
+            'Choose the Pioneer Library ZIP file you downloaded.',
+          );
+        }
+        return <String>[zipPath];
+      }
       if (kind != 'collection' &&
           kind != 'bookPackage' &&
           kind != 'pioneerPackage') {
@@ -200,6 +215,24 @@ class LibraryRootNative {
           collection: kind == 'collection',
         ),
       ];
+    }
+    if ((defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux) &&
+        kind == 'pioneerZip') {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['zip'],
+        allowMultiple: false,
+        dialogTitle: 'Choose the Pioneer Library ZIP file',
+        initialDirectory: await _lastPioneerPickerDirectory(),
+      );
+      final selectedPath = result?.files.firstOrNull?.path?.trim() ?? '';
+      if (selectedPath.isEmpty) return null;
+      await LocalSettingsStore.instance.saveLastPioneerPickerDirectory(
+        p.dirname(selectedPath),
+      );
+      return <String>[selectedPath];
     }
     if ((defaultTargetPlatform == TargetPlatform.macOS ||
             defaultTargetPlatform == TargetPlatform.windows ||
@@ -298,6 +331,13 @@ class LibraryRootNative {
 
   static Future<String?> pickPioneerPackage() async =>
       (await pickImportFiles(kind: 'pioneerPackage'))?.firstOrNull;
+
+  /// Picks a single Pioneer Library collection ZIP file. Selecting one file
+  /// is far more reliable across cloud storage
+  /// providers than navigating the folder-tree picker, which several
+  /// providers (notably Google Drive) present poorly.
+  static Future<String?> pickPioneerZipFile() async =>
+      (await pickImportFiles(kind: 'pioneerZip'))?.firstOrNull;
 
   static Future<String?> pickSavedPioneerExport() async {
     if (Platform.isAndroid || defaultTargetPlatform == TargetPlatform.android) {

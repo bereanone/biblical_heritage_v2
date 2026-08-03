@@ -4558,8 +4558,27 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         ),
       ),
     );
-    if (defaultTargetPlatform != TargetPlatform.macOS) {
-      return scaffold;
+    final guardedScaffold = Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        scaffold,
+        ReaderAutoscrollTapShield(
+          listenables: <Listenable>[_tiltAutoScroll, _steadyAutoScroll],
+          isScrolling: () =>
+              _tiltAutoScroll.isActive || _steadyAutoScroll.isScrolling,
+          onStop: () {
+            _steadyAutoScroll.stopForManualInteraction();
+            _tiltAutoScroll.stopSynchronously(
+              diagnosticCause: 'pointer-interaction',
+            );
+            _readerFocusNode.requestFocus();
+          },
+        ),
+      ],
+    );
+    if (defaultTargetPlatform != TargetPlatform.macOS &&
+        defaultTargetPlatform != TargetPlatform.windows) {
+      return guardedScaffold;
     }
     return Focus(
       focusNode: _readerFocusNode,
@@ -4570,7 +4589,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         controller: _steadyAutoScroll,
         suspended: _readerShortcutsSuspended,
       ),
-      child: scaffold,
+      child: guardedScaffold,
     );
   }
 }

@@ -473,10 +473,10 @@ class CaptureClipperImportsSection extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               isIOS
-                  ? 'Get available Pioneer books from verified public sources, or choose a book package from OneDrive, iCloud Drive, or another Files location. StudyBible copies it locally so it remains available offline.'
+                  ? 'Import the Pioneer Library from a folder you already have, or choose a book package from OneDrive, iCloud Drive, or another Files location. StudyBible copies it locally so it remains available offline.'
                   : isAndroid
-                  ? 'Get available Pioneer books from verified public sources, or choose Pioneers.studycollection or a .studybook package from Files or cloud storage. Imported packages are copied into StudyBible2 storage.'
-                  : 'Get missing Pioneer books from verified public sources, or choose Pioneers.studycollection from the Collections folder in your cloud storage. StudyBible2 shows what will change before importing.',
+                  ? 'Import the Pioneer Library from a folder you already have, or choose Pioneers.studycollection or a .studybook package from Files or cloud storage. Imported packages are copied into StudyBible2 storage.'
+                  : 'Import the Pioneer Library from a folder you already have, or choose Pioneers.studycollection from the Collections folder in your cloud storage. StudyBible2 shows what will change before importing.',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),
@@ -493,8 +493,8 @@ class CaptureClipperImportsSection extends StatelessWidget {
                 if (isIOS) ...[
                   FilledButton.icon(
                     onPressed: disableActions ? null : onDownloadPioneerBooks,
-                    icon: const Icon(Icons.download_rounded),
-                    label: const Text('Get Pioneer Books Online'),
+                    icon: const Icon(Icons.folder_open),
+                    label: const Text('Import Pioneer Library'),
                   ),
                   OutlinedButton(
                     onPressed: disableActions ? null : onImportBookPackage,
@@ -507,8 +507,8 @@ class CaptureClipperImportsSection extends StatelessWidget {
                 ] else if (isAndroid) ...[
                   FilledButton.icon(
                     onPressed: disableActions ? null : onDownloadPioneerBooks,
-                    icon: const Icon(Icons.download_rounded),
-                    label: const Text('Get Pioneer Books Online'),
+                    icon: const Icon(Icons.folder_open),
+                    label: const Text('Import Pioneer Library'),
                   ),
                   OutlinedButton(
                     onPressed: disableActions ? null : onCheckForNewBooks,
@@ -525,8 +525,8 @@ class CaptureClipperImportsSection extends StatelessWidget {
                   ),
                   OutlinedButton.icon(
                     onPressed: disableActions ? null : onDownloadPioneerBooks,
-                    icon: const Icon(Icons.download_rounded),
-                    label: const Text('Get Pioneer Books Online'),
+                    icon: const Icon(Icons.folder_open),
+                    label: const Text('Import Pioneer Library'),
                   ),
                   OutlinedButton(
                     onPressed: disableActions ? null : onImportBookPackage,

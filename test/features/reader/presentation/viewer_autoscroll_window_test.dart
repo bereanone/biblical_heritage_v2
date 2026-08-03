@@ -2,6 +2,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:studybible2/features/reader/presentation/viewer_body.dart';
 
 void main() {
+  test('automatic scrolling rejects implausible whole-book leaps', () {
+    expect(
+      viewerAutomaticBlockTransitionIsSafe(
+        previousBlockId: 30000,
+        candidateBlockId: 10,
+      ),
+      isFalse,
+    );
+    expect(
+      viewerAutomaticBlockTransitionIsSafe(
+        previousBlockId: 30000,
+        candidateBlockId: 30008,
+      ),
+      isTrue,
+    );
+  });
+
   test('stale old-range visible callbacks are rejected', () {
     expect(
       viewerVisibleLocationCallbackIsCurrent(

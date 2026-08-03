@@ -135,7 +135,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       motionSource: PlatformReaderTiltMotionSource(),
       scrollTarget: _tiltScrollTarget,
     )..addListener(_onTiltAutoScrollChanged);
-    _usesMacAutoscroll = Platform.isMacOS;
+    _usesMacAutoscroll = Platform.isMacOS || Platform.isWindows;
     if (_usesMacAutoscroll) {
       _macAutoScroll = MacReaderAutoScrollController(
         scrollTarget: _tiltScrollTarget,
@@ -409,7 +409,20 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         ),
       ),
     );
-    if (!_usesMacAutoscroll) return reader;
+    final guardedReader = Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        reader,
+        ReaderAutoscrollTapShield(
+          listenables: <Listenable>[_tiltAutoScroll, ?_macAutoScroll],
+          isScrolling: () =>
+              _tiltAutoScroll.isActive ||
+              (_macAutoScroll?.isScrolling ?? false),
+          onStop: _stopReaderAutoscroll,
+        ),
+      ],
+    );
+    if (!_usesMacAutoscroll) return guardedReader;
     return Focus(
       focusNode: _readerFocusNode,
       autofocus: true,
@@ -419,7 +432,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         controller: _macAutoScroll!,
         suspended: _readerShortcutsSuspended || _interlinearEnabled,
       ),
-      child: reader,
+      child: guardedReader,
     );
   }
 

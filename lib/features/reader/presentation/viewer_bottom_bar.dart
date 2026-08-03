@@ -110,24 +110,14 @@ class ViewerBottomBar extends StatelessWidget {
                     child: Row(
                       children: [
                         // Priority controls stay fixed and fully on-screen.
+                        // Commentary and eLibrary are core navigation and
+                        // must always be visible here, never inside the
+                        // scrollable low-priority section below (which can
+                        // render effectively empty if the available width is
+                        // tight, hiding them entirely).
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            IconButton(
-                              tooltip: 'History',
-                              onPressed: onHistory,
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints.tightFor(
-                                width: 36,
-                                height: 36,
-                              ),
-                              icon: Icon(
-                                Icons.history_rounded,
-                                color: buttonColor,
-                                size: 22,
-                              ),
-                            ),
-                            const SizedBox(width: 2),
                             _FontScaleButton(
                               onPressed: canDecreaseFont
                                   ? onDecreaseFont
@@ -151,28 +141,41 @@ class ViewerBottomBar extends StatelessWidget {
                             ),
                             const SizedBox(width: 2),
                             _autoScrollButton(),
-                            const SizedBox(width: 10),
+                            const SizedBox(width: 8),
+                            _BottomIconButton(
+                              tooltip: 'Commentary',
+                              icon: Icons.menu_book_outlined,
+                              color: buttonColor,
+                              compact: true,
+                              onPressed: onCommentary,
+                            ),
+                            const SizedBox(width: 2),
+                            _LibraryButton(compact: true, onPressed: onLibrary),
+                            const SizedBox(width: 6),
                           ],
                         ),
                         // Lower-priority controls scroll independently; moving
-                        // them can never move Tilt Auto-scroll off-screen.
+                        // them can never move Tilt Auto-scroll, Commentary,
+                        // or eLibrary off-screen.
                         Expanded(
                           child: SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             padding: EdgeInsets.only(right: sidePadding),
                             child: Row(
                               children: [
-                                _BottomIconButton(
-                                  tooltip: 'Commentary',
-                                  icon: Icons.menu_book_outlined,
-                                  color: buttonColor,
-                                  compact: true,
-                                  onPressed: onCommentary,
-                                ),
-                                const SizedBox(width: 2),
-                                _LibraryButton(
-                                  compact: true,
-                                  onPressed: onLibrary,
+                                IconButton(
+                                  tooltip: 'History',
+                                  onPressed: onHistory,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 36,
+                                    height: 36,
+                                  ),
+                                  icon: Icon(
+                                    Icons.history_rounded,
+                                    color: buttonColor,
+                                    size: 22,
+                                  ),
                                 ),
                                 const SizedBox(width: 2),
                                 _InterlinearToggleButton(

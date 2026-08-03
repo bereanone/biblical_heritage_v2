@@ -15,6 +15,51 @@ class _Target implements ReaderAutoScrollTarget {
 }
 
 void main() {
+  testWidgets(
+    'first tap stops active autoscroll and the next tap reaches content',
+    (tester) async {
+      final controller = MacReaderAutoScrollController(
+        scrollTarget: _Target(),
+        driveFrames: false,
+      );
+      addTearDown(controller.dispose);
+      var activations = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              TextButton(
+                key: const ValueKey('underlying-reader-action'),
+                onPressed: () => activations++,
+                child: const Text('Verse action'),
+              ),
+              ReaderAutoscrollTapShield(
+                listenables: <Listenable>[controller],
+                isScrolling: () => controller.isScrolling,
+                onStop: controller.stopForManualInteraction,
+              ),
+            ],
+          ),
+        ),
+      );
+      controller.setSignedStep(5);
+      await tester.pump();
+
+      await tester.tap(
+        find.byKey(const ValueKey('underlying-reader-action')),
+        warnIfMissed: false,
+      );
+      await tester.pump();
+      expect(controller.isScrolling, isFalse);
+      expect(activations, 0);
+
+      await tester.tap(find.byKey(const ValueKey('underlying-reader-action')));
+      await tester.pump();
+      expect(activations, 1);
+    },
+  );
+
   testWidgets('arrows change speed only while reader has primary focus', (
     tester,
   ) async {
@@ -157,6 +202,13 @@ void main() {
     await tester.pump();
     expect(controller.signedStep, 0);
     expect(controller.statusLabel, 'Autoscroll paused');
+    var button = tester.widget<IconButton>(
+      find.byKey(const ValueKey('mac-autoscroll-button')),
+    );
+    expect(
+      button.style?.backgroundColor?.resolve(const <WidgetState>{}),
+      Theme.of(tester.element(find.byType(Scaffold))).colorScheme.primary,
+    );
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
@@ -166,6 +218,13 @@ void main() {
     await tester.pump();
     expect(controller.signedStep, 0);
     expect(controller.statusLabel, 'Autoscroll stopped');
+    button = tester.widget<IconButton>(
+      find.byKey(const ValueKey('mac-autoscroll-button')),
+    );
+    expect(
+      button.style?.backgroundColor?.resolve(const <WidgetState>{}),
+      isNull,
+    );
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
@@ -243,10 +302,12 @@ void main() {
       await tester.sendKeyUpEvent(key);
     }
 
+    final keyboardRevision = controller.keyboardStatusRevision;
     for (final expected in <int>[1, 2, 3, 5, 10, 25, 50, 50]) {
       await press(LogicalKeyboardKey.arrowDown);
       expect(controller.signedStep, expected);
     }
+    expect(controller.keyboardStatusRevision, greaterThan(keyboardRevision));
     for (final expected in <int>[25, 10, 5, 3, 2, 1, 0, -1]) {
       await press(LogicalKeyboardKey.arrowUp);
       expect(controller.signedStep, expected);
@@ -453,6 +514,16 @@ void main() {
       expect(find.byKey(const ValueKey('mac-autoscroll-status')), findsNothing);
       controller.increaseStep();
       expect(controller.signedStep, 3);
+      controller.showKeyboardStatus();
+      await tester.pump();
+      expect(find.text('Autoscroll ↓ 3×'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 249));
+      expect(
+        find.byKey(const ValueKey('mac-autoscroll-status')),
+        findsOneWidget,
+      );
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(find.byKey(const ValueKey('mac-autoscroll-status')), findsNothing);
     },
   );
 }

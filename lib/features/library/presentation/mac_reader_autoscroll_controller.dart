@@ -25,6 +25,26 @@ const List<int> macAutoscrollSignedSpeedSteps = <int>[
   50,
 ];
 const int _boundaryConfirmationFrames = 8;
+const Duration macAutoscrollMaximumFrameElapsed = Duration(milliseconds: 50);
+const double macAutoscrollMaximumFrameDeltaPixels = 48;
+
+double cappedMacAutoscrollFrameDelta({
+  required double pixelsPerSecond,
+  required Duration elapsed,
+}) {
+  final cappedMicroseconds = elapsed.inMicroseconds.clamp(
+    0,
+    macAutoscrollMaximumFrameElapsed.inMicroseconds,
+  );
+  final delta =
+      pixelsPerSecond * cappedMicroseconds / Duration.microsecondsPerSecond;
+  return delta
+      .clamp(
+        -macAutoscrollMaximumFrameDeltaPixels,
+        macAutoscrollMaximumFrameDeltaPixels,
+      )
+      .toDouble();
+}
 
 int normalizeMacAutoscrollRememberedStep(int? value, int maximumStep) {
   final maximum = maximumStep.clamp(1, defaultMacAutoscrollMaximumStep);
@@ -104,6 +124,7 @@ class MacReaderAutoScrollController extends ChangeNotifier {
   ReaderTiltStatusBannerMode _statusBannerMode;
   double _baseSpeed;
   int statusRevision = 0;
+  int keyboardStatusRevision = 0;
   int _consecutiveBlockedFrames = 0;
   bool _hasMovedSinceStart = false;
 
@@ -213,12 +234,18 @@ class MacReaderAutoScrollController extends ChangeNotifier {
   }
 
   @visibleForTesting
-  void tick(Duration elapsed) {
+  void tick(Duration elapsed, {bool enforceFrameSafetyCap = false}) {
     if (!isScrolling || elapsed <= Duration.zero || !scrollTarget.isAttached) {
       return;
     }
-    final seconds = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
-    final delta = pixelsPerSecond * seconds;
+    final delta = enforceFrameSafetyCap
+        ? cappedMacAutoscrollFrameDelta(
+            pixelsPerSecond: pixelsPerSecond,
+            elapsed: elapsed,
+          )
+        : pixelsPerSecond *
+              elapsed.inMicroseconds /
+              Duration.microsecondsPerSecond;
     if (scrollTarget.scrollBy(delta)) {
       _consecutiveBlockedFrames = 0;
       _hasMovedSinceStart = true;
@@ -238,7 +265,9 @@ class MacReaderAutoScrollController extends ChangeNotifier {
     _ticker = _tickerFactory((elapsed) {
       final previous = _lastElapsed;
       _lastElapsed = elapsed;
-      if (previous != null) tick(elapsed - previous);
+      if (previous != null) {
+        tick(elapsed - previous, enforceFrameSafetyCap: true);
+      }
     })..start();
   }
 
@@ -258,6 +287,14 @@ class MacReaderAutoScrollController extends ChangeNotifier {
 
   void _showStatus() {
     statusRevision++;
+    notifyListeners();
+  }
+
+  /// Requests a short status flash even when the persistent banner preference
+  /// is Always Hidden. Used only for desktop arrow-key speed changes.
+  void showKeyboardStatus() {
+    if (_disposed) return;
+    keyboardStatusRevision++;
     notifyListeners();
   }
 

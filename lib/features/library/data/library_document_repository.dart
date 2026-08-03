@@ -278,13 +278,24 @@ class LibraryDocumentRepository {
         LibraryDocumentBlockType.heading.name,
       ],
       orderBy: 'display_order DESC',
+      limit: 16,
     );
     final headings = headingRows.map(LibraryDocumentBlock.fromRow).toList();
-    final primary = headings.where(
-      (heading) => heading.isPrimaryChapterHeading,
+    final primaryRows = await db.rawQuery(
+      '''
+      SELECT * FROM library_document_blocks
+      WHERE library_item_id = ? AND display_order <= ? AND block_type = ?
+        AND json_extract(formatted_content, '\$.metadata.heading_role') = 'chapter'
+      ORDER BY display_order DESC LIMIT 1
+      ''',
+      <Object?>[
+        libraryItemId,
+        displayOrder,
+        LibraryDocumentBlockType.heading.name,
+      ],
     );
-    final selectedHeading = primary.isNotEmpty
-        ? primary.first
+    final selectedHeading = primaryRows.isNotEmpty
+        ? LibraryDocumentBlock.fromRow(primaryRows.first)
         : headings.firstOrNull;
     final secondary = headings.where(
       (heading) =>

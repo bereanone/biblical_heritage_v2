@@ -87,6 +87,7 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
     case folder
     case scannedHtmlFile
     case importFileCopies
+    case importZipCopy
     case importPackageCopies
     case importCollectionCopy
     case importFolderCopies
@@ -99,6 +100,8 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
         return "scanned HTML file"
       case .importFileCopies:
         return "import file copy"
+      case .importZipCopy:
+        return "Pioneer ZIP import copy"
       case .importPackageCopies:
         return "studybook import copy"
       case .importCollectionCopy:
@@ -206,7 +209,28 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
       }
 
       let picker: UIDocumentPickerViewController
-      if kind == "collection" || kind == "bookPackage" || kind == "pioneerPackage" {
+      if kind == "pioneerZip" {
+        if #available(iOS 14.0, *) {
+          // Google Drive may advertise a ZIP as public.zip-archive,
+          // public.archive, public.data, or a provider-specific dynamic type.
+          // Include the broad fallbacks so Files can enable the document;
+          // Dart still requires the selected filename to end in .zip.
+          var contentTypes: [UTType] = [.zip, .archive, .data, .item]
+          if let extensionType = UTType(filenameExtension: "zip"),
+             !contentTypes.contains(extensionType) {
+            contentTypes.append(extensionType)
+          }
+          picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: contentTypes,
+            asCopy: true
+          )
+        } else {
+          picker = UIDocumentPickerViewController(
+            documentTypes: ["public.zip-archive", "public.archive", "public.data", "public.item"],
+            in: .import
+          )
+        }
+      } else if kind == "collection" || kind == "bookPackage" || kind == "pioneerPackage" {
         if #available(iOS 14.0, *) {
           // Ask to open one file, with the broad public.item type plus the
           // well-known zip archive type (a .studybook package is literally
@@ -267,10 +291,12 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
       // single copied-document request preserves provider navigation; users
       // can repeat the import action for additional books.
       picker.allowsMultipleSelection =
-        kind != "collection" && kind != "bookPackage" && kind != "pioneerPackage"
+        kind != "pioneerZip" && kind != "collection" && kind != "bookPackage" && kind != "pioneerPackage"
       picker.modalPresentationStyle = .formSheet
       self.pendingSelectionKind =
-        kind == "collection"
+        kind == "pioneerZip"
+          ? .importZipCopy
+          : kind == "collection"
           ? .importCollectionCopy
           : (kind == "bookPackage" || kind == "pioneerPackage")
             ? .importPackageCopies
@@ -278,9 +304,12 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
       self.pendingResult = result
       let isPioneerPackageKind =
         kind == "collection" || kind == "bookPackage" || kind == "pioneerPackage"
-      let loggedContentTypes = isPioneerPackageKind ? "[public.item]" : "[content-specific]"
+      let loggedContentTypes =
+        kind == "pioneerZip"
+          ? "[public.zip-archive, public.archive, public.data, public.item]"
+          : isPioneerPackageKind ? "[public.item]" : "[content-specific]"
       let loggedCopyMode = isPioneerPackageKind ? "open-then-copy-locally" : "asCopy=true"
-      let loggedMultipleSelection = !isPioneerPackageKind
+      let loggedMultipleSelection = !isPioneerPackageKind && kind != "pioneerZip"
       print(
         "StudyBible2: presenting copied-document picker. "
           + "kind=\(kind) contentTypes=\(loggedContentTypes) "
@@ -383,7 +412,7 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
 
   func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
     let selectionKind = pendingSelectionKind ?? .folder
-    if selectionKind == .importFileCopies || selectionKind == .importPackageCopies || selectionKind == .importCollectionCopy || selectionKind == .importFolderCopies {
+    if selectionKind == .importFileCopies || selectionKind == .importZipCopy || selectionKind == .importPackageCopies || selectionKind == .importCollectionCopy || selectionKind == .importFolderCopies {
       guard !urls.isEmpty else {
         print("StudyBible2: iOS import file picker returned no selection.")
         finish(
@@ -411,6 +440,21 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
             FlutterError(
               code: "invalid_studybook_selection",
               message: "Choose an individual book package, not a collection file.",
+              details: invalidNames
+            )
+          )
+          return
+        }
+      }
+      if selectionKind == .importZipCopy {
+        let invalidNames = urls
+          .map { $0.lastPathComponent }
+          .filter { !$0.lowercased().hasSuffix(".zip") }
+        if !invalidNames.isEmpty {
+          finish(
+            FlutterError(
+              code: "invalid_pioneer_zip_selection",
+              message: "Choose the Pioneer Library ZIP file you downloaded.",
               details: invalidNames
             )
           )
@@ -533,7 +577,7 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
         returnedURL = url
       case .scannedHtmlFile:
         returnedURL = selectedIsDirectory ? url : url.deletingLastPathComponent()
-      case .importFileCopies, .importPackageCopies, .importCollectionCopy, .importFolderCopies:
+      case .importFileCopies, .importZipCopy, .importPackageCopies, .importCollectionCopy, .importFolderCopies:
         // Handled by the early return above; kept for switch exhaustiveness.
         returnedURL = url
       }

@@ -21,10 +21,12 @@ KeyEventResult handleMacReaderAutoscrollKeyEvent({
   if (!controller.isActive) return KeyEventResult.ignored;
   if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
     controller.increaseStep();
+    controller.showKeyboardStatus();
     return KeyEventResult.handled;
   }
   if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
     controller.decreaseStep();
+    controller.showKeyboardStatus();
     return KeyEventResult.handled;
   }
   return KeyEventResult.ignored;
@@ -50,6 +52,38 @@ bool _editableControlHasFocus() {
       context.findAncestorWidgetOfExactType<DropdownButton<Object?>>() != null;
 }
 
+/// Consumes the first pointer sequence while autoscroll is moving. Stopping on
+/// pointer-down prevents the same click from reaching verse selection or a
+/// navigation control after the scroll position changes.
+class ReaderAutoscrollTapShield extends StatelessWidget {
+  const ReaderAutoscrollTapShield({
+    super.key,
+    required this.listenables,
+    required this.isScrolling,
+    required this.onStop,
+  });
+
+  final List<Listenable> listenables;
+  final bool Function() isScrolling;
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge(listenables),
+    builder: (context, _) {
+      if (!isScrolling()) return const SizedBox.shrink();
+      return Positioned.fill(
+        child: Listener(
+          key: const ValueKey('reader-autoscroll-tap-shield'),
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: (_) => onStop(),
+          child: const SizedBox.expand(),
+        ),
+      );
+    },
+  );
+}
+
 class MacReaderAutoScrollButton extends StatelessWidget {
   const MacReaderAutoScrollButton({
     super.key,
@@ -67,22 +101,30 @@ class MacReaderAutoScrollButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
-    builder: (context, _) => Semantics(
-      button: true,
-      label: controller.statusLabel,
-      hint: 'Click to start or stop. Long press for Autoscroll settings.',
-      child: Tooltip(
-        message: 'Autoscroll',
-        child: GestureDetector(
-          onLongPress: enabled ? onLongPress : null,
-          child: IconButton(
-            key: const ValueKey('mac-autoscroll-button'),
-            onPressed: enabled ? onPressed : null,
-            icon: const Icon(Icons.swap_vert),
+    builder: (context, _) {
+      final colors = Theme.of(context).colorScheme;
+      return Semantics(
+        button: true,
+        selected: controller.isActive,
+        label: controller.statusLabel,
+        hint: 'Click to start or stop. Long press for Autoscroll settings.',
+        child: Tooltip(
+          message: 'Autoscroll',
+          child: GestureDetector(
+            onLongPress: enabled ? onLongPress : null,
+            child: IconButton(
+              key: const ValueKey('mac-autoscroll-button'),
+              onPressed: enabled ? onPressed : null,
+              style: IconButton.styleFrom(
+                backgroundColor: controller.isActive ? colors.primary : null,
+                foregroundColor: controller.isActive ? colors.onPrimary : null,
+              ),
+              icon: const Icon(Icons.swap_vert),
+            ),
           ),
         ),
-      ),
-    ),
+      );
+    },
   );
 }
 
@@ -103,23 +145,31 @@ class ReaderAutoScrollButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
-    builder: (context, _) => Semantics(
-      button: true,
-      label: controller.statusLabel,
-      hint: 'Tap to start or stop. Long press for Autoscroll settings.',
-      child: Tooltip(
-        message: 'Autoscroll',
-        child: GestureDetector(
-          onLongPress: enabled ? onLongPress : null,
-          child: IconButton(
-            key: const ValueKey('elibrary-auto-scroll'),
-            constraints: const BoxConstraints.tightFor(width: 44, height: 44),
-            onPressed: enabled ? onPressed : null,
-            icon: const Icon(Icons.swap_vert_rounded),
+    builder: (context, _) {
+      final colors = Theme.of(context).colorScheme;
+      return Semantics(
+        button: true,
+        selected: controller.isActive,
+        label: controller.statusLabel,
+        hint: 'Tap to start or stop. Long press for Autoscroll settings.',
+        child: Tooltip(
+          message: 'Autoscroll',
+          child: GestureDetector(
+            onLongPress: enabled ? onLongPress : null,
+            child: IconButton(
+              key: const ValueKey('elibrary-auto-scroll'),
+              constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+              onPressed: enabled ? onPressed : null,
+              style: IconButton.styleFrom(
+                backgroundColor: controller.isActive ? colors.primary : null,
+                foregroundColor: controller.isActive ? colors.onPrimary : null,
+              ),
+              icon: const Icon(Icons.swap_vert_rounded),
+            ),
           ),
         ),
-      ),
-    ),
+      );
+    },
   );
 }
 
@@ -150,11 +200,14 @@ class _MacReaderAutoscrollStatusOverlayState
     extends State<MacReaderAutoscrollStatusOverlay> {
   Timer? _hideTimer;
   bool _autoHideVisible = false;
+  bool _keyboardFlashVisible = false;
+  int _lastKeyboardStatusRevision = 0;
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_handleControllerChange);
+    _lastKeyboardStatusRevision = widget.controller.keyboardStatusRevision;
   }
 
   @override
@@ -164,11 +217,27 @@ class _MacReaderAutoscrollStatusOverlayState
     oldWidget.controller.removeListener(_handleControllerChange);
     _hideTimer?.cancel();
     _autoHideVisible = false;
+    _keyboardFlashVisible = false;
+    _lastKeyboardStatusRevision = widget.controller.keyboardStatusRevision;
     widget.controller.addListener(_handleControllerChange);
   }
 
   void _handleControllerChange() {
+    final keyboardStatusChanged =
+        _lastKeyboardStatusRevision != widget.controller.keyboardStatusRevision;
+    _lastKeyboardStatusRevision = widget.controller.keyboardStatusRevision;
+    if (keyboardStatusChanged &&
+        widget.controller.statusBannerMode ==
+            ReaderTiltStatusBannerMode.alwaysHidden) {
+      _hideTimer?.cancel();
+      setState(() => _keyboardFlashVisible = true);
+      _hideTimer = Timer(const Duration(milliseconds: 250), () {
+        if (mounted) setState(() => _keyboardFlashVisible = false);
+      });
+      return;
+    }
     _hideTimer?.cancel();
+    _keyboardFlashVisible = false;
     if (widget.controller.statusBannerMode ==
         ReaderTiltStatusBannerMode.autoHide) {
       setState(() => _autoHideVisible = true);
@@ -193,7 +262,7 @@ class _MacReaderAutoscrollStatusOverlayState
     final visible = switch (controller.statusBannerMode) {
       ReaderTiltStatusBannerMode.alwaysVisible => controller.isActive,
       ReaderTiltStatusBannerMode.autoHide => _autoHideVisible,
-      ReaderTiltStatusBannerMode.alwaysHidden => false,
+      ReaderTiltStatusBannerMode.alwaysHidden => _keyboardFlashVisible,
     };
     if (!visible) return const SizedBox.shrink();
     final value = controller.statusLabel;

@@ -131,19 +131,19 @@ void main() {
     expect(find.text('✓ Import location is ready'), findsOneWidget);
     expect(
       find.text(
-        'Get missing Pioneer books from verified public sources, or choose Pioneers.studycollection from the Collections folder in your cloud storage. StudyBible2 shows what will change before importing.',
+        'Import the Pioneer Library from a folder you already have, or choose Pioneers.studycollection from the Collections folder in your cloud storage. StudyBible2 shows what will change before importing.',
       ),
       findsOneWidget,
     );
     expect(find.textContaining('/private/var'), findsNothing);
     expect(find.text('Last checked:\nPioneers\nToday'), findsOneWidget);
     expect(find.text('Check for New Books'), findsOneWidget);
-    expect(find.text('Get Pioneer Books Online'), findsOneWidget);
+    expect(find.text('Import Pioneer Library'), findsOneWidget);
     expect(find.text('Import One Book Package'), findsOneWidget);
     expect(find.text('Choose CloudFiles Folder'), findsOneWidget);
 
     await tester.tap(find.text('Check for New Books'));
-    await tester.tap(find.text('Get Pioneer Books Online'));
+    await tester.tap(find.text('Import Pioneer Library'));
     await tester.tap(find.text('Import One Book Package'));
     await tester.pump();
 
@@ -175,19 +175,19 @@ void main() {
       ),
     );
 
-    expect(find.text('Get Pioneer Books Online'), findsOneWidget);
+    expect(find.text('Import Pioneer Library'), findsOneWidget);
     expect(find.text('Import StudyBible Book'), findsOneWidget);
     expect(find.text('Import CaptureClipper Files'), findsOneWidget);
     expect(find.text('Choose CloudFiles Folder'), findsNothing);
     expect(find.textContaining('persistent'), findsNothing);
     expect(
       find.text(
-        'Get available Pioneer books from verified public sources, or choose a book package from OneDrive, iCloud Drive, or another Files location. StudyBible copies it locally so it remains available offline.',
+        'Import the Pioneer Library from a folder you already have, or choose a book package from OneDrive, iCloud Drive, or another Files location. StudyBible copies it locally so it remains available offline.',
       ),
       findsOneWidget,
     );
 
-    await tester.tap(find.text('Get Pioneer Books Online'));
+    await tester.tap(find.text('Import Pioneer Library'));
     expect(downloadCount, 1);
   });
 
@@ -218,14 +218,14 @@ void main() {
         ),
       );
 
-      expect(find.text('Get Pioneer Books Online'), findsOneWidget);
+      expect(find.text('Import Pioneer Library'), findsOneWidget);
       expect(find.text('Import Pioneer Collection'), findsOneWidget);
       expect(find.text('Import One Pioneer Book'), findsOneWidget);
       expect(find.text('Choose CloudFiles Folder'), findsNothing);
       expect(find.textContaining('Pioneers.studycollection'), findsOneWidget);
       expect(find.textContaining('.studybook'), findsOneWidget);
 
-      await tester.tap(find.text('Get Pioneer Books Online'));
+      await tester.tap(find.text('Import Pioneer Library'));
       await tester.tap(find.text('Import Pioneer Collection'));
       await tester.tap(find.text('Import One Pioneer Book'));
 

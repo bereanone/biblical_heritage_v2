@@ -17,6 +17,7 @@ import '../../library/data/library_author_resolver.dart';
 import '../../library/data/library_citation_display_helper.dart';
 import '../../library/data/library_item_identity.dart';
 import '../../library/data/library_section_heuristics.dart';
+import '../../utilities/data/elibrary_catalog_duplicate_repair_service.dart';
 import 'commentary_research_models.dart';
 import 'commentary_research_filters.dart';
 import 'commentary_reference_parser.dart';
@@ -756,20 +757,30 @@ class CommentaryResearchLibraryService
     }
 
     final preferredFormatFiles = _preferEpubs(discovered);
+    final indexableFiles = <File>[];
+    for (final file in preferredFormatFiles) {
+      final relativePath = await LibraryRootService.instance.relativePathFor(
+        absolutePath: file.path,
+        rootPath: rootPath,
+      );
+      final skipLegacy = await ELibraryCatalogDuplicateRepairService.instance
+          .shouldSkipLegacyCandidate(db: db, relativePath: relativePath);
+      if (!skipLegacy) indexableFiles.add(file);
+    }
 
     final scopedDiscovered =
         folderType == 'commentary' && preferredVolumeCode != null
-        ? preferredFormatFiles
+        ? indexableFiles
               .where(
                 (file) =>
                     _inferVolumeCodeFromPath(file.path) == preferredVolumeCode,
               )
               .toList(growable: false)
-        : preferredFormatFiles;
+        : indexableFiles;
     final filesToIndex =
         preferredVolumeCode != null && scopedDiscovered.isNotEmpty
         ? scopedDiscovered
-        : preferredFormatFiles;
+        : indexableFiles;
     final effectivePreferredVolumeCode =
         preferredVolumeCode != null && scopedDiscovered.isNotEmpty
         ? preferredVolumeCode

@@ -81,33 +81,101 @@ Future<void> _pumpScreen(
 }
 
 void main() {
-  testWidgets('first-time view has one obvious folder action and no counters', (
+  testWidgets(
+    'first-time view offers a ZIP action and a folder fallback, no counters',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ImportPioneerLibraryScreen(loadSavedFolder: () async => null),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pioneer Library'), findsOneWidget);
+      expect(find.byKey(const Key('pioneer-zip-action')), findsOneWidget);
+      expect(find.text('Choose Pioneer Library ZIP File'), findsOneWidget);
+      expect(find.byKey(const Key('pioneer-primary-action')), findsOneWidget);
+      expect(find.text('Add a Book File (EPUB)'), findsOneWidget);
+      expect(find.text('Advanced Tools'), findsOneWidget);
+      for (final technical in const [
+        'Usable',
+        'Text capture',
+        'Capture needed',
+        'Source needed',
+        'Selected',
+        'Select All',
+        'Import Selected',
+        'Catalog Details',
+      ]) {
+        expect(find.textContaining(technical), findsNothing);
+      }
+    },
+  );
+
+  testWidgets('choosing a ZIP file extracts, scans, and imports in one step', (
     tester,
   ) async {
+    final extractedFolder = Directory.systemTemp.createTempSync(
+      'pioneer_ui_zip_extracted_',
+    );
+    addTearDown(() => extractedFolder.deleteSync(recursive: true));
+    final inventory = _inventory(
+      extractedFolder,
+      entries: [_entry(id: 'new', unchanged: false)],
+    );
+    var extractCalls = 0;
+    String? extractedFromZipPath;
+    var prepareCalls = 0;
+    var activateCalls = 0;
+
     await tester.pumpWidget(
       MaterialApp(
-        home: ImportPioneerLibraryScreen(loadSavedFolder: () async => null),
+        home: ImportPioneerLibraryScreen(
+          loadSavedFolder: () async => null,
+          pickZipFile: () async => '/synthetic/Pioneer-Library-EPUBs.zip',
+          extractZip: (zipPath) async {
+            extractCalls++;
+            extractedFromZipPath = zipPath;
+            return extractedFolder.path;
+          },
+          surveyFolder: (selected, {onProgress}) async {
+            expect(selected.path, extractedFolder.path);
+            return inventory;
+          },
+          saveFolder: (path, bookmark) async {},
+          prepareImport:
+              ({required inventory, onProgress, shouldContinue}) async {
+                prepareCalls++;
+                return const PioneerEpubImportPreparation(
+                  targets: <LibraryAcquisitionBatchTarget>[],
+                  preparationFailures: <LibraryAcquisitionOutcome>[],
+                  skippedUnchangedCount: 0,
+                  skippedInvalidCount: 0,
+                );
+              },
+          activateBatch: (targets, {onProgress, shouldContinue}) async {
+            activateCalls++;
+            return const LibraryAcquisitionBatchResult(
+              targets: <LibraryAcquisitionBatchTarget>[],
+              outcomes: <LibraryAcquisitionOutcome>[],
+            );
+          },
+        ),
       ),
     );
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('pioneer-zip-action')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Pioneer Library'), findsOneWidget);
-    expect(find.byKey(const Key('pioneer-primary-action')), findsOneWidget);
-    expect(find.text('Choose Pioneer Library Folder'), findsOneWidget);
-    expect(find.text('Add a Book File (EPUB)'), findsOneWidget);
-    expect(find.text('Advanced Tools'), findsOneWidget);
-    for (final technical in const [
-      'Usable',
-      'Text capture',
-      'Capture needed',
-      'Source needed',
-      'Selected',
-      'Select All',
-      'Import Selected',
-      'Catalog Details',
-    ]) {
-      expect(find.textContaining(technical), findsNothing);
-    }
+    expect(extractCalls, 1);
+    expect(extractedFromZipPath, '/synthetic/Pioneer-Library-EPUBs.zip');
+    // No second tap on "Import / Update Pioneer Library" — picking the
+    // ZIP file goes straight through to import.
+    expect(prepareCalls, 1);
+    expect(activateCalls, 1);
+    expect(find.text('Pioneer Library Updated'), findsOneWidget);
   });
 
   testWidgets(
@@ -252,7 +320,7 @@ void main() {
 
     await tester.pageBack();
     await tester.pumpAndSettle();
-    expect(find.text('Choose Pioneer Library Folder'), findsOneWidget);
+    expect(find.text('Choose Pioneer Library ZIP File'), findsOneWidget);
   });
 
   for (final layout in <String, Size>{

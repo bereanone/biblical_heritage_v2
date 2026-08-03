@@ -348,4 +348,21 @@ void main() {
     expect(controller.pixelsPerSecond, 3000);
     expect(controller.statusLabel, 'Autoscroll ↓ 50×');
   });
+
+  test('a delayed frame cannot produce an extreme scroll jump', () {
+    expect(
+      cappedMacAutoscrollFrameDelta(
+        pixelsPerSecond: 3000,
+        elapsed: const Duration(seconds: 5),
+      ),
+      macAutoscrollMaximumFrameDeltaPixels,
+    );
+    expect(
+      cappedMacAutoscrollFrameDelta(
+        pixelsPerSecond: -3000,
+        elapsed: const Duration(seconds: 5),
+      ),
+      -macAutoscrollMaximumFrameDeltaPixels,
+    );
+  });
 }

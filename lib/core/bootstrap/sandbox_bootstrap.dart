@@ -13,6 +13,7 @@ class SandboxBootstrap {
   SandboxBootstrap._();
 
   static const _bibleDbName = 'bible_base.db';
+  static const _crossReferencesDbName = 'cross_references.db';
   static const _userDbName = 'user.db';
   static const _eLibraryDbName = 'eLibrary.db';
   static bool _sqfliteInitialized = false;
@@ -20,6 +21,11 @@ class SandboxBootstrap {
   static Future<String> bibleDatabasePath() async {
     final supportDir = await getApplicationSupportDirectory();
     return p.join(supportDir.path, 'databases', _bibleDbName);
+  }
+
+  static Future<String> crossReferencesDatabasePath() async {
+    final supportDir = await getApplicationSupportDirectory();
+    return p.join(supportDir.path, 'databases', _crossReferencesDbName);
   }
 
   static Future<String> userDatabasePath() async {
@@ -116,6 +122,19 @@ class SandboxBootstrap {
     await _touchDatabase(
       biblePath,
       assetPath: 'assets/databases/$_bibleDbName',
+    );
+  }
+
+  static Future<void> ensureCrossReferencesReady() async {
+    ensureSqfliteInitializedOnce();
+    final supportDir = await getApplicationSupportDirectory();
+    final supportDbDir = Directory(p.join(supportDir.path, 'databases'));
+    if (!supportDbDir.existsSync()) {
+      supportDbDir.createSync(recursive: true);
+    }
+    await _ensureAssetFile(
+      assetPath: 'assets/databases/$_crossReferencesDbName',
+      destinationPath: await crossReferencesDatabasePath(),
     );
   }
 

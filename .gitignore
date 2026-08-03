@@ -91,3 +91,6 @@ assets/scans/
 EPUB_CANONICAL_BATCH_REPORT_*.md
 EPUB_CANONICAL_BATCH_REPORT_*.json
 recovery_backups/
+
+# Downloaded upstream datasets retained locally for reproducible imports.
+source-data/

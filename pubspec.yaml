@@ -75,6 +75,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/databases/bible_base.db
+    - assets/databases/cross_references.db
     - assets/databases/user.db
     - assets/databases/eLibrary.db
     - assets/elibrary_sources/pioneer_sources.json

@@ -48,6 +48,8 @@ class _EntryScreenState extends State<EntryScreen> {
           'Version $version\n'
           '© 2026 Biblical Heritage\n'
           'Built with Flutter.\n\n'
+          'Cross-reference data derived from the OpenBible.info Bible Cross References dataset, licensed under Creative Commons Attribution 4.0.\n'
+          'https://www.openbible.info/labs/cross-references/\n\n'
           'Help: open Utilities for setup tools, then Bible Explorer for study controls and tutorials.',
         ),
         actions: [

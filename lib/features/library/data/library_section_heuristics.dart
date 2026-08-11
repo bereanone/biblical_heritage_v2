@@ -162,11 +162,36 @@ bool libraryIsMeaningfulReadingSection({
   }
 
   if (totalLength < 80) return false;
-  if (bodyParagraphCount == 0 && totalLength < 200) return false;
+  // A section made entirely of metadata-looking paragraphs (bare page
+  // numbers, "Contents", "Appendix", etc. — see _looksLikeMetadataParagraph)
+  // is never real reading content, no matter how many of them there are.
+  // Previously only length gated this, so an Index/back-matter page listing
+  // dozens of bare print-page markers ("150", "151", "152", …) could exceed
+  // the length threshold and get treated as the book's first real chapter.
+  if (bodyParagraphCount == 0) return false;
   if (!hasSubstantialParagraph && bodyParagraphCount < 2 && totalLength < 160) {
     return false;
   }
   return true;
+}
+
+/// True when [paragraphs] has zero real body content — every non-empty
+/// paragraph is nothing but a bare number (a print-edition page marker like
+/// "150", "151", "152", …). Deliberately narrower than
+/// [_looksLikeMetadataParagraph] (which also flags short plain-text lines on
+/// a length heuristic): this is used as a label-independent safety check
+/// where navigation-tree classification is otherwise trusted without
+/// re-running the full [libraryIsMeaningfulReadingSection] gate, including
+/// for single-paragraph sections, so it must never reject a legitimately
+/// short *real* opening line — only the unambiguous case of a section that
+/// is entirely page markers, e.g. an Index/back-matter page.
+bool librarySectionHasNoBodyParagraphs(List<String> paragraphs) {
+  final trimmed = paragraphs
+      .map((paragraph) => paragraph.trim())
+      .where((paragraph) => paragraph.isNotEmpty)
+      .toList(growable: false);
+  if (trimmed.isEmpty) return true;
+  return trimmed.every((paragraph) => RegExp(r'^\d+$').hasMatch(paragraph));
 }
 
 String libraryCleanVisibleMarginArtifacts(String value) {

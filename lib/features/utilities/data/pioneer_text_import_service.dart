@@ -9,9 +9,12 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/local_settings_store.dart';
+import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/elibrary_database.dart';
+import 'elibrary_folder_policy.dart';
 import 'pioneer_capture_folder_metadata.dart';
 import 'egw_copied_range_parser.dart';
+import '../../library/data/canonical_activation.dart';
 import '../../library/data/library_contributor.dart';
 import '../../library/data/library_section_heuristics.dart';
 import 'pioneer_html_capture_folder_scanner.dart';
@@ -1304,6 +1307,17 @@ class PioneerTextImportService {
           qualityValidation: qualityValidation,
         );
         results.add(result);
+        if (result.status == PioneerImportWorkStatus.imported &&
+            _isEpubLikeSourceType(sourceCandidate.sourceType)) {
+          // Best-effort only: the flattened-text import above already
+          // succeeded and must be reported as such regardless of whether
+          // this step (which only adds images) succeeds.
+          await _persistEpubSourceAndCanonicalize(
+            db: db,
+            itemId: itemId,
+            epubBytes: importBytes,
+          );
+        }
       } catch (error, stackTrace) {
         final stage = _failureStageFor(error);
         debugPrint(
@@ -1349,6 +1363,85 @@ class PioneerTextImportService {
     }
 
     return PioneerImportBatchResult(workResults: results);
+  }
+
+  /// Persists the real EGW EPUB [epubBytes] already downloaded for [itemId]
+  /// into the app-managed `ImportedPioneerEgwEpubs` folder, then runs it
+  /// through [CanonicalActivation] so its images become readable via the
+  /// canonical document reader (see `canonical_library_reader.dart`).
+  ///
+  /// This is purely additive to the flattened-text import already written by
+  /// [_writeImportedWork]: `library_text_blocks` (search/snippets) is
+  /// untouched either way, and this method never throws — a failure here
+  /// (missing Library Root, canonicalization rejecting the EPUB, disk
+  /// error) must never affect the outcome of the text import that already
+  /// succeeded. The `library_items` row for [itemId] is only updated to
+  /// point at the persisted EPUB (`file_format`/`source_type`/
+  /// `relative_path`) after canonicalization actually produces a complete,
+  /// activated generation — so a failure here leaves the item exactly as it
+  /// was: readable via the existing flattened-text/legacy reader.
+  Future<void> _persistEpubSourceAndCanonicalize({
+    required Database db,
+    required String itemId,
+    required Uint8List epubBytes,
+  }) async {
+    try {
+      final rootPath =
+          (await LibraryRootService.instance.accessibleLibraryRootPath())
+              ?.trim();
+      if (rootPath == null || rootPath.isEmpty) return;
+
+      final sanitizedId = itemId
+          .replaceAll(RegExp(r'[\\/:*?"<>|]+'), '_')
+          .trim();
+      final fileName = '${sanitizedId.isEmpty ? 'egw_book' : sanitizedId}.epub';
+      final relativePath = p.join(
+        ELibraryFolderPolicy.pioneerEgwEpubSourceRelativeFolder,
+        fileName,
+      );
+      final destination = File(
+        await LibraryRootService.instance.resolveRelativePath(
+          relativePath: relativePath,
+          rootPath: rootPath,
+        ),
+      );
+      await destination.parent.create(recursive: true);
+      await destination.writeAsBytes(epubBytes, flush: true);
+
+      final outcome = await CanonicalActivation.activate(
+        db: db,
+        libraryItemId: itemId,
+        source: destination,
+        applyStoragePolicy: true,
+        rootPath: rootPath,
+      );
+      if (!outcome.isReady) return;
+
+      final stat = await destination.exists() ? await destination.stat() : null;
+      final now = DateTime.now().toUtc().toIso8601String();
+      await db.update(
+        'library_items',
+        <String, Object?>{
+          'file_format': 'epub',
+          'source_type': 'pioneer_egw_epub_source',
+          'relative_path': relativePath,
+          'file_name': fileName,
+          'mime_type': 'application/epub+zip',
+          if (stat != null) 'file_size': stat.size,
+          if (stat != null)
+            'modified_at': stat.modified.toUtc().toIso8601String(),
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: <Object?>[itemId],
+      );
+    } catch (error, stackTrace) {
+      debugPrint(
+        '[PioneerImport] Image-source canonicalization skipped for '
+        '$itemId: $error',
+      );
+      debugPrintStack(stackTrace: stackTrace);
+    }
   }
 
   Future<PioneerImportWorkResult> importLocalEpubFile({

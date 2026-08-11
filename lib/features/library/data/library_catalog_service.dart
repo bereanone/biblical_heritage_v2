@@ -43,6 +43,7 @@ class LibraryCatalogService {
   Future<List<LibraryCatalogItem>> loadItems({
     String folderRoot = 'all',
     bool includeAlternateEditions = false,
+    bool hydrateMetadata = true,
   }) async {
     await LibraryRootService.instance.accessibleLibraryRootPath();
     final normalized = folderRoot.trim().toLowerCase();
@@ -116,25 +117,25 @@ class LibraryCatalogService {
         li.anchor_id,
         li.epub_href,
         li.paragraph_index,
-        (
+        ${hydrateMetadata ? '''(
           SELECT COUNT(*)
           FROM library_navigation_items lni
           WHERE lni.library_item_id = li.id
             AND lni.deleted_at IS NULL
-        ) AS navigation_count
-        ,(
+        )''' : '0'} AS navigation_count
+        ,${hydrateMetadata ? '''(
           SELECT COUNT(*) FROM library_text_blocks ltb
           WHERE ltb.library_item_id = li.id
-        ) AS readable_block_count
-        ,(
+        )''' : '0'} AS readable_block_count
+        ,${hydrateMetadata ? '''(
           SELECT COALESCE(SUM(LENGTH(ltb.plain_text)), 0)
           FROM library_text_blocks ltb WHERE ltb.library_item_id = li.id
-        ) AS extracted_text_length
-        ,(
+        )''' : '0'} AS extracted_text_length
+        ,${hydrateMetadata ? '''(
           SELECT COALESCE(MAX(lni.depth), 0)
           FROM library_navigation_items lni
           WHERE lni.library_item_id = li.id AND lni.deleted_at IS NULL
-        ) AS navigation_max_depth
+        )''' : '0'} AS navigation_max_depth
       FROM library_items li
       WHERE ${where.join(' AND ')}
       ORDER BY
@@ -149,12 +150,15 @@ class LibraryCatalogService {
       return const [];
     }
 
-    final normalizedRows = await _hydrateCatalogRows(
-      rows,
-      database: rowResult.database,
-    );
+    final normalizedRows = hydrateMetadata
+        ? await _hydrateCatalogRows(rows, database: rowResult.database)
+        : rows;
 
-    final items = normalizedRows.map(LibraryCatalogItem.fromRow).toList();
+    final rootPath = await LibraryRootService.instance
+        .accessibleLibraryRootPath();
+    final items = normalizedRows
+        .map((row) => LibraryCatalogItem.fromRow(row, rootPath: rootPath))
+        .toList();
     final projected = includeAlternateEditions
         ? items
         : selectPreferredLibraryEditions(items);
@@ -808,6 +812,8 @@ class LibraryCatalogService {
       return const [];
     }
 
+    final searchRootPath = await LibraryRootService.instance
+        .accessibleLibraryRootPath();
     final mappedResults = rows
         .map((row) {
           final item =
@@ -838,7 +844,7 @@ class LibraryCatalogService {
                 'epub_href': row['item_epub_href'],
                 'paragraph_index': row['item_paragraph_index'],
                 'navigation_count': 0,
-              }).copyWith(
+              }, rootPath: searchRootPath).copyWith(
                 spineIndex: (row['hit_spine_index'] as num?)?.toInt(),
                 epubHref: row['hit_epub_href']?.toString(),
                 paragraphIndex: (row['paragraph_on_section'] as num?)?.toInt(),
@@ -1407,7 +1413,13 @@ class LibraryCatalogService {
       rows,
       database: rowResult.database,
     );
-    return hydratedRows.map(LibraryCatalogItem.fromRow).toList(growable: false);
+    final hydratedRootPath = await LibraryRootService.instance
+        .accessibleLibraryRootPath();
+    return hydratedRows
+        .map(
+          (row) => LibraryCatalogItem.fromRow(row, rootPath: hydratedRootPath),
+        )
+        .toList(growable: false);
   }
 
   Future<String?> _ensureEpubAuthor({
@@ -2302,15 +2314,15 @@ class LibraryCatalogItem {
     this.contributors = const [],
   });
 
-  factory LibraryCatalogItem.fromRow(Map<String, Object?> row) {
+  factory LibraryCatalogItem.fromRow(
+    Map<String, Object?> row, {
+    String? rootPath,
+  }) {
     final coverPathValue = row['cover_path']?.toString().trim();
-    final resolvedCoverPath =
-        coverPathValue != null &&
-            coverPathValue.isNotEmpty &&
-            (_isFlutterAssetPath(coverPathValue) ||
-                File(coverPathValue).existsSync())
-        ? coverPathValue
-        : null;
+    final resolvedCoverPath = _resolveCoverPath(
+      coverPathValue,
+      rootPath: rootPath,
+    );
     return LibraryCatalogItem(
       id: row['id']?.toString() ?? '',
       title: row['title']?.toString() ?? '',
@@ -3200,6 +3212,33 @@ List<LibraryCatalogNavigationItem> _waggonerRomansNavigationHierarchy(
 
 bool _isFlutterAssetPath(String path) {
   return path.trim().replaceAll('\\', '/').startsWith('assets/');
+}
+
+/// Resolves a stored `cover_path` for display, tolerating a cover cached by
+/// a *different* device sharing the same synced Library Root. Cover files
+/// are cached under `<root>/Graphics/eLibraryCovers/<name>`
+/// (`cachePioneerCaptureCoverPath` in `pioneer_capture_folder_metadata.dart`)
+/// but historically stored as an absolute path — valid only on the device
+/// that wrote it (e.g. a macOS path baked into a Library Root also opened
+/// from Android). When the stored absolute path doesn't exist locally, retry
+/// by basename under the current device's root before giving up, so a cover
+/// cached on one platform still renders on another without needing a
+/// database migration.
+String? _resolveCoverPath(String? coverPathValue, {String? rootPath}) {
+  if (coverPathValue == null || coverPathValue.isEmpty) return null;
+  if (_isFlutterAssetPath(coverPathValue)) return coverPathValue;
+  if (File(coverPathValue).existsSync()) return coverPathValue;
+  final normalizedRoot = rootPath?.trim() ?? '';
+  if (normalizedRoot.isEmpty) return null;
+  final fileName = p.basename(coverPathValue);
+  if (fileName.isEmpty) return null;
+  final candidate = p.join(
+    normalizedRoot,
+    'Graphics',
+    'eLibraryCovers',
+    fileName,
+  );
+  return File(candidate).existsSync() ? candidate : null;
 }
 
 int _compareLibraryCatalogItems(LibraryCatalogItem a, LibraryCatalogItem b) {

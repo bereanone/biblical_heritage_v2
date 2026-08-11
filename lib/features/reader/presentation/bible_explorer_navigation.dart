@@ -3,6 +3,32 @@
 part of 'bible_explorer_screen.dart';
 
 extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
+  Future<void> _openCrossReferences(VerseLine line) async {
+    if (crossReferenceTapStopsAutoscroll(
+      tiltAutoscrollActive: _tiltAutoScroll.isActive,
+      steadyAutoscrollActive: _macAutoScroll?.isActive ?? false,
+    )) {
+      _macAutoScroll?.stopForManualInteraction();
+      _tiltAutoScroll.stopForManualInteraction();
+      return;
+    }
+    final sourceBlockId = line.blockId;
+    if (sourceBlockId == null || sourceBlockId <= 0) return;
+    final bookName = _bookNames[line.bookNumber] ?? 'Book ${line.bookNumber}';
+    final targetBlockId = await showCrossReferencePanel(
+      context: context,
+      sourceVerseId: sourceBlockId,
+      sourceReference: '$bookName ${line.chapter}:${line.verse}',
+    );
+    if (targetBlockId == null || targetBlockId == sourceBlockId || !mounted) {
+      return;
+    }
+    await HistoryLogService.instance.insertHistory(sourceBlockId);
+    if (!mounted) return;
+    setState(() => _crossReferenceReturnBlockIds.add(sourceBlockId));
+    await _navigateToBlockId(targetBlockId, recordHistory: false);
+  }
+
   Future<void> _initializeViewer() async {
     if (mounted) {
       setState(() {
@@ -365,8 +391,10 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
 
   Future<void> _openLibrary() async {
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => LibraryScreen(
+      PageRouteBuilder<void>(
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+        pageBuilder: (_, _, _) => LibraryScreen(
           themeMode: widget.themeMode,
           onThemeChanged: widget.onThemeChanged,
         ),

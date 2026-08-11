@@ -9,10 +9,12 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../database/elibrary_database.dart';
 import '../database/user_database.dart';
 import 'library_root_service.dart';
+import 'library_root_native.dart';
 import 'local_settings_store.dart';
 import 'sandbox_bootstrap.dart';
 import 'development_runtime_overrides.dart';
 import '../../features/library/data/canonical_epub_generation_repair_service.dart';
+import '../../features/library/data/library_catalog_service.dart';
 import '../../features/utilities/data/pioneer_captured_html_import_availability_service.dart';
 import '../../features/utilities/data/elibrary_catalog_duplicate_repair_service.dart';
 
@@ -83,8 +85,6 @@ class StartupCoordinator {
         errorMessage: migrationState['error_message']?.toString(),
         sourceDeviceName: _sourceDeviceName(),
       );
-      await _runLegacyEgwCatalogRepair(onStatus: onStatus);
-      await _runConfiguredCaptureFolderImport(onStatus: onStatus);
       return StartupSnapshot(
         phase: StartupPhase.ready,
         message: 'User database ready.',
@@ -119,8 +119,6 @@ class StartupCoordinator {
         'status': 'no_legacy_found',
         'error_message': null,
       });
-      await _runLegacyEgwCatalogRepair(onStatus: onStatus);
-      await _runConfiguredCaptureFolderImport(onStatus: onStatus);
       return const StartupSnapshot(
         phase: StartupPhase.noLegacyFound,
         message: 'No legacy user data found.',
@@ -141,13 +139,49 @@ class StartupCoordinator {
       _ => 'Legacy writable user data was found.',
     };
 
-    await _runLegacyEgwCatalogRepair(onStatus: onStatus);
-    await _runConfiguredCaptureFolderImport(onStatus: onStatus);
     return StartupSnapshot(
       phase: StartupPhase.legacyFoundWaitingForUser,
       message: promptMessage,
       migrationKey: migrationKey,
       backupPath: backupPath,
+    );
+  }
+
+  Future<void> runBackgroundMaintenance({
+    bool forceLibraryRescan = false,
+  }) async {
+    final startedAt = DateTime.now();
+    debugPrint('Startup background maintenance started.');
+    if (LibraryRootNative.usesAndroidDocumentTree) {
+      try {
+        final report = await LibraryRootNative.scanAndroidLibraryTree(
+          force: forceLibraryRescan,
+        );
+        if (report != null) {
+          debugPrint(
+            'Android library snapshot scan complete in '
+            '${report.elapsedMilliseconds}ms: changed=${report.changed} '
+            'unchanged=${report.unchanged} removed=${report.removed} '
+            'full=${report.fullScan}.',
+          );
+          if (report.fullScan || report.changed > 0 || report.removed > 0) {
+            final catalogStartedAt = DateTime.now();
+            await LibraryCatalogService.instance.refreshManagedItemsFromDisk();
+            debugPrint(
+              'Android changed-library catalog reconciliation complete in '
+              '${DateTime.now().difference(catalogStartedAt).inMilliseconds}ms.',
+            );
+          }
+        }
+      } catch (error) {
+        debugPrint('Android background library scan failed: $error');
+      }
+    }
+    await _runLegacyEgwCatalogRepair();
+    await _runConfiguredCaptureFolderImport();
+    debugPrint(
+      'Startup background maintenance complete in '
+      '${DateTime.now().difference(startedAt).inMilliseconds}ms.',
     );
   }
 

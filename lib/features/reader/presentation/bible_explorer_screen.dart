@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/database/study_bible_database.dart';
@@ -24,6 +26,7 @@ import 'highlight_popup.dart';
 import 'viewer_body.dart';
 import 'viewer_bottom_bar.dart';
 import 'commentary_research_screen.dart';
+import 'cross_reference_panel.dart';
 import 'viewer_data_controller.dart';
 import 'viewer_history_sheet.dart';
 import 'viewer_interlinear_body.dart';
@@ -48,6 +51,7 @@ import 'presentation_prep/presentation_ui_helpers.dart';
 import 'presentation_prep/tag_presentation_prep_launcher.dart';
 import 'presentation_prep/tag_presentation_prep_models.dart';
 import 'presentation_prep/tag_saved_presentations_screen.dart';
+import 'reader_autoscroll_diagnostics.dart';
 import 'rapid_tag_state.dart';
 import 'tag_quick_apply_helper.dart';
 import 'tag_screen_launcher.dart';
@@ -116,6 +120,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   final Map<int, String> _bookNames = <int, String>{};
   final BibleLiveReferenceController _liveVisibleLocation =
       BibleLiveReferenceController();
+  final List<int> _crossReferenceReturnBlockIds = <int>[];
   late final BibleLocationPersistenceCoordinator _locationPersistence;
   bool _wasTiltAutoScrollActive = false;
 
@@ -236,10 +241,14 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         (theme.textTheme.bodyLarge?.fontSize ?? 16) * _fontScale;
 
     final reader = PopScope(
-      canPop: true,
+      canPop: _crossReferenceReturnBlockIds.isEmpty,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
           unawaited(_locationPersistence.resumeAndFlush());
+        } else if (_crossReferenceReturnBlockIds.isNotEmpty) {
+          final sourceBlockId = _crossReferenceReturnBlockIds.removeLast();
+          unawaited(_navigateToBlockId(sourceBlockId, recordHistory: false));
+          setState(() {});
         }
       },
       child: Scaffold(
@@ -319,6 +328,9 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                       },
                       child: _interlinearEnabled
                           ? ViewerInterlinearBody(
+                              key: ValueKey(
+                                'interlinear-reader-$_navigationTick',
+                              ),
                               passage: passage,
                               selectedBookNumber: _bookNumber,
                               selectedChapter: _chapter,
@@ -326,6 +338,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                               fontScale: _fontScale,
                               settings: _interlinearSettings,
                               onSelectVerse: _selectLine,
+                              onOpenCrossReferences: _openCrossReferences,
                               onSelectBlockId: _openBlockId,
                               onTapSelectedRange: _openRangeActions,
                               rangeSelection: _rangeSelection,
@@ -333,6 +346,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                               navigationTick: _navigationTick,
                             )
                           : ViewerBody(
+                              key: ValueKey('standard-reader-$_navigationTick'),
                               anchorBlockId: _anchorBlockId!,
                               data: _viewerData,
                               bookNamesByNumber: _bookNames,
@@ -342,6 +356,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                               onSelectionVisibilityChanged:
                                   _handleSelectedVisibilityChanged,
                               onSelectVerse: _selectLine,
+                              onOpenCrossReferences: _openCrossReferences,
                               onSelectVerseNumber: _selectMarkupAnchor,
                               onSelectVerseNumberLongPressMove:
                                   _dragVerseAnchor,
@@ -405,6 +420,8 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                 foregroundColor: theme.colorScheme.onSurface,
                 backgroundColor: theme.colorScheme.surface,
               ),
+            if (!kReleaseMode && _showAutoScrollDiagnosticPanel)
+              _AutoScrollDiagnosticPanel(controller: _tiltAutoScroll),
           ],
         ),
       ),
@@ -857,5 +874,114 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         fontScale: _fontScale,
       );
     }
+  }
+}
+
+/// Flip to true locally to bring back the debug diagnostic panel below for
+/// another autoscroll-smoothness measurement pass; keep false otherwise so
+/// it doesn't cover the reader and block verse selection during normal use.
+const bool _showAutoScrollDiagnosticPanel = false;
+
+/// Debug-only overlay for the Android autoscroll smoothness investigation.
+/// Runs a fixed-duration, fixed-speed autoscroll with no sensor input and
+/// exports a bounded per-frame CSV via [readerAutoScrollDiagnostics]. Never
+/// built outside `kDebugMode`; not reachable from any production entry point.
+class _AutoScrollDiagnosticPanel extends StatefulWidget {
+  const _AutoScrollDiagnosticPanel({required this.controller});
+
+  final ReaderTiltAutoScrollController controller;
+
+  @override
+  State<_AutoScrollDiagnosticPanel> createState() =>
+      _AutoScrollDiagnosticPanelState();
+}
+
+class _AutoScrollDiagnosticPanelState
+    extends State<_AutoScrollDiagnosticPanel> {
+  static const _testSpeeds = <double>[10, 20, 40, 80, 160, 320];
+  static const _captureDuration = Duration(seconds: 45);
+  bool _running = false;
+  String? _lastExportName;
+
+  void _onFrameTimings(List<FrameTiming> timings) {
+    for (final timing in timings) {
+      final build = timing.buildDuration.inMicroseconds;
+      final raster = timing.rasterDuration.inMicroseconds;
+      final total = timing.totalSpan.inMicroseconds;
+      readerAutoScrollDiagnostics.recordEvent(
+        'frame_timing build=${build}us raster=${raster}us total=${total}us',
+      );
+    }
+  }
+
+  Future<void> _runTest(double speed) async {
+    debugPrint('AUTOSCROLL_DEBUG_TAP speed=$speed running=$_running');
+    if (_running) return;
+    setState(() => _running = true);
+    readerAutoScrollDiagnostics.start();
+    SchedulerBinding.instance.addTimingsCallback(_onFrameTimings);
+    await widget.controller.debugRunConstantSpeedDiagnostic(speed);
+    await Future.delayed(_captureDuration);
+    widget.controller.debugStopConstantSpeedDiagnostic();
+    SchedulerBinding.instance.removeTimingsCallback(_onFrameTimings);
+    final file = await readerAutoScrollDiagnostics.stopAndExport(
+      label: 'autoscroll_diag_speed${speed.toStringAsFixed(0)}',
+    );
+    if (!mounted) return;
+    setState(() {
+      _running = false;
+      _lastExportName = file?.path.split('/').last;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: 0,
+      child: SafeArea(
+        bottom: false,
+        child: Material(
+          color: const Color(0xFFFF00FF),
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final speed in _testSpeeds)
+                      SizedBox(
+                        height: 48,
+                        width: 64,
+                        child: ElevatedButton(
+                          onPressed: _running ? null : () => _runTest(speed),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.black,
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.zero,
+                          ),
+                          child: Text(
+                            'D${speed.toStringAsFixed(0)}',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                Text(
+                  _running ? 'capturing…' : (_lastExportName ?? 'idle'),
+                  style: const TextStyle(color: Colors.black, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

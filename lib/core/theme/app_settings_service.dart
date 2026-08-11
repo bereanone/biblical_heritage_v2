@@ -85,6 +85,7 @@ class AppSettingsService {
   static const _lastElibrarySearchSessionKey =
       'search.last_elibrary_search_session';
   static const _elibraryMediaFilterKey = 'library.media_filter';
+  static const _elibraryCollectionFilterKey = 'library.collection_filter';
 
   /// Generic single-key string accessor for callers (e.g. platform storage
   /// policy preferences) that don't warrant a dedicated typed key constant
@@ -126,6 +127,26 @@ class AppSettingsService {
   Future<void> saveElibraryMediaFilter(String value) async {
     await (await UserDatabase.instance.database).insert('app_settings', {
       'key': _elibraryMediaFilterKey,
+      'value': value,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<String?> loadElibraryCollectionFilter() async {
+    final db = await UserDatabase.instance.database;
+    final rows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [_elibraryCollectionFilterKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['value']?.toString();
+  }
+
+  Future<void> saveElibraryCollectionFilter(String value) async {
+    await (await UserDatabase.instance.database).insert('app_settings', {
+      'key': _elibraryCollectionFilterKey,
       'value': value,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }

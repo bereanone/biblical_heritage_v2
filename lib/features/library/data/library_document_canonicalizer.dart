@@ -988,16 +988,20 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(String html) {
     // page number from the source layout (common in Apple Pages EPUB
     // exports), not a real chapter/section heading — "Chapter 71" or "71."
     // still classify as headings since they contain non-digit characters.
-    final isBarePageNumber =
-        tag.startsWith('h') && RegExp(r'^\d{1,4}$').hasMatch(text);
+    final isStandaloneNumber = RegExp(r'^\d{1,4}$').hasMatch(text);
+    final isBarePageNumber = tag.startsWith('h') && isStandaloneNumber;
+    // These elements are print-layout anchors, not reader content. Keeping
+    // them as paragraphs made books such as Acts of the Apostles render
+    // hundreds of consecutive page numbers, one per line. A real numbered
+    // heading remains intact when it has punctuation or descriptive text.
+    if (isBarePageNumber || (tag == 'li' && isStandaloneNumber)) continue;
     final type = switch (tag) {
       'blockquote' => LibraryDocumentBlockType.quotation,
       'pre' => LibraryDocumentBlockType.poem,
       'li' => LibraryDocumentBlockType.listItem,
       'img' => LibraryDocumentBlockType.image,
       'hr' => LibraryDocumentBlockType.horizontalRule,
-      _ when tag.startsWith('h') && !isBarePageNumber =>
-        LibraryDocumentBlockType.heading,
+      _ when tag.startsWith('h') => LibraryDocumentBlockType.heading,
       _ => LibraryDocumentBlockType.paragraph,
     };
     if (text.isEmpty &&
@@ -1016,15 +1020,13 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(String html) {
             },
           ]
         : _inlineNodes(inner, className: className);
-    final headingRole = isBarePageNumber
-        ? null
-        : switch (tag) {
-            'h1' => 'book_title',
-            'h2' => 'chapter',
-            'h3' => 'section',
-            'h4' || 'h5' || 'h6' => 'minor',
-            _ => null,
-          };
+    final headingRole = switch (tag) {
+      'h1' => 'book_title',
+      'h2' => 'chapter',
+      'h3' => 'section',
+      'h4' || 'h5' || 'h6' => 'minor',
+      _ => null,
+    };
     result.add(
       _ParsedCanonicalBlock(
         type: type,
@@ -1035,9 +1037,7 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(String html) {
           metadata: (<String, Object?>{
             'source_tag': tag,
             'source_class': className,
-            'classification_reason': isBarePageNumber
-                ? 'numeric-only heading treated as page marker, not a real heading'
-                : tag.startsWith('h')
+            'classification_reason': tag.startsWith('h')
                 ? 'explicit semantic heading element'
                 : 'semantic HTML block',
             'heading_role': headingRole,

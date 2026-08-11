@@ -93,10 +93,92 @@ class ViewerBottomBar extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isWide = constraints.maxWidth >= 700;
-          final isCompact = constraints.maxWidth < 320;
+          final isCompact = constraints.maxWidth < 440;
           final sidePadding = isCompact ? 4.0 : 8.0;
 
           if (!isWide) {
+            if (isCompact) {
+              return SafeArea(
+                top: false,
+                child: SizedBox(
+                  height: 56,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: EdgeInsets.symmetric(horizontal: sidePadding),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          tooltip: 'History',
+                          onPressed: onHistory,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 36,
+                            height: 36,
+                          ),
+                          icon: Icon(
+                            Icons.history_rounded,
+                            color: buttonColor,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        _FontScaleButton(
+                          onPressed: canDecreaseFont ? onDecreaseFont : null,
+                          color: buttonColor,
+                          baseSize: 14,
+                          sign: 'A-',
+                          signSize: 10,
+                          compact: true,
+                        ),
+                        const SizedBox(width: 2),
+                        _FontScaleButton(
+                          onPressed: canIncreaseFont ? onIncreaseFont : null,
+                          color: buttonColor,
+                          baseSize: 19,
+                          sign: 'A+',
+                          signSize: 11,
+                          compact: true,
+                        ),
+                        const SizedBox(width: 2),
+                        _autoScrollButton(),
+                        const SizedBox(width: 8),
+                        _BottomIconButton(
+                          tooltip: 'Commentary',
+                          icon: Icons.menu_book_outlined,
+                          color: buttonColor,
+                          compact: true,
+                          onPressed: onCommentary,
+                        ),
+                        const SizedBox(width: 2),
+                        _LibraryButton(compact: true, onPressed: onLibrary),
+                        const SizedBox(width: 2),
+                        _InterlinearToggleButton(
+                          bookNumber: bookNumber,
+                          interlinearEnabled: interlinearEnabled,
+                          compact: true,
+                          baseColor: buttonColor,
+                          onToggleInterlinear: onToggleInterlinear,
+                        ),
+                        const SizedBox(width: 2),
+                        _ThemeToggleButton(
+                          themeMode: themeMode,
+                          compact: true,
+                          onToggleThemeMode: onToggleThemeMode,
+                        ),
+                        const SizedBox(width: 2),
+                        _BottomIconButton(
+                          tooltip: 'Mode',
+                          icon: Icons.settings_rounded,
+                          color: buttonColor,
+                          compact: true,
+                          onPressed: onMode,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
             // Below this width the complete set of minimum-size hit targets
             // cannot fit without compression. Keep every action full-size and
             // let the toolbar scroll horizontally instead.
@@ -118,6 +200,21 @@ class ViewerBottomBar extends StatelessWidget {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            IconButton(
+                              tooltip: 'History',
+                              onPressed: onHistory,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints.tightFor(
+                                width: 36,
+                                height: 36,
+                              ),
+                              icon: Icon(
+                                Icons.history_rounded,
+                                color: buttonColor,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(width: 2),
                             _FontScaleButton(
                               onPressed: canDecreaseFont
                                   ? onDecreaseFont
@@ -163,21 +260,6 @@ class ViewerBottomBar extends StatelessWidget {
                             padding: EdgeInsets.only(right: sidePadding),
                             child: Row(
                               children: [
-                                IconButton(
-                                  tooltip: 'History',
-                                  onPressed: onHistory,
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  icon: Icon(
-                                    Icons.history_rounded,
-                                    color: buttonColor,
-                                    size: 22,
-                                  ),
-                                ),
-                                const SizedBox(width: 2),
                                 _InterlinearToggleButton(
                                   bookNumber: bookNumber,
                                   interlinearEnabled: interlinearEnabled,

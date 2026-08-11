@@ -24,6 +24,7 @@ class ViewerVerseLine extends StatelessWidget {
     this.tokenHighlights = const <VerseHighlightRecord>[],
     this.isRangeSelected = false,
     required this.onTap,
+    this.onVerseNumberTap,
     this.onVerseNumberLongPress,
     this.onVerseNumberLongPressMoveDetails,
     this.rangeSelection,
@@ -46,6 +47,7 @@ class ViewerVerseLine extends StatelessWidget {
   final List<VerseHighlightRecord> tokenHighlights;
   final bool isRangeSelected;
   final VoidCallback onTap;
+  final VoidCallback? onVerseNumberTap;
   final VoidCallback? onVerseNumberLongPress;
   final ValueChanged<LongPressMoveUpdateDetails>?
   onVerseNumberLongPressMoveDetails;
@@ -164,43 +166,46 @@ class ViewerVerseLine extends StatelessWidget {
 
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(isSelected ? 3 : 6),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          width: double.infinity,
-          padding: EdgeInsets.symmetric(
-            horizontal: isSelected ? 0 : 2,
-            vertical: isSelected ? 0 : 1,
-          ),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? viewerSelectedVerseColor(context)
-                : rangeSelectionBackground ?? Colors.transparent,
-            borderRadius: BorderRadius.circular(isSelected ? 3 : 6),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _VerseGutter(
-                chapter: line.chapter,
-                verse: line.verse,
-                showVerseNumber: !showChapterNumber,
-                showChapterNumber: showChapterNumber,
-                chapterStyle: chapterStyle,
-                numberStyle: highlightSpec == null
-                    ? numberStyle
-                    : numberStyle.copyWith(color: highlightSpec.textColor),
-                isTagged: isTagged,
-                textDirection: textDirection,
-                onLongPress: onVerseNumberLongPress,
-                onLongPressMoveDetails: onVerseNumberLongPressMoveDetails,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        width: double.infinity,
+        padding: EdgeInsets.symmetric(
+          horizontal: isSelected ? 0 : 2,
+          vertical: isSelected ? 0 : 1,
+        ),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? viewerSelectedVerseColor(context)
+              : rangeSelectionBackground ?? Colors.transparent,
+          borderRadius: BorderRadius.circular(isSelected ? 3 : 6),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _VerseGutter(
+              chapter: line.chapter,
+              verse: line.verse,
+              showVerseNumber: !showChapterNumber,
+              showChapterNumber: showChapterNumber,
+              chapterStyle: chapterStyle,
+              numberStyle: highlightSpec == null
+                  ? numberStyle
+                  : numberStyle.copyWith(color: highlightSpec.textColor),
+              isTagged: isTagged,
+              textDirection: textDirection,
+              onTap: onVerseNumberTap,
+              onLongPress: onVerseNumberLongPress,
+              onLongPressMoveDetails: onVerseNumberLongPressMoveDetails,
+            ),
+            Expanded(
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(isSelected ? 3 : 6),
+                child: textWidget,
               ),
-              Expanded(child: textWidget),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -234,6 +239,7 @@ class _VerseGutter extends StatelessWidget {
     required this.numberStyle,
     required this.isTagged,
     required this.textDirection,
+    this.onTap,
     this.onLongPress,
     this.onLongPressMoveDetails,
   });
@@ -246,6 +252,7 @@ class _VerseGutter extends StatelessWidget {
   final TextStyle numberStyle;
   final bool isTagged;
   final TextDirection textDirection;
+  final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final ValueChanged<LongPressMoveUpdateDetails>? onLongPressMoveDetails;
 
@@ -288,10 +295,11 @@ class _VerseGutter extends StatelessWidget {
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
+      onTap: onTap,
       onLongPress: onLongPress,
       onLongPressMoveUpdate: onLongPressMoveDetails,
-      child: SizedBox(
-        width: width,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minWidth: width, minHeight: 48),
         child: Padding(
           padding: EdgeInsets.only(
             left: showChapterNumber ? 5 : 6,

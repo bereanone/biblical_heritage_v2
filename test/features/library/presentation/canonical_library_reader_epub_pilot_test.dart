@@ -133,6 +133,21 @@ void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
 
+  test('saved canonical front matter cannot override substantive opening', () {
+    expect(
+      canonicalSavedOrderIsSubstantive(savedOrder: 0, openingOrder: 4),
+      isFalse,
+    );
+    expect(
+      canonicalSavedOrderIsSubstantive(savedOrder: 4, openingOrder: 4),
+      isTrue,
+    );
+    expect(
+      canonicalSavedOrderIsSubstantive(savedOrder: 27, openingOrder: 4),
+      isTrue,
+    );
+  });
+
   late Directory supportDir;
   late Directory documentsDir;
   late Directory rootDir;

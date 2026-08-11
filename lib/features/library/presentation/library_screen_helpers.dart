@@ -1,5 +1,7 @@
 part of 'library_screen.dart';
 
+final RegExp _libraryDigitPattern = RegExp(r'\d');
+
 List<LibraryCatalogNavigationItem> _filterNavigation(
   List<LibraryCatalogNavigationItem> items,
   String query,
@@ -22,44 +24,44 @@ String _stamp(DateTime value) {
   return '${value.year}-${two(value.month)}-${two(value.day)}';
 }
 
-int _naturalCompare(String a, String b) {
-  final left = _naturalSortTokens(a);
-  final right = _naturalSortTokens(b);
+int _compareNaturalSortKeys(
+  List<({String text, int? number})> left,
+  List<({String text, int? number})> right,
+) {
   final length = left.length < right.length ? left.length : right.length;
   for (var i = 0; i < length; i++) {
     final leftToken = left[i];
     final rightToken = right[i];
-    final leftIsNumber = int.tryParse(leftToken) != null;
-    final rightIsNumber = int.tryParse(rightToken) != null;
 
-    if (leftIsNumber && rightIsNumber) {
-      final compare = int.parse(leftToken).compareTo(int.parse(rightToken));
+    if (leftToken.number != null && rightToken.number != null) {
+      final compare = leftToken.number!.compareTo(rightToken.number!);
       if (compare != 0) return compare;
       continue;
     }
 
-    final compare = leftToken.toLowerCase().compareTo(rightToken.toLowerCase());
+    final compare = leftToken.text.compareTo(rightToken.text);
     if (compare != 0) return compare;
   }
 
   return left.length.compareTo(right.length);
 }
 
-List<String> _naturalSortTokens(String value) {
+List<({String text, int? number})> _naturalSortKey(String value) {
   if (value.isEmpty) return const [];
-  final tokens = <String>[];
+  final tokens = <({String text, int? number})>[];
   final buffer = StringBuffer();
-  var currentIsDigit = RegExp(r'\d').hasMatch(value[0]);
+  var currentIsDigit = _libraryDigitPattern.hasMatch(value[0]);
 
   void flush() {
     if (buffer.isEmpty) return;
-    tokens.add(buffer.toString());
+    final token = buffer.toString().toLowerCase();
+    tokens.add((text: token, number: int.tryParse(token)));
     buffer.clear();
   }
 
   for (final rune in value.runes) {
     final char = String.fromCharCode(rune);
-    final isDigit = RegExp(r'\d').hasMatch(char);
+    final isDigit = _libraryDigitPattern.hasMatch(char);
     if (isDigit != currentIsDigit) {
       flush();
       currentIsDigit = isDigit;

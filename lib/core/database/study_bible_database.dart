@@ -196,6 +196,42 @@ class StudyBibleDatabase {
     return references[blockId];
   }
 
+  Future<Map<int, BibleVerseRecord>> loadVerseRecordsForBlockIds(
+    List<int> blockIds,
+  ) async {
+    if (blockIds.isEmpty) return const {};
+    final db = await bible;
+    final books = await loadBooks();
+    final namesByNumber = {
+      for (final book in books) book.bookNumber: book.bookName,
+    };
+    final records = <int, BibleVerseRecord>{};
+    const chunkSize = 900;
+    for (var start = 0; start < blockIds.length; start += chunkSize) {
+      final end = (start + chunkSize).clamp(0, blockIds.length);
+      final chunk = blockIds.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final rows = await db.rawQuery('''
+        SELECT id, book_number, chapter, block_index, plain_text
+        FROM bible_blocks
+        WHERE id IN ($placeholders)
+      ''', chunk);
+      for (final row in rows) {
+        final id = row['id'] as int;
+        final bookNumber = row['book_number'] as int;
+        records[id] = BibleVerseRecord(
+          blockId: id,
+          bookNumber: bookNumber,
+          bookName: namesByNumber[bookNumber] ?? 'Book $bookNumber',
+          chapter: row['chapter'] as int,
+          verse: row['block_index'] as int,
+          text: row['plain_text']?.toString() ?? '',
+        );
+      }
+    }
+    return records;
+  }
+
   Future<Map<int, List<String>>> loadSectionHeadings({
     required int bookNumber,
     required int chapter,
@@ -535,6 +571,26 @@ class StudyBibleDatabase {
     final path = await SandboxBootstrap.bibleDatabasePath();
     return openDatabase(path, readOnly: true);
   }
+}
+
+class BibleVerseRecord {
+  const BibleVerseRecord({
+    required this.blockId,
+    required this.bookNumber,
+    required this.bookName,
+    required this.chapter,
+    required this.verse,
+    required this.text,
+  });
+
+  final int blockId;
+  final int bookNumber;
+  final String bookName;
+  final int chapter;
+  final int verse;
+  final String text;
+
+  String get reference => '$bookName $chapter:$verse';
 }
 
 class InterlinearTokenRecord {

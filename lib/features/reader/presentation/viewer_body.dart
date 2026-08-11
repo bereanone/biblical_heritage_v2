@@ -18,6 +18,7 @@ import 'viewer_verse_line.dart';
 import 'text_range_geometry.dart';
 import '../../library/presentation/reader_tilt_autoscroll_controller.dart';
 import '../../library/presentation/mac_reader_autoscroll_controller.dart';
+import 'reader_autoscroll_diagnostics.dart';
 
 part 'viewer_body_helpers.dart';
 
@@ -79,6 +80,7 @@ class ViewerBody extends StatefulWidget {
     required this.onVisibleIdChanged,
     this.onSelectionVisibilityChanged,
     required this.onSelectVerse,
+    this.onOpenCrossReferences,
     this.onSelectVerseNumber = _noopVerseSelection,
     this.onSelectTokenLongPress,
     this.onSelectTokenLongPressMove,
@@ -99,6 +101,7 @@ class ViewerBody extends StatefulWidget {
   final ValueChanged<int> onVisibleIdChanged;
   final ValueChanged<bool>? onSelectionVisibilityChanged;
   final ValueChanged<VerseLine> onSelectVerse;
+  final ValueChanged<VerseLine>? onOpenCrossReferences;
   final ValueChanged<VerseLine> onSelectVerseNumber;
   final void Function(VerseLine line, int tokenIndex)? onSelectTokenLongPress;
   final void Function(VerseLine line, int tokenIndex)?
@@ -139,6 +142,26 @@ class _ViewerBodyState extends State<ViewerBody> {
   final Map<String, Map<String, List<VerseHighlightRecord>>>
   _tokenHighlightCache = <String, Map<String, List<VerseHighlightRecord>>>{};
   final Map<String, Set<String>> _verseMarkupCache = <String, Set<String>>{};
+  // Keyed like the caches above, so a rebuild triggered by something other
+  // than an actual change to the loaded window (e.g. a parent-level
+  // setState during fast autoscroll) reuses the prior result instead of
+  // re-walking every loaded block's HTML for red-letter continuation on
+  // every single rebuild — real cost previously measured on-device at
+  // several ms per call, recurring every ~30-90ms.
+  final Map<String, Map<int, _ViewerBodyBlockContext>> _blockContextCache =
+      <String, Map<int, _ViewerBodyBlockContext>>{};
+
+  // Guards the four cache-fill fetches below against being kicked off again
+  // on every rebuild while a fetch for the same cache key is already in
+  // flight. Without this, a rebuild cadence faster than a slow fetch (e.g.
+  // BibleMarkupRepository.loadMarkedVerseKeys on a large autoscroll-expanded
+  // window, which issues one sequential SQL query per chapter spanned)
+  // queues an unbounded pile of duplicate fetches, starving the UI thread
+  // and stalling autoscroll entirely until they drain.
+  final Set<String> _headingFetchInFlight = <String>{};
+  final Set<String> _acrosticFetchInFlight = <String>{};
+  final Set<String> _highlightFetchInFlight = <String>{};
+  final Set<String> _verseMarkupFetchInFlight = <String>{};
 
   final Map<int, GlobalKey> _verseKeys = {};
   Timer? _scrollDebounce;
@@ -177,6 +200,24 @@ class _ViewerBodyState extends State<ViewerBody> {
   }
 
   String get _geometryScopeId => 'viewer:${widget.anchorBlockId}';
+
+  Map<int, _ViewerBodyBlockContext> _computeAndCacheBlockContextMap(
+    String cacheKey,
+    List<int> loadedIds,
+  ) {
+    final stopwatch = readerAutoScrollDiagnostics.isCapturing
+        ? (Stopwatch()..start())
+        : null;
+    final computed = _buildBlockContextMap(loadedIds);
+    _blockContextCache[cacheKey] = computed;
+    if (stopwatch != null) {
+      readerAutoScrollDiagnostics.recordEvent(
+        'block_context_map n=${loadedIds.length} '
+        'us=${stopwatch.elapsedMicroseconds}',
+      );
+    }
+    return computed;
+  }
 
   @override
   void initState() {
@@ -218,6 +259,14 @@ class _ViewerBodyState extends State<ViewerBody> {
     if ((target - position.pixels).abs() <= 0.01) return false;
     final before = position.pixels;
     position.jumpTo(target);
+    if (readerAutoScrollDiagnostics.isCapturing) {
+      readerAutoScrollDiagnostics.record(
+        requestedDeltaLogical: delta,
+        pixelsBeforeLogical: before,
+        pixelsAfterLogical: position.pixels,
+        devicePixelRatio: View.of(context).devicePixelRatio,
+      );
+    }
     return (position.pixels - before).abs() > 0.01;
   }
 
@@ -266,7 +315,12 @@ class _ViewerBodyState extends State<ViewerBody> {
       firstLoadedBlockId: firstLoaded,
       lastLoadedBlockId: lastLoaded,
       maxBlockId: widget.data.maxBlockId,
-      guardBlocks: 40,
+      // Window-extend fetches measured 400-700ms on-device even after
+      // fixing the duplicate-fetch pileup; a fast rapid-scan burst can
+      // still outrun a 40-block buffer before that fetch resolves. 100
+      // gives it more headroom to finish in the background before the
+      // scroll clamp is reached.
+      guardBlocks: 100,
     );
     switch (action) {
       case ViewerAutoScrollWindowAction.scroll:
@@ -275,15 +329,39 @@ class _ViewerBodyState extends State<ViewerBody> {
       case ViewerAutoScrollWindowAction.stopAtEnd:
         return action;
       case ViewerAutoScrollWindowAction.extendForward:
+        if (readerAutoScrollDiagnostics.isCapturing) {
+          readerAutoScrollDiagnostics.recordEvent(
+            'extend_forward_start firstVisible=$firstVisible '
+            'lastLoaded=$lastLoaded',
+          );
+        }
         unawaited(
-          widget.data.ensureAutoScrollWindow(firstVisible, direction: 1),
+          widget.data.ensureAutoScrollWindow(firstVisible, direction: 1).then((
+            _,
+          ) {
+            if (readerAutoScrollDiagnostics.isCapturing) {
+              readerAutoScrollDiagnostics.recordEvent('extend_forward_done');
+            }
+          }),
         );
         // There are still 40 loaded blocks ahead, so do not introduce a
         // deliberate stopped frame while the asynchronous prefetch runs.
         return ViewerAutoScrollWindowAction.scroll;
       case ViewerAutoScrollWindowAction.extendBackward:
+        if (readerAutoScrollDiagnostics.isCapturing) {
+          readerAutoScrollDiagnostics.recordEvent(
+            'extend_backward_start lastVisible=$lastVisible '
+            'firstLoaded=$firstLoaded',
+          );
+        }
         unawaited(
-          widget.data.ensureAutoScrollWindow(lastVisible, direction: -1),
+          widget.data.ensureAutoScrollWindow(lastVisible, direction: -1).then((
+            _,
+          ) {
+            if (readerAutoScrollDiagnostics.isCapturing) {
+              readerAutoScrollDiagnostics.recordEvent('extend_backward_done');
+            }
+          }),
         );
         return ViewerAutoScrollWindowAction.scroll;
     }
@@ -297,6 +375,7 @@ class _ViewerBodyState extends State<ViewerBody> {
         oldWidget.fontScale != widget.fontScale ||
         oldWidget.navigationTick != widget.navigationTick) {
       _lastScrolledBlockId = null;
+      _userIsScrolling = false;
     }
     if (oldWidget.anchorBlockId != widget.anchorBlockId ||
         oldWidget.data != widget.data) {
@@ -529,7 +608,17 @@ class _ViewerBodyState extends State<ViewerBody> {
       widget.onSelectionVisibilityChanged?.call(selectedIsVisible);
     }
     widget.onVisibleIdChanged(blockId);
-    unawaited(widget.data.ensureWindow(blockId));
+    // While autoscroll is driving the scroll, ensureAutoScrollWindow (see
+    // _loadedWindowActionBeforeAutoScroll) already keeps the loaded window
+    // ahead of the scroll direction with its own extend-guard timing and a
+    // wider radius. This call's smaller default radius is redundant then,
+    // and — measured on-device — it shares the same _isLoading gate as the
+    // autoscroll extend, so its ~500ms fetch periodically blocks the real
+    // extend from starting, producing a visible stall roughly every time it
+    // fires. Manual scrolling still needs it to keep the window centered.
+    if (!_automaticPixelScrollActive) {
+      unawaited(widget.data.ensureWindow(blockId));
+    }
   }
 
   @override
@@ -556,33 +645,56 @@ class _ViewerBodyState extends State<ViewerBody> {
         final cachedHighlights = _highlightCache[cacheKey];
         final cachedTokenHighlights = _tokenHighlightCache[cacheKey];
         final cachedVerseMarkups = _verseMarkupCache[cacheKey];
-        final blockContextById = _buildBlockContextMap(loadedIds);
+        if (readerAutoScrollDiagnostics.isCapturing) {
+          readerAutoScrollDiagnostics.recordEvent(
+            'build_enter n=${loadedIds.length} key=$cacheKey '
+            'headingMiss=${cachedHeadings == null} '
+            'acrosticMiss=${cachedAcrostics == null} '
+            'highlightMiss=${cachedHighlights == null} '
+            'markupMiss=${cachedVerseMarkups == null}',
+          );
+        }
+        final blockContextById =
+            _blockContextCache[cacheKey] ??
+            _computeAndCacheBlockContextMap(cacheKey, loadedIds);
         final loadedLines = loadedIds
             .map((id) => widget.data.getBlock(id))
             .whereType<VerseLine>()
             .toList(growable: false);
 
-        if (cachedHeadings == null) {
+        if (cachedHeadings == null && _headingFetchInFlight.add(cacheKey)) {
           WidgetsBinding.instance.addPostFrameCallback((_) async {
             final headings = await StudyBibleDatabase.instance
                 .loadSectionHeadingsForBlockIds(loadedIds);
+            _headingFetchInFlight.remove(cacheKey);
             if (!mounted) return;
             setState(() {
               _headingCache[cacheKey] = headings;
             });
+            if (readerAutoScrollDiagnostics.isCapturing) {
+              readerAutoScrollDiagnostics.recordEvent(
+                'heading_cache_setState key=$cacheKey',
+              );
+            }
           });
         }
-        if (cachedAcrostics == null) {
+        if (cachedAcrostics == null && _acrosticFetchInFlight.add(cacheKey)) {
           WidgetsBinding.instance.addPostFrameCallback((_) async {
             final acrostics = await StudyBibleDatabase.instance
                 .loadAcrosticsForBlockIds(loadedIds);
+            _acrosticFetchInFlight.remove(cacheKey);
             if (!mounted) return;
             setState(() {
               _acrosticCache[cacheKey] = acrostics;
             });
+            if (readerAutoScrollDiagnostics.isCapturing) {
+              readerAutoScrollDiagnostics.recordEvent(
+                'acrostic_cache_setState key=$cacheKey',
+              );
+            }
           });
         }
-        if (cachedHighlights == null) {
+        if (cachedHighlights == null && _highlightFetchInFlight.add(cacheKey)) {
           WidgetsBinding.instance.addPostFrameCallback((_) async {
             final verseRefs = loadedIds
                 .map((id) => widget.data.getBlock(id))
@@ -598,24 +710,37 @@ class _ViewerBodyState extends State<ViewerBody> {
                 .loadHighlightsForVerseRefs(verseRefs);
             final tokenHighlights = await HighlightsRepository()
                 .loadHighlightRangesForVerseRefs(verseRefs);
+            _highlightFetchInFlight.remove(cacheKey);
             if (!mounted) return;
             setState(() {
               _highlightCache[cacheKey] = highlights;
               _tokenHighlightCache[cacheKey] = tokenHighlights;
             });
+            if (readerAutoScrollDiagnostics.isCapturing) {
+              readerAutoScrollDiagnostics.recordEvent(
+                'highlight_cache_setState key=$cacheKey',
+              );
+            }
           });
         }
-        if (cachedVerseMarkups == null) {
+        if (cachedVerseMarkups == null &&
+            _verseMarkupFetchInFlight.add(cacheKey)) {
           WidgetsBinding.instance.addPostFrameCallback((_) async {
             final markedVerseKeys = await BibleMarkupRepository()
                 .loadMarkedVerseKeys(
                   lines: loadedLines,
                   bookNamesByNumber: widget.bookNamesByNumber,
                 );
+            _verseMarkupFetchInFlight.remove(cacheKey);
             if (!mounted) return;
             setState(() {
               _verseMarkupCache[cacheKey] = markedVerseKeys;
             });
+            if (readerAutoScrollDiagnostics.isCapturing) {
+              readerAutoScrollDiagnostics.recordEvent(
+                'markup_cache_setState key=$cacheKey',
+              );
+            }
           });
         }
 
@@ -676,6 +801,7 @@ class _ViewerBodyState extends State<ViewerBody> {
             scrollOffsetController: _scrollOffsetController,
             itemPositionsListener: _itemPositionsListener,
             initialScrollIndex: _indexForBlockId(widget.anchorBlockId),
+            initialAlignment: 0.5,
             padding: const EdgeInsets.fromLTRB(22, 4, 22, 14),
             itemBuilder: (context, index) {
               // Make the visible pixel position available before the first
@@ -768,6 +894,9 @@ class _ViewerBodyState extends State<ViewerBody> {
                         startsInRedLetter:
                             blockContext?.startsInRedLetter ?? false,
                         onTap: () => widget.onSelectVerse(line),
+                        onVerseNumberTap: widget.onOpenCrossReferences == null
+                            ? null
+                            : () => widget.onOpenCrossReferences!(line),
                         onVerseNumberLongPress: () =>
                             widget.onSelectVerseNumber(line),
                         onVerseNumberLongPressMoveDetails:

@@ -86,18 +86,12 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       setState(() {
         _rangeSelection = _rangeSelection.completeVerseRange(blockId);
       });
-      _showRangeActionMessage(
-        'Range end set. Tap inside the highlighted range for actions.',
-      );
       return;
     }
 
     setState(() {
       _rangeSelection = _rangeSelection.beginVerseRange(blockId);
     });
-    _showRangeActionMessage(
-      'Range start set: ${line.chapter}:${line.verse}. Long-press end verse.',
-    );
   }
 
   void _selectTokenAnchor(VerseLine line, int tokenIndex) {
@@ -116,9 +110,6 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
           tokenIndex,
         );
       });
-      _showRangeActionMessage(
-        'Token range end set. Tap inside the selected verse range for actions.',
-      );
       return;
     }
 

@@ -51,7 +51,12 @@ extension _ViewerBodyHelpers on _ViewerBodyState {
         if (!mounted || token != _recenterToken) return;
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted || token != _recenterToken) return;
-          if (_userIsScrolling) return;
+          if (_userIsScrolling) {
+            if (attempt + 1 < delays.length) {
+              runAttempt(attempt + 1);
+            }
+            return;
+          }
           if (!_itemScrollController.isAttached) {
             if (attempt + 1 < delays.length) {
               runAttempt(attempt + 1);
@@ -67,10 +72,6 @@ extension _ViewerBodyHelpers on _ViewerBodyState {
             return;
           }
           if (isBibleEndBoundary) {
-            _lastScrolledBlockId = blockId;
-            return;
-          }
-          if (attempt > 0 && isVisible) {
             _lastScrolledBlockId = blockId;
             return;
           }

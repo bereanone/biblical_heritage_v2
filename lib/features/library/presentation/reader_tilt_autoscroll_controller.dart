@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'reader_autoscroll_frame_rate_boost.dart';
 import 'reader_tilt_motion_source.dart';
 import 'reader_tilt_preferences.dart';
 
@@ -58,6 +59,22 @@ double readerCarriedManualScrollOffset({
 }) {
   final carriedDelta = (velocity.clamp(-3000, 3000) * 0.12).clamp(-96, 96);
   return (currentOffset + carriedDelta).clamp(minScrollExtent, maxScrollExtent);
+}
+
+// Android's compositor only sustains the touch-boosted high refresh rate for
+// ~3s after the last touch; once autoscroll runs unboosted, real ticker gaps
+// commonly land in the 30-90ms range even though nothing is actually wrong.
+// Those gaps must advance a proportional distance so average speed holds
+// steady across an uneven cadence. The cap below exists only to stop a
+// pathological gap (app backgrounded/resumed mid-scroll) from replaying as
+// one huge jump; it must stay well above any gap Android's adaptive refresh
+// rate produces during ordinary autoscroll.
+Duration readerSmoothAutoScrollFrameElapsed(
+  Duration elapsed, {
+  Duration maximum = const Duration(milliseconds: 250),
+}) {
+  if (elapsed <= Duration.zero) return Duration.zero;
+  return elapsed > maximum ? maximum : elapsed;
 }
 
 class ReaderChapterBoundaryTransitionGate {
@@ -237,10 +254,10 @@ class ReaderTiltAutoScrollSettings {
     this.deadZoneRadians = 3 * math.pi / 180,
     this.maximumTiltRadians = 28 * math.pi / 180,
     this.minimumSpeedPixelsPerSecond = 8,
-    this.maximumSpeedPixelsPerSecond = 420,
-    this.hardSafetyCapPixelsPerSecond = 900,
-    this.sampleSmoothingFactor = 0.2,
-    this.speedSmoothingFactor = 0.16,
+    this.maximumSpeedPixelsPerSecond = 720,
+    this.hardSafetyCapPixelsPerSecond = 1600,
+    this.sampleSmoothingFactor = 0.12,
+    this.speedSmoothingFactor = 0.10,
     this.updateInterval = const Duration(milliseconds: 16),
     this.calibrationSampleCount = 12,
   });
@@ -320,12 +337,16 @@ class ReaderTiltAutoScrollController extends ChangeNotifier {
     this.canChangeChapter,
     this.onChapterChange,
     this.onVerticalBoundary,
+    ReaderAutoScrollFrameRateBoost? frameRateBoost,
     DateTime Function()? now,
-  }) : _now = now ?? DateTime.now;
+  }) : frameRateBoost =
+           frameRateBoost ?? PlatformReaderAutoScrollFrameRateBoost(),
+       _now = now ?? DateTime.now;
 
   final ReaderTiltMotionSource motionSource;
   final ReaderAutoScrollTarget scrollTarget;
   final ReaderTiltAutoScrollSettings settings;
+  final ReaderAutoScrollFrameRateBoost frameRateBoost;
   ReaderTiltPreferences preferences;
   final bool Function(ReaderChapterTiltDirection direction)? canChangeChapter;
   final void Function(ReaderChapterTiltDirection direction)? onChapterChange;
@@ -349,6 +370,7 @@ class ReaderTiltAutoScrollController extends ChangeNotifier {
   bool _disposed = false;
   bool _verticalBoundaryTransitionInProgress = false;
   int _sessionGeneration = 0;
+  bool _diagnosticSpeedLocked = false;
   int statusBannerRevision = 0;
   int diagnosticListenerCount = 0;
   int diagnosticMotionSamples = 0;
@@ -419,6 +441,7 @@ class ReaderTiltAutoScrollController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    unawaited(frameRateBoost.setActive(true));
     _beginCalibration();
     final generation = ++_sessionGeneration;
     try {
@@ -458,7 +481,37 @@ class ReaderTiltAutoScrollController extends ChangeNotifier {
     _beginCalibration();
   }
 
+  /// Drives the real per-frame ticker/scroll path at a fixed speed with no
+  /// sensor input at all, for the Android scroll-smoothness investigation.
+  /// Bypasses calibration and `_onSample` entirely so the only variable is
+  /// [pixelsPerSecond] versus the resulting visible/physical displacement.
+  /// Debug-only; not reachable from production UI.
+  Future<void> debugRunConstantSpeedDiagnostic(double pixelsPerSecond) async {
+    if (_disposed) return;
+    await stop(notify: false, diagnosticCause: 'diagnostic-restart');
+    unawaited(frameRateBoost.setActive(true));
+    _diagnosticSpeedLocked = true;
+    _targetSpeed = pixelsPerSecond;
+    speedPixelsPerSecond = pixelsPerSecond;
+    state = pixelsPerSecond < 0
+        ? ReaderTiltAutoScrollState.backward
+        : ReaderTiltAutoScrollState.forward;
+    final generation = ++_sessionGeneration;
+    _lastFrameElapsed = null;
+    _ticker = Ticker((elapsed) => _onFrame(elapsed, generation))..start();
+    notifyListeners();
+  }
+
+  /// Stops a diagnostic run started by [debugRunConstantSpeedDiagnostic]
+  /// without touching sensor/calibration state (there is none to touch).
+  void debugStopConstantSpeedDiagnostic() {
+    if (!_diagnosticSpeedLocked) return;
+    _diagnosticSpeedLocked = false;
+    stopSynchronously(diagnosticCause: 'diagnostic-stop');
+  }
+
   void _onSample(ReaderTiltSample sample) {
+    if (_diagnosticSpeedLocked) return;
     assert(() {
       diagnosticMotionSamples += 1;
       return true;
@@ -627,7 +680,11 @@ class ReaderTiltAutoScrollController extends ChangeNotifier {
     final previous = _lastFrameElapsed;
     _lastFrameElapsed = elapsed;
     if (previous == null) return;
-    tick(elapsed: elapsed - previous);
+    // Ordinary gaps (including Android's irregular unboosted ~30-90ms ticker
+    // cadence) advance their full proportional distance so average speed
+    // holds steady; only a pathological gap (e.g. app backgrounded/resumed
+    // mid-scroll) is capped to avoid replaying as one large jump.
+    tick(elapsed: readerSmoothAutoScrollFrameElapsed(elapsed - previous));
   }
 
   void _onError(Object _) => stop(
@@ -671,6 +728,7 @@ class ReaderTiltAutoScrollController extends ChangeNotifier {
     }
     unawaited(subscription?.cancel());
     unawaited(motionSource.stop());
+    unawaited(frameRateBoost.setActive(false));
   }
 
   Future<void> stop({
@@ -695,6 +753,7 @@ class ReaderTiltAutoScrollController extends ChangeNotifier {
     _lastFrameElapsed = null;
     _motionSubscription?.cancel();
     motionSource.stop();
+    unawaited(frameRateBoost.setActive(false));
     super.dispose();
   }
 }

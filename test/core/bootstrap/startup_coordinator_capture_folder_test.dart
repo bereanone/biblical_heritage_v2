@@ -211,18 +211,22 @@ void main() {
       );
 
       expect(snapshot.phase, StartupPhase.legacyFoundWaitingForUser);
-      expect(statuses, contains('Checking CaptureClipper cloud folders...'));
+      expect(
+        PioneerCapturedHtmlImportAvailabilityService.instance.latestReport,
+        isNull,
+        reason: 'folder discovery must not block initialize()',
+      );
+      await StartupCoordinator.instance.runBackgroundMaintenance();
       expect(
         statuses.any((status) => status.contains('bookmark-token')),
         isFalse,
       );
       expect(
-        statuses.any(
-          (status) => status.contains(
-            'CaptureClipper cloud import available: 1 folder.',
-          ),
-        ),
-        isTrue,
+        PioneerCapturedHtmlImportAvailabilityService
+            .instance
+            .latestReport
+            ?.availableCount,
+        1,
       );
       expect(
         Directory(p.join(captureRootDir.path, 'Backup')).existsSync(),
@@ -280,12 +284,17 @@ CIS 247.2</p>
 
       expect(snapshot.phase, StartupPhase.legacyFoundWaitingForUser);
       expect(
-        statuses.any(
-          (status) => status.contains(
-            'CaptureClipper cloud import available: 1 folder.',
-          ),
-        ),
-        isTrue,
+        PioneerCapturedHtmlImportAvailabilityService.instance.latestReport,
+        isNull,
+        reason: 'folder discovery must not block initialize()',
+      );
+      await StartupCoordinator.instance.runBackgroundMaintenance();
+      expect(
+        PioneerCapturedHtmlImportAvailabilityService
+            .instance
+            .latestReport
+            ?.availableCount,
+        1,
       );
       expect(folder.existsSync(), isTrue);
       expect(
@@ -307,11 +316,10 @@ CIS 247.2</p>
       );
 
       expect(snapshot.phase, StartupPhase.legacyFoundWaitingForUser);
+      await StartupCoordinator.instance.runBackgroundMaintenance();
       expect(
-        statuses,
-        contains(
-          'No CaptureClipper cloud folder configured; skipping detection.',
-        ),
+        PioneerCapturedHtmlImportAvailabilityService.instance.latestReport,
+        isNull,
       );
     },
   );

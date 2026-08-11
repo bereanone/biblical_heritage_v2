@@ -45,7 +45,7 @@ class CrossReferenceRepository {
             sourceVerseId: row['source_verse_id'] as int,
             targetVerseId: row['target_verse_id'] as int,
             score: row['score'] as int,
-            targetReference: row['target_reference'] as String,
+            targetReference: row['target_reference']?.toString() ?? '',
           ),
         )
         .toList(growable: false);

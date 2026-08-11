@@ -4,6 +4,8 @@ import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../../core/bootstrap/library_root_service.dart';
+
 /// Extracts a Pioneer Library EPUB collection ZIP (the same package format
 /// distributed to collaborators) into a working folder so it can be scanned
 /// and imported the same way as a manually-extracted folder. Picking a
@@ -36,7 +38,11 @@ class PioneerZipExtractService {
       );
     }
 
-    final supportDir = await getApplicationSupportDirectory();
+    final rootPath =
+        (await LibraryRootService.instance.accessibleLibraryRootPath())?.trim();
+    final supportDir = rootPath == null || rootPath.isEmpty
+        ? await getApplicationSupportDirectory()
+        : Directory(p.join(rootPath, 'Temporary'));
     final destinationDir = Directory(
       p.join(supportDir.path, workingFolderName),
     );

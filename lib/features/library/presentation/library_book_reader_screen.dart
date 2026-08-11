@@ -172,6 +172,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   int? _selectedHeadingTargetIndex;
   String? _pendingBodyScrollTargetKey;
   bool _searchTargetPositioned = false;
+  bool _ignoreSavedInitialLocation = false;
   Map<String, String> _refCodeByLocation = <String, String>{};
   Map<String, Map<int, String>> _paragraphReferenceCodesBySection =
       <String, Map<int, String>>{};
@@ -269,6 +270,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     if ((target - position.pixels).abs() <= 0.01) {
       return false;
     }
+    // Use jumpTo for sub-pixel movements to avoid animation overhead,
+    // but ensure we're moving the position directly without easing.
+    // This preserves frame-by-frame control from the autoscroll controller.
     position.jumpTo(target);
     return true;
   }
@@ -507,9 +511,33 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
               initialSpineIndex:
                   widget.searchTarget?.spineIndex ?? widget.initialSpineIndex,
             );
+      final ignoreSavedInitialLocation =
+          !widget.item.isPdf &&
+          libraryReaderSavedLocationTargetsFrontMatter(
+            item: widget.item,
+            sections: sections,
+            navigationItems: navigationItems,
+          );
       var initialNavigationIndex = widget.item.isPdf
           ? 0
           : _navigationIndexForSectionIndex(initialIndex) ?? 0;
+      final chapterInitialNavigationIndex = widget.item.isPdf
+          ? null
+          : libraryReaderInitialNavigationIndex(
+              item: widget.item,
+              sections: sections,
+              navigationItems: navigationItems,
+              initialSectionIndex: initialIndex,
+              hasExplicitInitialLocation:
+                  widget.searchTarget != null ||
+                  (widget.initialHref?.trim().isNotEmpty ?? false) ||
+                  (widget.initialAnchorId?.trim().isNotEmpty ?? false) ||
+                  widget.initialSpineIndex != null ||
+                  widget.initialParagraphIndex != null,
+            );
+      if (chapterInitialNavigationIndex != null) {
+        initialNavigationIndex = chapterInitialNavigationIndex;
+      }
       var resolvedInitialIndex = initialIndex;
       if (navigationItems.isNotEmpty) {
         final selectedNavItem =
@@ -624,6 +652,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         _navigationItems = navigationItems;
         _selectedIndex = resolvedInitialIndex;
         _selectedNavigationIndex = initialNavigationIndex;
+        _ignoreSavedInitialLocation = ignoreSavedInitialLocation;
         _showRefCodes = savedShowRefCodes;
         // Codes are loaded lazily; the maps above are still empty here.
         _refCodesLoaded = false;
@@ -2796,10 +2825,20 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       return _explicitInitialScrollTargetKey();
     }
 
-    final savedTargetKey = _isDevotionalNavigationBook
+    final savedTargetKey =
+        _isDevotionalNavigationBook || _ignoreSavedInitialLocation
         ? null
         : _savedLocationTargetKey();
     if (savedTargetKey != null) return savedTargetKey;
+
+    final selectedNavigationItem = _selectedNavigationItem;
+    if (selectedNavigationItem != null &&
+        !libraryIsFrontMatterOpeningLabel(selectedNavigationItem.label)) {
+      final navigationTarget = _fallbackTargetKeyForNavigationItem(
+        selectedNavigationItem,
+      );
+      if (navigationTarget != null) return navigationTarget;
+    }
 
     final headingTargets = _headingTargetsForCurrentSection();
     if (headingTargets.isNotEmpty) {
@@ -4475,6 +4514,24 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                           ),
                         const SizedBox(width: 12),
                       ],
+                      // Placed immediately after Contents (ahead of Library
+                      // and Day/Night) rather than after the zoom cluster:
+                      // autoscroll is used far more often on phones than the
+                      // theme toggle, and the toolbar row scrolls
+                      // horizontally, so a low-priority position left it
+                      // hidden off-screen for most phone widths.
+                      if (_tiltAutoScroll.motionSource.isSupported) ...[
+                        ReaderTiltAutoScrollIconButton(
+                          key: const ValueKey('elibrary-tilt-auto-scroll'),
+                          controller: _tiltAutoScroll,
+                          interactionGeneration: _chapterGeneration,
+                          compact: false,
+                          enabled: _sections.isNotEmpty && !item.isPdf,
+                          onPressed: _toggleTiltAutoscroll,
+                          onLongPress: _openTiltSettings,
+                        ),
+                        const SizedBox(width: 12),
+                      ],
                       _ToolbarPillButton(
                         isNightMode: isNight,
                         icon: Icons.library_books_outlined,
@@ -4525,18 +4582,6 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                         onZoomIn: _zoomIn,
                       ),
                       const SizedBox(width: 12),
-                      if (_tiltAutoScroll.motionSource.isSupported) ...[
-                        ReaderTiltAutoScrollIconButton(
-                          key: const ValueKey('elibrary-tilt-auto-scroll'),
-                          controller: _tiltAutoScroll,
-                          interactionGeneration: _chapterGeneration,
-                          compact: false,
-                          enabled: _sections.isNotEmpty && !item.isPdf,
-                          onPressed: _toggleTiltAutoscroll,
-                          onLongPress: _openTiltSettings,
-                        ),
-                        const SizedBox(width: 12),
-                      ],
                       _NavCluster(
                         isNightMode: isNight,
                         canGoFirst: _sections.isNotEmpty,

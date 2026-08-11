@@ -24,6 +24,7 @@ class ViewerInterlinearBody extends StatefulWidget {
     required this.fontScale,
     required this.settings,
     required this.onSelectVerse,
+    this.onOpenCrossReferences,
     required this.onSelectBlockId,
     this.onTapSelectedRange = _noop,
     this.rangeSelection = const ViewerRangeSelection(),
@@ -38,6 +39,7 @@ class ViewerInterlinearBody extends StatefulWidget {
   final double fontScale;
   final ViewerInterlinearSettings settings;
   final ValueChanged<VerseLine> onSelectVerse;
+  final ValueChanged<VerseLine>? onOpenCrossReferences;
   final ValueChanged<int> onSelectBlockId;
   final VoidCallback onTapSelectedRange;
   final ViewerRangeSelection rangeSelection;
@@ -75,9 +77,11 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
         oldWidget.passage?.chapter != widget.passage?.chapter ||
         oldWidget.passage?.bookName != widget.passage?.bookName) {
       _lastScrolledBlockId = null;
+      _userIsScrolling = false;
     }
     if (oldWidget.navigationTick != widget.navigationTick) {
       _lastScrolledBlockId = null;
+      _userIsScrolling = false;
     }
     if (oldWidget.highlightRefreshTick != widget.highlightRefreshTick) {
       final passage = widget.passage;
@@ -241,6 +245,7 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
         itemScrollController: _itemScrollController,
         itemPositionsListener: _itemPositionsListener,
         initialScrollIndex: initialIndex,
+        initialAlignment: 0.5,
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
         itemBuilder: (context, index) {
           final item = renderItems[index];
@@ -299,6 +304,9 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
                 showTopDivider:
                     index == 0 || renderItems[index - 1] is! ViewerAcrosticItem,
                 onTap: () => widget.onSelectVerse(line),
+                onVerseNumberTap: widget.onOpenCrossReferences == null
+                    ? null
+                    : () => widget.onOpenCrossReferences!(line),
                 onOpenStrongs: (strongsId) {
                   showViewerStrongsPageOne(
                     context,
@@ -389,7 +397,12 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
         if (!mounted || token != _recenterToken) return;
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted || token != _recenterToken) return;
-          if (_userIsScrolling) return;
+          if (_userIsScrolling) {
+            if (attempt + 1 < delays.length) {
+              runAttempt(attempt + 1);
+            }
+            return;
+          }
           if (!_itemScrollController.isAttached) {
             if (attempt + 1 < delays.length) {
               runAttempt(attempt + 1);
@@ -415,10 +428,6 @@ class _ViewerInterlinearBodyState extends State<ViewerInterlinearBody> {
             return;
           }
           if (isBibleEndBoundary) {
-            _lastScrolledBlockId = blockId;
-            return;
-          }
-          if (attempt > 0 && isVisible) {
             _lastScrolledBlockId = blockId;
             return;
           }
@@ -471,6 +480,7 @@ class _InterlinearVerseFlow extends StatefulWidget {
     required this.isHebrew,
     required this.showTopDivider,
     required this.onTap,
+    this.onVerseNumberTap,
     required this.onOpenStrongs,
   });
 
@@ -485,6 +495,7 @@ class _InterlinearVerseFlow extends StatefulWidget {
   final bool isHebrew;
   final bool showTopDivider;
   final VoidCallback onTap;
+  final VoidCallback? onVerseNumberTap;
   final ValueChanged<String> onOpenStrongs;
 
   @override
@@ -540,6 +551,7 @@ class _InterlinearVerseFlowState extends State<_InterlinearVerseFlow> {
         isHebrew: widget.isHebrew,
         showTopDivider: widget.showTopDivider,
         onTap: widget.onTap,
+        onVerseNumberTap: widget.onVerseNumberTap,
         onOpenStrongs: widget.onOpenStrongs,
       );
     }
@@ -601,6 +613,7 @@ class _InterlinearVerseFlowState extends State<_InterlinearVerseFlow> {
           isHebrew: widget.isHebrew,
           showTopDivider: widget.showTopDivider,
           onTap: widget.onTap,
+          onVerseNumberTap: widget.onVerseNumberTap,
           onOpenStrongs: widget.onOpenStrongs,
         );
       },
@@ -620,6 +633,7 @@ class _InterlinearVerseContent extends StatelessWidget {
     required this.isHebrew,
     required this.showTopDivider,
     required this.onTap,
+    this.onVerseNumberTap,
     required this.onOpenStrongs,
   });
 
@@ -633,6 +647,7 @@ class _InterlinearVerseContent extends StatelessWidget {
   final bool isHebrew;
   final bool showTopDivider;
   final VoidCallback onTap;
+  final VoidCallback? onVerseNumberTap;
   final ValueChanged<String> onOpenStrongs;
 
   @override
@@ -711,6 +726,7 @@ class _InterlinearVerseContent extends StatelessWidget {
                 text: headerText,
                 style: headerStyle,
                 fontScale: fontScale,
+                onVerseNumberTap: onVerseNumberTap,
               ),
               const SizedBox(height: 2),
               Directionality(
@@ -750,6 +766,7 @@ class _InterlinearHeaderRow extends StatelessWidget {
     required this.text,
     required this.style,
     required this.fontScale,
+    this.onVerseNumberTap,
   });
 
   final int verse;
@@ -759,6 +776,7 @@ class _InterlinearHeaderRow extends StatelessWidget {
   final String text;
   final TextStyle style;
   final double fontScale;
+  final VoidCallback? onVerseNumberTap;
 
   @override
   Widget build(BuildContext context) {
@@ -773,6 +791,7 @@ class _InterlinearHeaderRow extends StatelessWidget {
             showChapterNumber: showChapterNumber,
             hasUserMarkup: hasUserMarkup,
             fontScale: fontScale,
+            onTap: onVerseNumberTap,
           ),
           const SizedBox(width: 8),
           Expanded(child: Text(text, style: style)),
@@ -789,6 +808,7 @@ class _VerseNumberChip extends StatelessWidget {
     required this.showChapterNumber,
     required this.hasUserMarkup,
     required this.fontScale,
+    this.onTap,
   });
 
   final int verse;
@@ -796,23 +816,32 @@ class _VerseNumberChip extends StatelessWidget {
   final bool showChapterNumber;
   final bool hasUserMarkup;
   final double fontScale;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: (6 * fontScale).clamp(5.0, 9.0),
-        vertical: (1.5 * fontScale).clamp(1.0, 3.0),
-      ),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        showChapterNumber ? '$chapter:$verse' : '$verse',
-        style: (theme.textTheme.bodySmall ?? const TextStyle()).copyWith(
-          fontWeight: hasUserMarkup ? FontWeight.w700 : FontWeight.w600,
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+        child: Container(
+          alignment: Alignment.center,
+          padding: EdgeInsets.symmetric(
+            horizontal: (6 * fontScale).clamp(5.0, 9.0),
+            vertical: (1.5 * fontScale).clamp(1.0, 3.0),
+          ),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            showChapterNumber ? '$chapter:$verse' : '$verse',
+            style: (theme.textTheme.bodySmall ?? const TextStyle()).copyWith(
+              fontWeight: hasUserMarkup ? FontWeight.w700 : FontWeight.w600,
+            ),
+          ),
         ),
       ),
     );

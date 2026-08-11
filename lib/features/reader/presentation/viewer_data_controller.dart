@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../core/database/study_bible_database.dart';
+import 'reader_autoscroll_diagnostics.dart';
 import 'viewer_passage_models.dart';
 
 class ViewerDataController extends ChangeNotifier {
@@ -90,10 +91,24 @@ class ViewerDataController extends ChangeNotifier {
     _isLoading = true;
     try {
       final targetCenter = centerId.clamp(minId, _maxBlockId);
+      if (readerAutoScrollDiagnostics.isCapturing) {
+        readerAutoScrollDiagnostics.recordEvent(
+          'load_block_window_start center=$targetCenter radius=$radius',
+        );
+      }
+      final queryStopwatch = readerAutoScrollDiagnostics.isCapturing
+          ? (Stopwatch()..start())
+          : null;
       var fetched = await _database.loadBlockWindowById(
         targetCenter,
         windowRadius: radius,
       );
+      if (queryStopwatch != null) {
+        readerAutoScrollDiagnostics.recordEvent(
+          'load_block_window_done rows=${fetched.length} '
+          'us=${queryStopwatch.elapsedMicroseconds}',
+        );
+      }
       if (fetched.isEmpty) {
         fetched = await _chapterFallback(targetCenter);
       }

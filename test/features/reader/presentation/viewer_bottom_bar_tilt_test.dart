@@ -249,15 +249,14 @@ void main() {
   });
 
   testWidgets(
-    'Commentary and eLibrary stay fixed and visible; only lower-priority '
-    'actions scroll',
+    'the complete ordered phone toolbar scrolls as one usable strip',
     (tester) async {
       final motion = FakeReaderTiltMotionSource();
       final controller = ReaderTiltAutoScrollController(
         motionSource: motion,
         scrollTarget: CallbackReaderAutoScrollTarget(),
       );
-      await tester.binding.setSurfaceSize(const Size(300, 180));
+      await tester.binding.setSurfaceSize(const Size(390, 180));
       addTearDown(() async {
         await tester.binding.setSurfaceSize(null);
         controller.dispose();
@@ -292,25 +291,37 @@ void main() {
       expect(tester.takeException(), isNull);
       final tilt = find.byTooltip('Tilt Auto-scroll');
       final before = tester.getRect(tilt);
+      final historyBefore = tester.getRect(find.byTooltip('History'));
       final commentaryBefore = tester.getRect(find.byTooltip('Commentary'));
       final libraryBefore = tester.getRect(find.byTooltip('eLibrary'));
-      expect(before.right, lessThanOrEqualTo(300));
-      // Commentary and eLibrary are fixed/always-visible: no scrolling
-      // should ever be required to reach them.
-      expect(commentaryBefore.right, lessThanOrEqualTo(300));
-      expect(libraryBefore.right, lessThanOrEqualTo(300));
-      expect(tester.getRect(find.byTooltip('Mode')).right, greaterThan(300));
+      expect(historyBefore.left, lessThan(libraryBefore.left));
+      expect(before.right, lessThanOrEqualTo(390));
+      expect(commentaryBefore.right, lessThanOrEqualTo(390));
+      expect(libraryBefore.right, lessThanOrEqualTo(390));
+      expect(tester.getRect(find.byTooltip('Mode')).right, greaterThan(390));
 
       await tester.drag(
         find.byType(SingleChildScrollView),
         const Offset(-400, 0),
       );
       await tester.pumpAndSettle();
-      // Scrolling to reach a lower-priority action must never move the
-      // fixed, always-visible controls.
-      expect(tester.getRect(tilt), before);
-      expect(tester.getRect(find.byTooltip('Commentary')), commentaryBefore);
-      expect(tester.getRect(find.byTooltip('eLibrary')), libraryBefore);
+      expect(tester.getRect(tilt).left, lessThan(before.left));
+      expect(
+        tester.getRect(find.byTooltip('History')).left,
+        lessThan(historyBefore.left),
+      );
+      expect(
+        tester.getRect(find.byTooltip('Commentary')).left,
+        lessThan(commentaryBefore.left),
+      );
+      expect(
+        tester.getRect(find.byTooltip('eLibrary')).left,
+        lessThan(libraryBefore.left),
+      );
+      expect(
+        tester.getRect(find.byTooltip('Mode')).right,
+        lessThanOrEqualTo(390),
+      );
       expect(find.byTooltip('Mode'), findsOneWidget);
     },
   );

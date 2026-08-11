@@ -85,6 +85,7 @@ flutter:
     - assets/icons/GoldLogo.png
     - assets/icons/Logo2.png
     - tool/elibrary_download_manifest.json
+    - tool/pioneer_epub_download_manifest.json
 
   fonts:
     - family: Roboto

@@ -1417,6 +1417,117 @@ void main() {
       expect(chain!.readableSection.entryName, 'october17.html');
     });
 
+    test(
+      'first open preserves Chapter 1 anchor when title shares its spine',
+      () {
+        final item = LibraryCatalogItem.fromRow(const <String, Object?>{
+          'id': 'american-papacy',
+          'title': 'The American Papacy',
+          'file_name': 'american-papacy.epub',
+          'relative_path': 'ImportedPioneerEpubs/american-papacy.epub',
+        });
+        final sharedSection = LibraryBookSection(
+          entryName: 'text/book.xhtml',
+          title: 'The American Papacy',
+          paragraphs: const ['The American Papacy', 'Chapter 1 body text.'],
+          blocks: const [
+            LibraryBookBlock(
+              html: '<h1>The American Papacy</h1>',
+              text: 'The American Papacy',
+              kind: 'heading',
+              anchorId: 'title',
+            ),
+            LibraryBookBlock(
+              html: '<h2>Chapter 1</h2>',
+              text: 'Chapter 1',
+              kind: 'heading',
+              anchorId: 'chapter-1',
+            ),
+          ],
+          spineIndex: 1,
+        );
+        final navigation = <LibraryCatalogNavigationItem>[
+          const LibraryCatalogNavigationItem(
+            id: 'title',
+            parentId: null,
+            label: 'The American Papacy',
+            href: 'text/book.xhtml',
+            anchorId: 'title',
+            spineIndex: 1,
+            sortOrder: 1,
+            depth: 0,
+            navType: 'toc',
+            contentKind: 'title',
+            isFrontMatter: false,
+            isBodyStart: false,
+            bodyOrder: 1,
+          ),
+          const LibraryCatalogNavigationItem(
+            id: 'chapter-1',
+            parentId: null,
+            label: 'Chapter 1',
+            href: 'text/book.xhtml#chapter-1',
+            anchorId: 'chapter-1',
+            spineIndex: 1,
+            sortOrder: 2,
+            depth: 0,
+            navType: 'toc',
+            contentKind: 'chapter',
+            isFrontMatter: false,
+            isBodyStart: true,
+            bodyOrder: 2,
+          ),
+        ];
+
+        final initialSection = libraryReaderInitialSectionIndex(
+          item: item,
+          sections: [sharedSection],
+          navigationItems: navigation,
+          devotionalMode: false,
+        );
+        expect(initialSection, 0);
+        expect(
+          libraryReaderInitialNavigationIndex(
+            item: item,
+            sections: [sharedSection],
+            navigationItems: navigation,
+            initialSectionIndex: initialSection,
+            hasExplicitInitialLocation: false,
+          ),
+          1,
+        );
+
+        final previouslyOpenedAtTitle =
+            LibraryCatalogItem.fromRow(const <String, Object?>{
+              'id': 'american-papacy-saved-title',
+              'title': 'The American Papacy',
+              'file_name': 'american-papacy.epub',
+              'relative_path': 'ImportedPioneerEpubs/american-papacy.epub',
+              'last_opened': '2026-08-04T00:00:00.000Z',
+              'epub_href': 'text/book.xhtml#title',
+              'spine_index': 1,
+            });
+        expect(
+          libraryReaderSavedLocationTargetsFrontMatter(
+            item: previouslyOpenedAtTitle,
+            sections: [sharedSection],
+            navigationItems: navigation,
+          ),
+          isTrue,
+        );
+        expect(
+          libraryReaderInitialNavigationIndex(
+            item: previouslyOpenedAtTitle,
+            sections: [sharedSection],
+            navigationItems: navigation,
+            initialSectionIndex: 0,
+            hasExplicitInitialLocation: false,
+          ),
+          1,
+        );
+      },
+    );
+
     test('genuine saved progress on an already-readable section resumes '
         'exactly and never engages descendant composition', () {
       final item = LibraryCatalogItem.fromRow(const <String, Object?>{
@@ -1442,6 +1553,89 @@ void main() {
       // never needs to resolve a descendant chain for it.
       expect(sections[resumedIndex].blocks, isNotEmpty);
     });
+
+    test(
+      'saved EGW front matter is ignored in favor of substantive content',
+      () {
+        final item = LibraryCatalogItem.fromRow(const <String, Object?>{
+          'id': 'confrontation',
+          'title': 'Confrontation',
+          'file_name': 'con.epub',
+          'relative_path': 'ePubs/EGW/EGW_Books/con.epub',
+          'last_opened': '2026-08-04T00:00:00.000Z',
+          'epub_href': 'information.xhtml',
+          'spine_index': 1,
+        });
+        const frontMatter = LibraryBookSection(
+          entryName: 'information.xhtml',
+          title: 'Information about this Book',
+          paragraphs: ['ISBN: 978-1-61253-711-5'],
+          blocks: [
+            LibraryBookBlock(
+              html: '<p>ISBN: 978-1-61253-711-5</p>',
+              text: 'ISBN: 978-1-61253-711-5',
+              kind: 'paragraph',
+            ),
+          ],
+          spineIndex: 1,
+        );
+        const firstChapter = LibraryBookSection(
+          entryName: 'chapter1.xhtml',
+          title: 'Confrontation in the Desert',
+          paragraphs: ['Substantive chapter text.'],
+          blocks: [
+            LibraryBookBlock(
+              html: '<p>Substantive chapter text.</p>',
+              text: 'Substantive chapter text.',
+              kind: 'paragraph',
+            ),
+          ],
+          spineIndex: 2,
+        );
+        const navigation = <LibraryCatalogNavigationItem>[
+          LibraryCatalogNavigationItem(
+            id: 'information',
+            parentId: null,
+            label: 'Information about this Book',
+            href: 'information.xhtml',
+            anchorId: null,
+            spineIndex: 1,
+            sortOrder: 1,
+            depth: 0,
+            navType: 'toc',
+            contentKind: 'front_matter',
+            isFrontMatter: true,
+            isBodyStart: false,
+            bodyOrder: 1,
+          ),
+          LibraryCatalogNavigationItem(
+            id: 'chapter-1',
+            parentId: null,
+            label: 'Confrontation in the Desert',
+            href: 'chapter1.xhtml',
+            anchorId: null,
+            spineIndex: 2,
+            sortOrder: 2,
+            depth: 0,
+            navType: 'toc',
+            contentKind: 'chapter',
+            isFrontMatter: false,
+            isBodyStart: true,
+            bodyOrder: 2,
+          ),
+        ];
+
+        expect(
+          libraryReaderInitialSectionIndex(
+            item: item,
+            sections: const [frontMatter, firstChapter],
+            navigationItems: navigation,
+            devotionalMode: false,
+          ),
+          1,
+        );
+      },
+    );
 
     test('a readable leaf keeps its own body and a sibling leaf keeps its own '
         'body too', () {
@@ -1858,12 +2052,16 @@ void main() {
 
             expect(tilt.width, greaterThanOrEqualTo(44));
             expect(tilt.height, greaterThanOrEqualTo(44));
-            expect(contents.left, lessThan(library.left));
+            // Autoscroll sits immediately after Contents (ahead of Library
+            // and the theme toggle) since it's used far more often than
+            // those on phones — see the reorder comment above the tilt
+            // button in library_book_reader_screen.dart.
+            expect(contents.left, lessThan(tilt.left));
+            expect(tilt.left, lessThan(library.left));
             expect(library.left, lessThan(theme.left));
             expect(theme.left, lessThan(refs.left));
             expect(refs.left, lessThan(font.left));
-            expect(tilt.left - font.right, inInclusiveRange(0, 12));
-            expect(font.overlaps(tilt), isFalse);
+            expect(contents.overlaps(tilt), isFalse);
             expect(toolbar.left, greaterThanOrEqualTo(safeArea.left));
             expect(toolbar.right, lessThanOrEqualTo(safeArea.right));
 

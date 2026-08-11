@@ -105,6 +105,9 @@ class _BootstrapGateState extends State<BootstrapGate> {
         _busy = false;
         _startupTakingLong = false;
       });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(StartupCoordinator.instance.runBackgroundMaintenance());
+      });
     } catch (error) {
       _startupWatchdog?.cancel();
       if (!mounted || attempt != _bootstrapAttempt) return;

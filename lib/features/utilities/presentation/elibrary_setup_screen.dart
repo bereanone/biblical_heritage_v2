@@ -436,6 +436,7 @@ class CaptureClipperImportsSection extends StatelessWidget {
     required this.isIOS,
     this.isAndroid = false,
     this.onDownloadPioneerBooks,
+    this.onImportPioneerZip,
     this.lastCheckedLabel,
   });
 
@@ -449,6 +450,7 @@ class CaptureClipperImportsSection extends StatelessWidget {
   final bool isIOS;
   final bool isAndroid;
   final VoidCallback? onDownloadPioneerBooks;
+  final VoidCallback? onImportPioneerZip;
   final String? lastCheckedLabel;
 
   @override
@@ -508,11 +510,11 @@ class CaptureClipperImportsSection extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: disableActions ? null : onDownloadPioneerBooks,
                     icon: const Icon(Icons.folder_open),
-                    label: const Text('Import Pioneer Library'),
+                    label: const Text('Install Pioneer Library'),
                   ),
                   OutlinedButton(
-                    onPressed: disableActions ? null : onCheckForNewBooks,
-                    child: const Text('Import Pioneer Collection'),
+                    onPressed: disableActions ? null : onImportPioneerZip,
+                    child: const Text('Import Pioneer ZIP'),
                   ),
                   OutlinedButton(
                     onPressed: disableActions ? null : onImportBookPackage,
@@ -3298,6 +3300,13 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                     onDownloadPioneerBooks: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => const ImportPioneerLibraryScreen(),
+                      ),
+                    ),
+                    onImportPioneerZip: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ImportPioneerLibraryScreen(
+                          startWithZipPicker: true,
+                        ),
                       ),
                     ),
                     onCheckForNewBooks: _checkForNewBooks,

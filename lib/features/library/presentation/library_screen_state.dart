@@ -101,6 +101,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   }
 
   Future<void> _load() async {
+    final startedAt = DateTime.now();
     if (mounted) {
       setState(() {
         _loading = true;
@@ -109,35 +110,50 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
       });
     }
     try {
-      final selection = await LibraryRootService.instance.loadSelection();
-      final viewerFontScale = await AppSettingsService.instance
+      final selectionFuture = LibraryRootService.instance.loadSelection();
+      final viewerFontScaleFuture = AppSettingsService.instance
           .loadViewerFontScale();
+      final fileTypeFilterFuture = AppSettingsService.instance
+          .loadElibraryMediaFilter();
+      final collectionFilterFuture = AppSettingsService.instance
+          .loadElibraryCollectionFilter();
+      final itemsFuture = _service.loadItems(hydrateMetadata: false);
+      final selection = await selectionFuture;
+      final viewerFontScale = await viewerFontScaleFuture;
       final fileTypeFilter = normalizeLibraryMediaFilter(
-        await AppSettingsService.instance.loadElibraryMediaFilter(),
+        await fileTypeFilterFuture,
       );
-      var items = await _service.loadItems();
-      final hasCommentaryItems = items.any(
-        (item) => item.collectionGroupKey == 'egw_commentaries',
-      );
-      if (!hasCommentaryItems && selection.exists) {
-        await _service.refreshManagedItemsFromDisk();
-        items = await _service.loadItems();
-      }
+      final storedCollectionFilter = await collectionFilterFuture;
+      final collectionFilter = storedCollectionFilter == null
+          ? _collectionFilter
+          : _normalizeCollectionFilterSelection(storedCollectionFilter);
+      final items = await itemsFuture;
       if (!mounted) return;
       setState(() {
         _selection = selection;
         _items = items;
         _viewerFontScale = viewerFontScale;
         _fileTypeFilter = fileTypeFilter;
+        _collectionFilter = collectionFilter;
         _loading = false;
         _loadingStatus = 'Library loaded.';
         _loadingError = null;
       });
-      await _syncSelectionAndNavigation(
-        _filteredBooks,
-        preferExistingSelection: false,
+      debugPrint(
+        'eLibrary indexed view usable in '
+        '${DateTime.now().difference(startedAt).inMilliseconds}ms '
+        '(${items.length} items).',
       );
-      await _refreshCaptureImportReport(promptOnDiscovery: true);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(
+          _syncSelectionAndNavigation(
+            _filteredBooks,
+            preferExistingSelection: false,
+          ),
+        );
+        unawaited(_refreshCaptureImportReport(promptOnDiscovery: true));
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -149,7 +165,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   }
 
   Future<void> _reloadItems() async {
-    final items = await _service.loadItems();
+    final items = await _service.loadItems(hydrateMetadata: false);
     if (!mounted) return;
     setState(() => _items = items);
     await _refreshCaptureImportReport(promptOnDiscovery: false);
@@ -167,6 +183,21 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
       debugPrint(
         'CaptureClipper library availability scan skipped by development override.',
       );
+      return;
+    }
+    // Startup already performs this folder discovery. Repeating it as soon
+    // as eLibrary paints can monopolize the UI isolate and, when a candidate
+    // exists, introduce a modal barrier that makes the apparently loaded
+    // screen dim and unresponsive. Adopt the startup snapshot here; explicit
+    // refresh/import actions below still request a fresh scan.
+    if (promptOnDiscovery && widget.capturedImportAvailabilityLoader == null) {
+      final cached =
+          PioneerCapturedHtmlImportAvailabilityService.instance.latestReport;
+      if (!mounted) return;
+      setState(() {
+        _captureImportReport = cached;
+        _loadingCaptureImports = false;
+      });
       return;
     }
     if (mounted) {
@@ -532,6 +563,9 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
       }
       _tab = _LibraryTab.books;
     });
+    await AppSettingsService.instance.saveElibraryCollectionFilter(
+      normalizedValue,
+    );
     await _syncSelectionAndNavigation(
       _filteredBooks,
       preferExistingSelection: true,
@@ -708,7 +742,34 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
     );
   }
 
+  // Filtering/sorting a large catalog (e.g. "All Collections") is CPU work
+  // that used to re-run several times per tap: once from the selection
+  // handler, again inside _syncSelectionAndNavigation, and again during the
+  // subsequent build(). Memoizing on the inputs collapses those repeats back
+  // down to a single computation per actual change.
+  List<LibraryCatalogItem>? _filteredBooksCache;
+  ({
+    List<LibraryCatalogItem> items,
+    String fileTypeFilter,
+    String collectionFilter,
+    String? selectedInitialLetter,
+    String searchQuery,
+  })?
+  _filteredBooksCacheKey;
+
   List<LibraryCatalogItem> get _filteredBooks {
+    final key = (
+      items: _items,
+      fileTypeFilter: _fileTypeFilter,
+      collectionFilter: _collectionFilter,
+      selectedInitialLetter: _selectedInitialLetter,
+      searchQuery: _searchQuery,
+    );
+    final cached = _filteredBooksCache;
+    if (cached != null && _filteredBooksCacheKey == key) {
+      return cached;
+    }
+
     final query = compactLibrarySearchText(_searchQuery);
     final initial = query.isEmpty
         ? _selectedInitialLetter?.trim().toUpperCase()
@@ -725,11 +786,46 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
       final haystack = libraryCatalogSearchTextForItem(item);
       return haystack.contains(query);
     }).toList();
-    filtered.sort(
-      (a, b) =>
-          _compareBooksForShelf(a, b, sortByAuthorFirst: sortByAuthorFirst),
-    );
-    return filtered;
+    // Build natural-sort keys once per item. The comparator runs O(n log n)
+    // times, so tokenizing titles/authors inside it made expanding from the
+    // Pioneer subset to All Collections especially costly on Android.
+    final keyed =
+        <
+          ({
+            LibraryCatalogItem item,
+            List<({String text, int? number})> title,
+            List<({String text, int? number})> author,
+          })
+        >[
+          for (final item in filtered)
+            (
+              item: item,
+              title: _naturalSortKey(_sortableTitle(item.displayTitle)),
+              author: _naturalSortKey(item.displayAuthor),
+            ),
+        ];
+    keyed.sort((a, b) {
+      if (sortByAuthorFirst) {
+        final authorCompare = _compareNaturalSortKeys(a.author, b.author);
+        if (authorCompare != 0) return authorCompare;
+      }
+      final titleCompare = _compareNaturalSortKeys(a.title, b.title);
+      if (titleCompare != 0) return titleCompare;
+      final authorCompare = _compareNaturalSortKeys(a.author, b.author);
+      if (authorCompare != 0) return authorCompare;
+      return (a.item.lastOpened ??
+              a.item.dateAdded ??
+              DateTime.fromMillisecondsSinceEpoch(0))
+          .compareTo(
+            b.item.lastOpened ??
+                b.item.dateAdded ??
+                DateTime.fromMillisecondsSinceEpoch(0),
+          );
+    });
+    final sorted = [for (final entry in keyed) entry.item];
+    _filteredBooksCacheKey = key;
+    _filteredBooksCache = sorted;
+    return sorted;
   }
 
   List<LibraryCatalogItem> get _recentBooks {
@@ -862,30 +958,6 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
       return left.compareTo(right);
     });
     return sorted.first;
-  }
-
-  int _compareBooksForShelf(
-    LibraryCatalogItem a,
-    LibraryCatalogItem b, {
-    required bool sortByAuthorFirst,
-  }) {
-    if (sortByAuthorFirst) {
-      final authorCompare = _naturalCompare(a.displayAuthor, b.displayAuthor);
-      if (authorCompare != 0) return authorCompare;
-    }
-    final titleCompare = _naturalCompare(
-      _sortableTitle(a.displayTitle),
-      _sortableTitle(b.displayTitle),
-    );
-    if (titleCompare != 0) return titleCompare;
-    final authorCompare = _naturalCompare(a.displayAuthor, b.displayAuthor);
-    if (authorCompare != 0) return authorCompare;
-    return (a.lastOpened ??
-            a.dateAdded ??
-            DateTime.fromMillisecondsSinceEpoch(0))
-        .compareTo(
-          b.lastOpened ?? b.dateAdded ?? DateTime.fromMillisecondsSinceEpoch(0),
-        );
   }
 
   @override

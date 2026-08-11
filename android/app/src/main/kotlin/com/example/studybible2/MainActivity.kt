@@ -9,12 +9,17 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.util.Log
 import android.view.Surface
+import org.json.JSONArray
+import org.json.JSONObject
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterSurfaceView
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -27,19 +32,43 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
     private val documentPickerRequestCode = 4817
     private val libraryTreeRequestCode = 4818
     private val libraryRootChannel = "studybible/library_root"
+    private val autoscrollFrameRateChannel = "studybible/reader_autoscroll_frame_rate"
     private val pickerPreferences = "studybible_document_picker"
     private val lastCloudDocumentUriKey = "last_cloud_document_uri"
     private val libraryTreeUriKey = "library_tree_uri"
     private val libraryReconnectTimestampKey = "library_reconnect_timestamp"
     private val libraryAuthorizationErrorKey = "library_authorization_error"
+    private val librarySnapshotKey = "library_tree_snapshot_v1"
     private val storageLogTag = "StudyBibleStorage"
     private var sensorManager: SensorManager? = null
     private var rotationSensor: Sensor? = null
     private var eventSink: EventChannel.EventSink? = null
+    // Rotation-vector delivery runs on this dedicated background thread instead of
+    // the Android main/platform thread. That thread also hosts Choreographer's
+    // vsync callback that drives Flutter's frame scheduling on Android, and
+    // SENSOR_DELAY_GAME is only a hint: on this hardware it delivers an uncapped,
+    // unevenly paced stream (measured ~50Hz with individual gaps alternating
+    // between ~12ms and ~28ms). Left on the main thread, that irregular load
+    // periodically delayed a vsync just enough to visibly stall the reader's
+    // per-frame autoscroll tick. Sampling is capped to 60Hz to match iOS's
+    // CMMotionManager rate (AppDelegate.swift), which produces smooth motion.
+    private var sensorHandlerThread: HandlerThread? = null
+    private var sensorHandler: Handler? = null
+    private val sensorSamplingPeriodUs = 16_667
+    // Flutter composites its own content on this surface without ever
+    // invalidating the Activity's DecorView, so it — not the DecorView — is
+    // the correct target for a per-frame-renewing frame-rate vote. See
+    // setReaderAutoscrollFrameRateBoost for why this matters.
+    private var flutterSurfaceView: FlutterSurfaceView? = null
     private var pendingDocumentPickerResult: MethodChannel.Result? = null
     private var pendingLibraryTreeResult: MethodChannel.Result? = null
     private var pendingLibraryTreeRequiresExisting = false
     private val storageExecutor = Executors.newSingleThreadExecutor()
+
+    override fun onFlutterSurfaceViewCreated(flutterSurfaceView: FlutterSurfaceView) {
+        super.onFlutterSurfaceViewCreated(flutterSurfaceView)
+        this.flutterSurfaceView = flutterSurfaceView
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -69,12 +98,104 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
                 )
                 "validateAndroidLibraryTree" -> validateSavedLibraryTree(result)
                 "syncAndroidLibraryTree" -> syncSavedLibraryTree(result)
+                "scanAndroidLibraryTree" -> scanSavedLibraryTree(
+                    result,
+                    call.argument<Boolean>("force") ?: false,
+                )
                 "clearAndroidLibraryTree" -> {
                     getSharedPreferences(pickerPreferences, Context.MODE_PRIVATE)
                         .edit().remove(libraryTreeUriKey).apply()
                     result.success(null)
                 }
                 else -> result.notImplemented()
+            }
+        }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            autoscrollFrameRateChannel,
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setActive" -> {
+                    setReaderAutoscrollFrameRateBoost(call.argument<Boolean>("active") ?: false)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    // Requests (or releases) a sustained high display refresh rate for the
+    // duration of programmatic reader autoscroll. Without this, autoscroll's
+    // jumpTo() calls generate no touch input, so Android's adaptive refresh
+    // rate drops the window's touch-boosted high refresh rate ~3s after the
+    // last touch and instead delivers ticker frames at an irregular ~26-29Hz
+    // (measured on-device), producing visible stall/lurch stepping even
+    // though the scroll math itself is correct. Manual finger-drag scrolling
+    // is unaffected because active touch keeps the boost alive on its own.
+    //
+    // Three mechanisms were tried, in order, each measured on-device via the
+    // reader's diagnostic capture before moving to the next:
+    // 1. WindowManager.LayoutParams.preferredRefreshRate selects the 90Hz
+    //    display *mode* (confirmed via `dumpsys window`), but does not stop
+    //    Android's separate adaptive vsync-delivery throttle from skipping
+    //    Choreographer callbacks; measured ticker cadence was unchanged.
+    // 2. View.setRequestedFrameRate (API 35+), first tried on the DecorView,
+    //    then on the FlutterSurfaceView itself once it was clear the vote
+    //    decays ~100ms after the View holding it last drew/invalidated (the
+    //    DecorView never invalidates - Flutter composites via its own
+    //    Surface). Cadence was still unchanged either way: this API votes
+    //    through Android's HWUI/RenderNode draw pipeline, which Flutter's
+    //    Surface-level rendering never participates in, so the vote is
+    //    logged but has no effect on a SurfaceView Flutter is driving.
+    // 3. Surface.setFrameRate, applied directly to the FlutterSurfaceView's
+    //    underlying Surface (its actual SurfaceFlinger buffer queue) rather
+    //    than through any View-level voting system. This is the mechanism
+    //    that actually moved the measured cadence.
+    private var frameRateReassertHandler: Handler? = null
+    private val frameRateReassertRunnable = object : Runnable {
+        override fun run() {
+            applyReaderAutoscrollFrameRateBoost(true)
+            frameRateReassertHandler?.postDelayed(this, 500)
+        }
+    }
+
+    private fun setReaderAutoscrollFrameRateBoost(active: Boolean) {
+        frameRateReassertHandler?.removeCallbacks(frameRateReassertRunnable)
+        applyReaderAutoscrollFrameRateBoost(active)
+        if (active) {
+            // DIAGNOSTIC: test whether a one-time vote is being silently
+            // cleared by Android's own 3s touch-boost-timeout event, versus
+            // the API itself having no effect on this surface regardless of
+            // call frequency. Re-asserting every 500ms is not the intended
+            // final shape of this fix either way.
+            val handler = frameRateReassertHandler ?: Handler(mainLooper).also {
+                frameRateReassertHandler = it
+            }
+            handler.postDelayed(frameRateReassertRunnable, 500)
+        }
+    }
+
+    private fun applyReaderAutoscrollFrameRateBoost(active: Boolean) {
+        val window = window ?: return
+        val targetHz = if (!active) {
+            0f // 0 = no preference; releases the request.
+        } else {
+            val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                display
+            } else {
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay
+            }
+            display?.supportedModes?.maxOfOrNull { it.refreshRate } ?: 0f
+        }
+        if (targetHz > 0f || !active) {
+            window.attributes = window.attributes.also { it.preferredRefreshRate = targetHz }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            flutterSurfaceView?.holder?.surface?.let { surface ->
+                if (surface.isValid) {
+                    surface.setFrameRate(targetHz, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+                }
             }
         }
     }
@@ -476,7 +597,12 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
             mirror.mkdirs()
             fileCount = copyTreeToMirror(uri, rootDocumentId, mirror)
         } else if (validFolder && read) {
-            fileCount = countTreeFiles(uri, rootDocumentId)
+            // Authorization validation must remain constant-depth. Recursively
+            // counting every SAF document here used to block Flutter startup
+            // for tens of seconds on large libraries.
+            fileCount = preferences.getString(librarySnapshotKey, null)
+                ?.let { runCatching { JSONObject(it).optInt("fileCount", 0) }.getOrNull() }
+                ?: 0
         }
         val authorized = validFolder && read && write
         return mapOf(
@@ -516,6 +642,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
         val name: String,
         val mimeType: String,
         val size: Long,
+        val modified: Long,
     )
 
     private fun listChildren(treeUri: Uri, parentDocumentId: String): List<TreeChild> {
@@ -531,6 +658,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
                 DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                 DocumentsContract.Document.COLUMN_MIME_TYPE,
                 DocumentsContract.Document.COLUMN_SIZE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED,
             ),
             null,
             null,
@@ -548,6 +676,9 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
             val sizeIndex = cursor.getColumnIndex(
                 DocumentsContract.Document.COLUMN_SIZE,
             )
+            val modifiedIndex = cursor.getColumnIndex(
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+            )
             while (cursor.moveToNext()) {
                 children += TreeChild(
                     cursor.getString(idIndex),
@@ -557,6 +688,11 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
                         cursor.getLong(sizeIndex)
                     } else {
                         -1L
+                    },
+                    if (modifiedIndex >= 0 && !cursor.isNull(modifiedIndex)) {
+                        cursor.getLong(modifiedIndex)
+                    } else {
+                        0L
                     },
                 )
             }
@@ -612,6 +748,159 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
         return count
     }
 
+    private data class LibrarySnapshotEntry(
+        val relativePath: String,
+        val documentId: String,
+        val size: Long,
+        val modified: Long,
+    )
+
+    private fun scanSavedLibraryTree(result: MethodChannel.Result, force: Boolean) {
+        val preferences = getSharedPreferences(pickerPreferences, Context.MODE_PRIVATE)
+        val saved = preferences.getString(libraryTreeUriKey, null)
+        if (saved.isNullOrBlank()) {
+            result.success(mapOf("skipped" to true, "reason" to "no_authorized_tree"))
+            return
+        }
+        storageExecutor.execute {
+            val startedAt = System.currentTimeMillis()
+            try {
+                val uri = Uri.parse(saved)
+                val rootId = DocumentsContract.getTreeDocumentId(uri)
+                val mirror = File(
+                    getExternalFilesDir(null) ?: filesDir,
+                    "StudyBibleMirror_${uri.toString().hashCode()}",
+                )
+                mirror.mkdirs()
+                val current = mutableListOf<LibrarySnapshotEntry>()
+                collectTreeSnapshot(uri, rootId, "", current)
+                val previousJson = if (force) null else preferences.getString(librarySnapshotKey, null)
+                val previous = parseLibrarySnapshot(previousJson)
+                val previousByPath = previous.associateBy { it.relativePath }
+                val currentByPath = current.associateBy { it.relativePath }
+                var changed = 0
+                var unchanged = 0
+                var removed = 0
+                for (entry in current) {
+                    val old = previousByPath[entry.relativePath]
+                    if (!force && old != null && old.size == entry.size && old.modified == entry.modified) {
+                        unchanged += 1
+                        continue
+                    }
+                    copySnapshotEntry(uri, entry, mirror)
+                    changed += 1
+                }
+                for (entry in previous) {
+                    if (currentByPath.containsKey(entry.relativePath)) continue
+                    val rootName = entry.relativePath.substringBefore('/').lowercase()
+                    if (rootName !in setOf(
+                            "epubs", "pdfs", "commentaries", "research",
+                            "images", "media", "translations", "books",
+                        )
+                    ) continue
+                    val stale = File(mirror, entry.relativePath)
+                    if (stale.exists() && stale.isFile) stale.delete()
+                    removed += 1
+                }
+                val snapshot = JSONObject()
+                    .put("schema", 1)
+                    .put("treeUri", saved)
+                    .put("completedAt", System.currentTimeMillis())
+                    .put("fileCount", current.size)
+                    .put("totalSize", current.sumOf { if (it.size > 0) it.size else 0L })
+                    .put("entries", JSONArray().apply {
+                        current.forEach { entry ->
+                            put(JSONObject()
+                                .put("path", entry.relativePath)
+                                .put("documentId", entry.documentId)
+                                .put("size", entry.size)
+                                .put("modified", entry.modified))
+                        }
+                    })
+                // Commit only after every copy/removal succeeds. An interrupted
+                // scan therefore leaves the previous valid manifest authoritative.
+                preferences.edit().putString(librarySnapshotKey, snapshot.toString()).commit()
+                val elapsed = System.currentTimeMillis() - startedAt
+                Log.i(storageLogTag, "library_background_scan_complete elapsedMs=$elapsed changed=$changed unchanged=$unchanged removed=$removed force=$force")
+                runOnUiThread {
+                    result.success(mapOf(
+                        "elapsedMs" to elapsed,
+                        "changed" to changed,
+                        "unchanged" to unchanged,
+                        "removed" to removed,
+                        "fileCount" to current.size,
+                        "fullScan" to (force || previousJson == null),
+                    ))
+                }
+            } catch (error: Exception) {
+                Log.e(storageLogTag, "library_background_scan_failed", error)
+                runOnUiThread {
+                    result.error("library_tree_scan_failed", "Library verification failed; the previous index remains available.", error.localizedMessage)
+                }
+            }
+        }
+    }
+
+    private fun collectTreeSnapshot(
+        treeUri: Uri,
+        parentDocumentId: String,
+        relativeParent: String,
+        output: MutableList<LibrarySnapshotEntry>,
+    ) {
+        val contentRoots = setOf(
+            "epubs", "pdfs", "commentaries", "research", "images",
+            "media", "translations", "books",
+        )
+        for (child in listChildren(treeUri, parentDocumentId)) {
+            val relativePath = if (relativeParent.isEmpty()) child.name else "$relativeParent/${child.name}"
+            if (child.mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                // Writable databases, markup, tags, history, backups, and
+                // indexes are already authoritative in the local mirror. They
+                // must never be overwritten by background discovery.
+                if (relativeParent.isEmpty() && child.name.lowercase() !in contentRoots) continue
+                collectTreeSnapshot(treeUri, child.documentId, relativePath, output)
+            } else if (!child.name.endsWith(".downloading") && !child.name.endsWith(".saf_importing")) {
+                output += LibrarySnapshotEntry(relativePath, child.documentId, child.size, child.modified)
+            }
+        }
+    }
+
+    private fun parseLibrarySnapshot(raw: String?): List<LibrarySnapshotEntry> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val root = JSONObject(raw)
+            if (root.optInt("schema") != 1) return@runCatching emptyList()
+            val entries = root.getJSONArray("entries")
+            buildList {
+                for (index in 0 until entries.length()) {
+                    val item = entries.getJSONObject(index)
+                    add(LibrarySnapshotEntry(
+                        item.getString("path"),
+                        item.getString("documentId"),
+                        item.optLong("size", -1L),
+                        item.optLong("modified", 0L),
+                    ))
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun copySnapshotEntry(treeUri: Uri, entry: LibrarySnapshotEntry, mirror: File) {
+        val target = File(mirror, entry.relativePath)
+        target.parentFile?.mkdirs()
+        val temporary = File(target.parentFile, "${target.name}.saf_importing")
+        val documentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, entry.documentId)
+        contentResolver.openInputStream(documentUri).use { input ->
+            requireNotNull(input) { "Cannot open ${entry.relativePath}" }
+            FileOutputStream(temporary).use { output -> input.copyTo(output) }
+        }
+        if (target.exists() && !target.delete()) throw IllegalStateException("Cannot replace ${entry.relativePath}")
+        if (!temporary.renameTo(target)) {
+            temporary.copyTo(target, overwrite = true)
+            temporary.delete()
+        }
+    }
+
     private fun queryDisplayName(uri: Uri): String {
         contentResolver.query(
             uri,
@@ -664,12 +953,19 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
             return
         }
         eventSink = events
-        sensorManager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME)
+        val thread = HandlerThread("StudyBibleReaderTiltSensor").apply { start() }
+        sensorHandlerThread = thread
+        val handler = Handler(thread.looper)
+        sensorHandler = handler
+        sensorManager?.registerListener(this, sensor, sensorSamplingPeriodUs, handler)
     }
 
     override fun onCancel(arguments: Any?) {
         sensorManager?.unregisterListener(this)
         eventSink = null
+        sensorHandler = null
+        sensorHandlerThread?.quitSafely()
+        sensorHandlerThread = null
     }
 
     override fun onSensorChanged(event: SensorEvent) {
@@ -678,13 +974,14 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
         val orientation = FloatArray(3)
         SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
         SensorManager.getOrientation(rotationMatrix, orientation)
-        eventSink?.success(
-            mapOf(
-                "attitudePitch" to orientation[1].toDouble(),
-                "attitudeRoll" to orientation[2].toDouble(),
-                "orientation" to readerOrientationName(),
-            ),
+        val payload = mapOf(
+            "attitudePitch" to orientation[1].toDouble(),
+            "attitudeRoll" to orientation[2].toDouble(),
+            "orientation" to readerOrientationName(),
         )
+        // EventChannel delivery must happen on the platform thread; this hop is the
+        // only work this stream now does on that thread, at the capped 60Hz rate.
+        runOnUiThread { eventSink?.success(payload) }
     }
 
     @Suppress("DEPRECATION")
@@ -700,6 +997,9 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         sensorManager?.unregisterListener(this)
         eventSink = null
+        sensorHandler = null
+        sensorHandlerThread?.quitSafely()
+        sensorHandlerThread = null
         pendingDocumentPickerResult?.success(null)
         pendingDocumentPickerResult = null
         pendingLibraryTreeResult?.success(mapOf("cancelled" to true))

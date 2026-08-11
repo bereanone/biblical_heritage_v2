@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/library_root_native.dart';
+import '../../../core/bootstrap/startup_coordinator.dart';
 import '../data/elibrary_file_management_service.dart';
 import '../data/elibrary_root_migration_service.dart';
 import '../../reader/data/commentary_research_library_service.dart';
@@ -355,10 +356,13 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
     final path = _selection?.path;
     if (path == null || path.trim().isEmpty) return;
     await LibraryRootService.instance.ensureStructure(path);
+    await StartupCoordinator.instance.runBackgroundMaintenance(
+      forceLibraryRescan: true,
+    );
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('Library folders refreshed.')));
+    ).showSnackBar(const SnackBar(content: Text('Library fully rescanned.')));
     await _load();
   }
 
@@ -595,7 +599,7 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
                                 ),
                                 OutlinedButton(
                                   onPressed: _migrating ? null : _refresh,
-                                  child: const Text('Refresh Folders'),
+                                  child: const Text('Rescan Library'),
                                 ),
                               ],
                             ),

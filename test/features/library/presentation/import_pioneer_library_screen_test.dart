@@ -93,7 +93,8 @@ void main() {
 
       expect(find.text('Pioneer Library'), findsOneWidget);
       expect(find.byKey(const Key('pioneer-zip-action')), findsOneWidget);
-      expect(find.text('Choose Pioneer Library ZIP File'), findsOneWidget);
+      expect(find.text('Install Verified Pioneer Books'), findsOneWidget);
+      expect(find.text('Import Pioneer ZIP'), findsOneWidget);
       expect(find.byKey(const Key('pioneer-primary-action')), findsOneWidget);
       expect(find.text('Add a Book File (EPUB)'), findsOneWidget);
       expect(find.text('Advanced Tools'), findsOneWidget);
@@ -320,7 +321,8 @@ void main() {
 
     await tester.pageBack();
     await tester.pumpAndSettle();
-    expect(find.text('Choose Pioneer Library ZIP File'), findsOneWidget);
+    expect(find.text('Install Verified Pioneer Books'), findsOneWidget);
+    expect(find.text('Import Pioneer ZIP'), findsOneWidget);
   });
 
   for (final layout in <String, Size>{

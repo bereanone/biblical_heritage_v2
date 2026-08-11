@@ -1,0 +1,670 @@
+{
+  "schema_version": 1,
+  "source": "https://archive.org  (Adventist Pioneer Authors collection)",
+  "source_note": "Verified via archive.org metadata API on 2026-08-07. Only authors with real EPUB files are listed; the remaining Pioneer Authors have no direct EPUB anywhere and require the CaptureClipper path per docs/pioneer_acquisition_plan.md.",
+  "download_url_template": "https://archive.org/download/{identifier}/{file_name}",
+  "authors": [
+    {
+      "identifier": "adventist-pioneer-authors-owen-russell-loomis-crosier",
+      "author": "Owen Russell Loomis Crosier",
+      "works": [
+        {
+          "code": "LOM",
+          "title": "The Law of Moses",
+          "file_name": "LOM - The Law of Moses.epub",
+          "size": "72174"
+        },
+        {
+          "code": "SANC",
+          "title": "The Sanctuary",
+          "file_name": "SANC - The Sanctuary.epub",
+          "size": "48847"
+        }
+      ]
+    },
+    {
+      "identifier": "adventist-pioneer-authors-uriah-smith",
+      "author": "Uriah Smith",
+      "works": [
+        {
+          "code": "AMCR",
+          "title": "America’s Crisis",
+          "file_name": "AMCR - America’s Crisis.epub",
+          "size": "31892"
+        },
+        {
+          "code": "APYO",
+          "title": "An Appeal to the Youth",
+          "file_name": "APYO - An Appeal to the Youth.epub",
+          "size": "82046"
+        },
+        {
+          "code": "BSA",
+          "title": "Bible Student’s Assistant",
+          "file_name": "BSA - Bible Student’s Assistant.epub",
+          "size": "58724"
+        },
+        {
+          "code": "BSSL",
+          "title": "Both Sides on the Sabbath and Law",
+          "file_name": "BSSL - Both Sides on the Sabbath and Law.epub",
+          "size": "269866"
+        },
+        {
+          "code": "DAR",
+          "title": "Daniel and The Revelation",
+          "file_name": "DAR - Daniel and The Revelation.epub",
+          "size": "1094833"
+        },
+        {
+          "code": "DAR1909",
+          "title": "Daniel and The Revelation",
+          "file_name": "DAR1909 - Daniel and The Revelation.epub",
+          "size": "1060020"
+        },
+        {
+          "code": "DCRC",
+          "title": "Day of the Crucifixion and Resurrection of Christ",
+          "file_name": "DCRC - Day of the Crucifixion and Resurrection of Christ.epub",
+          "size": "48307"
+        },
+        {
+          "code": "DJWW",
+          "title": "The Defense of Elder James White and Wife",
+          "file_name": "DJWW - The Defense of Elder James White and Wife.epub",
+          "size": "156574"
+        },
+        {
+          "code": "FPSDA",
+          "canonical_code": "FP1872",
+          "aliases": ["FPSDA", "FP187"],
+          "title": "Fundamental Principles of Seventh-day Adventists",
+          "file_name": "FPSDA - Fundamental Principles of Seventh-day Adventists.epub",
+          "size": "16015"
+        },
+        {
+          "code": "GRCO",
+          "title": "The Great Commandment",
+          "file_name": "GRCO - The Great Commandment.epub",
+          "size": "12186"
+        },
+        {
+          "code": "GRFA",
+          "title": "A Greek Falsehood",
+          "file_name": "GRFA - A Greek Falsehood.epub",
+          "size": "47828"
+        },
+        {
+          "code": "HHMLD",
+          "title": "Here and Hereafter",
+          "file_name": "HHMLD - Here and Hereafter.epub",
+          "size": "430196"
+        },
+        {
+          "code": "IMBG",
+          "title": "In Memoriam [Bourdeau]",
+          "file_name": "IMBG - In Memoriam [Bourdeau].epub",
+          "size": "26774"
+        },
+        {
+          "code": "IMJW",
+          "title": "In Memoriam [White]",
+          "file_name": "IMJW - In Memoriam [White].epub",
+          "size": "79309"
+        },
+        {
+          "code": "KPC",
+          "title": "Key to the Prophetic Chart",
+          "file_name": "KPC - Key to the Prophetic Chart.epub",
+          "size": "59765"
+        },
+        {
+          "code": "KSDPR",
+          "title": "Key to Smith’s Diagram and Parliamentary Rules",
+          "file_name": "KSDPR - Key to Smith’s Diagram and Parliamentary Rules.epub",
+          "size": "41802"
+        },
+        {
+          "code": "LUJ",
+          "title": "Looking Unto Jesus",
+          "file_name": "LUJ - Looking Unto Jesus.epub",
+          "size": "327247"
+        },
+        {
+          "code": "MANA",
+          "title": "The Marvel of Nations",
+          "file_name": "MANA - The Marvel of Nations.epub",
+          "size": "341985"
+        },
+        {
+          "code": "MND",
+          "title": "Man’s Nature and Destiny",
+          "file_name": "MND - Man’s Nature and Destiny.epub",
+          "size": "385349"
+        },
+        {
+          "code": "MOI",
+          "title": "Mortal or Immortal - Which",
+          "file_name": "MOI - Mortal or Immortal - Which.epub",
+          "size": "146423"
+        },
+        {
+          "code": "MOSP",
+          "title": "Modern Spiritualism",
+          "file_name": "MOSP - Modern Spiritualism.epub",
+          "size": "175856"
+        },
+        {
+          "code": "POUS",
+          "title": "Poems, by Uriah Smith",
+          "file_name": "POUS - Poems, by Uriah Smith.epub",
+          "size": "27339"
+        },
+        {
+          "code": "PTV",
+          "title": "Parable of the Ten Virgins",
+          "file_name": "PTV - Parable of the Ten Virgins.epub",
+          "size": "32775"
+        },
+        {
+          "code": "QUAN",
+          "title": "A Question Answered",
+          "file_name": "QUAN - A Question Answered.epub",
+          "size": "8727"
+        },
+        {
+          "code": "RECA",
+          "title": "Replies to Elder Canright’s Attacks on Seventh-day Adventists",
+          "file_name": "RECA - Replies to Elder Canright’s Attacks on Seventh-day Adventists.epub",
+          "size": "5996"
+        },
+        {
+          "code": "S144",
+          "title": "A Study of the 144,000",
+          "file_name": "S144 - A Study of the 144,000.epub",
+          "size": "17757"
+        },
+        {
+          "code": "SBTON",
+          "title": "Sabbaton",
+          "file_name": "SBTON - Sabbaton.epub",
+          "size": "30975"
+        },
+        {
+          "code": "SCSNT",
+          "title": "Is Sunday Called the Sabbath in the New Testament",
+          "file_name": "SCSNT - Is Sunday Called the Sabbath in the New Testament.epub",
+          "size": "15160"
+        },
+        {
+          "code": "SDAWK",
+          "title": "Seventh-day Adventists and Their Work",
+          "file_name": "SDAWK - Seventh-day Adventists and Their Work.epub",
+          "size": "25012"
+        },
+        {
+          "code": "SHR",
+          "title": "The Seven Heads of Revelation 12, 13, and 17",
+          "file_name": "SHR - The Seven Heads of Revelation 12, 13, and 17.epub",
+          "size": "57782"
+        },
+        {
+          "code": "STTHD",
+          "title": "The Sanctuary and the Twenty-three Hundred Days of Daniel 8_14",
+          "file_name": "STTHD - The Sanctuary and the Twenty-three Hundred Days of Daniel 8_14.epub",
+          "size": "282714"
+        },
+        {
+          "code": "SUGR",
+          "title": "Sunday in the Greek",
+          "file_name": "SUGR - Sunday in the Greek.epub",
+          "size": "15636"
+        },
+        {
+          "code": "SYNPT",
+          "title": "Synopsis of the Present Truth",
+          "file_name": "SYNPT - Synopsis of the Present Truth.epub",
+          "size": "389962"
+        },
+        {
+          "code": "TBI",
+          "title": "The Biblical Institute",
+          "file_name": "TBI - The Biblical Institute.epub",
+          "size": "446566"
+        },
+        {
+          "code": "TRIMM",
+          "title": "Trine Immersion",
+          "file_name": "TRIMM - Trine Immersion.epub",
+          "size": "16134"
+        },
+        {
+          "code": "TTC",
+          "title": "The Two Covenants",
+          "file_name": "TTC - The Two Covenants.epub",
+          "size": "40191"
+        },
+        {
+          "code": "TTHDS",
+          "title": "The 2300 Days and the Sanctuary",
+          "file_name": "TTHDS - The 2300 Days and the Sanctuary.epub",
+          "size": "40518"
+        },
+        {
+          "code": "USLP",
+          "title": "The United States in the Light of Prophecy",
+          "file_name": "USLP - The United States in the Light of Prophecy.epub",
+          "size": "153485"
+        },
+        {
+          "code": "VBCJW",
+          "title": "Vindication of the Business Career of Elder James White",
+          "file_name": "VBCJW - Vindication of the Business Career of Elder James White.epub",
+          "size": "49825"
+        },
+        {
+          "code": "VEGW",
+          "title": "The Visions of Mrs. E.G. White",
+          "file_name": "VEGW - The Visions of Mrs. E.G. White.epub",
+          "size": "174699"
+        },
+        {
+          "code": "WCS",
+          "title": "Who Changed the Sabbath",
+          "file_name": "WCS - Who Changed the Sabbath.epub",
+          "size": "31995"
+        },
+        {
+          "code": "WFS",
+          "title": "A Word for The Sabbath",
+          "file_name": "WFS - A Word for The Sabbath.epub",
+          "size": "63581"
+        },
+        {
+          "code": "WIEX",
+          "title": "Without Excuse",
+          "file_name": "WIEX - Without Excuse.epub",
+          "size": "13306"
+        },
+        {
+          "code": "WVTP",
+          "title": "The Warning Voice of Time and Prophecy",
+          "file_name": "WVTP - The Warning Voice of Time and Prophecy.epub",
+          "size": "125137"
+        },
+        {
+          "code": "WWNC",
+          "title": "What Was Nailed to the Cross",
+          "file_name": "WWNC - What Was Nailed to the Cross.epub",
+          "size": "27376"
+        }
+      ]
+    },
+    {
+      "identifier": "adventist-pioneer-authors-james-white",
+      "author": "James White",
+      "works": [
+        {
+          "code": "APIM",
+          "title": "Appeal on Immortality",
+          "file_name": "APIM - Appeal on Immortality.epub",
+          "size": "15624"
+        },
+        {
+          "code": "ARSR",
+          "title": "Ascension Robes; Slander Refuted",
+          "file_name": "ARSR - Ascension Robes; Slander Refuted.epub",
+          "size": "12674"
+        },
+        {
+          "code": "AWLF",
+          "title": "A Word to the “Little Flock”",
+          "file_name": "AWLF - A Word to the “Little Flock”.epub",
+          "size": "79166"
+        },
+        {
+          "code": "AWMW",
+          "title": "An Appeal to the Working Men and Women in the Ranks of Seventh-day Adventists",
+          "file_name": "AWMW - An Appeal to the Working Men and Women in the Ranks of Seventh-day Adventists.epub",
+          "size": "171435"
+        },
+        {
+          "code": "BEARF",
+          "title": "A Brief Exposition of the Angels of Revelation XIV",
+          "file_name": "BEARF - A Brief Exposition of the Angels of Revelation XIV.epub",
+          "size": "46008"
+        },
+        {
+          "code": "BHY",
+          "title": "Bible Hygiene",
+          "file_name": "BHY - Bible Hygiene.epub",
+          "size": "139518"
+        },
+        {
+          "code": "BIAD",
+          "title": "Bible Adventism",
+          "file_name": "BIAD - Bible Adventism.epub",
+          "size": "212003"
+        },
+        {
+          "code": "BISA",
+          "title": "The Bible Sabbath",
+          "file_name": "BISA - The Bible Sabbath.epub",
+          "size": "114148"
+        },
+        {
+          "code": "BMD",
+          "title": "Brother Miller’s Dream",
+          "file_name": "BMD - Brother Miller’s Dream.epub",
+          "size": "18332"
+        },
+        {
+          "code": "CCBC",
+          "title": "A Circular to the Citizens of Battle Creek, Relative to The Dime Tabernacle",
+          "file_name": "CCBC - A Circular to the Citizens of Battle Creek, Relative to The Dime Tabernacle.epub",
+          "size": "8662"
+        },
+        {
+          "code": "COTSN",
+          "title": "Christ in the Old Testament, and the Sabbath in the New",
+          "file_name": "COTSN - Christ in the Old Testament, and the Sabbath in the New.epub",
+          "size": "60882"
+        },
+        {
+          "code": "DEBU",
+          "title": "Death and Burial",
+          "file_name": "DEBU - Death and Burial.epub",
+          "size": "20815"
+        },
+        {
+          "code": "EAAP",
+          "title": "An Earnest Appeal",
+          "file_name": "EAAP - An Earnest Appeal.epub",
+          "size": "56404"
+        },
+        {
+          "code": "FUMP",
+          "title": "The Four Universal Monarchies of the Prophecy of Daniel, and God’s Everlasting Kingdom",
+          "file_name": "FUMP - The Four Universal Monarchies of the Prophecy of Daniel, and God’s Everlasting Kingdom.epub",
+          "size": "52609"
+        },
+        {
+          "code": "GOL",
+          "title": "The Game of Life",
+          "file_name": "GOL - The Game of Life.epub",
+          "size": "16037"
+        },
+        {
+          "code": "GOME",
+          "title": "God’s Memorial",
+          "file_name": "GOME - God’s Memorial.epub",
+          "size": "20908"
+        },
+        {
+          "code": "HHTL",
+          "title": "Health, or, How to Live",
+          "file_name": "HHTL - Health, or, How to Live.epub",
+          "size": "575551"
+        },
+        {
+          "code": "JGMT",
+          "title": "The Judgment",
+          "file_name": "JGMT - The Judgment.epub",
+          "size": "25042"
+        },
+        {
+          "code": "LAGO",
+          "title": "The Law and the Gospel",
+          "file_name": "LAGO - The Law and the Gospel.epub",
+          "size": "28200"
+        },
+        {
+          "code": "LELJB",
+          "title": "The Early Life and Later Experience and Labors of Elder Joseph Bates",
+          "file_name": "LELJB - The Early Life and Later Experience and Labors of Elder Joseph Bates.epub",
+          "size": "354897"
+        },
+        {
+          "code": "LIFIN",
+          "title": "Life Incidents",
+          "file_name": "LIFIN - Life Incidents.epub",
+          "size": "435018"
+        },
+        {
+          "code": "LIFSK",
+          "title": "Life Sketches",
+          "file_name": "LIFSK - Life Sketches.epub",
+          "size": "490742"
+        },
+        {
+          "code": "LSDNW",
+          "title": "A Brief Account of the Last Sickness and Death of Nathaniel White",
+          "file_name": "LSDNW - A Brief Account of the Last Sickness and Death of Nathaniel White.epub",
+          "size": "18921"
+        },
+        {
+          "code": "MLDC",
+          "title": "My Lord Delayeth His Coming",
+          "file_name": "MLDC - My Lord Delayeth His Coming.epub",
+          "size": "12810"
+        },
+        {
+          "code": "OFAH",
+          "title": "Our Faith and Hope",
+          "file_name": "OFAH - Our Faith and Hope.epub",
+          "size": "57572"
+        },
+        {
+          "code": "OFH1",
+          "title": "Our Faith and Hope, No. 1",
+          "file_name": "OFH1 - Our Faith and Hope, No. 1.epub",
+          "size": "204458"
+        },
+        {
+          "code": "OMC",
+          "title": "The Old Moral Code of Ten Commandments Not Revised",
+          "file_name": "OMC - The Old Moral Code of Ten Commandments Not Revised.epub",
+          "size": "23384"
+        },
+        {
+          "code": "PARA",
+          "title": "The Parable",
+          "file_name": "PARA - The Parable.epub",
+          "size": "48393"
+        },
+        {
+          "code": "PERGO",
+          "title": "Personality of God",
+          "file_name": "PERGO - Personality of God.epub",
+          "size": "14870"
+        },
+        {
+          "code": "PRWO",
+          "title": "Preach the Word",
+          "file_name": "PRWO - Preach the Word.epub",
+          "size": "21394"
+        },
+        {
+          "code": "PSG",
+          "title": "Perpetuity of Spiritual Gifts",
+          "file_name": "PSG - Perpetuity of Spiritual Gifts.epub",
+          "size": "30858"
+        },
+        {
+          "code": "RAR",
+          "title": "The Redeemer and Redeemed",
+          "file_name": "RAR - The Redeemer and Redeemed.epub",
+          "size": "50850"
+        },
+        {
+          "code": "RBF",
+          "title": "Report of the Book Fund for Tract and Book Distribution",
+          "file_name": "RBF - Report of the Book Fund for Tract and Book Distribution.epub",
+          "size": "46843"
+        },
+        {
+          "code": "SATDSD",
+          "title": "The Sanctuary, the 2300 Days, and the Shut Door",
+          "file_name": "SATDSD - The Sanctuary, the 2300 Days, and the Shut Door.epub",
+          "size": "23234"
+        },
+        {
+          "code": "SCOC",
+          "title": "The Second Coming of Christ",
+          "file_name": "SCOC - The Second Coming of Christ.epub",
+          "size": "95079"
+        },
+        {
+          "code": "SDSL",
+          "title": "The Seventh Day of the Week is the Sabbath of the Lord",
+          "file_name": "SDSL - The Seventh Day of the Week is the Sabbath of the Lord.epub",
+          "size": "74725"
+        },
+        {
+          "code": "SDSNA",
+          "title": "The Seventh Day Sabbath Not Abolished",
+          "file_name": "SDSNA - The Seventh Day Sabbath Not Abolished.epub",
+          "size": "44416"
+        },
+        {
+          "code": "SEADV",
+          "title": "The Second Advent",
+          "file_name": "SEADV - The Second Advent.epub",
+          "size": "47862"
+        },
+        {
+          "code": "SFCC",
+          "title": "Small Fruits",
+          "file_name": "SFCC - Small Fruits.epub",
+          "size": "44477"
+        },
+        {
+          "code": "SLWM",
+          "title": "Sketches of the Christian Life and Public Labors of William Miller",
+          "file_name": "SLWM - Sketches of the Christian Life and Public Labors of William Miller.epub",
+          "size": "478552"
+        },
+        {
+          "code": "SSTR",
+          "title": "The Sounding of the Seven Trumpets of Revelation 8 and 9",
+          "file_name": "SSTR - The Sounding of the Seven Trumpets of Revelation 8 and 9.epub",
+          "size": "82690"
+        },
+        {
+          "code": "ST1853",
+          "title": "The Signs of the Times [1853]",
+          "file_name": "ST1853 - The Signs of the Times [1853].epub",
+          "size": "134013"
+        },
+        {
+          "code": "ST186x",
+          "title": "The Signs of the Times",
+          "file_name": "ST186x - The Signs of the Times.epub",
+          "size": "28137"
+        },
+        {
+          "code": "SoAp",
+          "title": "A Solemn Appeal",
+          "file_name": "SoAp - A Solemn Appeal.epub",
+          "size": "253489"
+        },
+        {
+          "code": "TTAM",
+          "title": "The Third Angel’s Message",
+          "file_name": "TTAM - The Third Angel’s Message.epub",
+          "size": "24288"
+        },
+        {
+          "code": "TTKGG",
+          "title": "The Two Thrones Representing the Kingdoms of Grace and of Glory",
+          "file_name": "TTKGG - The Two Thrones Representing the Kingdoms of Grace and of Glory.epub",
+          "size": "49549"
+        }
+      ]
+    },
+    {
+      "identifier": "adventist-pioneer-authors-joseph-bates",
+      "author": "Joseph Bates",
+      "works": [
+        {
+          "code": "AJB",
+          "title": "The Autobiography of Elder Joseph Bates",
+          "file_name": "AJB - The Autobiography of Elder Joseph Bates.epub",
+          "size": "341597"
+        },
+        {
+          "code": "BP1",
+          "title": "[Bates’ Pamphlet #1] The Opening Heavens",
+          "file_name": "BP1 - [Bates’ Pamphlet #1] The Opening Heavens.epub",
+          "size": "65913"
+        },
+        {
+          "code": "BP2",
+          "title": "[Bates’ Pamphlet #2] Second Advent Way Marks and High Heaps",
+          "file_name": "BP2 - [Bates’ Pamphlet #2] Second Advent Way Marks and High Heaps.epub",
+          "size": "138968"
+        },
+        {
+          "code": "BP3",
+          "title": "[Bates’ Pamphlet #3] An Explanation of the Typical and Anti-typical Sanctuary by the Scriptures",
+          "file_name": "BP3 - [Bates’ Pamphlet #3] An Explanation of the Typical and Anti-typical Sanctuary by the Scriptures.epub",
+          "size": "30111"
+        },
+        {
+          "code": "SC1",
+          "title": "[Sabbath Controversy #1] The Seventh Day Sabbath, A Perpetual Sign",
+          "file_name": "SC1 - [Sabbath Controversy #1] The Seventh Day Sabbath, A Perpetual Sign.epub",
+          "size": "80401"
+        },
+        {
+          "code": "SC2",
+          "title": "[Sabbath Controversy #2] The Seventh Day Sabbath, A Perpetual Sign (2nd Ed.)",
+          "file_name": "SC2 - [Sabbath Controversy #2] The Seventh Day Sabbath, A Perpetual Sign (2nd Ed.).epub",
+          "size": "108553"
+        },
+        {
+          "code": "SC3",
+          "title": "[Sabbath Controversy #3] A Vindication of the Seventh-day Sabbath, and the Commandments of God",
+          "file_name": "SC3 - [Sabbath Controversy #3] A Vindication of the Seventh-day Sabbath, and the Commandments of God.epub",
+          "size": "183266"
+        },
+        {
+          "code": "SLG",
+          "title": "A Seal of the Living God",
+          "file_name": "SLG - A Seal of the Living God.epub",
+          "size": "119127"
+        }
+      ]
+    },
+    {
+      "identifier": "adventist-pioneer-authors-josiah-litch",
+      "author": "Josiah Litch",
+      "works": [
+        {
+          "code": "APEC",
+          "title": "An Address to the Public, and Especially the Clergy",
+          "file_name": "APEC - An Address to the Public, and Especially the Clergy.epub",
+          "size": "139032"
+        }
+      ]
+    },
+    {
+      "identifier": "adventist-pioneer-authors-alonzo-trevier-jones",
+      "author": "Alonzo Trevier Jones",
+      "works": [
+        {
+          "code": "ABSB",
+          "title": "Arguments on the Breckinridge Sunday Bill",
+          "file_name": "ABSB - Arguments on the Breckinridge Sunday Bill.epub",
+          "size": "84813"
+        },
+        {
+          "code": "AMS",
+          "title": "The American Sentinel 10",
+          "file_name": "AMS - The American Sentinel 10.epub",
+          "size": "1089736"
+        }
+      ]
+    }
+  ]
+}

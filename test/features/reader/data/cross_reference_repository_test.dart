@@ -30,6 +30,12 @@ void main() {
     });
     await database.insert('cross_references', {
       'source_verse_id': 1,
+      'target_verse_id': 4,
+      'score': 1,
+      'target_reference': null,
+    });
+    await database.insert('cross_references', {
+      'source_verse_id': 1,
       'target_verse_id': 2,
       'score': 20,
       'target_reference': 'Genesis 1:2',
@@ -41,7 +47,8 @@ void main() {
   test('retrieves a canonical verse ID sorted by score descending', () async {
     final repository = CrossReferenceRepository(database: database);
     final references = await repository.forVerse(1);
-    expect(references.map((item) => item.targetVerseId), [2, 3]);
-    expect(references.map((item) => item.score), [20, 4]);
+    expect(references.map((item) => item.targetVerseId), [2, 3, 4]);
+    expect(references.map((item) => item.score), [20, 4, 1]);
+    expect(references.last.targetReference, isEmpty);
   });
 }

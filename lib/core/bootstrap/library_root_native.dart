@@ -89,6 +89,18 @@ class LibraryRootNative {
     );
   }
 
+  static Future<AndroidLibraryScanReport?> scanAndroidLibraryTree({
+    bool force = false,
+  }) async {
+    if (!usesAndroidDocumentTree) return null;
+    final result = await _channel.invokeMapMethod<String, dynamic>(
+      'scanAndroidLibraryTree',
+      {'force': force},
+    );
+    if (result == null) return null;
+    return AndroidLibraryScanReport.fromMap(result);
+  }
+
   static Future<({String path, String bookmark})?> pickFolder() async {
     if (Platform.isIOS || defaultTargetPlatform == TargetPlatform.iOS) {
       throw UnsupportedError(
@@ -397,6 +409,36 @@ class LibraryRootNative {
     if (saved == null || saved.trim().isEmpty) return null;
     return await Directory(saved).exists() ? saved : null;
   }
+}
+
+@immutable
+class AndroidLibraryScanReport {
+  const AndroidLibraryScanReport({
+    required this.elapsedMilliseconds,
+    required this.changed,
+    required this.unchanged,
+    required this.removed,
+    required this.fileCount,
+    required this.fullScan,
+  });
+
+  factory AndroidLibraryScanReport.fromMap(Map<String, dynamic> value) {
+    return AndroidLibraryScanReport(
+      elapsedMilliseconds: (value['elapsedMs'] as num?)?.toInt() ?? 0,
+      changed: (value['changed'] as num?)?.toInt() ?? 0,
+      unchanged: (value['unchanged'] as num?)?.toInt() ?? 0,
+      removed: (value['removed'] as num?)?.toInt() ?? 0,
+      fileCount: (value['fileCount'] as num?)?.toInt() ?? 0,
+      fullScan: value['fullScan'] == true,
+    );
+  }
+
+  final int elapsedMilliseconds;
+  final int changed;
+  final int unchanged;
+  final int removed;
+  final int fileCount;
+  final bool fullScan;
 }
 
 class AndroidLibraryAuthorization {

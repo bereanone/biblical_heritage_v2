@@ -305,6 +305,34 @@ void main() {
     expect(location!.block.plainText, 'Chapter I — The Beginning');
   });
 
+  test('canonical opening uses first structural chapter when it has no '
+      'chapter number', () async {
+    await source.writeAsString('''
+      <html><body>
+        <h2>Information about this Book</h2>
+        <p>Publisher metadata and licensing information for this edition.</p>
+        <h2>The Sanctuary Truth</h2>
+        <p>This is the first substantive chapter of the book.</p>
+      </body></html>
+    ''');
+    await const LibraryDocumentCanonicalizer().canonicalize(
+      db: db,
+      libraryItemId: 'structural-chapter-book',
+      source: source,
+    );
+
+    final repository = LibraryDocumentRepository(db);
+    final order = await repository.openingDisplayOrder(
+      'structural-chapter-book',
+    );
+    expect(order, isNotNull);
+    final location = await repository.resolveLocation(
+      'structural-chapter-book',
+      order!,
+    );
+    expect(location!.block.plainText, 'The Sanctuary Truth');
+  });
+
   test('canonical title-led article skips metadata section', () async {
     await source.writeAsString('''
       <html><body>
@@ -338,7 +366,7 @@ void main() {
   });
 
   test(
-    'bare numeric headings become paragraphs, not Contents entries',
+    'bare numeric page-marker headings are omitted from reader content',
     () async {
       final html = '''
 <!doctype html>
@@ -353,6 +381,7 @@ void main() {
 <p>Body after a heading with trailing punctuation.</p>
 <h1>1</h1>
 <p>Body after a lone single-digit heading.</p>
+<ol><li>2</li><li>A legitimate descriptive list item</li></ol>
 </body></html>
 ''';
       await source.writeAsString(html, flush: true);
@@ -373,11 +402,15 @@ void main() {
         whereArgs: const <Object?>['NUM'],
         orderBy: 'display_order ASC',
       );
-      final pageMarker = blocks.firstWhere((row) => row['plain_text'] == '71');
-      expect(pageMarker['block_type'], 'paragraph');
-      expect(pageMarker['formatted_content'], isNot(contains('heading_role')));
-      final loneDigit = blocks.firstWhere((row) => row['plain_text'] == '1');
-      expect(loneDigit['block_type'], 'paragraph');
+      expect(blocks.where((row) => row['plain_text'] == '71'), isEmpty);
+      expect(blocks.where((row) => row['plain_text'] == '1'), isEmpty);
+      expect(blocks.where((row) => row['plain_text'] == '2'), isEmpty);
+      expect(
+        blocks.where(
+          (row) => row['plain_text'] == 'A legitimate descriptive list item',
+        ),
+        hasLength(1),
+      );
       final punctuated = blocks.firstWhere((row) => row['plain_text'] == '71.');
       expect(punctuated['block_type'], 'heading');
     },

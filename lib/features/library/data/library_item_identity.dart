@@ -21,6 +21,10 @@ bool isPioneerImportedEpubRelativePath(String relativePath) {
   return ELibraryFolderPolicy.isPioneerImportedEpubFolderPath(relativePath);
 }
 
+bool isPioneerEgwEpubSourceRelativePath(String relativePath) {
+  return ELibraryFolderPolicy.isPioneerEgwEpubSourceFolderPath(relativePath);
+}
+
 bool isManagedEgwCollectionName(String? collectionName) {
   final normalized = _normalizedText(collectionName ?? '');
   return normalized == 'egw books' ||

@@ -15,6 +15,15 @@ const String _libraryAllCollectionsFilterLabel = 'All Collections';
 const String _libraryPioneerCollectionsFilterValue =
     'adventist_pioneer_library';
 const String _libraryPioneerCollectionsFilterLabel = 'Pioneer Library';
+final RegExp _libraryCollectionFilterSeparatorPattern = RegExp(r'[_\-\s]+');
+final RegExp _libraryCollectionFilterInvalidCharsPattern = RegExp(
+  r'[^a-z0-9_]+',
+);
+final RegExp _libraryCollectionFilterRepeatedUnderscorePattern = RegExp(r'_+');
+final RegExp _libraryCollectionFilterEdgeUnderscorePattern = RegExp(r'^_|_$');
+final RegExp _libraryHumanizeSeparatorPattern = RegExp(r'[_\-]+');
+final RegExp _libraryHumanizeWhitespacePattern = RegExp(r'\s+');
+
 const List<String> _libraryCollectionFilterPriority = <String>[
   'egw_books',
   'egw_devotionals',
@@ -159,8 +168,8 @@ String? _collectionFolderFromRelativePath(String relativePath) {
 
 String _humanizeLibraryCollectionLabel(String value) {
   return value
-      .replaceAll(RegExp(r'[_\-]+'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
+      .replaceAll(_libraryHumanizeSeparatorPattern, ' ')
+      .replaceAll(_libraryHumanizeWhitespacePattern, ' ')
       .trim()
       .split(' ')
       .where((part) => part.isNotEmpty)
@@ -176,10 +185,10 @@ String _normalizeLibraryCollectionFilterValue(String value) {
   return value
       .trim()
       .toLowerCase()
-      .replaceAll(RegExp(r'[_\-\s]+'), '_')
-      .replaceAll(RegExp(r'[^a-z0-9_]+'), '')
-      .replaceAll(RegExp(r'_+'), '_')
-      .replaceAll(RegExp(r'^_|_$'), '');
+      .replaceAll(_libraryCollectionFilterSeparatorPattern, '_')
+      .replaceAll(_libraryCollectionFilterInvalidCharsPattern, '')
+      .replaceAll(_libraryCollectionFilterRepeatedUnderscorePattern, '_')
+      .replaceAll(_libraryCollectionFilterEdgeUnderscorePattern, '');
 }
 
 String _canonicalLibraryCollectionFilterValue(String normalizedValue) {

@@ -188,6 +188,14 @@ class ELibraryFolderPolicy {
   /// storage-policy eligibility for it is unchanged by this addition.
   static const pioneerImportedEpubsRelativeFolder = 'ImportedPioneerEpubs';
 
+  /// Where "Import Pioneer Library" persists the real `.epub` it already
+  /// downloaded per-title from egwwritings.org (as opposed to
+  /// [pioneerImportedEpubsRelativeFolder], which holds whole EPUB files
+  /// discovered in a user-selected raw folder). Kept separate from that
+  /// folder so the two provenances stay distinguishable in storage
+  /// accounting even though both are app-managed EGW copies.
+  static const pioneerEgwEpubSourceRelativeFolder = 'ImportedPioneerEgwEpubs';
+
   static bool isUserImportedEpubFolderPath(String path) {
     final normalized = p.normalize(path).toLowerCase();
     final pathSegments = p.split(normalized);
@@ -206,10 +214,20 @@ class ELibraryFolderPolicy {
     return _containsPathSegments(pathSegments, targetSegments);
   }
 
+  static bool isPioneerEgwEpubSourceFolderPath(String path) {
+    final normalized = p.normalize(path).toLowerCase();
+    final pathSegments = p.split(normalized);
+    final targetSegments = p.split(
+      p.normalize(pioneerEgwEpubSourceRelativeFolder).toLowerCase(),
+    );
+    return _containsPathSegments(pathSegments, targetSegments);
+  }
+
   static bool isManagedEgwFolderPath(String path) {
     final normalized = p.normalize(path).toLowerCase();
     final pathSegments = p.split(normalized);
-    if (pathSegments.contains('importedpioneerepubs')) {
+    if (pathSegments.contains('importedpioneerepubs') ||
+        pathSegments.contains('importedpioneeregwepubs')) {
       return true;
     }
     for (final folder in allManagedEgwFolderDefinitions) {

@@ -25,25 +25,30 @@ const List<int> macAutoscrollSignedSpeedSteps = <int>[
   50,
 ];
 const int _boundaryConfirmationFrames = 8;
-const Duration macAutoscrollMaximumFrameElapsed = Duration(milliseconds: 50);
-const double macAutoscrollMaximumFrameDeltaPixels = 48;
+const Duration macAutoscrollMaximumFrameElapsed = Duration(milliseconds: 100);
+const double macAutoscrollMaximumFrameDeltaPixels = 200;
 
 double cappedMacAutoscrollFrameDelta({
   required double pixelsPerSecond,
   required Duration elapsed,
 }) {
+  // Clamp elapsed time to avoid huge jumps on resumed/backgrounded apps.
+  // Cap is much higher than typical frame intervals to preserve smooth motion
+  // across variable frame timing without visible stepping.
   final cappedMicroseconds = elapsed.inMicroseconds.clamp(
     0,
     macAutoscrollMaximumFrameElapsed.inMicroseconds,
   );
   final delta =
       pixelsPerSecond * cappedMicroseconds / Duration.microsecondsPerSecond;
-  return delta
-      .clamp(
-        -macAutoscrollMaximumFrameDeltaPixels,
-        macAutoscrollMaximumFrameDeltaPixels,
-      )
-      .toDouble();
+  // Only clamp if delta is pathologically large (app was suspended).
+  // For normal operation at 60Hz, a 200px/s speed at 16.67ms = ~3.3px per frame,
+  // which is well under the 200px cap. Higher speeds at higher frame rates
+  // stay smooth without arbitrary capping.
+  return delta.clamp(
+    -macAutoscrollMaximumFrameDeltaPixels,
+    macAutoscrollMaximumFrameDeltaPixels,
+  );
 }
 
 int normalizeMacAutoscrollRememberedStep(int? value, int maximumStep) {

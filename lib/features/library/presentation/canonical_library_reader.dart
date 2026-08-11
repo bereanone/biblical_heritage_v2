@@ -111,6 +111,12 @@ String? canonicalVisibleReaderSubtitle(LibraryDocumentLocation? location) {
   return hiddenProvenance.contains(normalized) ? null : sectionTitle;
 }
 
+@visibleForTesting
+bool canonicalSavedOrderIsSubstantive({
+  required int savedOrder,
+  required int? openingOrder,
+}) => openingOrder == null || savedOrder >= openingOrder;
+
 ({Color background, Color foreground}) canonicalReaderPalette(
   ThemeData theme,
   AppThemeMode mode,
@@ -251,6 +257,15 @@ bool supportsCanonicalEpubReader(LibraryCatalogItem item) {
   if (sourceType == 'pioneer_epub_import') {
     return isPioneerImportedEpubRelativePath(relativePath);
   }
+  // Added for per-title EGW EPUB downloads made by "Import Pioneer Library"
+  // (pioneer_text_import_service.dart): the real .epub egwwritings.org
+  // publishes for the title, persisted after a successful canonicalization
+  // so its images can be shown alongside the existing flattened-text import.
+  // Only eligible when copied into the dedicated managed folder — never an
+  // arbitrary path.
+  if (sourceType == 'pioneer_egw_epub_source') {
+    return isPioneerEgwEpubSourceRelativePath(relativePath);
+  }
   return false;
 }
 
@@ -292,6 +307,14 @@ Future<CanonicalReaderPreparation?> prepareCanonicalEpubReader(
       rootPath: rootPath,
     );
     if (!outcome.isReady) return null;
+  }
+
+  if (await repository.hasPathologicalNumericTocMarkers(item.id)) {
+    debugPrint(
+      'canonical_reader_fallback workId=${item.id} '
+      'reason=pathological_numeric_toc_markers',
+    );
+    return null;
   }
 
   final assetDirectory = Directory(
@@ -496,7 +519,7 @@ class _CanonicalLibraryReaderScreenState
     _controller = LibraryDocumentController(
       libraryItemId: widget.item.id,
       repository: widget.repository,
-    )..addListener(_changed);
+    );
     _autoScroll = ReaderTiltAutoScrollController(
       motionSource: widget.motionSource ?? PlatformReaderTiltMotionSource(),
       scrollTarget: _scrollTarget,
@@ -531,10 +554,6 @@ class _CanonicalLibraryReaderScreenState
     });
   }
 
-  void _changed() {
-    if (mounted) setState(() {});
-  }
-
   Future<void> _initializeAtSearchTarget() async {
     final target = widget.searchTarget;
     if (target == null) {
@@ -545,7 +564,15 @@ class _CanonicalLibraryReaderScreenState
       final savedOrder = widget.item.lastOpened != null
           ? widget.item.paragraphIndex
           : null;
+      final openingOrder = await widget.repository.openingDisplayOrder(
+        widget.item.id,
+        bookTitle: widget.item.displayTitle,
+      );
       if (savedOrder != null &&
+          canonicalSavedOrderIsSubstantive(
+            savedOrder: savedOrder,
+            openingOrder: openingOrder,
+          ) &&
           await widget.repository.containsDisplayOrder(
             widget.item.id,
             savedOrder,
@@ -559,10 +586,6 @@ class _CanonicalLibraryReaderScreenState
         await _controller.initialize(centerOrder: savedOrder);
         return;
       }
-      final openingOrder = await widget.repository.openingDisplayOrder(
-        widget.item.id,
-        bookTitle: widget.item.displayTitle,
-      );
       _initialSearchOrder = openingOrder;
       if (savedOrder != null) {
         debugPrint(
@@ -650,7 +673,6 @@ class _CanonicalLibraryReaderScreenState
     _autoScroll.dispose();
     _readerFocusNode.dispose();
     _scrollTarget.detach();
-    _controller.removeListener(_changed);
     _controller.dispose();
     super.dispose();
   }
@@ -730,45 +752,48 @@ class _CanonicalLibraryReaderScreenState
                   ),
                 ),
               Expanded(
-                child: CanonicalLibraryDocumentBody(
-                  controller: _controller,
-                  autoScrollTarget: _scrollTarget,
-                  onVisibleOrderChanged: _visible,
-                  textColor: foreground,
-                  onManualScroll: _usesMacAutoscroll
-                      ? () {
-                          _macAutoScroll!.stopForManualInteraction();
-                          _autoScroll.stopForManualInteraction();
-                        }
-                      : _autoScroll.stopForManualInteraction,
-                  onReaderInteraction: _readerFocusNode.requestFocus,
-                  sourceRoot: widget.sourceRoot,
-                  diagnostics: widget.diagnostics,
-                  proofCommands: _commands,
-                  fontScale: _fontScale,
-                  showRefCodes: _showRefCodes,
-                  activeSearchBlockId: _activeSearchBlockId,
-                  initialScrollOrder: _initialSearchOrder,
-                  onInitialScrollCompleted: () {
-                    _searchTargetPositioned = true;
-                    final target = widget.searchTarget;
-                    if (target != null) {
-                      debugPrint(
-                        'search_target_scroll_completed '
-                        '${target.diagnosticSummary}',
-                      );
-                    }
-                  },
-                  highlightedBlockIds: _canonicalHighlights.keys
-                      .map((key) => key.substring('canonical:'.length))
-                      .toSet(),
-                  onSelectionChanged: (block, selection) {
-                    if (!selection.isCollapsed) {
-                      _selectedMarkupBlock = block;
-                      _selectedMarkupRange = selection;
-                    }
-                  },
-                  onOpenSelectionMenu: _openCanonicalSelectionMenu,
+                child: ListenableBuilder(
+                  listenable: _controller,
+                  builder: (context, child) => CanonicalLibraryDocumentBody(
+                    controller: _controller,
+                    autoScrollTarget: _scrollTarget,
+                    onVisibleOrderChanged: _visible,
+                    textColor: foreground,
+                    onManualScroll: _usesMacAutoscroll
+                        ? () {
+                            _macAutoScroll!.stopForManualInteraction();
+                            _autoScroll.stopForManualInteraction();
+                          }
+                        : _autoScroll.stopForManualInteraction,
+                    onReaderInteraction: _readerFocusNode.requestFocus,
+                    sourceRoot: widget.sourceRoot,
+                    diagnostics: widget.diagnostics,
+                    proofCommands: _commands,
+                    fontScale: _fontScale,
+                    showRefCodes: _showRefCodes,
+                    activeSearchBlockId: _activeSearchBlockId,
+                    initialScrollOrder: _initialSearchOrder,
+                    onInitialScrollCompleted: () {
+                      _searchTargetPositioned = true;
+                      final target = widget.searchTarget;
+                      if (target != null) {
+                        debugPrint(
+                          'search_target_scroll_completed '
+                          '${target.diagnosticSummary}',
+                        );
+                      }
+                    },
+                    highlightedBlockIds: _canonicalHighlights.keys
+                        .map((key) => key.substring('canonical:'.length))
+                        .toSet(),
+                    onSelectionChanged: (block, selection) {
+                      if (!selection.isCollapsed) {
+                        _selectedMarkupBlock = block;
+                        _selectedMarkupRange = selection;
+                      }
+                    },
+                    onOpenSelectionMenu: _openCanonicalSelectionMenu,
+                  ),
                 ),
               ),
               if (widget.proofLabel == null)
@@ -787,43 +812,13 @@ class _CanonicalLibraryReaderScreenState
                             onPressed: _openContents,
                           ),
                           const SizedBox(width: 12),
-                          _CanonicalToolbarButton(
-                            icon: Icons.library_books_outlined,
-                            label: 'Library',
-                            onPressed: widget.onLibrary,
-                          ),
-                          const SizedBox(width: 12),
-                          _CanonicalToolbarButton(
-                            key: const ValueKey('canonical-theme-toggle'),
-                            icon: isNight
-                                ? Icons.wb_sunny_outlined
-                                : Icons.nightlight_round,
-                            label: isNight ? 'Day' : 'Night',
-                            onPressed: widget.onThemeChanged == null
-                                ? null
-                                : () => widget.onThemeChanged!(
-                                    isNight
-                                        ? AppThemeMode.sepia
-                                        : AppThemeMode.night,
-                                  ),
-                          ),
-                          const SizedBox(width: 12),
-                          _CanonicalToolbarButton(
-                            icon: _showRefCodes
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined,
-                            label: _showRefCodes
-                                ? 'Hide Ref Codes'
-                                : 'Show Ref Codes',
-                            onPressed: _toggleRefCodes,
-                          ),
-                          const SizedBox(width: 12),
-                          _CanonicalZoomCluster(
-                            valueLabel: '${(_fontScale * 100).round()}%',
-                            onZoomOut: () => _setFontScale(_fontScale - .1),
-                            onZoomIn: () => _setFontScale(_fontScale + .1),
-                          ),
-                          const SizedBox(width: 12),
+                          // Placed immediately after Contents (ahead of
+                          // Library and Day/Night) rather than after the
+                          // zoom cluster: autoscroll is used far more often
+                          // on phones than the theme toggle, and the toolbar
+                          // row scrolls horizontally, so a low-priority
+                          // position left it hidden off-screen for most
+                          // phone widths.
                           _usesMacAutoscroll &&
                                   !Platform.isMacOS &&
                                   _autoScroll.motionSource.isSupported
@@ -862,6 +857,43 @@ class _CanonicalLibraryReaderScreenState
                                   onPressed: _toggleTiltAutoscroll,
                                   onLongPress: _openTiltAutoscrollSettings,
                                 ),
+                          const SizedBox(width: 12),
+                          _CanonicalToolbarButton(
+                            icon: Icons.library_books_outlined,
+                            label: 'Library',
+                            onPressed: widget.onLibrary,
+                          ),
+                          const SizedBox(width: 12),
+                          _CanonicalToolbarButton(
+                            key: const ValueKey('canonical-theme-toggle'),
+                            icon: isNight
+                                ? Icons.wb_sunny_outlined
+                                : Icons.nightlight_round,
+                            label: isNight ? 'Day' : 'Night',
+                            onPressed: widget.onThemeChanged == null
+                                ? null
+                                : () => widget.onThemeChanged!(
+                                    isNight
+                                        ? AppThemeMode.sepia
+                                        : AppThemeMode.night,
+                                  ),
+                          ),
+                          const SizedBox(width: 12),
+                          _CanonicalToolbarButton(
+                            icon: _showRefCodes
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                            label: _showRefCodes
+                                ? 'Hide Ref Codes'
+                                : 'Show Ref Codes',
+                            onPressed: _toggleRefCodes,
+                          ),
+                          const SizedBox(width: 12),
+                          _CanonicalZoomCluster(
+                            valueLabel: '${(_fontScale * 100).round()}%',
+                            onZoomOut: () => _setFontScale(_fontScale - .1),
+                            onZoomIn: () => _setFontScale(_fontScale + .1),
+                          ),
                           const SizedBox(width: 12),
                           _CanonicalNavCluster(
                             onPreviousHeading: () => _jumpHeading(false),
@@ -1325,72 +1357,78 @@ class _CanonicalProductionHeader extends StatelessWidget {
       button(Icons.library_books_outlined, 'Library', onLibrary),
       ?menu,
     ];
-    return Padding(
-      key: const ValueKey('canonical-production-header'),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          LayoutBuilder(
-            builder: (context, constraints) {
-              if (constraints.maxWidth < 900) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        key: const ValueKey('canonical-production-header'),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth < 900) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(
+                        children: <Widget>[
+                          back,
+                          const SizedBox(width: 12),
+                          title,
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(spacing: 10, runSpacing: 10, children: actions),
+                    ],
+                  );
+                }
+                return Row(
                   children: <Widget>[
-                    Row(
-                      children: <Widget>[
-                        back,
-                        const SizedBox(width: 12),
-                        title,
-                      ],
+                    back,
+                    const SizedBox(width: 12),
+                    title,
+                    const Spacer(),
+                    ...actions.expand(
+                      (action) => <Widget>[action, const SizedBox(width: 12)],
                     ),
-                    const SizedBox(height: 8),
-                    Wrap(spacing: 10, runSpacing: 10, children: actions),
                   ],
                 );
-              }
-              return Row(
-                children: <Widget>[
-                  back,
-                  const SizedBox(width: 12),
-                  title,
-                  const Spacer(),
-                  ...actions.expand(
-                    (action) => <Widget>[action, const SizedBox(width: 12)],
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          Material(
-            color: Theme.of(context).colorScheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(18),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    item.displayTitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: foreground,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  if (item.displayAuthor.trim().isNotEmpty &&
-                      item.displayAuthor != 'Unknown author')
+              },
+            ),
+            const SizedBox(height: 12),
+            Material(
+              color: Theme.of(context).colorScheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(18),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
                     Text(
-                      item.displayAuthor,
-                      style: TextStyle(color: foreground),
+                      item.displayTitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: foreground,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                ],
+                    if (item.displayAuthor.trim().isNotEmpty &&
+                        item.displayAuthor != 'Unknown author')
+                      Text(
+                        item.displayAuthor,
+                        style: TextStyle(color: foreground),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1639,23 +1677,26 @@ class _CanonicalLibraryDocumentBodyState
     final before = position.pixels;
     position.jumpTo(target);
     final appliedDelta = position.pixels - before;
-    final block = widget.controller.blockAt(_firstVisibleOrder);
-    final heading = widget.controller.headingAtOrBefore(_firstVisibleOrder);
-    widget.diagnostics?.record(
-      CanonicalScrollDiagnosticSample(
-        timestamp: DateTime.now().toUtc(),
-        requestedDelta: delta,
-        appliedDelta: appliedDelta,
-        firstVisibleBlockId: block?.id,
-        firstVisibleDisplayOrder: _firstVisibleOrder,
-        headingBlockId: heading?.id,
-        headingTitle: heading?.plainText,
-        direction: delta < 0 ? 'backward' : 'forward',
-        programmaticItemJump: false,
-        controllerIdentity: identityHashCode(widget.controller),
-        chapterNavigationFired: false,
-      ),
-    );
+    final diagnostics = widget.diagnostics;
+    if (diagnostics != null) {
+      final block = widget.controller.blockAt(_firstVisibleOrder);
+      final heading = widget.controller.headingAtOrBefore(_firstVisibleOrder);
+      diagnostics.record(
+        CanonicalScrollDiagnosticSample(
+          timestamp: DateTime.now().toUtc(),
+          requestedDelta: delta,
+          appliedDelta: appliedDelta,
+          firstVisibleBlockId: block?.id,
+          firstVisibleDisplayOrder: _firstVisibleOrder,
+          headingBlockId: heading?.id,
+          headingTitle: heading?.plainText,
+          direction: delta < 0 ? 'backward' : 'forward',
+          programmaticItemJump: false,
+          controllerIdentity: identityHashCode(widget.controller),
+          chapterNavigationFired: false,
+        ),
+      );
+    }
     return appliedDelta.abs() > .01;
   }
 
@@ -1736,6 +1777,13 @@ class _CanonicalLibraryDocumentBodyState
                 itemCount: widget.controller.blockCount,
                 itemScrollController: _itemController,
                 itemPositionsListener: _positions,
+                initialScrollIndex: (widget.initialScrollOrder ?? 0).clamp(
+                  0,
+                  widget.controller.blockCount > 0
+                      ? widget.controller.blockCount - 1
+                      : 0,
+                ),
+                initialAlignment: widget.initialScrollOrder == null ? 0 : 0.08,
                 padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
                 itemBuilder: (context, order) {
                   _position ??= Scrollable.maybeOf(context)?.position;
@@ -1799,6 +1847,12 @@ class _CanonicalBlockView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Hide page markers already stored by canonicalizer v5. New imports omit
+    // them at ingestion, while this compatibility guard cleans existing
+    // libraries without requiring the original EPUB archive to still exist.
+    if (canonicalBlockIsPrintPageMarker(block)) {
+      return const SizedBox.shrink();
+    }
     if (block.blockType == LibraryDocumentBlockType.horizontalRule) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 16),
@@ -1893,6 +1947,22 @@ class _CanonicalBlockView extends StatelessWidget {
       ),
     );
   }
+}
+
+@visibleForTesting
+bool canonicalBlockIsPrintPageMarker(LibraryDocumentBlock block) {
+  if (!RegExp(r'^\d{1,4}$').hasMatch(block.plainText.trim())) return false;
+  final formatted = LibraryFormattedContent.fromJson(block.formattedContent);
+  if (formatted.metadata['classification_reason'] ==
+      'numeric-only heading treated as page marker, not a real heading') {
+    return true;
+  }
+  if (block.blockType != LibraryDocumentBlockType.listItem) return false;
+  final href = (block.sourceHref ?? '').toLowerCase();
+  return href.contains('toc.') ||
+      href.contains('/toc') ||
+      href.contains('nav.') ||
+      href.contains('/nav');
 }
 
 /// Development-only command seam for explicit proof controls. Ordinary pixel

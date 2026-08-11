@@ -7,6 +7,7 @@ import '../../../core/bootstrap/local_settings_store.dart';
 import '../../utilities/data/pioneer_epub_bulk_import_service.dart';
 import '../../utilities/data/pioneer_epub_folder_inventory_service.dart';
 import '../../utilities/data/pioneer_zip_extract_service.dart';
+import '../../utilities/data/pioneer_archive_org_install_service.dart';
 import '../../utilities/presentation/pioneer_text_import_screen.dart';
 import '../data/canonical_activation.dart';
 import '../data/library_acquisition_batch_runner.dart';
@@ -41,6 +42,7 @@ typedef PioneerBatchActivator =
 class ImportPioneerLibraryScreen extends StatefulWidget {
   const ImportPioneerLibraryScreen({
     super.key,
+    this.startWithZipPicker = false,
     this.pickFolder,
     this.pickZipFile,
     this.extractZip,
@@ -51,6 +53,8 @@ class ImportPioneerLibraryScreen extends StatefulWidget {
     this.saveFolder,
     this.advancedToolsBuilder,
   });
+
+  final bool startWithZipPicker;
 
   final PioneerFolderPicker? pickFolder;
   final PioneerZipPicker? pickZipFile;
@@ -83,11 +87,102 @@ class _ImportPioneerLibraryScreenState
   int _alreadyUpToDate = 0;
   int _addedOrUpdated = 0;
   int _needsAttention = 0;
+  int? _onlineWorkCount;
+  PioneerArchiveOrgInstallProgress? _onlineProgress;
 
   @override
   void initState() {
     super.initState();
     _loadConfiguredFolder();
+    if (widget.startWithZipPicker) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _chooseZipFile();
+      });
+    }
+    PioneerArchiveOrgInstallService.instance
+        .inspect()
+        .then((value) {
+          if (mounted) setState(() => _onlineWorkCount = value);
+        })
+        .catchError((_) {});
+  }
+
+  Future<void> _installOnline() async {
+    final count = _onlineWorkCount;
+    final countLabel = count == null ? 'the available' : '$count';
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Install Verified Pioneer Books?'),
+        content: Text(
+          'StudyBible will download $countLabel verified public-domain '
+          'Pioneer Authors books individually from the Internet Archive '
+          'and install them for offline use. This is not yet the complete '
+          '361-work Pioneer catalog. Titles already in your Library are '
+          'skipped automatically, and Import Pioneer ZIP remains available '
+          'for the remaining works.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Install'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    setState(() {
+      _running = true;
+      _message = null;
+    });
+    var installed = 0;
+    var alreadyInLibrary = 0;
+    var needsAttention = 0;
+    try {
+      final archiveResult = await PioneerArchiveOrgInstallService.instance
+          .install(
+            onProgress: (progress) {
+              if (mounted) setState(() => _onlineProgress = progress);
+            },
+          );
+      installed += archiveResult.installed;
+      alreadyInLibrary += archiveResult.alreadyInLibrary;
+      needsAttention += archiveResult.unavailable + archiveResult.failed;
+      if (mounted) setState(() => _onlineProgress = null);
+
+      if (!mounted) return;
+      setState(() {
+        _running = false;
+        _onlineProgress = null;
+        _result = const LibraryAcquisitionBatchResult(
+          targets: [],
+          outcomes: [],
+        );
+        _addedOrUpdated = installed;
+        _alreadyUpToDate = alreadyInLibrary;
+        _needsAttention = needsAttention;
+      });
+    } on PioneerArchiveOrgInstallCancelled {
+      if (mounted) {
+        setState(() {
+          _running = false;
+          _message =
+              'Installation cancelled. Your existing Library was not changed.';
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _running = false;
+          _message =
+              'The online installation could not finish. Tap Retry to continue safely.\n$error';
+        });
+      }
+    }
   }
 
   Future<void> _loadConfiguredFolder() async {
@@ -370,14 +465,17 @@ class _ImportPioneerLibraryScreenState
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Preparing Pioneer Library…',
+            _onlinePhaseLabel(),
             style: Theme.of(context).textTheme.headlineSmall,
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
           LibraryAcquisitionProgressView(
             progress: _progress,
-            onCancel: _progress != null ? () => _cancelled = true : null,
+            onCancel: () {
+              _cancelled = true;
+              PioneerArchiveOrgInstallService.instance.cancel();
+            },
           ),
           const SizedBox(height: 20),
           _friendlyCounts(),
@@ -387,6 +485,23 @@ class _ImportPioneerLibraryScreenState
     if (_result != null) return _buildCompletion(context);
     if (_inventory != null) return _buildReady(context, wide);
     return _buildFirstTime(context, wide);
+  }
+
+  String _onlinePhaseLabel() {
+    final progress = _onlineProgress;
+    final phase = progress?.phase;
+    final label = switch (phase) {
+      PioneerArchiveOrgInstallPhase.downloading => 'Downloading…',
+      PioneerArchiveOrgInstallPhase.downloaded => 'Downloading…',
+      PioneerArchiveOrgInstallPhase.skippedExisting =>
+        'Skipping already-installed titles…',
+      PioneerArchiveOrgInstallPhase.unavailable => 'Downloading…',
+      PioneerArchiveOrgInstallPhase.failed => 'Downloading…',
+      PioneerArchiveOrgInstallPhase.activating => 'Updating Library…',
+      null => 'Preparing download…',
+    };
+    if (progress == null || progress.total <= 0) return label;
+    return '$label (${progress.current} of ${progress.total})';
   }
 
   Widget _buildChecking(BuildContext context) {
@@ -427,10 +542,7 @@ class _ImportPioneerLibraryScreenState
         ),
         const SizedBox(height: 8),
         Text(
-          'If you have the Pioneer Library ZIP file, choose it below — '
-          'StudyBible unpacks and imports it automatically. Selecting a '
-          'cloud storage folder directly (Google Drive especially) often '
-          "does not offer a clear way to pick the folder itself.",
+          'Download the verified online portion of the Adventist Pioneer EPUB collection. Import Pioneer ZIP remains available for the works not yet covered by verified online sources.',
           style: Theme.of(context).textTheme.bodyMedium,
           textAlign: TextAlign.center,
         ),
@@ -442,10 +554,20 @@ class _ImportPioneerLibraryScreenState
         SizedBox(
           height: 52,
           child: FilledButton.icon(
+            key: const Key('pioneer-online-install-action'),
+            onPressed: _installOnline,
+            icon: const Icon(Icons.download),
+            label: const Text('Install Verified Pioneer Books'),
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 52,
+          child: OutlinedButton.icon(
             key: const Key('pioneer-zip-action'),
             onPressed: _chooseZipFile,
             icon: const Icon(Icons.folder_zip_outlined),
-            label: const Text('Choose Pioneer Library ZIP File'),
+            label: const Text('Import Pioneer ZIP'),
           ),
         ),
         const SizedBox(height: 12),
@@ -506,7 +628,17 @@ class _ImportPioneerLibraryScreenState
         const SizedBox(height: 26),
         SizedBox(
           height: 54,
-          child: FilledButton(
+          child: FilledButton.icon(
+            key: const Key('pioneer-online-update-action'),
+            onPressed: _installOnline,
+            icon: const Icon(Icons.system_update_alt),
+            label: const Text('Update Verified Pioneer Books'),
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 54,
+          child: OutlinedButton(
             key: const Key('pioneer-primary-action'),
             onPressed: _importOrUpdate,
             child: const Text('Import / Update Pioneer Library'),

@@ -41,18 +41,19 @@ android {
 
     signingConfigs {
         create("release") {
-            check(keystorePropertiesFile.exists()) {
-                "android/key.properties is required for a release-signed APK."
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"] as String?
+                keyPassword = keystoreProperties["keyPassword"] as String?
+                storeFile = (keystoreProperties["storeFile"] as String?)?.let(::file)
+                storePassword = keystoreProperties["storePassword"] as String?
             }
-            keyAlias = keystoreProperties["keyAlias"] as String?
-            keyPassword = keystoreProperties["keyPassword"] as String?
-            storeFile = (keystoreProperties["storeFile"] as String?)?.let(::file)
-            storePassword = keystoreProperties["storePassword"] as String?
         }
     }
 
     buildTypes {
         release {
+            // Release builds fail closed when key.properties is absent or
+            // incomplete; they must never silently produce a debug-signed APK.
             signingConfig = signingConfigs.getByName("release")
         }
     }

@@ -66,6 +66,35 @@ class LibraryDocumentRepository {
     ),
   );
 
+  /// Older canonical generations can contain a print-layout page index as
+  /// dozens or hundreds of numeric TOC list items. Besides being useless
+  /// reader content, long zero-height runs of those rows can prevent the
+  /// virtualized canonical list from mounting its initial chapter. Those
+  /// books should use the legacy EPUB reader until they are recanonicalized.
+  Future<bool> hasPathologicalNumericTocMarkers(
+    String libraryItemId, {
+    int threshold = 20,
+  }) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT COUNT(*) AS marker_count
+      FROM library_document_blocks
+      WHERE library_item_id = ?
+        AND block_type = ?
+        AND TRIM(plain_text) GLOB '[0-9]*'
+        AND TRIM(plain_text) NOT GLOB '*[^0-9]*'
+        AND LENGTH(TRIM(plain_text)) BETWEEN 1 AND 4
+        AND (
+          LOWER(COALESCE(source_href, '')) LIKE '%/toc.%'
+          OR LOWER(COALESCE(source_href, '')) LIKE '%/nav.%'
+        )
+      ''',
+      <Object?>[libraryItemId, LibraryDocumentBlockType.listItem.name],
+    );
+    final count = (rows.firstOrNull?['marker_count'] as num?)?.toInt() ?? 0;
+    return count >= threshold;
+  }
+
   Future<List<LibraryDocumentBlock>> loadWindow(
     String libraryItemId, {
     required int centerOrder,
@@ -139,7 +168,12 @@ class LibraryDocumentRepository {
   }) async {
     final headingRows = await db.query(
       'library_document_blocks',
-      columns: const <String>['display_order', 'plain_text', 'source_href'],
+      columns: const <String>[
+        'display_order',
+        'plain_text',
+        'source_href',
+        'formatted_content',
+      ],
       where: 'library_item_id = ? AND block_type = ?',
       whereArgs: <Object?>[
         libraryItemId,
@@ -154,13 +188,13 @@ class LibraryDocumentRepository {
           libraryIsFrontMatterOpeningLabel(href)) {
         continue;
       }
-      final normalized = label
-          .toLowerCase()
-          .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-          .trim();
-      if (RegExp(
-        r'^(?:chapter|article|sermon|part) (?:1|i|one)(?: |$)',
-      ).hasMatch(normalized)) {
+      if (_isFirstCanonicalBodyLabel(label)) {
+        return (heading['display_order'] as num?)?.toInt();
+      }
+      final formatted = LibraryFormattedContent.fromJson(
+        heading['formatted_content']?.toString(),
+      );
+      if (formatted.metadata['heading_role'] == 'chapter') {
         return (heading['display_order'] as num?)?.toInt();
       }
     }
@@ -177,12 +211,27 @@ class LibraryDocumentRepository {
       ''',
       <Object?>[libraryItemId],
     );
+    // Some EGW EPUBs (including editions of Acts of the Apostles) put the
+    // chapter number in the section/TOC title while the first heading inside
+    // the XHTML contains only the chapter's descriptive title. Resolve that
+    // structural Chapter 1 identity before considering any readable-looking
+    // title or introductory section.
+    for (final row in rows) {
+      final title = row['title']?.toString() ?? '';
+      if (_isFirstCanonicalBodyLabel(title)) {
+        return (row['first_order'] as num?)?.toInt();
+      }
+    }
     for (final row in rows) {
       final sectionId = row['id']?.toString() ?? '';
       final title = row['title']?.toString() ?? '';
       final href = row['source_href']?.toString() ?? '';
       if (libraryIsFrontMatterOpeningLabel(title) ||
           libraryIsFrontMatterOpeningLabel(href)) {
+        continue;
+      }
+      if (_normalizedCanonicalOpeningLabel(title) ==
+          _normalizedCanonicalOpeningLabel(bookTitle ?? '')) {
         continue;
       }
       final blockRows = await db.query(
@@ -215,6 +264,13 @@ class LibraryDocumentRepository {
     }
     return null;
   }
+
+  static String _normalizedCanonicalOpeningLabel(String value) =>
+      value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+
+  static bool _isFirstCanonicalBodyLabel(String value) => RegExp(
+    r'^(?:(?:chapter|chap|article|sermon|part)\s*)?(?:1|i|one)(?:\s|$)',
+  ).hasMatch(_normalizedCanonicalOpeningLabel(value));
 
   Future<bool> containsDisplayOrder(
     String libraryItemId,

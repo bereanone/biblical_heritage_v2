@@ -113,7 +113,15 @@ int libraryReaderInitialSectionIndex({
     if (savedHref.isNotEmpty) {
       final savedIndex = _sectionIndexForHref(sections, savedHref);
       if (savedIndex != null &&
-          _hasReadableSavedSectionContent(sections[savedIndex])) {
+          _hasReadableSavedSectionContent(sections[savedIndex]) &&
+          (!_isEgwReaderItem(item) ||
+              !_savedSectionIsFrontMatter(
+                item: item,
+                sections: sections,
+                navigationItems: navigationItems,
+                sectionIndex: savedIndex,
+                savedLocation: item.epubHref,
+              ))) {
         return savedIndex;
       }
     }
@@ -125,7 +133,14 @@ int libraryReaderInitialSectionIndex({
         spineIndex: savedSpine,
       );
       if (savedIndex != null &&
-          _hasReadableSavedSectionContent(sections[savedIndex])) {
+          _hasReadableSavedSectionContent(sections[savedIndex]) &&
+          (!_isEgwReaderItem(item) ||
+              !_savedSectionIsFrontMatter(
+                item: item,
+                sections: sections,
+                navigationItems: navigationItems,
+                sectionIndex: savedIndex,
+              ))) {
         return savedIndex;
       }
     }
@@ -156,8 +171,17 @@ int libraryReaderInitialSectionIndex({
       sections,
       firstRealContentHref,
     );
+    // The navigation row has already passed the explicit front-matter and
+    // metadata filters. Trust that database classification even when the
+    // first chapter is intentionally short — except for the unambiguous
+    // case of a section with zero real body paragraphs (e.g. an Index/
+    // back-matter page that is nothing but bare print-page markers like
+    // "150", "151", "152", …). Nav classification alone doesn't catch that
+    // because such a section can still be labeled/typed as non-front-matter.
     if (firstRealContentIndex != null &&
-        _isRealContentSection(sections[firstRealContentIndex], item)) {
+        !librarySectionHasNoBodyParagraphs(
+          sections[firstRealContentIndex].paragraphs,
+        )) {
       return firstRealContentIndex;
     }
   }
@@ -191,9 +215,118 @@ bool _isChapterOneLabel(String normalizedLabel) {
   return RegExp(r'^chapter (?:1|i|one)(?: |$)').hasMatch(normalizedLabel);
 }
 
+/// Keeps a first chapter's anchor/navigation identity when its heading shares
+/// an XHTML spine with a title page. Resolving only the section index loses
+/// that anchor and leaves the reader at the title until the user taps TOC.
+int? libraryReaderInitialNavigationIndex({
+  required LibraryCatalogItem item,
+  required List<LibraryBookSection> sections,
+  required List<LibraryCatalogNavigationItem> navigationItems,
+  required int initialSectionIndex,
+  required bool hasExplicitInitialLocation,
+}) {
+  if (hasExplicitInitialLocation) return null;
+  for (var index = 0; index < navigationItems.length; index++) {
+    final nav = navigationItems[index];
+    final label = nav.label
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
+    if (!_isChapterOneLabel(label)) continue;
+    final sectionIndex = _sectionIndexForNavigationItemInSections(
+      sections,
+      nav,
+    );
+    if (sectionIndex == initialSectionIndex) return index;
+  }
+  return null;
+}
+
 bool _hasReadableSavedSectionContent(LibraryBookSection section) {
   if (section.blocks.isNotEmpty) return true;
-  return section.paragraphs.any((paragraph) => paragraph.trim().isNotEmpty);
+  if (!section.paragraphs.any((paragraph) => paragraph.trim().isNotEmpty)) {
+    return false;
+  }
+  // A saved position that resolves to a section with only bare page-number/
+  // metadata paragraphs (e.g. an Index page) is not readable content, even
+  // though it technically has non-empty "paragraphs" — see
+  // librarySectionHasNoBodyParagraphs.
+  return !librarySectionHasNoBodyParagraphs(section.paragraphs);
+}
+
+bool _isEgwReaderItem(LibraryCatalogItem item) {
+  final path = item.relativePath.replaceAll('\\', '/').toLowerCase();
+  final collection = item.collectionName?.trim().toLowerCase() ?? '';
+  return path.contains('/egw/') ||
+      path.contains('/egw_') ||
+      collection.startsWith('egw ') ||
+      item.sourceSite?.trim().toLowerCase() == 'egwwritings.org';
+}
+
+bool libraryReaderSavedLocationTargetsFrontMatter({
+  required LibraryCatalogItem item,
+  required List<LibraryBookSection> sections,
+  required List<LibraryCatalogNavigationItem> navigationItems,
+}) {
+  final savedHref = _splitReaderHref(item.epubHref).href;
+  final savedIndex = savedHref.isNotEmpty
+      ? _sectionIndexForHref(sections, savedHref)
+      : item.spineIndex == null
+      ? null
+      : _sectionIndexForSpineIndex(
+          sections: sections,
+          navigationItems: navigationItems,
+          spineIndex: item.spineIndex!,
+        );
+  if (savedIndex == null) return false;
+  return _savedSectionIsFrontMatter(
+    item: item,
+    sections: sections,
+    navigationItems: navigationItems,
+    sectionIndex: savedIndex,
+    savedLocation: item.epubHref,
+  );
+}
+
+bool _savedSectionIsFrontMatter({
+  required LibraryCatalogItem item,
+  required List<LibraryBookSection> sections,
+  required List<LibraryCatalogNavigationItem> navigationItems,
+  required int sectionIndex,
+  String? savedLocation,
+}) {
+  if (sectionIndex < 0 || sectionIndex >= sections.length) return true;
+  final section = sections[sectionIndex];
+  if (libraryIsFrontMatterOpeningLabel(section.title) ||
+      libraryIsFrontMatterOpeningLabel(section.entryName)) {
+    return true;
+  }
+  final savedAnchor = _splitReaderHref(savedLocation).anchor;
+  for (final nav in navigationItems) {
+    if (_sectionIndexForNavigationItemInSections(sections, nav) !=
+        sectionIndex) {
+      continue;
+    }
+    if (savedAnchor != null &&
+        savedAnchor.isNotEmpty &&
+        nav.anchorId?.trim().toLowerCase() != savedAnchor.toLowerCase()) {
+      continue;
+    }
+    final contentKind = nav.contentKind?.trim().toLowerCase();
+    if (nav.isFrontMatter ||
+        const {
+          'title',
+          'cover',
+          'copyright',
+          'toc',
+          'front_matter',
+        }.contains(contentKind) ||
+        libraryIsFrontMatterOpeningLabel(nav.label)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 int? _sectionIndexForHref(List<LibraryBookSection> sections, String href) {

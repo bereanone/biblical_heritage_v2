@@ -3,11 +3,22 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:studybible2/features/library/presentation/reader_autoscroll_frame_rate_boost.dart';
 import 'package:studybible2/features/library/presentation/reader_tilt_autoscroll_controller.dart';
 import 'package:studybible2/features/library/presentation/reader_tilt_motion_source.dart';
 import 'package:studybible2/features/library/presentation/reader_tilt_preferences.dart';
 
 const _portrait = ReaderDeviceOrientation.portrait;
+
+class FakeReaderAutoScrollFrameRateBoost
+    implements ReaderAutoScrollFrameRateBoost {
+  final List<bool> calls = [];
+
+  @override
+  Future<void> setActive(bool active) async {
+    calls.add(active);
+  }
+}
 
 ReaderTiltSample sample(
   double degrees, {
@@ -20,6 +31,50 @@ ReaderTiltSample sample(
 );
 
 void main() {
+  test('ordinary Android ticker gaps (30-90ms, unboosted refresh rate) pass '
+      'through unmodified so distance stays proportional to elapsed time', () {
+    for (final ms in [16, 35, 45, 60, 90]) {
+      expect(
+        readerSmoothAutoScrollFrameElapsed(Duration(milliseconds: ms)),
+        Duration(milliseconds: ms),
+        reason: 'a $ms ms gap must not be truncated',
+      );
+    }
+  });
+
+  test('a fixed speed advances proportionally correct distance across 35ms, '
+      '45ms, 60ms, and 90ms frame gaps', () {
+    const speedPixelsPerSecond = 320.0;
+    for (final ms in [35, 45, 60, 90]) {
+      final elapsed = readerSmoothAutoScrollFrameElapsed(
+        Duration(milliseconds: ms),
+      );
+      final seconds = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
+      final distance = speedPixelsPerSecond * seconds;
+      expect(
+        distance,
+        closeTo(speedPixelsPerSecond * ms / 1000, 0.0001),
+        reason: 'a $ms ms gap must cover its full proportional distance',
+      );
+    }
+  });
+
+  test('an extreme background/resume gap is still capped rather than replayed '
+      'as one large jump', () {
+    expect(
+      readerSmoothAutoScrollFrameElapsed(const Duration(seconds: 30)),
+      const Duration(milliseconds: 250),
+    );
+    expect(
+      readerSmoothAutoScrollFrameElapsed(const Duration(milliseconds: 251)),
+      const Duration(milliseconds: 250),
+    );
+    expect(
+      readerSmoothAutoScrollFrameElapsed(const Duration(milliseconds: 250)),
+      const Duration(milliseconds: 250),
+    );
+  });
+
   const settings = ReaderTiltAutoScrollSettings(
     calibrationSampleCount: 5,
     sampleSmoothingFactor: 1,
@@ -103,6 +158,61 @@ void main() {
     controller.dispose();
     await source.dispose();
   });
+
+  testWidgets(
+    'requests the high frame-rate boost while a session is active and '
+    'releases it on stop and on dispose',
+    (tester) async {
+      final source = FakeReaderTiltMotionSource();
+      final boost = FakeReaderAutoScrollFrameRateBoost();
+      final controller = ReaderTiltAutoScrollController(
+        motionSource: source,
+        scrollTarget: CallbackReaderAutoScrollTarget(),
+        settings: settings,
+        frameRateBoost: boost,
+      );
+
+      await controller.activate();
+      expect(boost.calls, [true]);
+
+      await controller.stop(notify: false);
+      expect(boost.calls, [true, false]);
+
+      await controller.activate();
+      expect(boost.calls, [true, false, true]);
+
+      controller.dispose();
+      expect(boost.calls, [true, false, true, false]);
+      await source.dispose();
+    },
+  );
+
+  testWidgets(
+    'the constant-speed diagnostic driver also requests and releases the '
+    'frame-rate boost',
+    (tester) async {
+      final source = FakeReaderTiltMotionSource();
+      final boost = FakeReaderAutoScrollFrameRateBoost();
+      final controller = ReaderTiltAutoScrollController(
+        motionSource: source,
+        scrollTarget: CallbackReaderAutoScrollTarget(),
+        settings: settings,
+        frameRateBoost: boost,
+      );
+
+      // debugRunConstantSpeedDiagnostic stops any prior session first (a
+      // no-op release since nothing was active yet), then requests the
+      // boost for the diagnostic run itself.
+      await controller.debugRunConstantSpeedDiagnostic(40);
+      expect(boost.calls, [false, true]);
+
+      controller.debugStopConstantSpeedDiagnostic();
+      expect(boost.calls, [false, true, false]);
+
+      controller.dispose();
+      await source.dispose();
+    },
+  );
 
   testWidgets('tilt drives attached scroll view and respects both boundaries', (
     tester,
@@ -980,11 +1090,11 @@ void main() {
       expect(half, closeTo(normal * 0.5, 0.001));
       expect(doubleSpeed, closeTo(normal * 2, 0.001));
     }
-    expect(speed(0.25, 1), closeTo(42, 0.001));
-    expect(speed(0.6, 1), closeTo(171.36, 0.001));
-    expect(speed(1, 1), closeTo(420, 0.001));
-    expect(speed(1, 2), closeTo(840, 0.001));
-    expect(speed(1, 2) / 60, closeTo(14, 0.001));
+    expect(speed(0.25, 1), closeTo(72, 0.001));
+    expect(speed(0.6, 1), closeTo(293.76, 0.001));
+    expect(speed(1, 1), closeTo(720, 0.001));
+    expect(speed(1, 2), closeTo(1440, 0.001));
+    expect(speed(1, 2) / 60, closeTo(24, 0.001));
     expect(
       readerTiltNormalizedMagnitude(
         angleFor(0.6),
@@ -1072,7 +1182,7 @@ void main() {
       bible.tick(elapsed: elapsed);
       library.tick(elapsed: elapsed);
     }
-    expect(biblePixels, closeTo(420, 0.1));
+    expect(biblePixels, closeTo(720, 0.1));
     expect(scroll.offset, closeTo(biblePixels, 0.001));
     bible.dispose();
     library.dispose();

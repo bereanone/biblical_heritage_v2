@@ -210,6 +210,7 @@ void main() {
               disableActions: false,
               onCheckForNewBooks: () => collectionCount += 1,
               onDownloadPioneerBooks: () => downloadCount += 1,
+              onImportPioneerZip: () => collectionCount += 1,
               onImportBookPackage: () => bookCount += 1,
               onImportCapturedBooks: _noop,
               onChangeImportLocation: () => locationCount += 1,
@@ -218,15 +219,15 @@ void main() {
         ),
       );
 
-      expect(find.text('Import Pioneer Library'), findsOneWidget);
-      expect(find.text('Import Pioneer Collection'), findsOneWidget);
+      expect(find.text('Install Pioneer Library'), findsOneWidget);
+      expect(find.text('Import Pioneer ZIP'), findsOneWidget);
       expect(find.text('Import One Pioneer Book'), findsOneWidget);
       expect(find.text('Choose CloudFiles Folder'), findsNothing);
       expect(find.textContaining('Pioneers.studycollection'), findsOneWidget);
       expect(find.textContaining('.studybook'), findsOneWidget);
 
-      await tester.tap(find.text('Import Pioneer Library'));
-      await tester.tap(find.text('Import Pioneer Collection'));
+      await tester.tap(find.text('Install Pioneer Library'));
+      await tester.tap(find.text('Import Pioneer ZIP'));
       await tester.tap(find.text('Import One Pioneer Book'));
 
       expect(downloadCount, 1);

@@ -57,6 +57,16 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# flutter_paste_input 1.0.0 omits its generated Pigeon implementation from
+# the Windows target, which leaves ClipboardContent and its host APIs
+# unresolved at link time. Keep this application-side workaround until the
+# package publishes the source in its own PLUGIN_SOURCES list.
+if(TARGET flutter_paste_input_plugin)
+  target_sources(flutter_paste_input_plugin PRIVATE
+    "${FLUTTER_MANAGED_DIR}/ephemeral/.plugin_symlinks/flutter_paste_input/windows/messages.g.cpp"
+  )
+endif()
+
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can

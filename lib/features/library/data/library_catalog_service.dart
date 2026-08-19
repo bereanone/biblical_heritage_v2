@@ -610,7 +610,11 @@ class LibraryCatalogService {
     final result = await _readResolver.readWithFallback<int>(
       read: (db) async {
         final rows = await db.rawQuery('''
-      SELECT COUNT(DISTINCT ltb.library_item_id) AS cnt
+      -- Search results are paragraph-level navigation targets. Counting only
+      -- distinct books truncates broad searches to one result per matching
+      -- book even though searchContent intentionally returns every matching
+      -- paragraph.
+      SELECT COUNT(*) AS cnt
       FROM library_text_blocks ltb
       INNER JOIN library_items li ON li.id = ltb.library_item_id
       WHERE ${where.join(' AND ')}
@@ -738,12 +742,19 @@ class LibraryCatalogService {
     }
 
     final cteWhere = where.join(' AND ');
+    // A single-collection search already narrows the CTE's candidate rows
+    // via the collection WHERE clause, so 8x headroom above the requested
+    // limit is enough. "All Collections" searches that same table with no
+    // collection narrowing, so the pre-scoring LIMIT window has to cover
+    // many more collections' worth of candidates to keep any one collection
+    // (or any one early-sorting item ID) from crowding out the rest —
+    // it needs at least as much headroom as a single collection, not less.
     final fetchLimit =
         limit *
         ((normalizedCollectionFilter.isNotEmpty &&
                 normalizedCollectionFilter != _libraryAllCollectionsFilterValue)
             ? 8
-            : 4);
+            : 16);
 
     final rowResult = await _readResolver
         .readWithFallback<List<Map<String, Object?>>>(
@@ -754,7 +765,7 @@ class LibraryCatalogService {
         FROM library_text_blocks ltb
         INNER JOIN library_items li ON li.id = ltb.library_item_id
         WHERE $cteWhere
-        ORDER BY ltb.library_item_id, ltb.epub_href, ltb.paragraph_index
+        ORDER BY ltb.library_item_id COLLATE NOCASE, ltb.epub_href, ltb.paragraph_index
         LIMIT ?
       )
       SELECT

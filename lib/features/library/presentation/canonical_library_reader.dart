@@ -20,6 +20,7 @@ import '../data/library_item_identity.dart';
 import '../data/elibrary_markup_repository.dart';
 import '../data/library_reader_state_writer.dart';
 import '../data/library_search_navigation_target.dart';
+import '../../search/search_highlight_helper.dart';
 import 'canonical_local_image.dart';
 import 'canonical_scroll_diagnostics.dart';
 import 'elibrary_highlight_color_picker.dart';
@@ -148,25 +149,32 @@ List<InlineSpan> canonicalInlineTextSpans({
   required TextStyle bodyStyle,
   required TextStyle referenceStyle,
   required bool showReferenceCode,
+  List<String> highlightTerms = const <String>[],
 }) => <InlineSpan>[
   ...formatted.nodes.map((node) {
     if (node['type'] == 'line_break') return const TextSpan(text: '\n');
     final marks = (node['marks'] as List<Object?>? ?? const <Object?>[])
         .map((value) => value.toString())
         .toSet();
+    final nodeStyle = bodyStyle.copyWith(
+      fontWeight: marks.contains('bold') ? FontWeight.w700 : null,
+      fontStyle: marks.contains('italic') ? FontStyle.italic : null,
+      decoration: marks.contains('underline')
+          ? TextDecoration.underline
+          : null,
+      fontFeatures: marks.contains('superscript')
+          ? const <FontFeature>[FontFeature.superscripts()]
+          : marks.contains('subscript')
+          ? const <FontFeature>[FontFeature.subscripts()]
+          : null,
+    );
+    final text = node['text']?.toString() ?? '';
+    if (highlightTerms.isEmpty) return TextSpan(text: text, style: nodeStyle);
     return TextSpan(
-      text: node['text']?.toString() ?? '',
-      style: bodyStyle.copyWith(
-        fontWeight: marks.contains('bold') ? FontWeight.w700 : null,
-        fontStyle: marks.contains('italic') ? FontStyle.italic : null,
-        decoration: marks.contains('underline')
-            ? TextDecoration.underline
-            : null,
-        fontFeatures: marks.contains('superscript')
-            ? const <FontFeature>[FontFeature.superscripts()]
-            : marks.contains('subscript')
-            ? const <FontFeature>[FontFeature.subscripts()]
-            : null,
+      children: buildHighlightedSearchSpans(
+        text,
+        highlightTerms,
+        baseStyle: nodeStyle,
       ),
     );
   }),
@@ -350,6 +358,7 @@ class CanonicalLibraryReaderGate extends StatefulWidget {
     this.onSearch,
     this.onLibrary,
     this.searchTarget,
+    this.highlightTerms = const <String>[],
   });
 
   final LibraryCatalogItem item;
@@ -363,6 +372,7 @@ class CanonicalLibraryReaderGate extends StatefulWidget {
   final VoidCallback? onSearch;
   final VoidCallback? onLibrary;
   final LibrarySearchNavigationTarget? searchTarget;
+  final List<String> highlightTerms;
 
   @override
   State<CanonicalLibraryReaderGate> createState() =>
@@ -409,6 +419,7 @@ class _CanonicalLibraryReaderGateState
             onSearch: widget.onSearch,
             onLibrary: widget.onLibrary,
             searchTarget: widget.searchTarget,
+            highlightTerms: widget.highlightTerms,
           );
         },
       );
@@ -431,6 +442,7 @@ class CanonicalLibraryReaderScreen extends StatefulWidget {
     this.onSearch,
     this.onLibrary,
     this.searchTarget,
+    this.highlightTerms = const <String>[],
   });
   final LibraryCatalogItem item;
   final LibraryDocumentRepository repository;
@@ -446,6 +458,7 @@ class CanonicalLibraryReaderScreen extends StatefulWidget {
   final VoidCallback? onSearch;
   final VoidCallback? onLibrary;
   final LibrarySearchNavigationTarget? searchTarget;
+  final List<String> highlightTerms;
 
   @override
   State<CanonicalLibraryReaderScreen> createState() =>
@@ -502,9 +515,6 @@ class _CanonicalLibraryReaderScreenState
   int _latestVisibleOrder = 0;
   double _fontScale = 1;
   bool _showRefCodes = false;
-  List<LibraryDocumentBlock> _searchResults = const <LibraryDocumentBlock>[];
-  int _searchResultIndex = -1;
-  String? _activeSearchBlockId;
   int? _initialSearchOrder;
   bool _searchTargetPositioned = false;
   LibraryDocumentBlock? _selectedMarkupBlock;
@@ -722,18 +732,7 @@ class _CanonicalLibraryReaderScreenState
                   foreground: foreground,
                   background: background,
                   onBack: widget.onBack ?? () => Navigator.of(context).pop(),
-                  onSearch: _openCanonicalSearch,
-                  searchCounter: _searchResults.isEmpty
-                      ? null
-                      : '${_searchResultIndex + 1}/${_searchResults.length}',
-                  onPreviousSearch: _searchResultIndex > 0
-                      ? () => _moveSearchResult(-1)
-                      : null,
-                  onNextSearch:
-                      _searchResultIndex >= 0 &&
-                          _searchResultIndex < _searchResults.length - 1
-                      ? () => _moveSearchResult(1)
-                      : null,
+                  onSearch: widget.onSearch,
                   onLibrary: widget.onLibrary,
                   menu: widget.actionsBuilder?.call(context).firstOrNull,
                 ),
@@ -771,7 +770,7 @@ class _CanonicalLibraryReaderScreenState
                     proofCommands: _commands,
                     fontScale: _fontScale,
                     showRefCodes: _showRefCodes,
-                    activeSearchBlockId: _activeSearchBlockId,
+                    highlightTerms: widget.highlightTerms,
                     initialScrollOrder: _initialSearchOrder,
                     onInitialScrollCompleted: () {
                       _searchTargetPositioned = true;
@@ -1102,59 +1101,6 @@ class _CanonicalLibraryReaderScreenState
     await _jumpToBlock(forward ? headings.first : headings.last);
   }
 
-  Future<void> _openCanonicalSearch() async {
-    final queryController = TextEditingController();
-    final query = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Search this book'),
-        content: TextField(
-          key: const ValueKey('canonical-search-field'),
-          controller: queryController,
-          autofocus: true,
-          textInputAction: TextInputAction.search,
-          onSubmitted: (value) => Navigator.of(context).pop(value),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(queryController.text),
-            child: const Text('Search'),
-          ),
-        ],
-      ),
-    );
-    queryController.dispose();
-    if (!mounted || query == null || query.trim().isEmpty) return;
-    final results = await widget.repository.searchCurrentBook(
-      widget.item.id,
-      query,
-    );
-    if (!mounted) return;
-    setState(() {
-      _searchResults = results;
-      _searchResultIndex = results.isEmpty ? -1 : 0;
-      _activeSearchBlockId = results.isEmpty ? null : results.first.id;
-    });
-    if (results.isNotEmpty) await _jumpToBlock(results.first);
-  }
-
-  Future<void> _moveSearchResult(int delta) async {
-    if (_searchResults.isEmpty) return;
-    final next = (_searchResultIndex + delta).clamp(
-      0,
-      _searchResults.length - 1,
-    );
-    setState(() {
-      _searchResultIndex = next;
-      _activeSearchBlockId = _searchResults[next].id;
-    });
-    await _jumpToBlock(_searchResults[next]);
-  }
-
   Future<void> _loadCanonicalHighlights() async {
     Map<String, List<ElibraryMarkupRecord>> byLocation;
     try {
@@ -1294,9 +1240,6 @@ class _CanonicalProductionHeader extends StatelessWidget {
     required this.background,
     required this.onBack,
     required this.onSearch,
-    required this.searchCounter,
-    required this.onPreviousSearch,
-    required this.onNextSearch,
     required this.onLibrary,
     required this.menu,
   });
@@ -1306,9 +1249,6 @@ class _CanonicalProductionHeader extends StatelessWidget {
   final Color background;
   final VoidCallback onBack;
   final VoidCallback? onSearch;
-  final String? searchCounter;
-  final VoidCallback? onPreviousSearch;
-  final VoidCallback? onNextSearch;
   final VoidCallback? onLibrary;
   final Widget? menu;
 
@@ -1331,29 +1271,6 @@ class _CanonicalProductionHeader extends StatelessWidget {
     );
     final actions = <Widget>[
       button(Icons.search, 'Search', onSearch),
-      if (searchCounter != null)
-        DecoratedBox(
-          decoration: BoxDecoration(
-            border: Border.all(color: Theme.of(context).colorScheme.outline),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              IconButton(
-                tooltip: 'Previous search result',
-                onPressed: onPreviousSearch,
-                icon: const Icon(Icons.chevron_left),
-              ),
-              Text(searchCounter!),
-              IconButton(
-                tooltip: 'Next search result',
-                onPressed: onNextSearch,
-                icon: const Icon(Icons.chevron_right),
-              ),
-            ],
-          ),
-        ),
       button(Icons.library_books_outlined, 'Library', onLibrary),
       ?menu,
     ];
@@ -1545,7 +1462,7 @@ class CanonicalLibraryDocumentBody extends StatefulWidget {
     this.fontScale = 1,
     this.onReaderInteraction,
     this.showRefCodes = false,
-    this.activeSearchBlockId,
+    this.highlightTerms = const <String>[],
     this.initialScrollOrder,
     this.onInitialScrollCompleted,
     this.highlightedBlockIds = const <String>{},
@@ -1563,7 +1480,7 @@ class CanonicalLibraryDocumentBody extends StatefulWidget {
   final double fontScale;
   final VoidCallback? onReaderInteraction;
   final bool showRefCodes;
-  final String? activeSearchBlockId;
+  final List<String> highlightTerms;
   final int? initialScrollOrder;
   final VoidCallback? onInitialScrollCompleted;
   final Set<String> highlightedBlockIds;
@@ -1806,7 +1723,7 @@ class _CanonicalLibraryDocumentBodyState
                       sourceRoot: widget.sourceRoot,
                       fontScale: widget.fontScale,
                       showRefCode: widget.showRefCodes,
-                      searchActive: widget.activeSearchBlockId == block.id,
+                      highlightTerms: widget.highlightTerms,
                       highlighted: widget.highlightedBlockIds.contains(
                         block.id,
                       ),
@@ -1830,7 +1747,7 @@ class _CanonicalBlockView extends StatelessWidget {
     required this.sourceRoot,
     required this.fontScale,
     required this.showRefCode,
-    required this.searchActive,
+    this.highlightTerms = const <String>[],
     required this.highlighted,
     required this.onSelectionChanged,
     required this.onOpenSelectionMenu,
@@ -1840,7 +1757,7 @@ class _CanonicalBlockView extends StatelessWidget {
   final Directory? sourceRoot;
   final double fontScale;
   final bool showRefCode;
-  final bool searchActive;
+  final List<String> highlightTerms;
   final bool highlighted;
   final ValueChanged<TextSelection>? onSelectionChanged;
   final VoidCallback? onOpenSelectionMenu;
@@ -1911,9 +1828,7 @@ class _CanonicalBlockView extends StatelessWidget {
       ),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: searchActive
-              ? Colors.amber.withValues(alpha: .22)
-              : highlighted
+          color: highlighted
               ? Colors.amber.withValues(alpha: .35)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
@@ -1934,6 +1849,7 @@ class _CanonicalBlockView extends StatelessWidget {
                     fontWeight: FontWeight.w500,
                   ),
                   showReferenceCode: showRefCode,
+                  highlightTerms: highlightTerms,
                 ),
               ),
               textAlign: align,

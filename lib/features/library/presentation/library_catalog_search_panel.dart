@@ -312,42 +312,6 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
             onChanged: _onFilterChanged,
           ),
         ),
-        if (rememberedSearchLabel.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                style: TextButton.styleFrom(
-                  alignment: Alignment.centerLeft,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  minimumSize: const Size(0, 44),
-                  foregroundColor: scheme.onSurface,
-                  textStyle: libraryBodyTextStyle(
-                    context,
-                    theme.textTheme.bodyMedium,
-                    color: scheme.onSurface,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                onPressed: () => _resumeRememberedSearch(),
-                child: Text.rich(
-                  TextSpan(
-                    text: rememberedSearchLabel,
-                    style: libraryBodyTextStyle(
-                      context,
-                      theme.textTheme.bodyMedium,
-                      color: scheme.onSurface,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -529,6 +493,42 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                   ),
           ),
         ),
+        if (rememberedSearchLabel.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  alignment: Alignment.centerLeft,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  minimumSize: const Size(0, 44),
+                  foregroundColor: scheme.onSurface,
+                  textStyle: libraryBodyTextStyle(
+                    context,
+                    theme.textTheme.bodyMedium,
+                    color: scheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onPressed: () => _resumeRememberedSearch(),
+                child: Text.rich(
+                  TextSpan(
+                    text: rememberedSearchLabel,
+                    style: libraryBodyTextStyle(
+                      context,
+                      theme.textTheme.bodyMedium,
+                      color: scheme.onSurface,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }

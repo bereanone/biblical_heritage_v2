@@ -438,20 +438,22 @@ void main() {
       await File(p.join(captureDir.path, 'cover.jpg')).writeAsString('cover');
 
       final db = await ELibraryDatabase.instance.database;
+      const lessonsId =
+          'library_item_research_pioneer_at_jones_lessons_on_faith';
       await db.update(
         'library_items',
         {'cover_path': null},
         where: 'id = ?',
-        whereArgs: ['lessons_on_faith'],
+        whereArgs: [lessonsId],
       );
 
       final items = await LibraryCatalogService.instance.loadItems();
-      final lessons = items.firstWhere((item) => item.id == 'lessons_on_faith');
+      final lessons = items.firstWhere((item) => item.id == lessonsId);
       final expectedCoverPath = p.join(
         libraryRootDir.path,
         'Graphics',
         'eLibraryCovers',
-        'library_item_077a15a4815016460c22_faith.jpg',
+        'library_item_1f9f7610c38c8c69e99d_faith.jpg',
       );
       expect(lessons.coverPath, expectedCoverPath);
       expect(File(expectedCoverPath).existsSync(), isTrue);
@@ -460,7 +462,7 @@ void main() {
         'library_items',
         columns: const ['cover_path'],
         where: 'id = ?',
-        whereArgs: ['lessons_on_faith'],
+        whereArgs: [lessonsId],
       );
       expect(repairedRow.single['cover_path'], expectedCoverPath);
     },
@@ -479,6 +481,8 @@ void main() {
       await File(mirrorCoverPath).writeAsString('cover bytes');
 
       final db = await ELibraryDatabase.instance.database;
+      const lessonsId =
+          'library_item_research_pioneer_at_jones_lessons_on_faith';
       await db.update(
         'library_items',
         {
@@ -487,18 +491,18 @@ void main() {
               'BiblicalHeritage/v2/Graphics/eLibraryCovers/lessons_on_faith.png',
         },
         where: 'id = ?',
-        whereArgs: ['lessons_on_faith'],
+        whereArgs: [lessonsId],
       );
 
       final items = await LibraryCatalogService.instance.loadItems();
-      final lessons = items.firstWhere((item) => item.id == 'lessons_on_faith');
+      final lessons = items.firstWhere((item) => item.id == lessonsId);
       expect(lessons.coverPath, mirrorCoverPath);
 
       final repairedRow = await db.query(
         'library_items',
         columns: const ['cover_path'],
         where: 'id = ?',
-        whereArgs: ['lessons_on_faith'],
+        whereArgs: [lessonsId],
       );
       expect(repairedRow.single['cover_path'], mirrorCoverPath);
     },
@@ -533,7 +537,7 @@ void main() {
           .toList(growable: false);
       expect(darItems, hasLength(1));
       final dar = darItems.single;
-      expect(dar.id, 'DAR_US');
+      expect(dar.id, 'library_item_research_pioneer_uriah_smith_DAR_US');
       expect(dar.displayAuthor, 'Uriah Smith');
       expect(dar.fileFormat, 'html');
       expect(dar.isEpub, isTrue);
@@ -782,13 +786,13 @@ void main() {
       );
       expect(results, isNotEmpty);
 
-      expect(
-        await LibraryCatalogService.instance.countSearchContentResults(
-          query: searchPhrase,
-          collectionFilter: 'adventist_pioneer_library',
-        ),
-        greaterThanOrEqualTo(1),
-      );
+      final resultCount = await LibraryCatalogService.instance
+          .countSearchContentResults(
+            query: searchPhrase,
+            collectionFilter: 'adventist_pioneer_library',
+          );
+      expect(resultCount, greaterThanOrEqualTo(1));
+      expect(resultCount, results.length);
       expect(
         await LibraryCatalogService.instance.countIndexedSearchableItems(
           collectionFilter: 'adventist_pioneer_library',

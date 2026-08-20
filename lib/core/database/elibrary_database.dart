@@ -114,10 +114,15 @@ class ELibraryDatabase {
     final writablePath = await SandboxBootstrap.eLibraryDatabasePath();
     final writableFile = File(writablePath);
     writableFile.parent.createSync(recursive: true);
-    if (!writableFile.existsSync()) {
+    if (writableFile.existsSync()) {
       debugPrint(
-        'ELibraryDatabase: no DB found at $writablePath — '
-        'copying from asset ($_bundledAssetPath).',
+        'Library bootstrap: existing persistent library found — reuse '
+        '($writablePath).',
+      );
+    } else {
+      debugPrint(
+        'Library bootstrap: persistent library missing — initializing '
+        '$writablePath from bundled seed ($_bundledAssetPath).',
       );
       final copied = await _copyBundledAsset(writableFile);
       if (!copied) {
@@ -130,8 +135,6 @@ class ELibraryDatabase {
           'ELibraryDatabase: asset copied successfully to $writablePath.',
         );
       }
-    } else {
-      debugPrint('ELibraryDatabase: using existing DB at $writablePath.');
     }
     return writablePath;
   }

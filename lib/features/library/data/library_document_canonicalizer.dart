@@ -58,7 +58,7 @@ class LibraryDocumentCanonicalizer {
   /// checked against [EpubDownloadValidator], so it must be treated as
   /// untrustworthy and revalidated (never assumed complete) the next time
   /// this item is canonicalized.
-  static const int version = 5;
+  static const int version = 6;
   final LibraryCanonicalizationFailureHook? failureHook;
 
   /// Builds a candidate generation of canonical sections/blocks in the
@@ -152,6 +152,10 @@ class LibraryDocumentCanonicalizer {
 
     try {
       final sections = _readSections(source.path, bytes, archive);
+      final refCodeTracker = _EpubRefCodeTracker.fromSource(
+        source.path,
+        sections,
+      );
       var written = 0;
       await db.transaction((txn) async {
         var globalOrder = 0;
@@ -168,7 +172,10 @@ class LibraryDocumentCanonicalizer {
             normalizedHref,
             '$sectionIndex',
           ]);
-          var parsed = _parseHtmlBlocks(section.html);
+          var parsed = _parseHtmlBlocks(
+            section.html,
+            refCodeTracker: refCodeTracker,
+          );
           if (archive != null) {
             parsed = _extractSectionImages(
               parsed,
@@ -758,7 +765,10 @@ class _ParsedCanonicalBlock {
   );
 }
 
-List<_ParsedCanonicalBlock> _parseHtmlBlocks(String html) {
+List<_ParsedCanonicalBlock> _parseHtmlBlocks(
+  String html, {
+  _EpubRefCodeTracker? refCodeTracker,
+}) {
   if (RegExp(
     r'''class\s*=\s*["'][^"']*\bclip-text\b''',
     caseSensitive: false,
@@ -766,7 +776,7 @@ List<_ParsedCanonicalBlock> _parseHtmlBlocks(String html) {
     final captured = _parseCapturedEgwBlocks(html);
     if (captured.isNotEmpty) return captured;
   }
-  return _parseSemanticHtmlBlocks(html);
+  return _parseSemanticHtmlBlocks(html, refCodeTracker: refCodeTracker);
 }
 
 List<_ParsedCanonicalBlock> _parseCapturedEgwBlocks(String html) {
@@ -970,7 +980,10 @@ int _romanNumeralValue(String source) {
   return result;
 }
 
-List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(String html) {
+List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(
+  String html, {
+  _EpubRefCodeTracker? refCodeTracker,
+}) {
   final pattern = RegExp(
     r'<(h[1-6]|p|blockquote|pre|li|img|hr)\b([^>]*)>(?:(.*?)</\1\s*>)?',
     caseSensitive: false,
@@ -1027,6 +1040,7 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(String html) {
       'h4' || 'h5' || 'h6' => 'minor',
       _ => null,
     };
+    if (headingRole == 'chapter') refCodeTracker?.beginBody();
     result.add(
       _ParsedCanonicalBlock(
         type: type,
@@ -1044,7 +1058,11 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(String html) {
           }..removeWhere((_, value) => value == null)),
         ),
         anchor: _attribute(attrs, 'id'),
-        refcode: _attribute(attrs, 'data-refcode'),
+        refcode:
+            _attribute(attrs, 'data-refcode') ??
+            (type == LibraryDocumentBlockType.paragraph
+                ? refCodeTracker?.referenceCodeFor(inner)
+                : null),
       ),
     );
   }
@@ -1061,6 +1079,92 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(String html) {
     }
   }
   return result;
+}
+
+class _EpubRefCodeTracker {
+  factory _EpubRefCodeTracker.fromSource(
+    String sourcePath,
+    List<LibraryCanonicalSourceSection> sections,
+  ) {
+    final stem = p.basenameWithoutExtension(sourcePath);
+    final match = RegExp(
+      r'^(?:[a-z]{2,3}[_-])?([a-z][a-z0-9]{0,9})$',
+      caseSensitive: false,
+    ).firstMatch(stem);
+    int? initialPage;
+    for (final section in sections) {
+      final marker = RegExp(
+        r'''<[^>]*\bepub:type\s*=\s*["']pagebreak["'][^>]*>''',
+        caseSensitive: false,
+      ).firstMatch(section.html);
+      if (marker == null) continue;
+      final tag = marker.group(0) ?? '';
+      final value =
+          _attribute(tag, 'title') ??
+          _attribute(tag, 'id')?.replaceFirst(RegExp(r'^[pP]'), '');
+      final page = int.tryParse(value ?? '');
+      if (page != null && page > 0) {
+        initialPage = page > 1 ? page - 1 : page;
+        break;
+      }
+    }
+    return _EpubRefCodeTracker(
+      match?.group(1)?.toUpperCase(),
+      initialPage: initialPage,
+    );
+  }
+
+  final String? abbreviation;
+  _EpubRefCodeTracker(this.abbreviation, {int? initialPage})
+    : _page = initialPage;
+  int? _page;
+  int _paragraphOnPage = 0;
+  bool _bodyStarted = false;
+
+  void beginBody() => _bodyStarted = true;
+
+  String? referenceCodeFor(String paragraphHtml) {
+    final code = abbreviation;
+    if (!_bodyStarted || code == null || code.isEmpty) return null;
+    final markers = RegExp(
+      r'''<[^>]*\bepub:type\s*=\s*["']pagebreak["'][^>]*>''',
+      caseSensitive: false,
+    ).allMatches(paragraphHtml).toList();
+    final markerPages = <({int page, bool textBefore})>[];
+    for (final marker in markers) {
+      final tag = marker.group(0) ?? '';
+      final pageValue =
+          _attribute(tag, 'title') ??
+          _attribute(tag, 'id')?.replaceFirst(RegExp(r'^[pP]'), '');
+      final page = int.tryParse(pageValue ?? '');
+      if (page == null || page <= 0) continue;
+      markerPages.add((
+        page: page,
+        textBefore: _plain(paragraphHtml.substring(0, marker.start)).isNotEmpty,
+      ));
+    }
+    if (_page == null && markerPages.isNotEmpty) {
+      final first = markerPages.first;
+      _page = first.textBefore && first.page > 1 ? first.page - 1 : first.page;
+      _paragraphOnPage = 0;
+    }
+    if (_page == null) return null;
+
+    final leadingMarker = markerPages.firstOrNull;
+    if (leadingMarker != null && !leadingMarker.textBefore) {
+      _page = leadingMarker.page;
+      _paragraphOnPage = 0;
+    }
+    _paragraphOnPage++;
+    final result = '$code $_page.$_paragraphOnPage';
+
+    for (final marker in markerPages) {
+      if (!marker.textBefore) continue;
+      _page = marker.page;
+      _paragraphOnPage = 0;
+    }
+    return result;
+  }
 }
 
 /// Normalization is intentionally locator-only: backslashes become slashes,

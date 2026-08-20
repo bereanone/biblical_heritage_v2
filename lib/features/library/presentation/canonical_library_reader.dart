@@ -159,9 +159,7 @@ List<InlineSpan> canonicalInlineTextSpans({
     final nodeStyle = bodyStyle.copyWith(
       fontWeight: marks.contains('bold') ? FontWeight.w700 : null,
       fontStyle: marks.contains('italic') ? FontStyle.italic : null,
-      decoration: marks.contains('underline')
-          ? TextDecoration.underline
-          : null,
+      decoration: marks.contains('underline') ? TextDecoration.underline : null,
       fontFeatures: marks.contains('superscript')
           ? const <FontFeature>[FontFeature.superscripts()]
           : marks.contains('subscript')

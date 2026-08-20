@@ -1,5 +1,6 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'elibrary_legacy_item_id_migration.dart';
 import 'elibrary_sdp_cleanup.dart';
 
 class ELibrarySchema {
@@ -25,6 +26,7 @@ class ELibrarySchema {
       await _createIndexes(db);
       await _seedInitialMigration(db);
       await ELibraryBogusSdpCleanupService.instance.run(db);
+      await ELibraryLegacyItemIdMigrationService.instance.run(db);
     });
   }
 

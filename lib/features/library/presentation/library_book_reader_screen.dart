@@ -3995,6 +3995,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       return CanonicalLibraryReaderGate(
         item: widget.item,
         searchTarget: widget.searchTarget,
+        highlightTerms: widget.highlightTerms,
         themeMode: widget.themeMode,
         onThemeChanged: widget.onThemeChanged,
         onBack: _backToBible,

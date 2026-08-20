@@ -55,6 +55,44 @@ void main() {
   });
 
   test(
+    'fresh EGW import stores paragraph refcodes and opens at Chapter 1',
+    () async {
+      final actsSource = File(p.join(directory.path, 'en_AA.html'));
+      await actsSource.writeAsString('''
+      <h1>The Acts of the Apostles</h1>
+      <p>Copyright and publication front matter.</p>
+      <h2>Chapter 1—God's Purpose for His Church</h2>
+      <p>First chapter paragraph.</p>
+      <p>Second paragraph before <span epub:type="pagebreak" title="10">[10]</span> the page turn.</p>
+      <p>First paragraph on the next page.</p>
+    ''');
+
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'AA',
+        source: actsSource,
+      );
+      final repository = LibraryDocumentRepository(db);
+      final opening = await repository.openingDisplayOrder(
+        'AA',
+        bookTitle: 'The Acts of the Apostles',
+      );
+      final rows = await db.query(
+        'library_document_blocks',
+        columns: const <String>['plain_text', 'source_refcode'],
+        where: 'library_item_id = ? AND block_type = ?',
+        whereArgs: <Object?>['AA', LibraryDocumentBlockType.paragraph.name],
+        orderBy: 'display_order',
+      );
+
+      expect(opening, 2);
+      expect(rows[1]['source_refcode'], 'AA 9.1');
+      expect(rows[2]['source_refcode'], 'AA 9.2');
+      expect(rows[3]['source_refcode'], 'AA 10.1');
+    },
+  );
+
+  test(
     'conversion is immutable, ordered, deterministic, and idempotent',
     () async {
       final before = sha256.convert(await source.readAsBytes()).toString();

@@ -600,7 +600,6 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     if (_defaultTag == widget.tag) {
       await widget.repository.saveDefaultTagCategory(normalizedTarget);
     }
-    _showSnack('Moved ${widget.tag} from $sourceLabel to $targetLabel');
   }
 
   Future<void> _deleteEntry(HashTagEntry entry) async {

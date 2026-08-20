@@ -975,6 +975,21 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     }
   }
 
+  Future<bool> createCategory(String category) async {
+    final normalizedCategory = _normalizeCategoryName(category);
+    if (normalizedCategory == null) return false;
+    try {
+      await ensureSchema();
+      final db = await _db();
+      final groupId = await db.transaction(
+        (txn) => _ensureNormalizedCategoryGroupId(txn, normalizedCategory),
+      );
+      return groupId != null && groupId.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> hasVisibleTagSummary(String tag, {String? category}) async {
     final normalizedTag = normalizeTagName(tag);
     if (normalizedTag.isEmpty) return false;

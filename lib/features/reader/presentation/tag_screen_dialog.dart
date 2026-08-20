@@ -268,9 +268,6 @@ class _HashTagDialogState extends State<HashTagDialog>
       return;
     }
     await _reloadSelectedTag(tag, category: newCategory);
-    _showSnack(
-      'Category changed: $tag moved to ${newCategory?.isNotEmpty == true ? newCategory : 'None'}',
-    );
   }
 
   Future<String?> _resolveTagForSelection() async {
@@ -1440,22 +1437,21 @@ class _HashTagDialogState extends State<HashTagDialog>
       return existing;
     }
 
-    if (currentTag.isEmpty) {
-      _showSnack('Choose a $_tagName first.');
-      return null;
-    }
-
-    final saved = await _repository.saveTagCategory(
-      currentTag,
-      normalized,
-      currentCategory: _tagCategory,
-      currentCategoryKnown: true,
-    );
+    final created = await _repository.createCategory(normalized);
     if (!mounted) return null;
-    if (!saved) {
-      _showSnack('Could not save category for $currentTag');
+    if (!created) {
+      _showSnack('Could not create category $normalized.');
       return null;
     }
+    final assigned = currentTag.isNotEmpty
+        ? await _repository.saveTagCategory(
+            currentTag,
+            normalized,
+            currentCategory: _tagCategory,
+            currentCategoryKnown: true,
+          )
+        : false;
+    if (!mounted) return null;
     setState(() {
       _selectedCategory = normalized;
       _tagCategory = normalized;
@@ -1463,9 +1459,10 @@ class _HashTagDialogState extends State<HashTagDialog>
       _syncCategoryBrowseFilterToSelection();
       _recomputeBrowseViews();
     });
-    await _reloadSelectedTag(currentTag, category: normalized);
+    if (assigned) {
+      await _reloadSelectedTag(currentTag, category: normalized);
+    }
     _scheduleCategoryRefresh(selectedCategory: normalized);
-    _showSnack('Category changed: $currentTag moved to $normalized');
     return normalized;
   }
 

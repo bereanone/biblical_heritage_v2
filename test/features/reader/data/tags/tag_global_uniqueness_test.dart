@@ -372,6 +372,14 @@ For God so loved the world that he gave his only begotten Son.
     expect(afterB, hasLength(1));
   });
 
+  test('an empty category is persisted without an existing tag', () async {
+    final repo = HashTagRepository();
+
+    expect(await repo.createCategory('New Tags'), isTrue);
+    expect(await repo.loadCategoryOptions(), contains('New Tags'));
+    expect(await repo.loadSummaries(), isEmpty);
+  });
+
   test('category filters do not alter tag membership', () async {
     final repo = HashTagRepository();
     final db = await _openUserDatabase();

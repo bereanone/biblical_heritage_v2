@@ -3,19 +3,36 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../../features/library/data/library_item_identity.dart';
 
 const String kLegacyItemIdNormalizationMigrationKey =
-    'normalize_legacy_pioneer_item_ids_20260815';
+    'normalize_legacy_pioneer_item_ids_20260820';
 
 /// Legacy `library_items.id` values shipped in the bundled asset database
 /// before [canonicalLibraryItemId]'s `library_item_...` prefix convention
-/// existed. Both rows predate the Pioneer stable-ID scheme
+/// existed. These rows predate the Pioneer stable-ID scheme
 /// (`library_item_research_pioneer_<authorId>_<workId>`) and were never
 /// re-imported under it, so their bare IDs sort ahead of every properly
 /// prefixed ID — including every EGW item — in a plain ID-ordered query.
 /// That crowded EGW results out of the pre-scoring LIMIT window in
 /// `LibraryCatalogService.searchContent`.
+///
+/// `import_scans_to_asset_db.dart` bakes new bare `work_id`s straight from
+/// each capture folder's `metadata.json` (see `_metaForFolder`), so every
+/// newly bundled title lands here too until that tool is taught to emit
+/// canonical IDs directly.
+///
+/// The SSP and WOR targets are not arbitrary — they must match the IDs
+/// already hardcoded elsewhere: `library_item_research_pioneer_e_j_waggoner_WOR`
+/// is required by `_isWaggonerOnRomansItemId` (library_catalog_service.dart)
+/// for the "Waggoner on Romans" navigation/title overrides, and
+/// `library_item_research_pioneer_stephen_nelson_haskell_SSP` matches both
+/// the explicit `canonicalLibraryWorkId` mapping there and
+/// `canonicalSspProofItemId` in `lib/features/library/dev/canonical_ssp_runtime_proof.dart`.
 const Map<String, String> _legacyPioneerItemIdRenames = <String, String>{
   'DAR_US': 'library_item_research_pioneer_uriah_smith_DAR_US',
   'lessons_on_faith': 'library_item_research_pioneer_at_jones_lessons_on_faith',
+  'CIS': 'library_item_research_pioneer_stephen_nelson_haskell_CIS',
+  'FP187': 'library_item_research_pioneer_james_white_FP187',
+  'SSP': 'library_item_research_pioneer_stephen_nelson_haskell_SSP',
+  'WOR': 'library_item_research_pioneer_e_j_waggoner_WOR',
 };
 
 class ELibraryLegacyItemIdMigrationService {

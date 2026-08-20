@@ -70,11 +70,19 @@ assets/library_covers/*
 !assets/library_covers/.gitkeep
 !assets/library_covers/DAR.png
 !assets/library_covers/LOF_ATJ.png
+!assets/library_covers/CIS.png
+!assets/library_covers/FP187.png
+!assets/library_covers/SSP.png
+!assets/library_covers/WOR.png
 !assets/library_covers/thumbs/
 assets/library_covers/thumbs/*
 !assets/library_covers/thumbs/.gitkeep
 !assets/library_covers/thumbs/DAR.png
 !assets/library_covers/thumbs/LOF_ATJ.png
+!assets/library_covers/thumbs/CIS.png
+!assets/library_covers/thumbs/FP187.png
+!assets/library_covers/thumbs/SSP.png
+!assets/library_covers/thumbs/WOR.png
 
 # Generated EPUB/PDF payloads; keep baseline placeholders tracked.
 assets/databases/ePubs/EGW/**

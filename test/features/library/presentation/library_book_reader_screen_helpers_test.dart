@@ -1908,10 +1908,13 @@ void main() {
               archiveImportedFolders: false,
             );
         expect(importReport.importedCount, 1);
+        final importedLibraryItemId = importReport.entries
+            .singleWhere((entry) => entry.imported && entry.createdNew)
+            .libraryItemId;
 
         final items = await LibraryCatalogService.instance.loadItems();
         importedItem = items.singleWhere(
-          (item) => item.displayTitle == 'The Story of the Seer of Patmos',
+          (item) => item.id == importedLibraryItemId,
         );
       });
 
@@ -2247,9 +2250,7 @@ void main() {
           final itemsAfterRemove = await LibraryCatalogService.instance
               .loadItems();
           expect(
-            itemsAfterRemove.where(
-              (item) => item.displayTitle == 'The Story of the Seer of Patmos',
-            ),
+            itemsAfterRemove.where((item) => item.id == importedItem.id),
             isEmpty,
           );
         },
@@ -2268,9 +2269,7 @@ void main() {
           final itemsAfterRepair = await LibraryCatalogService.instance
               .loadItems();
           expect(
-            itemsAfterRepair.where(
-              (item) => item.displayTitle == 'The Story of the Seer of Patmos',
-            ),
+            itemsAfterRepair.where((item) => item.id == importedItem.id),
             isNotEmpty,
           );
         },

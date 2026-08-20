@@ -217,4 +217,51 @@ void main() {
     );
     expect(find.text('Reference 150'), findsOneWidget);
   });
+
+  testWidgets('reference and verse text follow the reader font scale', (
+    tester,
+  ) async {
+    Future<void> pumpAtScale(double fontScale) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CrossReferencePanel(
+              sourceVerseId: 1,
+              sourceReference: 'Genesis 1:1',
+              fontScale: fontScale,
+              loadItems: (_) async => const [
+                CrossReferenceListItem(
+                  targetVerseId: 2,
+                  reference: 'John 1:1',
+                  text: 'In the beginning was the Word.',
+                ),
+              ],
+              onSelect: (_) {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    for (final scale in [0.8, 1.0, 1.6, 2.0]) {
+      await pumpAtScale(scale);
+      final context = tester.element(find.byType(CrossReferencePanel));
+      final theme = Theme.of(context);
+      final reference = tester.widget<Text>(find.text('John 1:1'));
+      final verse = tester.widget<Text>(
+        find.text('In the beginning was the Word.'),
+      );
+
+      expect(
+        reference.style?.fontSize,
+        closeTo((theme.textTheme.titleSmall?.fontSize ?? 14) * scale, 0.001),
+      );
+      expect(
+        verse.style?.fontSize,
+        closeTo((theme.textTheme.bodyLarge?.fontSize ?? 16) * scale, 0.001),
+      );
+      expect(tester.takeException(), isNull);
+    }
+  });
 }

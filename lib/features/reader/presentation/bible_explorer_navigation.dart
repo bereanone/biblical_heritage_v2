@@ -19,6 +19,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
       context: context,
       sourceVerseId: sourceBlockId,
       sourceReference: '$bookName ${line.chapter}:${line.verse}',
+      fontScale: _fontScale,
     );
     if (targetBlockId == null || targetBlockId == sourceBlockId || !mounted) {
       return;

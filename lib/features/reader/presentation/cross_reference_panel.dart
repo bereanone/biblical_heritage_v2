@@ -57,11 +57,13 @@ Future<int?> showCrossReferencePanel({
   required BuildContext context,
   required int sourceVerseId,
   required String sourceReference,
+  required double fontScale,
   CrossReferenceItemLoader loadItems = loadCrossReferenceItems,
 }) {
   final panel = CrossReferencePanel(
     sourceVerseId: sourceVerseId,
     sourceReference: sourceReference,
+    fontScale: fontScale,
     loadItems: loadItems,
     onSelect: (targetVerseId) => Navigator.of(context).pop(targetVerseId),
   );
@@ -96,12 +98,14 @@ class CrossReferencePanel extends StatefulWidget {
     required this.sourceReference,
     required this.loadItems,
     required this.onSelect,
+    this.fontScale = 1,
   });
 
   final int sourceVerseId;
   final String sourceReference;
   final CrossReferenceItemLoader loadItems;
   final ValueChanged<int> onSelect;
+  final double fontScale;
 
   @override
   State<CrossReferencePanel> createState() => _CrossReferencePanelState();
@@ -126,6 +130,14 @@ class _CrossReferencePanelState extends State<CrossReferencePanel> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final referenceStyle = theme.textTheme.titleSmall?.copyWith(
+      color: theme.colorScheme.primary,
+      fontWeight: FontWeight.w700,
+      fontSize: (theme.textTheme.titleSmall?.fontSize ?? 14) * widget.fontScale,
+    );
+    final verseStyle = theme.textTheme.bodyLarge?.copyWith(
+      fontSize: (theme.textTheme.bodyLarge?.fontSize ?? 16) * widget.fontScale,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -185,16 +197,10 @@ class _CrossReferencePanelState extends State<CrossReferencePanel> {
                   final item = items[index];
                   return ListTile(
                     key: ValueKey('cross-reference-${item.targetVerseId}'),
-                    title: Text(
-                      item.reference,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    title: Text(item.reference, style: referenceStyle),
                     subtitle: Padding(
                       padding: const EdgeInsets.only(top: 4),
-                      child: Text(item.text),
+                      child: Text(item.text, style: verseStyle),
                     ),
                     onTap: item.targetVerseId > 0
                         ? () => widget.onSelect(item.targetVerseId)

@@ -95,34 +95,48 @@ class StartupCoordinator {
 
     onStatus?.call('Scanning for legacy user data...');
     final legacyFiles = await _discoverLegacyWritableFiles();
-    if (legacyFiles.isEmpty) {
+    final hasRealLegacyContent =
+        legacyFiles.isNotEmpty && await _legacyDatabaseHasRealContent();
+    if (legacyFiles.isEmpty || !hasRealLegacyContent) {
+      // A legacy user.db file can exist (and be non-zero bytes purely from
+      // SQLite's own page/schema overhead) without containing any actual
+      // tags, notes, bookmarks, or highlights. Treat that case the same as
+      // no legacy file at all so users on the default library location
+      // never see the 3-way decision prompt for data that isn't really
+      // there to lose.
+      final migrationKey = legacyFiles.isEmpty
+          ? 'no_legacy_found'
+          : 'no_legacy_content';
       onStatus?.call('Preparing fresh user database...');
       await _ensureFreshV2Database(deviceId: deviceId);
       onStatus?.call('Recording startup state...');
       await _recordMigrationRow(
         deviceId: deviceId,
-        migrationKey: 'no_legacy_found',
+        migrationKey: migrationKey,
         startedAt: _utcNow(),
         completedAt: _utcNow(),
         backupPath: null,
-        status: 'no_legacy_found',
+        status: migrationKey,
         errorMessage: null,
         sourceDeviceName: _sourceDeviceName(),
       );
       await LocalSettingsStore.instance.saveMigrationState(<String, Object?>{
-        'migration_key': 'no_legacy_found',
+        'migration_key': migrationKey,
         'from_version': _fromVersion,
         'to_version': _toVersion,
         'started_at': _utcNow(),
         'completed_at': _utcNow(),
         'backup_path': null,
-        'status': 'no_legacy_found',
+        'status': migrationKey,
         'error_message': null,
       });
-      return const StartupSnapshot(
+      return StartupSnapshot(
         phase: StartupPhase.noLegacyFound,
-        message: 'No legacy user data found.',
-        migrationKey: 'no_legacy_found',
+        message: legacyFiles.isEmpty
+            ? 'No legacy user data found.'
+            : 'Legacy user database found but contained no tags, notes, '
+                  'bookmarks, or highlights to preserve.',
+        migrationKey: migrationKey,
       );
     }
 
@@ -900,6 +914,61 @@ class StartupCoordinator {
       }
     }
     return null;
+  }
+
+  /// Legacy content tables that hold irreplaceable user-created data. A
+  /// legacy user.db with rows in none of these has nothing worth the 3-way
+  /// backup/upgrade decision — it's SQLite page overhead, not user content.
+  static const _legacyContentTables = <String>[
+    'hash_tags',
+    'dollar_tags',
+    'at_tags',
+    'highlights',
+    'memory_verses',
+    'history',
+    'navigation_history',
+  ];
+
+  Future<bool> _legacyDatabaseHasRealContent() async {
+    final legacyDbPath = await _primaryLegacyDatabasePath();
+    if (legacyDbPath == null) return false;
+    Database? legacyDb;
+    try {
+      legacyDb = await openDatabase(
+        legacyDbPath,
+        readOnly: true,
+        singleInstance: false,
+      );
+      // Confirm this is actually a readable SQLite database (and see which
+      // tables it really has) before trusting an all-tables-missing result
+      // as "empty" rather than "unreadable/corrupt". A file that isn't a
+      // valid SQLite database at all throws here, falling into the outer
+      // catch, which conservatively treats it as containing data.
+      final tableRows = await legacyDb.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type = 'table'",
+      );
+      final existingTables = tableRows
+          .map((row) => row['name']?.toString() ?? '')
+          .toSet();
+      for (final table in _legacyContentTables) {
+        if (!existingTables.contains(table)) continue;
+        final result = await legacyDb.rawQuery(
+          'SELECT COUNT(*) AS c FROM $table',
+        );
+        final count = (result.firstOrNull?['c'] as int?) ?? 0;
+        if (count > 0) return true;
+      }
+      return false;
+    } catch (error) {
+      debugPrint(
+        'StartupCoordinator: could not inspect legacy database for real '
+        'content ($legacyDbPath): $error. Treating as containing data to '
+        'be safe.',
+      );
+      return true;
+    } finally {
+      await legacyDb?.close();
+    }
   }
 
   Future<Map<String, Object?>> _backUpLegacyFiles({

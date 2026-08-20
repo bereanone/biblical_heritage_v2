@@ -438,31 +438,39 @@ class _LegacyUpgradeDecisionScreen extends StatelessWidget {
                         ],
                         const SizedBox(height: 20),
                         const Text(
-                          'Choose whether to back up and upgrade existing data or continue into the Bible without changing files.',
+                          'This device has tags, notes, or bookmarks saved by an older version of the app. Choose how to handle them:',
                           style: TextStyle(color: Colors.white70),
                         ),
                         const SizedBox(height: 20),
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
-                          children: [
-                            FilledButton(
-                              onPressed: onUpgrade,
-                              child: const Text(
-                                'Back Up and Upgrade Existing Data',
-                              ),
+                        _LegacyDecisionOption(
+                          description:
+                              'Recommended. Backs up your existing tags, notes, and bookmarks, then upgrades them into the new format so you keep everything.',
+                          button: FilledButton(
+                            onPressed: onUpgrade,
+                            child: const Text(
+                              'Back Up and Upgrade Existing Data',
                             ),
-                            OutlinedButton(
-                              onPressed: onFreshStart,
-                              child: const Text(
-                                'Start Fresh but Keep Legacy Backup',
-                              ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _LegacyDecisionOption(
+                          description:
+                              'Backs up your old data to a file first, then opens with a clean, empty library. Your old tags/notes/bookmarks are not carried over automatically, but the backup file is kept in case you want them restored later.',
+                          button: OutlinedButton(
+                            onPressed: onFreshStart,
+                            child: const Text(
+                              'Start Fresh but Keep Legacy Backup',
                             ),
-                            TextButton(
-                              onPressed: onNotNow,
-                              child: const Text('Continue to Bible Only'),
-                            ),
-                          ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _LegacyDecisionOption(
+                          description:
+                              'Skip this decision for now and open the Bible without changing any files. You will be asked again the next time you start the app.',
+                          button: TextButton(
+                            onPressed: onNotNow,
+                            child: const Text('Continue to Bible Only'),
+                          ),
                         ),
                       ],
                     ),
@@ -473,6 +481,31 @@ class _LegacyUpgradeDecisionScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _LegacyDecisionOption extends StatelessWidget {
+  const _LegacyDecisionOption({
+    required this.description,
+    required this.button,
+  });
+
+  final String description;
+  final Widget button;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        button,
+        const SizedBox(height: 4),
+        Text(
+          description,
+          style: const TextStyle(color: Colors.white54, fontSize: 13),
+        ),
+      ],
     );
   }
 }

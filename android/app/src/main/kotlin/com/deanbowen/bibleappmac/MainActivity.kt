@@ -1,4 +1,4 @@
-package com.example.studybible2
+package com.deanbowen.bibleappmac
 
 import android.app.Activity
 import android.content.Context

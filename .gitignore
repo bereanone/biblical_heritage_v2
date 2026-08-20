@@ -4,6 +4,15 @@
 *.pyc
 *.swp
 .DS_Store
+
+# Store API credentials must never live in this repo — they belong in
+# ~/.config/studybible2-release-api/ outside version control. These patterns
+# are a safety net in case a key ever gets copied in by mistake.
+*.p8
+*-service-account.json
+asc_key_id.txt
+asc_issuer_id.txt
+tool/store_api/credentials/
 .atom/
 .build/
 .buildlog/
@@ -86,6 +95,7 @@ assets/databases/eLibrary.db.bak
 assets/databases/*before-scans-import*
 assets/databases/Databases/
 assets/databases/Graphics/
+test/Databases/
 assets/databases/download_reports/
 assets/scans/
 EPUB_CANONICAL_BATCH_REPORT_*.md

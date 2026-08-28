@@ -4789,16 +4789,42 @@ int? _firstMeaningfulSectionIndex(
   List<PioneerImportSection> sections, {
   required String bookTitle,
 }) {
+  int? firstNonFrontMatterLabelIndex;
   for (var index = 0; index < sections.length; index++) {
     final section = sections[index];
-    if (libraryIsMeaningfulReadingSection(
-      title: section.title,
-      href: section.href,
-      paragraphs: section.paragraphs,
-      bookTitle: bookTitle,
-    )) {
+    // A section can be full of real, substantial prose and still not be a
+    // chapter — "Information about this Book" is the clearest case: it
+    // easily clears libraryIsMeaningfulReadingSection's paragraph-length bar
+    // but must never be treated as the book's first chapter. Gate on the
+    // same front-matter label check the reader itself uses
+    // (`_firstRealContentNavigationHref` in library_book_reader_screen.dart)
+    // before paragraph content is even considered — otherwise the About
+    // page gets picked as "chapter one" and every real chapter after it
+    // ends up recorded as front matter instead.
+    final looksLikeFrontMatterByLabel =
+        libraryIsFrontMatterOpeningLabel(section.title) ||
+        libraryIsFrontMatterOpeningLabel(
+          p.basenameWithoutExtension(section.href),
+        );
+    if (!looksLikeFrontMatterByLabel) {
+      firstNonFrontMatterLabelIndex ??= index;
+    }
+    if (!looksLikeFrontMatterByLabel &&
+        libraryIsMeaningfulReadingSection(
+          title: section.title,
+          href: section.href,
+          paragraphs: section.paragraphs,
+          bookTitle: bookTitle,
+        )) {
       return index;
     }
+  }
+  // If nothing passed the full "meaningful" bar (e.g. every chapter's
+  // paragraph extraction came back thin), prefer the first section that at
+  // least isn't itself front-matter-labeled over blindly picking index 0 —
+  // index 0 is very often the cover or About page.
+  if (firstNonFrontMatterLabelIndex != null) {
+    return firstNonFrontMatterLabelIndex;
   }
   return sections.isEmpty ? null : 0;
 }

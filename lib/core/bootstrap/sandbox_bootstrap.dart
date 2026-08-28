@@ -95,9 +95,12 @@ class SandboxBootstrap {
       return;
     }
     sqfliteFfiInit();
-    if (!identical(databaseFactory, databaseFactoryFfi)) {
-      databaseFactory = databaseFactoryFfi;
-    }
+    // Reading the `databaseFactory` getter before it has ever been assigned
+    // throws (sqflite_common has no default value on desktop platforms,
+    // unlike the auto-registered native Android/iOS/macOS plugins) — this
+    // was crashing every Windows launch. `_sqfliteInitialized` above already
+    // guarantees this assignment runs at most once, so just assign directly.
+    databaseFactory = databaseFactoryFfi;
     _sqfliteInitialized = true;
   }
 

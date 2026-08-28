@@ -240,9 +240,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     });
   }
 
-  double? _sectionDocumentTop(int index) {
-    final position = _bodyScrollPosition;
-    if (position == null) return null;
+  /// The section's current on-screen distance from the viewport's top edge,
+  /// or null if either isn't laid out yet. Zero means its leading edge is
+  /// exactly at the top of the viewport.
+  double? _sectionViewportOffset(int index) {
     final viewportBox =
         _continuousScrollViewKey.currentContext?.findRenderObject()
             as RenderBox?;
@@ -255,9 +256,16 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         !sectionBox.attached) {
       return null;
     }
-    return position.pixels +
-        sectionBox.localToGlobal(Offset.zero).dy -
+    return sectionBox.localToGlobal(Offset.zero).dy -
         viewportBox.localToGlobal(Offset.zero).dy;
+  }
+
+  double? _sectionDocumentTop(int index) {
+    final position = _bodyScrollPosition;
+    if (position == null) return null;
+    final onScreenOffset = _sectionViewportOffset(index);
+    if (onScreenOffset == null) return null;
+    return position.pixels + onScreenOffset;
   }
 
   bool _scrollContinuousDocument(double delta) {
@@ -1901,18 +1909,52 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     });
   }
 
-  void _scrollToSectionUnit(int index) {
+  void _scrollToSectionUnit(
+    int index, {
+    int attempt = 0,
+    int? chapterGeneration,
+  }) {
+    final generation = chapterGeneration ?? _chapterGeneration;
+    if (generation != _chapterGeneration) return;
     final itemIndex = _readableSectionIndices.indexOf(index);
     if (itemIndex >= 0 && _itemScrollController.isAttached) {
       _itemScrollController.jumpTo(index: itemIndex, alignment: 0);
+      if (attempt < 6) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || generation != _chapterGeneration) return;
+          // jumpTo can silently fail to land when the target item hasn't
+          // been laid out yet — most visible on macOS jumping far across a
+          // long compiled work like Early Writings. Verify the section
+          // actually reached the top of the viewport and retry if not.
+          final onScreenOffset = _sectionViewportOffset(index);
+          if (onScreenOffset == null || onScreenOffset.abs() > 4) {
+            _scrollToSectionUnit(
+              index,
+              attempt: attempt + 1,
+              chapterGeneration: generation,
+            );
+          }
+        });
+      }
       return;
     }
     final context = _sectionUnitKeys[index]?.currentContext;
-    if (context == null) {
-      _scrollToTarget(null);
+    if (context != null) {
+      Scrollable.ensureVisible(context, alignment: 0, duration: Duration.zero);
       return;
     }
-    Scrollable.ensureVisible(context, alignment: 0, duration: Duration.zero);
+    if (attempt < 6) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || generation != _chapterGeneration) return;
+        _scrollToSectionUnit(
+          index,
+          attempt: attempt + 1,
+          chapterGeneration: generation,
+        );
+      });
+      return;
+    }
+    _scrollToTarget(null, chapterGeneration: generation);
   }
 
   LibraryBookSection? get _currentSection {
@@ -1985,7 +2027,14 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       if (!_sectionIsReadableForAutomaticContinuation(index)) continue;
       final content = _contentSectionForIndex(index);
       if (content == null) continue;
-      final identity = _sectionKey(content.entryName);
+      // One XHTML spine item can legitimately be split into several reader
+      // sections (chapter plus anchored subheadings). Deduplicating by href
+      // alone drops every subsection after the first and makes its TOC target
+      // impossible to mount. Title distinguishes those real boundaries while
+      // still collapsing duplicate structural/readable representations.
+      final identity =
+          '${_sectionKey(content.entryName)}|'
+          '${_normalizeReaderLabel(content.title)}';
       if (!seenContentIdentities.add(identity)) continue;
       result.add(index);
     }
@@ -2591,9 +2640,12 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     final effectiveNavIndex = normalizedNavItem == null
         ? navIndex
         : navigationItems.indexWhere((nav) => nav.id == normalizedNavItem.id);
-    final effectiveSectionIndex = _sectionIndexForNavigationItem(
+    final matchedSectionIndex = _sectionIndexForNavigationItem(
       effectiveNavItem,
     );
+    final effectiveSectionIndex = matchedSectionIndex == null
+        ? null
+        : _readableSectionIndexForSelection(matchedSectionIndex);
     final targetSection =
         effectiveSectionIndex != null &&
             effectiveSectionIndex >= 0 &&
@@ -2636,15 +2688,60 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     });
     _publishLiveSectionLocation(generation);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && generation == _chapterGeneration) {
-        if ((shouldJumpToSectionStart || targetKey == null) &&
-            effectiveSectionIndex != null) {
-          _selectSection(effectiveSectionIndex);
+      if (!mounted || generation != _chapterGeneration) return;
+
+      // A block inside another section cannot be resolved until that section
+      // has first been brought into ScrollablePositionedList's mounted range.
+      // This is especially visible when navigating backwards to the opening
+      // chapters of a book from a later chapter on macOS.
+      if (changesSection) {
+        _scrollToSectionUnit(
+          effectiveSectionIndex,
+          chapterGeneration: generation,
+        );
+        if (shouldJumpToSectionStart || targetKey == null) {
+          _pendingBodyScrollTargetKey = null;
           return;
         }
-        _scrollToTarget(targetKey);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || generation != _chapterGeneration) return;
+          _scrollToTarget(targetKey, chapterGeneration: generation);
+        });
+        return;
       }
+
+      if ((shouldJumpToSectionStart || targetKey == null) &&
+          effectiveSectionIndex != null) {
+        _scrollToSectionUnit(
+          effectiveSectionIndex,
+          chapterGeneration: generation,
+        );
+        _pendingBodyScrollTargetKey = null;
+        return;
+      }
+      _scrollToTarget(targetKey, chapterGeneration: generation);
     });
+  }
+
+  int _readableSectionIndexForSelection(int sectionIndex) {
+    if (_readableSectionIndices.isEmpty ||
+        _readableSectionIndices.contains(sectionIndex)) {
+      return sectionIndex;
+    }
+    final targetSection = _contentSectionForIndex(sectionIndex);
+    final targetEntryName = targetSection?.entryName;
+    if (targetSection == null ||
+        targetEntryName == null ||
+        targetEntryName.trim().isEmpty) {
+      return sectionIndex;
+    }
+    final targetKey = _sectionKey(targetEntryName);
+    final targetTitle = _normalizeReaderLabel(targetSection.title);
+    return _readableSectionIndices.firstWhere((candidate) {
+      final candidateSection = _contentSectionForIndex(candidate);
+      return _sectionKey(candidateSection?.entryName ?? '') == targetKey &&
+          _normalizeReaderLabel(candidateSection?.title ?? '') == targetTitle;
+    }, orElse: () => sectionIndex);
   }
 
   double _pageScrollStep() {
@@ -2663,7 +2760,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     final renderObject = targetContext.findRenderObject();
     if (renderObject == null) return null;
     final viewport = RenderAbstractViewport.of(renderObject);
-    return viewport.getOffsetToReveal(renderObject, 0.0).offset;
+    return viewport.getOffsetToReveal(renderObject, 0).offset;
   }
 
   List<_ReaderHeadingTarget> _headingTargetsForCurrentSection() {
@@ -2994,7 +3091,19 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     final generation = chapterGeneration ?? _chapterGeneration;
     if (generation != _chapterGeneration) return;
     final position = _bodyScrollPosition;
-    if (position == null) return;
+    if (position == null) {
+      if (attempt < 6) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || generation != _chapterGeneration) return;
+          _scrollToTarget(
+            targetKey,
+            attempt: attempt + 1,
+            chapterGeneration: generation,
+          );
+        });
+      }
+      return;
+    }
     final resolvedTargetKey = targetKey ?? _pendingBodyScrollTargetKey;
     final targetContext = resolvedTargetKey == null
         ? null
@@ -3005,22 +3114,16 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       if (target != null) {
         debugPrint('search_target_widget_found ${target.diagnosticSummary}');
       }
-      final targetOffset = _scrollOffsetForContext(targetContext);
-      final scroll = targetOffset == null
-          ? Scrollable.ensureVisible(
-              targetContext,
-              alignment: 0.08,
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeInOut,
-            )
-          : position.animateTo(
-              (targetOffset - position.viewportDimension * 0.08).clamp(
-                position.minScrollExtent,
-                position.maxScrollExtent,
-              ),
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeInOut,
-            );
+      // ScrollablePositionedList can shift its internal origin when jumping
+      // between distant items. A cached ScrollPosition offset is therefore
+      // not a reliable coordinate for a newly mounted block on macOS. Reveal
+      // the actual render object through its owning scrollable instead.
+      final scroll = Scrollable.ensureVisible(
+        targetContext,
+        alignment: 0.08,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeInOut,
+      );
       _pendingBodyScrollTargetKey = null;
       unawaited(
         scroll.then((_) {
@@ -3278,6 +3381,20 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     final visited = <String>{};
     final visibleTargetIds = <String>{};
 
+    bool hasReadableDestination(LibraryCatalogNavigationItem item) {
+      final sectionIndex = _sectionIndexForNavigationItem(item);
+      if (sectionIndex != null &&
+          _sectionIsReadableForAutomaticContinuation(sectionIndex)) {
+        return true;
+      }
+      return libraryReaderFirstReadableDescendant(
+            navItem: item,
+            tree: tree,
+            sections: _sections,
+          ) !=
+          null;
+    }
+
     void visit(LibraryCatalogNavigationItem item, int depth) {
       if (!visited.add(item.id)) return;
       final visibleItem = libraryReaderVisibleContentsNavigationItem(
@@ -3286,7 +3403,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         sections: _sections,
       );
       final shouldDisplay =
-          visibleItem != null && !_isMeaninglessNumericNavigationLabel(item);
+          visibleItem != null &&
+          hasReadableDestination(visibleItem) &&
+          !_isMeaninglessNumericNavigationLabel(item);
       if (shouldDisplay) {
         if (!visibleTargetIds.add(visibleItem.id)) {
           return;

@@ -74,7 +74,47 @@ String? libraryReaderContentsTargetKeyForNavigationItem({
     navItem: navItem,
   );
   if (sectionIndex == null) return null;
-  return libraryReaderSectionStartTargetKey(sections[sectionIndex].blocks);
+  final blocks = sections[sectionIndex].blocks;
+
+  final anchorId = navItem.anchorId?.trim();
+  if (anchorId != null && anchorId.isNotEmpty) {
+    for (var index = 0; index < blocks.length; index++) {
+      final block = blocks[index];
+      if (block.anchorId?.trim() == anchorId) {
+        return _libraryReaderBlockTargetKey(block, index);
+      }
+    }
+  }
+
+  // Some books' reading-pane blocks are sourced from a separately imported
+  // text-block table whose bodyOrder/paragraph numbering does not share the
+  // same domain as the navigation items' EPUB-derived bodyOrder, so a numeric
+  // bodyOrder match can land on an unrelated block. Heading text is stable
+  // across both sources, so match on that instead.
+  final normalizedLabel = _normalizeReaderLabel(navItem.label);
+  if (normalizedLabel.isNotEmpty) {
+    for (var index = 0; index < blocks.length; index++) {
+      final block = blocks[index];
+      if (!block.isHeading) continue;
+      if (_normalizeReaderLabel(block.text) == normalizedLabel) {
+        return _libraryReaderBlockTargetKey(block, index);
+      }
+    }
+  }
+
+  return libraryReaderSectionStartTargetKey(blocks);
+}
+
+String _libraryReaderBlockTargetKey(LibraryBookBlock block, int index) {
+  final anchorId = block.anchorId?.trim();
+  if (anchorId != null && anchorId.isNotEmpty) {
+    return 'anchor:${_normalizeBlockKey(anchorId)}';
+  }
+  final bodyOrder = block.bodyOrder;
+  if (bodyOrder != null) {
+    return 'body:$bodyOrder';
+  }
+  return 'block:$index';
 }
 
 bool libraryReaderNavigationItemTargetsSectionStart({
@@ -269,20 +309,78 @@ int? _librarySectionIndexForNavigationItem({
   final href = _cleanNavigationHref(navItem.href);
   if (href != null) {
     final normalizedHref = href.toLowerCase();
+    final matchingIndices = <int>[];
     for (var index = 0; index < sections.length; index++) {
       if (_hrefMatchesSection(sections[index].entryName, normalizedHref)) {
+        matchingIndices.add(index);
+      }
+    }
+    final resolved = _bestNavigationSectionMatch(
+      sections: sections,
+      matchingIndices: matchingIndices,
+      navItem: navItem,
+    );
+    if (resolved != null) return resolved;
+  }
+
+  if (navItem.spineIndex != null) {
+    final matchingIndices = <int>[];
+    for (var index = 0; index < sections.length; index++) {
+      if (sections[index].spineIndex == navItem.spineIndex) {
+        matchingIndices.add(index);
+      }
+    }
+    return _bestNavigationSectionMatch(
+      sections: sections,
+      matchingIndices: matchingIndices,
+      navItem: navItem,
+    );
+  }
+
+  return null;
+}
+
+int? _bestNavigationSectionMatch({
+  required List<LibraryBookSection> sections,
+  required List<int> matchingIndices,
+  required LibraryCatalogNavigationItem navItem,
+}) {
+  if (matchingIndices.isEmpty) return null;
+  if (matchingIndices.length == 1) return matchingIndices.first;
+
+  final anchorId = navItem.anchorId?.trim();
+  if (anchorId != null && anchorId.isNotEmpty) {
+    final normalizedAnchor = _normalizeBlockKey(anchorId);
+    for (final index in matchingIndices) {
+      if (sections[index].blocks.any(
+        (block) =>
+            _normalizeBlockKey(block.anchorId?.trim() ?? '') ==
+            normalizedAnchor,
+      )) {
         return index;
       }
     }
   }
 
-  if (navItem.spineIndex != null) {
-    for (var index = 0; index < sections.length; index++) {
-      if (sections[index].spineIndex == navItem.spineIndex) return index;
+  final normalizedLabel = _normalizeReaderLabel(navItem.label);
+  if (normalizedLabel.isNotEmpty) {
+    for (final index in matchingIndices) {
+      if (_normalizeReaderLabel(sections[index].title) == normalizedLabel) {
+        return index;
+      }
+    }
+    for (final index in matchingIndices) {
+      if (sections[index].blocks.any(
+        (block) =>
+            block.isHeading &&
+            _normalizeReaderLabel(block.text) == normalizedLabel,
+      )) {
+        return index;
+      }
     }
   }
 
-  return null;
+  return matchingIndices.first;
 }
 
 String _normalizeReaderLabel(String value) {
@@ -1008,8 +1106,11 @@ Color _readerSubduedColor(ThemeData theme, bool isNight) {
 
 Color _readerSelectedColor(ThemeData theme, bool isNight) {
   final base = _readerSurfaceHighColor(theme, isNight);
+  // A reader scanning a long, scrolling Contents list needs the current
+  // position to register at a glance, not just on close inspection — a
+  // light 16% tint read as barely-there in practice.
   return Color.alphaBlend(
-    theme.colorScheme.primary.withValues(alpha: 0.16),
+    theme.colorScheme.primary.withValues(alpha: 0.34),
     base,
   );
 }

@@ -639,6 +639,137 @@ void main() {
     );
   });
 
+  test('TOC headings sharing one EPUB section resolve to their own blocks', () {
+    final section = LibraryBookSection(
+      entryName: 'OEBPS/early-writings.xhtml',
+      title: 'Early Writings',
+      paragraphs: const <String>['Preface text.', 'The vision text.'],
+      blocks: const <LibraryBookBlock>[
+        LibraryBookBlock(
+          html: '<h1>Early Writings</h1>',
+          text: 'Early Writings',
+          kind: 'heading',
+          bodyOrder: 1,
+        ),
+        LibraryBookBlock(
+          html: '<h2>Preface</h2>',
+          text: 'Preface',
+          kind: 'heading',
+          bodyOrder: 17,
+        ),
+        LibraryBookBlock(
+          html: '<h2>My First Vision</h2>',
+          text: 'My First Vision',
+          kind: 'heading',
+          bodyOrder: 42,
+        ),
+      ],
+      spineIndex: 3,
+    );
+    final navItem = LibraryCatalogNavigationItem(
+      id: 'first-vision',
+      parentId: null,
+      label: 'My First Vision',
+      href: 'OEBPS/early-writings.xhtml',
+      anchorId: null,
+      spineIndex: 3,
+      sortOrder: 8,
+      depth: 0,
+      navType: 'toc',
+      contentKind: 'body_subsection',
+      isFrontMatter: false,
+      isBodyStart: false,
+      // Deliberately from the TOC ordering domain, not the text-block domain.
+      bodyOrder: 8,
+    );
+
+    expect(
+      libraryReaderContentsTargetKeyForNavigationItem(
+        navItem: navItem,
+        sections: [section],
+      ),
+      'body:42',
+    );
+    expect(
+      libraryReaderNavigationItemTargetsSectionStart(
+        navItem: navItem,
+        sections: [section],
+      ),
+      isFalse,
+    );
+  });
+
+  test('subheadings split into sections with one href resolve by anchor', () {
+    const sharedHref = 'OEBPS/content02.xhtml';
+    const sections = <LibraryBookSection>[
+      LibraryBookSection(
+        entryName: sharedHref,
+        title: 'Historical Prologue',
+        paragraphs: <String>['Opening text.'],
+        blocks: <LibraryBookBlock>[
+          LibraryBookBlock(
+            html: '<h2>Historical Prologue</h2>',
+            text: 'Historical Prologue',
+            kind: 'heading',
+            anchorId: 'content02_heading_1_historical_prologue',
+          ),
+        ],
+        spineIndex: 7,
+      ),
+      LibraryBookSection(
+        entryName: sharedHref,
+        title: 'The Great Advent Awakening',
+        paragraphs: <String>['Awakening text.'],
+        blocks: <LibraryBookBlock>[
+          LibraryBookBlock(
+            html: '<h4>The Great Advent Awakening</h4>',
+            text: 'The Great Advent Awakening',
+            kind: 'heading',
+            anchorId: 'content02_heading_6_the_great_advent_awakening',
+          ),
+        ],
+        spineIndex: 7,
+      ),
+      LibraryBookSection(
+        entryName: sharedHref,
+        title: 'Truths Confirmed by Vision',
+        paragraphs: <String>['Confirmation text.'],
+        blocks: <LibraryBookBlock>[
+          LibraryBookBlock(
+            html: '<h4>Truths Confirmed by Vision</h4>',
+            text: 'Truths Confirmed by Vision',
+            kind: 'heading',
+            anchorId: 'content02_heading_40_truths_confirmed_by_vision',
+          ),
+        ],
+        spineIndex: 7,
+      ),
+    ];
+    const navItem = LibraryCatalogNavigationItem(
+      id: 'truths-confirmed',
+      parentId: 'historical-prologue',
+      label: 'Truths Confirmed by Vision',
+      href: sharedHref,
+      anchorId: 'content02_heading_40_truths_confirmed_by_vision',
+      spineIndex: 7,
+      sortOrder: 3007,
+      depth: 1,
+      navType: 'body',
+      contentKind: 'body_subsection',
+      isFrontMatter: false,
+      isBodyStart: false,
+      bodyOrder: 40,
+    );
+
+    expect(
+      libraryReaderContentsTargetKeyForNavigationItem(
+        navItem: navItem,
+        sections: sections,
+      ),
+      'anchor:content02_heading_40_truths_confirmed_by_vision',
+    );
+  });
+
   test('SSP-style chapter navigation targets the real section starts', () {
     final preface = LibraryBookSection(
       entryName: 'ssp.xhtml',

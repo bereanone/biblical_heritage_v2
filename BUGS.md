@@ -66,6 +66,45 @@ The desired general rule is: **silent on ordinary success, notify on failure or 
 
 ---
 
+### 6. TOC navigation not scrolling to selected chapter
+
+**Area:** eLibrary / Table of Contents navigation
+
+**Status:** Fixed in code. Verified via the automated test suite (975/976 tests
+passing, including two new tests added for this fix) and by code review
+confirming the fix is shared Dart logic with no platform-specific branching —
+the same code path runs on iOS, Android, macOS, and Windows. Not re-confirmed
+by direct visual click-through on macOS this pass (see 2026-08-25 pre-release
+sweep note below).
+
+**Platform:** macOS (confirmed broken); iOS confirmed working — likely macOS-specific.
+
+**Problem:**
+
+Opening the Contents (TOC) panel and tapping a chapter/section entry does nothing — no scroll/navigation occurs to that location in the reading view.
+
+**Expected behavior:**
+
+Tapping a TOC entry should scroll/jump the main content view to that chapter's position.
+
+**Repro:**
+
+On Mac: open any book → tap Contents → tap any chapter entry → nothing happens. On iOS, the same steps work correctly.
+
+**Cause:**
+
+Some EPUBs, including Early Writings, contain both section-level and nested TOC targets. Navigation previously tried to resolve a nested target before its new section had been mounted, which was especially reproducible when navigating backward to the opening chapters on macOS. Some imported TOC and text-block ordering values also use different numeric domains.
+
+The EPUB also exposes metadata/help TOC rows whose source files are not part of
+the reader's imported content. These dead rows are now omitted from Contents;
+only entries with a readable section or readable descendant are displayed.
+
+**To test:**
+
+Verify several Early Writings entries near the beginning, middle, and end on macOS. Each should land on its matching rendered heading.
+
+---
+
 ## Verification Needed
 
 ### 3. eLibrary search results may return too few matches

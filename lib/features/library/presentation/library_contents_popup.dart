@@ -666,50 +666,65 @@ class _ContentsPopupSheetState extends State<_ContentsPopupSheet> {
                               ),
                               child: KeyedSubtree(
                                 key: _keyFor(entry.item.id),
-                                child: Material(
-                                  color: selected
-                                      ? libraryReaderSelectedColor(
-                                          theme,
-                                          isNight,
-                                        )
-                                      : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: InkWell(
-                                    borderRadius: BorderRadius.circular(12),
-                                    onTap: () => Navigator.of(
-                                      context,
-                                    ).pop(_tapTargetForEntry(index)),
-                                    child: Padding(
-                                      padding: EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                        vertical:
-                                            libraryContentsPopupTocRowVerticalPadding(
-                                              readerFontScale,
-                                              isHeading: false,
-                                            ),
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            navigationDisplayLabel(
-                                              entry.item,
-                                              devotionalMode:
-                                                  widget.isDevotionalNavigation,
-                                            ),
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            style:
-                                                libraryContentsPopupTocRowTextStyle(
-                                                  theme.textTheme.bodyLarge,
-                                                  readerFontScale,
-                                                  isHeading: false,
-                                                  isSelected: selected,
-                                                  color: sheetTextColor,
-                                                ),
+                                child: Container(
+                                  decoration: selected
+                                      ? BoxDecoration(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
                                           ),
-                                        ],
+                                          border: Border(
+                                            left: BorderSide(
+                                              color: theme.colorScheme.primary,
+                                              width: 4,
+                                            ),
+                                          ),
+                                        )
+                                      : null,
+                                  child: Material(
+                                    color: selected
+                                        ? libraryReaderSelectedColor(
+                                            theme,
+                                            isNight,
+                                          )
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(12),
+                                      onTap: () => Navigator.of(
+                                        context,
+                                      ).pop(_tapTargetForEntry(index)),
+                                      child: Padding(
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical:
+                                              libraryContentsPopupTocRowVerticalPadding(
+                                                readerFontScale,
+                                                isHeading: false,
+                                              ),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              navigationDisplayLabel(
+                                                entry.item,
+                                                devotionalMode: widget
+                                                    .isDevotionalNavigation,
+                                              ),
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style:
+                                                  libraryContentsPopupTocRowTextStyle(
+                                                    theme.textTheme.bodyLarge,
+                                                    readerFontScale,
+                                                    isHeading: false,
+                                                    isSelected: selected,
+                                                    color: sheetTextColor,
+                                                  ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),

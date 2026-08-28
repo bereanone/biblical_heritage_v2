@@ -135,6 +135,34 @@ If current behavior is correct, mark this item fixed.
 
 ## Fixed
 
+### eLibrary TOC (legacy reader) showing no nesting at all for books with real sub-chapters (Early Writings, SDA Bible Commentary, etc.)
+
+**Area:** eLibrary / Table of Contents navigation (legacy `library_book_reader_screen.dart` / `library_contents_popup.dart` — used as the canonical-reader fallback, and for any book not yet eligible for canonical)
+
+**Status:** Fixed (code + live data repair), 2026-08-27.
+
+**Platform:** All (shared Dart parsing code — no platform branching).
+
+**Problem:**
+
+Books whose real embedded TOC/navMap has genuine multi-level nesting — e.g. Early Writings' "Experience and Views" section containing "My First Vision," "Subsequent Visions," etc., or the SDA Bible Commentary volumes' "Genesis" containing "Chapter 1," "Chapter 2," etc. — rendered as a completely flat list in this reader. Every nested chapter showed at the top level instead of grouped under its section.
+
+**Cause:**
+
+`_extractNavigationEntriesFromDocument` in `commentary_research_library_service_epub_parsing.dart` estimates a nesting `depth` for every anchor parsed out of a book's embedded TOC document (by counting unclosed `<ol>` tags), but always hard-coded `parent_id: null` regardless of that depth. The Contents UI (`buildLibraryNavigationTree`) builds its entire tree from `parent_id`, ignoring the `depth` column — so real nesting was silently discarded at import time. This predates the 2026-08-25 front-matter/sort-order work; it only became visible once a book with genuine multi-level TOC nesting was checked closely.
+
+**Fix:**
+
+`_extractNavigationEntriesFromDocument` now walks entries in document order with a depth stack, linking each entry to the nearest preceding entry with a smaller depth (the same shape of fix as the sort-order tree-walk). `commentary_research_library_service_epub_indexing.dart`'s `rootsByHref` construction was adjusted to stop excluding now-parented entries, so a nested chapter still anchors its own spine page's body content (previously a no-op check, since parent_id was always null before this fix — leaving it as-is would have spawned duplicate entries for every nested chapter).
+
+**Live data repair (2026-08-27):** Built `tool/nav_parent_link_repair/run_nav_parent_link_repair.dart`, which repairs already-imported rows by recovering each entry's original document order from the numeric suffix baked into its `id` and re-running the same depth-stack walk. Backed up both databases (SHA-256 verified), dry-ran against copies first, then applied it live to **both** the macOS database (macOS app fully quit first) and the Android device's database (pulled via adb, repaired, app force-stopped, pushed back, re-verified via a fresh pull): 48 titles affected on each, 3,584 navigation rows re-parented, `PRAGMA integrity_check` passed on both, and both verified via direct query afterward (Early Writings' 73 nested chapters correctly parented under their 3 sections).
+
+**Also applied to Android (2026-08-27):** last night's sort-order collision repair (see entry below) had never actually reached Android's live database — the report file labeled "android" turned out to be a byte-for-byte duplicate of the macOS report, not a real run against the device. Ran it for real this time: 97/97 items, 14,190 rows renumbered, verified zero remaining collisions on-device after relaunching the app.
+
+**Not yet checked:** iOS and Windows local databases weren't reachable from this session. Same symptom would need the same two repair tools (`tool/nav_parent_link_repair/` then `tool/nav_sort_order_repair/`) run against their own `eLibrary.db` — check with the affected-item queries in each script before assuming it's needed.
+
+---
+
 ### eLibrary TOC showing front matter interleaved with chapters ("scrambled" ordering)
 
 **Area:** eLibrary / Table of Contents navigation

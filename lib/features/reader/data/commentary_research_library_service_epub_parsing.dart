@@ -487,6 +487,15 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
       caseSensitive: false,
       dotAll: true,
     );
+    // Tracks the chain of ancestor entries by nesting depth (from
+    // `_estimateNavDepth`, which counts unclosed `<ol>` tags) so a heading
+    // nested inside a real embedded TOC/navMap's own <ol><li> structure gets
+    // linked to its enclosing entry, not left parentless. Without this, every
+    // entry from this source ended up with `parentId: null` regardless of its
+    // estimated depth, so books with genuine multi-level TOCs (e.g. Early
+    // Writings' "Experience and Views" section and its nested chapters)
+    // always rendered as a flat list.
+    final ancestorStack = <MapEntry<int, String>>[];
     for (final match in anchorPattern.allMatches(navigationSource)) {
       final href = match.group(1)?.trim() ?? '';
       final label = _stripHtml(match.group(2) ?? '').trim();
@@ -498,17 +507,23 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
       final anchorId = hrefParts.length > 1
           ? hrefParts.sublist(1).join('#')
           : null;
+      final depth = _estimateNavDepth(navigationSource, match.start);
+      while (ancestorStack.isNotEmpty && ancestorStack.last.key >= depth) {
+        ancestorStack.removeLast();
+      }
+      final parentId = ancestorStack.isEmpty ? null : ancestorStack.last.value;
+      final id = 'nav_${_slug(libraryItemId)}_${_slug(basePath)}_$sortOrder';
       entries.add(
         _NavigationEntryDraft(
-          id: 'nav_${_slug(libraryItemId)}_${_slug(basePath)}_$sortOrder',
+          id: id,
           libraryItemId: libraryItemId,
-          parentId: null,
+          parentId: parentId,
           label: label,
           href: resolvedPath,
           anchorId: anchorId,
           spineIndex: null,
           sortOrder: sortOrder,
-          depth: _estimateNavDepth(navigationSource, match.start),
+          depth: depth,
           navType: navType,
           contentKind: _navigationContentKind(
             label: label,
@@ -520,6 +535,7 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
           deviceId: deviceId,
         ),
       );
+      ancestorStack.add(MapEntry(depth, id));
       sortOrder += 1;
     }
     return entries;

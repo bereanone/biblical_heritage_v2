@@ -692,9 +692,15 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
       }
     }
 
+    // Every TOC/navMap entry is eligible to anchor its own file's body
+    // content here, regardless of whether it's nested under another entry
+    // for display purposes (a nested chapter still owns its own spine page).
+    // `putIfAbsent` keeps the first entry seen per href, same as before this
+    // comment was added, back when every entry from that source had a null
+    // parentId and this check was a no-op.
     final rootsByHref = <String, _NavigationEntryDraft>{};
     for (final entry in entries) {
-      if (entry.parentId != null || entry.href == null) continue;
+      if (entry.href == null) continue;
       rootsByHref.putIfAbsent(_navigationHrefKey(entry.href!), () => entry);
     }
 

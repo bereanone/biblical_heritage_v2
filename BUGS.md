@@ -174,6 +174,22 @@ If current behavior is correct, mark this item fixed.
 
 ## Fixed
 
+### eLibrary Contents showing no nesting or current-location highlight for EGW official EPUBs (Early Writings, etc.)
+
+**Area:** eLibrary / canonical reader Contents dialog
+
+**Status:** Partially fixed, 2026-08-27. Reported live on Android as "no nested TOC in EW, nor can I see on the TOC any highlighted indication of my current location."
+
+**Real root cause (this took most of the investigation to pin down):** official EGW EPUB downloads like Early Writings don't actually use `library_book_reader_screen.dart` / `library_contents_popup.dart` at all — `supportsCanonicalEpubReader` routes them into a completely separate reader, `CanonicalLibraryReaderScreen` (`canonical_library_reader.dart`), built on its own storage table (`library_document_blocks`), independent of `library_navigation_items`. All of the `library_navigation_items` work below (parent-link bug, sort-order repair) is real and still worth having — it's what the *legacy* reader uses, and canonical prep still falls back to it when a book isn't (yet) eligible — but it isn't what actually renders Early Writings' Contents. That dialog (`_openContents` in `canonical_library_reader.dart`) was just `headings.map((h) => ListTile(title: Text(h.plainText)))` — a flat list, no depth, no indication of current position, by omission rather than data corruption.
+
+**Fix:** `_openContents` now indents each heading by its `heading_role` (h2/'chapter' → depth 0, h3/'section' → depth 1, h4-h6/'minor' → depth 2) and highlights whichever heading the current reading position falls under (bold, colored text, left accent border) — the same visual treatment the legacy popup already had. Verified live on the device: within-chapter sub-headings ("Texts Referred to on Preceding Page" under "My First Vision") now nest correctly.
+
+**Known remaining gap:** `heading_role` only reflects structure *within* a single spine file (from that file's own `<h1>`–`<h6>` tags). It has no idea that "My First Vision," "Subsequent Visions," etc. are conceptually children of the "Experience and Views" *section* — each is its own spine file, and the real parent/child relationship for that only exists in `library_navigation_items` (which this reader doesn't consult). So EW's top-level chapter list is complete and now internally-nested, but the top-level items don't yet group under their section headers the way they did in the legacy reader's TOC. Closing that gap means cross-referencing `library_navigation_items`'s (now-correct) parent/child tree with the canonical `library_document_blocks` headings — a real follow-up, not something to guess at further without your input on priority.
+
+Also inconsistent: a few sub-headings detected by the canonicalizer's *heuristic* classifier (not a real `<h#>` tag — e.g. "About the Author," "Further Links" inside `aboutbook.xhtml`) get `heading_role: 'chapter'` instead of `'section'`, so they don't indent even though they're conceptually nested. Same underlying limitation, not something this pass fixed.
+
+---
+
 ### eLibrary TOC (legacy reader) showing no nesting at all for books with real sub-chapters (Early Writings, SDA Bible Commentary, etc.)
 
 **Area:** eLibrary / Table of Contents navigation (legacy `library_book_reader_screen.dart` / `library_contents_popup.dart` — used as the canonical-reader fallback, and for any book not yet eligible for canonical)

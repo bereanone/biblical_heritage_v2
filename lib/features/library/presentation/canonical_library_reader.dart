@@ -1050,6 +1050,17 @@ class _CanonicalLibraryReaderScreenState
   Future<void> _openContents() async {
     final headings = await widget.repository.loadHeadings(widget.item.id);
     if (!mounted) return;
+    final currentOrder = _location?.block.displayOrder;
+    // The most recent heading at or before the current reading position is
+    // the one the reader is inside of right now.
+    LibraryDocumentBlock? currentHeading;
+    if (currentOrder != null) {
+      for (final heading in headings) {
+        if (heading.displayOrder > currentOrder) break;
+        currentHeading = heading;
+      }
+    }
+    final theme = Theme.of(context);
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1060,12 +1071,34 @@ class _CanonicalLibraryReaderScreenState
             shrinkWrap: true,
             children: headings
                 .map(
-                  (heading) => ListTile(
-                    title: Text(heading.plainText),
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      unawaited(_jumpToBlock(heading));
-                    },
+                  (heading) => Padding(
+                    padding: EdgeInsets.only(
+                      left: _contentsHeadingDepth(heading) * 16.0,
+                    ),
+                    child: ListTile(
+                      selected: heading.id == currentHeading?.id,
+                      selectedTileColor: theme.colorScheme.primary
+                          .withValues(alpha: 0.12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: heading.id == currentHeading?.id
+                            ? BorderSide(color: theme.colorScheme.primary, width: 3)
+                            : BorderSide.none,
+                      ),
+                      title: Text(
+                        heading.plainText,
+                        style: heading.id == currentHeading?.id
+                            ? TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: theme.colorScheme.primary,
+                              )
+                            : null,
+                      ),
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        unawaited(_jumpToBlock(heading));
+                      },
+                    ),
                   ),
                 )
                 .toList(growable: false),
@@ -1073,6 +1106,14 @@ class _CanonicalLibraryReaderScreenState
         ),
       ),
     );
+  }
+
+  int _contentsHeadingDepth(LibraryDocumentBlock heading) {
+    return switch (heading.headingRole) {
+      'section' => 1,
+      'minor' => 2,
+      _ => 0,
+    };
   }
 
   final CanonicalLibraryProofCommands _commands =

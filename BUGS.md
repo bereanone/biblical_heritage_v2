@@ -135,6 +135,62 @@ If current behavior is correct, mark this item fixed.
 
 ## Fixed
 
+### eLibrary TOC showing front matter interleaved with chapters ("scrambled" ordering)
+
+**Area:** eLibrary / Table of Contents navigation
+
+**Status:** Fixed (code + live data repair), 2026-08-25.
+
+**Platform:** All (shared Dart indexing code — no platform branching).
+
+**Problem:**
+
+For books whose EPUB has a real embedded TOC/navMap, the Contents list could
+show front-matter items (e.g. "Information about this Book" and its
+sub-items: Overview, About the Author, Further Links, License, Further
+Information) rendered *after* several real chapters instead of grouped
+together at their correct position — e.g. Education showed "First Principles"
+and Chapters 1–4 before "Information about this Book" and "Foreword," when
+the source EPUB has those two front-matter entries first. Reported live as
+"front matter mixed in with chapters, totally scrambled" and "navigation is
+erratic and inaccurate."
+
+**Cause:**
+
+In `commentary_research_library_service_epub_indexing.dart`, a heading found
+inside a root's page was assigned
+`sortOrder = rootSortOrder * 1000 + headingIndex` so it would sort after its
+root. That scheme only avoids collisions when roots are spaced at least 1000
+apart — but real-TOC-derived roots are numbered sequentially (0, 1, 2, ...),
+so a heading's derived sortOrder landed directly on top of an unrelated
+root's sortOrder. The row ordering comparator (`_compareNavigationDrafts`)
+sorted by that colliding `sortOrder` first, so items with the same numeric
+value from *different* parents ended up interleaved, with depth/parentId
+string comparison arbitrarily deciding the tiebreak.
+
+**Fix:**
+
+Replaced the arithmetic sortOrder scheme with a proper depth-first tree walk
+(`_orderNavigationEntriesHierarchically`) that renumbers every entry
+sequentially in true document order, using the existing parent/child
+relationships (which were always correct) rather than trying to keep
+disjoint numeric ranges. Applies to all platforms since it's shared,
+non-platform-specific Dart code.
+
+**Live data repair (2026-08-25):** 97 titles in the live macOS
+`eLibrary.db` had this exact collision. Backed up the database (SHA-256
+verified), dry-ran a renumbering repair
+(`tool/nav_sort_order_repair/run_nav_sort_order_repair.dart`) against a copy,
+then applied it live: 14,190 navigation rows renumbered across 97 items,
+`PRAGMA integrity_check` passed afterward. Verified visually on "The
+Adventist Home" — front matter now groups correctly before Foreword/Section
+1. Other devices' local databases (iOS, Android, Windows) were not part of
+this repair and would need the same repair tool run against their own
+`eLibrary.db` if they show the same symptom — check with the same collision
+query in the repair script before assuming it's needed.
+
+---
+
 ### Cross-reference popup ignored Bible Reader font size
 
 **Area:** Bible Reader / Cross References

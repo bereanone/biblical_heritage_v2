@@ -838,7 +838,7 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     }
 
     final finalizedEntries = _finalizeNavigationEntries(
-      List<_NavigationEntryDraft>.of(entries)..sort(_compareNavigationDrafts),
+      _orderNavigationEntriesHierarchically(entries),
     );
     for (final entry in finalizedEntries) {
       await db.insert(
@@ -1219,4 +1219,48 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     _NavigationEntryDraft a,
     _NavigationEntryDraft b,
   ) => (this as dynamic)._compareNavigationDrafts(a, b) as int;
+
+  /// Renumbers every entry's `sortOrder` via a depth-first walk of the
+  /// parent/child tree, replacing whatever draft values each entry was
+  /// assigned during extraction.
+  ///
+  /// Root entries (from a real TOC/navMap) get small sequential sortOrder
+  /// values, while a heading found inside one of those root's pages is
+  /// assigned `rootSortOrder * 1000 + headingIndex` so it lands after its
+  /// root. That scheme only stays collision-free if roots are spaced at
+  /// least 1000 apart — with real navMap roots numbered 0, 1, 2, ... those
+  /// derived child values land directly on top of neighboring roots'
+  /// sortOrder (root 2's first heading becomes sortOrder 1, identical to
+  /// root 1), and a flat sort by sortOrder alone then interleaves unrelated
+  /// chapters with another chapter's subheadings. Draft sortOrder values are
+  /// still reliable *within* one parent's sibling group (they come from a
+  /// simple local counter), so re-deriving a single global sequence by
+  /// walking the tree — siblings ordered by their draft sortOrder, still
+  /// nested under their real parent — sidesteps the collision entirely.
+  List<_NavigationEntryDraft> _orderNavigationEntriesHierarchically(
+    List<_NavigationEntryDraft> entries,
+  ) {
+    final childrenByParentId = <String?, List<_NavigationEntryDraft>>{};
+    for (final entry in entries) {
+      childrenByParentId.putIfAbsent(entry.parentId, () => []).add(entry);
+    }
+    for (final siblings in childrenByParentId.values) {
+      siblings.sort(_compareNavigationDrafts);
+    }
+
+    final ordered = <_NavigationEntryDraft>[];
+    var nextSortOrder = 0;
+    void visit(_NavigationEntryDraft entry) {
+      ordered.add(entry.copyWith(sortOrder: nextSortOrder));
+      nextSortOrder += 1;
+      for (final child in childrenByParentId[entry.id] ?? const []) {
+        visit(child);
+      }
+    }
+
+    for (final root in childrenByParentId[null] ?? const []) {
+      visit(root);
+    }
+    return ordered;
+  }
 }

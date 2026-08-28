@@ -988,6 +988,7 @@ class _NavigationEntryDraft {
     bool? isFrontMatter,
     bool? isBodyStart,
     int? bodyOrder,
+    int? sortOrder,
   }) {
     return _NavigationEntryDraft(
       id: id,
@@ -997,7 +998,7 @@ class _NavigationEntryDraft {
       href: href,
       anchorId: anchorId,
       spineIndex: spineIndex,
-      sortOrder: sortOrder,
+      sortOrder: sortOrder ?? this.sortOrder,
       depth: depth,
       navType: navType,
       contentKind: contentKind ?? this.contentKind,

@@ -470,7 +470,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       return;
     }
 
-    final filePath = p.join(rootPath, widget.item.relativePath);
+    final existingFile = await LibraryRootService.instance
+        .resolveExistingAssetFile(
+          rootPath: rootPath,
+          relativePath: widget.item.relativePath,
+        );
+    final filePath =
+        existingFile?.path ?? p.join(rootPath, widget.item.relativePath);
     try {
       final loadedSections = widget.item.isPdf
           ? const <LibraryBookSection>[]

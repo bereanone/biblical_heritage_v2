@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/elibrary_database.dart';
 import '../../utilities/data/elibrary_download_service.dart';
@@ -117,12 +115,11 @@ class LibraryAcquisitionOrchestrator {
         sourceFilePresent: false,
       );
     }
-    final resolvedPath = await LibraryRootService.instance.resolveRelativePath(
+    final source = await LibraryRootService.instance.resolveExistingAssetFile(
       relativePath: relativePath,
       rootPath: rootPath,
     );
-    final source = File(resolvedPath);
-    if (!await source.exists()) {
+    if (source == null) {
       return LibraryAcquisitionOutcome(
         libraryItemId: libraryItemId,
         phase: LibraryAcquisitionPhase.sourceUnavailable,
@@ -170,12 +167,11 @@ class LibraryAcquisitionOrchestrator {
         sourceFilePresent: false,
       );
     }
-    final resolvedPath = await LibraryRootService.instance.resolveRelativePath(
+    final source = await LibraryRootService.instance.resolveExistingAssetFile(
       relativePath: relativePath,
       rootPath: rootPath,
     );
-    final source = File(resolvedPath);
-    if (!await source.exists()) {
+    if (source == null) {
       return LibraryAcquisitionOutcome(
         libraryItemId: libraryItemId,
         phase: LibraryAcquisitionPhase.sourceUnavailable,
@@ -409,12 +405,11 @@ class LibraryAcquisitionOrchestrator {
         sourceFilePresent: false,
       );
     }
-    final resolvedPath = await LibraryRootService.instance.resolveRelativePath(
+    final source = await LibraryRootService.instance.resolveExistingAssetFile(
       relativePath: relativePath,
       rootPath: rootPath,
     );
-    final source = File(resolvedPath);
-    if (!await source.exists()) {
+    if (source == null) {
       return LibraryAcquisitionOutcome(
         libraryItemId: libraryItemId,
         phase: LibraryAcquisitionPhase.sourceUnavailable,
@@ -466,12 +461,11 @@ class LibraryAcquisitionOrchestrator {
         relativePath.isNotEmpty &&
         rootPath != null &&
         rootPath.isNotEmpty &&
-        await File(
-          await LibraryRootService.instance.resolveRelativePath(
-            relativePath: relativePath,
-            rootPath: rootPath,
-          ),
-        ).exists();
+        await LibraryRootService.instance.resolveExistingAssetFile(
+              relativePath: relativePath,
+              rootPath: rootPath,
+            ) !=
+            null;
     final indexStatus = (rows.first['index_status']?.toString() ?? '').trim();
     if (indexStatus == 'needs_attention') {
       final indexError = rows.first['index_error']?.toString();

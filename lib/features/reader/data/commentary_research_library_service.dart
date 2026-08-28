@@ -56,13 +56,11 @@ class CommentaryResearchLibraryService
 
     final file = File(filePath);
     if (await file.exists()) {
-      final chunks = await _readBodySections(
+      final sections = await loadBookSectionsFromEpubFile(
         file: file,
         libraryItemId: libraryItemId,
         includeFrontMatter: includeFrontMatter,
-        preserveHeadingBlocks: true,
       );
-      final sections = _sectionsFromChunks(chunks);
       if (sections.isNotEmpty) {
         return sections;
       }
@@ -71,6 +69,25 @@ class CommentaryResearchLibraryService
     // If the EPUB parser cannot expose body sections, reuse the indexed text
     // blocks so books that already have stored content still open in the reader.
     return _loadBookSectionsFromTextBlocks(libraryItemId: libraryItemId);
+  }
+
+  /// Parses an EPUB file directly into sections, bypassing the `library_items`
+  /// profile lookup and the stored-text-blocks fallback entirely. Callers that
+  /// already know they want the live, heading-aware EPUB parse — e.g. batch
+  /// tooling that has no running catalog database connection for the profile
+  /// check — can use this directly instead of [loadBookSections].
+  Future<List<LibraryBookSection>> loadBookSectionsFromEpubFile({
+    required File file,
+    required String libraryItemId,
+    bool includeFrontMatter = true,
+  }) async {
+    final chunks = await _readBodySections(
+      file: file,
+      libraryItemId: libraryItemId,
+      includeFrontMatter: includeFrontMatter,
+      preserveHeadingBlocks: true,
+    );
+    return _sectionsFromChunks(chunks);
   }
 
   Future<_LibraryItemProfile?> _loadLibraryItemProfile(String libraryItemId) {

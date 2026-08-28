@@ -1478,12 +1478,12 @@ class LibraryCatalogService {
         return null;
       }
 
-      final epubPath = await LibraryRootService.instance.resolveRelativePath(
-        relativePath: relativePath,
-        rootPath: rootPath,
-      );
-      final epubFile = File(epubPath);
-      if (!epubFile.existsSync()) {
+      final epubFile = await LibraryRootService.instance
+          .resolveExistingAssetFile(
+            relativePath: relativePath,
+            rootPath: rootPath,
+          );
+      if (epubFile == null) {
         return null;
       }
 
@@ -1548,12 +1548,12 @@ class LibraryCatalogService {
         return null;
       }
 
-      final epubPath = await LibraryRootService.instance.resolveRelativePath(
-        relativePath: relativePath,
-        rootPath: rootPath,
-      );
-      final epubFile = File(epubPath);
-      if (!epubFile.existsSync()) {
+      final epubFile = await LibraryRootService.instance
+          .resolveExistingAssetFile(
+            relativePath: relativePath,
+            rootPath: rootPath,
+          );
+      if (epubFile == null) {
         return null;
       }
 
@@ -1724,11 +1724,12 @@ class LibraryCatalogService {
       if (id.isEmpty || fileName.isEmpty || expectedTitle.isEmpty) continue;
 
       final currentRelativePath = row['relative_path']?.toString().trim() ?? '';
-      final currentPath = await LibraryRootService.instance.resolveRelativePath(
-        relativePath: currentRelativePath,
-        rootPath: rootPath,
-      );
-      if (File(currentPath).existsSync()) {
+      final currentFile = await LibraryRootService.instance
+          .resolveExistingAssetFile(
+            relativePath: currentRelativePath,
+            rootPath: rootPath,
+          );
+      if (currentFile != null) {
         continue;
       }
 
@@ -1825,9 +1826,12 @@ class LibraryCatalogService {
           : row['library_role']?.toString().trim() ?? '';
       if (folderType.isEmpty) continue;
 
-      final resolvedPath = await LibraryRootService.instance
-          .resolveRelativePath(relativePath: relativePath, rootPath: rootPath);
-      if (!File(resolvedPath).existsSync()) continue;
+      final existingFile = await LibraryRootService.instance
+          .resolveExistingAssetFile(
+            relativePath: relativePath,
+            rootPath: rootPath,
+          );
+      if (existingFile == null) continue;
 
       final canonicalId = canonicalLibraryItemId(
         folderType: folderType,
@@ -1906,12 +1910,12 @@ class LibraryCatalogService {
         return null;
       }
 
-      final epubPath = await LibraryRootService.instance.resolveRelativePath(
-        relativePath: relativePath,
-        rootPath: rootPath,
-      );
-      final epubFile = File(epubPath);
-      if (!epubFile.existsSync()) {
+      final epubFile = await LibraryRootService.instance
+          .resolveExistingAssetFile(
+            relativePath: relativePath,
+            rootPath: rootPath,
+          );
+      if (epubFile == null) {
         return null;
       }
 

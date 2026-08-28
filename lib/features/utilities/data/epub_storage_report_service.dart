@@ -78,18 +78,28 @@ class EpubStorageReportService {
           (await LibraryRootService.instance.accessibleLibraryRootPath())
               ?.trim();
       if (rootPath != null && rootPath.isNotEmpty) {
-        final resolvedPath = await LibraryRootService.instance
-            .resolveRelativePath(
+        final epubFile = await LibraryRootService.instance
+            .resolveExistingAssetFile(
               relativePath: relativePath,
               rootPath: rootPath,
             );
-        final epubFile = File(resolvedPath);
-        if (await epubFile.exists()) {
+        if (epubFile != null) {
           epubPresent = true;
           epubSizeBytes = await epubFile.length();
         }
+        // The epub itself may already be cleaned up after canonicalization
+        // (leaving only the generated assets), so check for the assets
+        // folder next to wherever the epub actually is (or would be).
+        final assetDirectoryBase =
+            epubFile?.parent.path ??
+            p.dirname(
+              await LibraryRootService.instance.resolveRelativePath(
+                relativePath: relativePath,
+                rootPath: rootPath,
+              ),
+            );
         final assetDirectory = Directory(
-          p.join(p.dirname(resolvedPath), '_canonical_assets', libraryItemId),
+          p.join(assetDirectoryBase, '_canonical_assets', libraryItemId),
         );
         if (await assetDirectory.exists()) {
           await for (final entity in assetDirectory.list(recursive: true)) {

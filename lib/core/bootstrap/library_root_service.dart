@@ -593,6 +593,55 @@ class LibraryRootService {
     return p.join(p.normalize(rootPath.trim()), relativePath.trim());
   }
 
+  /// Looks up an asset that is expected to already exist on disk, tolerating
+  /// a Library Root that has drifted onto the legacy `BiblicalHeritage/v2`
+  /// database-mirror folder. That folder holds the database but was never
+  /// guaranteed to hold every asset file (EPUBs, covers, etc.) — those live
+  /// under the app's real Documents root. A caller that only checks
+  /// [resolveRelativePath] against a drifted root can wrongly conclude an
+  /// asset is missing (and, in a few call sites, persist that wrong
+  /// conclusion to the database) even though the file is present at the true
+  /// root. Callers computing a *destination* path for a new write should keep
+  /// using [resolveRelativePath] directly — this fallback only applies to
+  /// looking up something that should already be there.
+  ///
+  /// Returns the first existing [File] between the configured root and the
+  /// app's default Documents root, or null if neither has it.
+  Future<File?> resolveExistingAssetFile({
+    required String relativePath,
+    required String rootPath,
+  }) async {
+    final primaryPath = await resolveRelativePath(
+      relativePath: relativePath,
+      rootPath: rootPath,
+    );
+    final primaryFile = File(primaryPath);
+    if (await primaryFile.exists()) return primaryFile;
+
+    final String defaultRoot;
+    try {
+      defaultRoot = await defaultAppLibraryRootPath();
+    } catch (_) {
+      // path_provider's platform channel isn't available in every context
+      // this runs in (widget/unit tests, for instance). The primary path is
+      // already confirmed missing above, so there's nothing left to try —
+      // fall through to the same "not found" result a lookup with no
+      // fallback would have given.
+      return null;
+    }
+    if (p.normalize(defaultRoot) == p.normalize(rootPath.trim())) {
+      return null;
+    }
+    final fallbackPath = await resolveRelativePath(
+      relativePath: relativePath,
+      rootPath: defaultRoot,
+    );
+    final fallbackFile = File(fallbackPath);
+    if (await fallbackFile.exists()) return fallbackFile;
+
+    return null;
+  }
+
   Future<bool> needsReconnect() async {
     final selection = await loadSelection();
     return selection.needsReconnect;

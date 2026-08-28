@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/elibrary_database.dart';
 import '../../utilities/data/elibrary_download_service.dart';
@@ -82,12 +80,11 @@ class LibraryItemRetryDownloadService {
         outcome: LibraryItemRetryDownloadOutcome.libraryRootUnavailable,
       );
     }
-    final resolvedPath = await LibraryRootService.instance.resolveRelativePath(
+    final source = await LibraryRootService.instance.resolveExistingAssetFile(
       relativePath: relativePath,
       rootPath: rootPath,
     );
-    final source = File(resolvedPath);
-    if (!await source.exists()) {
+    if (source == null) {
       return const LibraryItemRetryDownloadResult(
         outcome: LibraryItemRetryDownloadOutcome.fileStillMissing,
       );

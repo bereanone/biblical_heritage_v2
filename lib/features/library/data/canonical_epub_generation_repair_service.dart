@@ -145,12 +145,10 @@ class CanonicalEpubGenerationRepairService {
     }
     final relativePath = row['relative_path']?.toString().trim() ?? '';
     if (relativePath.isEmpty) return null;
-    final resolvedPath = await LibraryRootService.instance.resolveRelativePath(
+    return LibraryRootService.instance.resolveExistingAssetFile(
       relativePath: relativePath,
       rootPath: rootPath,
     );
-    final file = File(resolvedPath);
-    return await file.exists() ? file : null;
   }
 
   Future<int> _repairStaleStorageStates({
@@ -172,9 +170,12 @@ class CanonicalEpubGenerationRepairService {
       final itemId = row['id']?.toString().trim() ?? '';
       final relativePath = row['relative_path']?.toString().trim() ?? '';
       if (itemId.isEmpty || relativePath.isEmpty) continue;
-      final resolvedPath = await LibraryRootService.instance
-          .resolveRelativePath(relativePath: relativePath, rootPath: rootPath);
-      if (await File(resolvedPath).exists()) continue;
+      final existingFile = await LibraryRootService.instance
+          .resolveExistingAssetFile(
+            relativePath: relativePath,
+            rootPath: rootPath,
+          );
+      if (existingFile != null) continue;
       await db.update(
         'library_items',
         <String, Object?>{

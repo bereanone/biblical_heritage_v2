@@ -385,6 +385,87 @@ void main() {
     );
   });
 
+  test(
+    'legacy bridge still finds a canonical row whose own source_type is '
+    'already pioneer_epub_import (regression: this used to be excluded and '
+    'created a duplicate ad hoc row instead)',
+    () async {
+      const canonicalId = 'library_item_research_pioneer_stephen_nelson_haskell_CIS';
+      final db = await ELibraryDatabase.instance.database;
+      final now = DateTime.now().toUtc().toIso8601String();
+      // A prior bridge (or a pre-seeded bundled row, as the real live catalog
+      // has for this exact id) can leave the canonical legacy-bridge
+      // target's own source_type at 'pioneer_epub_import' — exactly what
+      // `_copyAndRegister` sets on every row it touches. The bridge lookup
+      // must still find this row on a later re-scan rather than excluding
+      // it and minting a brand new ad hoc id for the same physical file.
+      // `replace` because the bundled seed database already ships this
+      // exact id for this exact work.
+      await db.insert('library_items', <String, Object?>{
+        'id': canonicalId,
+        'title': 'The Cross and its Shadow',
+        'author': 'Stephen Nelson Haskell',
+        'file_name': 'the_cross_and_its_shadow.epub',
+        'relative_path': 'ImportedPioneerEpubs/the_cross_and_its_shadow.epub',
+        'file_format': 'epub',
+        'folder_type': 'pioneer_epub_import',
+        'source_type': 'pioneer_epub_import',
+        'is_missing': 0,
+        'created_at': now,
+        'updated_at': now,
+        'device_id': 'test-device',
+        'revision': 1,
+        'sync_status': 'pending',
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+      final source = File(
+        p.join(sourceFolder.path, 'the_cross_and_its_shadow.epub'),
+      );
+      await source.writeAsBytes(
+        _wellFormedEpubBytes(
+          title: 'The Cross and its Shadow',
+          author: 'Stephen Nelson Haskell',
+        ),
+        flush: true,
+      );
+
+      final inventory = await PioneerEpubFolderInventoryService.instance
+          .survey(sourceFolder);
+      expect(inventory.entries.single.libraryItemId, canonicalId);
+      expect(
+        inventory.entries.single.reusesLegacyLibraryItemIdentity,
+        isTrue,
+      );
+
+      final preparation = await PioneerEpubBulkImportService.instance.prepare(
+        inventory: inventory,
+      );
+      expect(preparation.targets.single.libraryItemId, canonicalId);
+      final result = await LibraryAcquisitionBatchRunner.instance.activate(
+        preparation.targets,
+      );
+      expect(result.readyCount, 1);
+
+      final rows = await db.query(
+        'library_items',
+        where: 'id = ?',
+        whereArgs: const <Object?>[canonicalId],
+      );
+      expect(rows, hasLength(1));
+      expect(
+        await db.query(
+          'library_items',
+          where: 'id != ? AND lower(title) LIKE ?',
+          whereArgs: const <Object?>[canonicalId, '%cross and its shadow%'],
+        ),
+        isEmpty,
+        reason:
+            'A second row for the same physical file means the bridge '
+            'failed to find the canonical row and minted a duplicate.',
+      );
+    },
+  );
+
   test('missing Library Root Folder throws a clear, catchable error', () async {
     await File(
       p.join(sourceFolder.path, 'x.epub'),

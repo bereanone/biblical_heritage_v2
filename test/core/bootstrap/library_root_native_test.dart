@@ -47,7 +47,7 @@ void main() {
         isA<FormatException>().having(
           (error) => error.message,
           'message',
-          'Choose a .studybook Pioneer package.',
+          'Choose a .zip Pioneer package (or legacy .studybook).',
         ),
       ),
     );
@@ -156,7 +156,7 @@ void main() {
           isA<UnsupportedError>().having(
             (error) => error.message,
             'message',
-            contains('selecting a .studybook package'),
+            contains('selecting a .zip Pioneer package'),
           ),
         ),
       );
@@ -236,13 +236,30 @@ void main() {
     expect(receivedArguments.single, {'kind': 'bookPackage'});
   });
 
-  test('rejects non-studybook paths returned for package import', () async {
+  test('accepts a plain .zip returned for package import', () async {
     const channel = MethodChannel('studybible/library_root');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           if (call.method == 'pickImportFiles') {
             return <String, Object?>{
-              'paths': <Object?>['/tmp/Inbox/not-a-package.zip'],
+              'paths': <Object?>['/tmp/Inbox/SSP07-5-2026.zip'],
+            };
+          }
+          return null;
+        });
+
+    final result = await LibraryRootNative.pickStudyBookPackage();
+
+    expect(result, '/tmp/Inbox/SSP07-5-2026.zip');
+  });
+
+  test('rejects non-package paths returned for package import', () async {
+    const channel = MethodChannel('studybible/library_root');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'pickImportFiles') {
+            return <String, Object?>{
+              'paths': <Object?>['/tmp/Inbox/not-a-package.pdf'],
             };
           }
           return null;

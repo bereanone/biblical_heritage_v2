@@ -1640,12 +1640,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: Text(
-            'Select ${widget.item.sourceWorkId ?? 'book'} .studybook to Repair',
+            'Select ${widget.item.sourceWorkId ?? 'book'} .zip to Repair',
           ),
           content: const Text(
             'The preserved local package source is unavailable. Select the '
-            'matching .studybook package. It will be copied into app-managed '
-            'storage before repair; the selected file will not be changed.',
+            'matching .zip package (or .studybook). It will be copied into '
+            'app-managed storage before repair; the selected file will not '
+            'be changed.',
           ),
           actions: [
             TextButton(
@@ -2164,8 +2165,14 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   }) {
     if (index < 0 || index >= _sections.length) return;
     final currentSection = _sections[index];
+    final composedSections = _composedHeadingSectionsForIndex(index);
+    debugPrint(
+      'SL27_TRACE index=$index '
+      'navItemId=${_navigationItemForSectionIndex(index)?.id} '
+      'composedSections=${composedSections.map((s) => s.entryName).toList()}',
+    );
     final labels = libraryReaderLiveSectionHeadingLabels(
-      composedSections: _composedHeadingSectionsForIndex(index),
+      composedSections: composedSections,
       bookTitle: widget.item.displayTitle,
     ).toList(growable: true);
     if (includeVisibleHeading) {
@@ -2397,7 +2404,11 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     if (_navigationItems.isEmpty) return const [];
 
     final tree = buildLibraryNavigationTree(
-      _navigationItems,
+      libraryReaderContentsDisplayNavigationItems(
+        items: _navigationItems,
+        sections: _sections,
+        bookTitle: widget.item.displayTitle,
+      ),
       devotionalMode: _isDevotionalNavigationBook,
       periodicalMode: widget.item.isPeriodical,
     );
@@ -2410,6 +2421,23 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     final sectionHref = p.normalize(section.entryName).toLowerCase();
     final sectionSpineIndex = section.spineIndex;
     final navigationItems = _orderedNavigationItems;
+
+    // Exact, fragment-preserving match first: entryName commonly embeds the
+    // in-file anchor (e.g. "content.xhtml#heading-2-4"), and several
+    // sections legitimately share one physical file with only their anchor
+    // telling them apart. The fragment-stripped/spine-index fallback below
+    // can't distinguish those — it matches whichever nav item for that file
+    // comes first, which silently mis-resolves every other heading in the
+    // file to that one.
+    for (var index = 0; index < navigationItems.length; index++) {
+      final rawNavHref = p
+          .normalize((navigationItems[index].href ?? '').trim())
+          .toLowerCase();
+      if (rawNavHref.isNotEmpty && rawNavHref == sectionHref) {
+        return index;
+      }
+    }
+
     for (var index = 0; index < navigationItems.length; index++) {
       final nav = navigationItems[index];
       final navHref = _cleanNavigationHref(nav.href);
@@ -2424,24 +2452,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   }
 
   int? _sectionIndexForNavigationItem(LibraryCatalogNavigationItem item) {
-    if (_sections.isEmpty) return null;
-    final href = _cleanNavigationHref(item.href);
-    if (href != null) {
-      final normalizedHref = href.toLowerCase();
-      for (var index = 0; index < _sections.length; index++) {
-        if (_hrefMatchesSection(_sections[index].entryName, normalizedHref)) {
-          return index;
-        }
-      }
-    }
-
-    if (item.spineIndex != null) {
-      for (var index = 0; index < _sections.length; index++) {
-        if (_sections[index].spineIndex == item.spineIndex) return index;
-      }
-    }
-
-    return null;
+    return _librarySectionIndexForNavigationItem(
+      sections: _sections,
+      navItem: item,
+    );
   }
 
   int? _sectionIndexForNavigationItemInSections(
@@ -3915,6 +3929,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   Widget _buildContinuousSectionUnit({
     required BuildContext context,
     required int sectionIndex,
+    int? previousReadableSectionIndex,
     required Color textColor,
     required Color subduedColor,
     required Color cardBackground,
@@ -3927,7 +3942,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     if (contentSection == null) return const SizedBox.shrink();
     final blocks = contentSection.blocks;
     final title = libraryReaderDisplaySectionTitle(contentSection.title);
-    final headings = _composedHeadingSectionsForIndex(sectionIndex)
+    final composedHeadings = _composedHeadingSectionsForIndex(sectionIndex)
         .where((section) {
           final label = libraryReaderDisplaySectionTitle(section.title);
           if (label.isEmpty) return false;
@@ -3937,6 +3952,12 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
           return true;
         })
         .toList(growable: false);
+    final headings = libraryReaderContinuousUnitHeadings(
+      composedHeadings: composedHeadings,
+      previousComposedHeadings: previousReadableSectionIndex == null
+          ? const <LibraryBookSection>[]
+          : _composedHeadingSectionsForIndex(previousReadableSectionIndex),
+    );
     final markups =
         _elibraryMarkupsByHref[contentSection.entryName] ??
         const <ElibraryMarkupRecord>[];
@@ -4555,6 +4576,11 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                                               return _buildContinuousSectionUnit(
                                                 context: context,
                                                 sectionIndex: sectionIndex,
+                                                previousReadableSectionIndex:
+                                                    itemIndex > 0
+                                                    ? _readableSectionIndices[itemIndex -
+                                                          1]
+                                                    : null,
                                                 textColor: textColor,
                                                 subduedColor: subduedColor,
                                                 cardBackground: cardBackground,

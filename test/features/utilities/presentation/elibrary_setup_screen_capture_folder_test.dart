@@ -81,9 +81,10 @@ void main() {
     expect(find.text('Import Book Package'), findsOneWidget);
     expect(
       find.text(
-        'Select one .studybook or .studycollection file from OneDrive, iCloud Drive, '
-        'Google Drive, or On My iPad. StudyBible2 copies and unpacks it '
-        'locally. Your cloud file is not changed.',
+        'Select one .zip or .studycollection file from OneDrive, iCloud Drive, '
+        'Google Drive, or On My iPad (older .studybook files also work). '
+        'StudyBible2 copies and unpacks it locally. Your cloud file is not '
+        'changed.',
       ),
       findsOneWidget,
     );

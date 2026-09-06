@@ -81,6 +81,7 @@ class PioneerBookPackageImportService {
   final LocalSettingsStore _settingsStore;
 
   static const Set<String> supportedPackageExtensions = <String>{
+    '.zip',
     '.studybook',
     '.studybook.zip',
   };
@@ -116,7 +117,7 @@ class PioneerBookPackageImportService {
       final packageExtension = p.extension(sourcePath).toLowerCase();
       throw PioneerBookPackageImportException(
         'Unsupported package type "$packageExtension". Please select a '
-        '.studybook CaptureClipper package.',
+        '.zip CaptureClipper package (or legacy .studybook).',
       );
     }
     final sourceFile = File(sourcePath);

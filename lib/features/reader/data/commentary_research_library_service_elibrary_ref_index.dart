@@ -239,6 +239,12 @@ mixin _CommentaryResearchLibraryServiceElibraryRefIndexSupport {
     var insideParagraphMarkerCount = 0;
     final sampleRows = <String>[];
     final content02Href = _sectionKey('OEBPS/content02.xhtml');
+    // A single href split into multiple sections (an internal-anchor split
+    // for a single-spine-file book) must still produce a strictly-increasing
+    // `paragraph_index` per href across ALL of that href's sections, since
+    // `elibrary_ref_index` is UNIQUE(library_item_id, href, paragraph_index)
+    // -- resetting per section would collide two sections sharing an href.
+    final paragraphIndexByHref = <String, int>{};
 
     for (final section in sections) {
       final paragraphBlocks = section.blocks
@@ -259,12 +265,14 @@ mixin _CommentaryResearchLibraryServiceElibraryRefIndexSupport {
             : firstMarkerInSection.pageNumber;
       }
 
-      var paragraphIndex = 0;
+      final sectionHrefKey = _sectionKey(section.entryName);
+      var paragraphIndex = paragraphIndexByHref[sectionHrefKey] ?? 0;
       for (final block in section.blocks) {
         if (block.kind != 'paragraph') {
           continue;
         }
         paragraphIndex += 1;
+        paragraphIndexByHref[sectionHrefKey] = paragraphIndex;
         final markers = _extractPageBreakMarkers(block.html);
         if (markers.isEmpty) {
           if (currentPageNumber == null) {

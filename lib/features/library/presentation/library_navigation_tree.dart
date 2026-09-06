@@ -52,12 +52,28 @@ LibraryNavigationTreeResult buildLibraryNavigationTree(
       // the file. Keep the first occurrence as the root and tuck later rows
       // under that root instead of letting depth-based inference glue them to
       // the previous root chapter.
+      //
+      // But several sections can also legitimately share one physical file
+      // via distinct anchors (e.g. INTRODUCTION, ARGUMENT, APPENDIX A all
+      // living in the same content.xhtml, each its own top-level sibling).
+      // Stripping the fragment for the href comparison above would otherwise
+      // conflate that case with the duplicate-pass case, gluing every later
+      // sibling under the first one. Only reparent when the anchor also
+      // matches (including both being absent), which is what a genuine
+      // repeated TOC row looks like. Some import pipelines (e.g. SL27's)
+      // never populate the anchor_id column at all and fold the fragment
+      // into href instead, so the anchor used here falls back to parsing it
+      // straight off href rather than trusting an always-empty column.
       final rootForHref = rootsByHref[normalizedHref];
       if (rootForHref != null && rootForHref.id != item.id) {
         if (_isDuplicateRootEntry(item, rootForHref)) {
           continue;
         }
-        parentId = rootForHref.id;
+        final itemAnchor = _effectiveAnchorId(item);
+        final rootAnchor = _effectiveAnchorId(rootForHref);
+        if (itemAnchor == rootAnchor) {
+          parentId = rootForHref.id;
+        }
       }
     }
 
@@ -136,7 +152,7 @@ String _navigationEntryKey(LibraryCatalogNavigationItem item) {
   return [
     _normalizedNavigationHref(item.href) ?? '',
     item.label.trim().toLowerCase(),
-    item.anchorId?.trim().toLowerCase() ?? '',
+    _effectiveAnchorId(item),
   ].join('|');
 }
 
@@ -230,9 +246,23 @@ bool _isDuplicateRootEntry(
   final rootLabel = root.label.trim().toLowerCase();
   if (itemLabel != rootLabel) return false;
 
-  final itemAnchor = item.anchorId?.trim().toLowerCase() ?? '';
-  final rootAnchor = root.anchorId?.trim().toLowerCase() ?? '';
-  return itemAnchor == rootAnchor;
+  return _effectiveAnchorId(item) == _effectiveAnchorId(root);
+}
+
+/// The anchor identifying which part of a shared physical file an item
+/// points at. Prefers the stored `anchor_id` column, but some import
+/// pipelines (e.g. SL27's) leave that column empty and fold the fragment
+/// into `href` instead (`OEBPS/content.xhtml#heading-2-1`), so this falls
+/// back to parsing the fragment straight off href rather than treating an
+/// always-empty column as "no anchor" for every row.
+String _effectiveAnchorId(LibraryCatalogNavigationItem item) {
+  final explicit = item.anchorId?.trim().toLowerCase() ?? '';
+  if (explicit.isNotEmpty) return explicit;
+
+  final href = item.href?.trim() ?? '';
+  final hashIndex = href.indexOf('#');
+  if (hashIndex == -1) return '';
+  return href.substring(hashIndex + 1).trim().toLowerCase();
 }
 
 int _compareNavigationEntries(

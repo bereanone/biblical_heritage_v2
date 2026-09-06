@@ -92,6 +92,66 @@ void main() {
     },
   );
 
+  test('EPUB refcode spans remain toggleable metadata, not prose', () async {
+    final refSource = File(p.join(directory.path, 'SL27.html'));
+    await refSource.writeAsString('''
+      <h2>INTRODUCTION</h2>
+      <p data-refcode="SL27 iii.1">Readable paragraph.
+        <span class="refcode">{SL27 iii.1}</span></p>
+    ''');
+
+    await const LibraryDocumentCanonicalizer().canonicalize(
+      db: db,
+      libraryItemId: 'SL27',
+      source: refSource,
+    );
+    final rows = await db.query(
+      'library_document_blocks',
+      columns: const <String>[
+        'plain_text',
+        'source_refcode',
+        'formatted_content',
+      ],
+      where: 'library_item_id = ? AND block_type = ?',
+      whereArgs: <Object?>['SL27', LibraryDocumentBlockType.paragraph.name],
+    );
+
+    expect(rows, hasLength(1));
+    expect(rows.single['plain_text'], 'Readable paragraph.');
+    expect(rows.single['source_refcode'], 'SL27 iii.1');
+    expect(
+      rows.single['formatted_content'].toString(),
+      isNot(contains('iii.1')),
+    );
+  });
+
+  test(
+    'canonicalization preserves source heading text without corrections',
+    () async {
+      final sourceWithOriginalSpelling = File(
+        p.join(directory.path, 'source-heading.xhtml'),
+      );
+      await sourceWithOriginalSpelling.writeAsString('''
+      <h1>ARGUMET</h1>
+      <p>The source edition is preserved verbatim.</p>
+    ''');
+
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'source-preservation',
+        source: sourceWithOriginalSpelling,
+      );
+
+      final headings = await db.query(
+        'library_document_blocks',
+        columns: const <String>['plain_text'],
+        where: 'library_item_id = ? AND block_type = ?',
+        whereArgs: const <Object?>['source-preservation', 'heading'],
+      );
+      expect(headings.single['plain_text'], 'ARGUMET');
+    },
+  );
+
   test(
     'conversion is immutable, ordered, deterministic, and idempotent',
     () async {

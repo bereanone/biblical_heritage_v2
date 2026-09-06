@@ -14,9 +14,11 @@ import '../../../core/database/elibrary_database.dart';
 import 'elibrary_folder_policy.dart';
 import 'pioneer_capture_folder_metadata.dart';
 import 'egw_copied_range_parser.dart';
+import 'pioneer_epub_inspection_parser.dart';
 import '../../library/data/canonical_activation.dart';
 import '../../library/data/library_contributor.dart';
 import '../../library/data/library_section_heuristics.dart';
+import '../../library/data/pioneer_cover_assignment_service.dart';
 import 'pioneer_html_capture_folder_scanner.dart';
 import 'pioneer_source_catalog.dart';
 
@@ -103,12 +105,33 @@ class PioneerImportSection {
     required this.title,
     required this.paragraphs,
     required this.spineIndex,
+    this.depth = 0,
+    this.referenceCodes = const <String?>[],
+    this.anchorId,
   });
 
   final String href;
   final String title;
   final List<String> paragraphs;
   final int spineIndex;
+  final int depth;
+  final List<String?> referenceCodes;
+
+  /// The fragment identifying this section's start within `href`'s physical
+  /// file, when several sections share one file. Kept in sync with `href` at
+  /// construction time (see `_hrefFragment`) rather than derived later, so it
+  /// is never silently null for a section whose href does carry one.
+  final String? anchorId;
+}
+
+/// Extracts the `#fragment` portion of an already-built section href, so
+/// every `PioneerImportSection` construction site can populate `anchorId`
+/// from the exact same href it stores, instead of leaving the column always
+/// null while the anchor lives only inside href's fragment.
+String? _hrefFragment(String href) {
+  final hashIndex = href.indexOf('#');
+  if (hashIndex == -1 || hashIndex == href.length - 1) return null;
+  return href.substring(hashIndex + 1);
 }
 
 class PioneerImportDocument {
@@ -175,12 +198,8 @@ Future<PioneerEpubInspectionReport> inspectPioneerEpubBytes(
   Uint8List bytes, {
   PioneerSourceWork? work,
 }) async {
-  Archive archive;
-  var isValidZip = true;
-  try {
-    archive = ZipDecoder().decodeBytes(bytes, verify: false);
-  } catch (_) {
-    isValidZip = false;
+  final archiveInspection = PioneerEpubArchiveInspection.inspect(bytes);
+  if (!archiveInspection.isValidZip) {
     return PioneerEpubInspectionReport(
       byteCount: bytes.length,
       isValidZip: false,
@@ -209,70 +228,8 @@ Future<PioneerEpubInspectionReport> inspectPioneerEpubBytes(
   final profile = work == null
       ? PioneerEpubParserProfile.generic
       : PioneerEpubParserProfile.infer(work);
-  final hasMimeType = archive.findFile('mimetype') != null;
-  final containerEntry = archive.findFile('META-INF/container.xml');
-  final hasContainerXml = containerEntry != null;
-  String? opfPath;
-  var manifestCount = 0;
-  var spineCount = 0;
-  if (containerEntry != null) {
-    final containerXml = utf8.decode(
-      containerEntry.content as List<int>,
-      allowMalformed: true,
-    );
-    final opfPathMatch = RegExp(
-      r'full-path="([^"]+)"',
-      caseSensitive: false,
-    ).firstMatch(containerXml);
-    final rawOpfPath = opfPathMatch?.group(1);
-    if (rawOpfPath != null && rawOpfPath.trim().isNotEmpty) {
-      opfPath = _normalizeEpubPath(rawOpfPath);
-      final opfEntry = archive.findFile(opfPath);
-      if (opfEntry != null && opfEntry.isFile) {
-        final opfXml = utf8.decode(
-          opfEntry.content as List<int>,
-          allowMalformed: true,
-        );
-        manifestCount = RegExp(
-          r'<item\b[^>]*>',
-          caseSensitive: false,
-        ).allMatches(opfXml).length;
-        spineCount = RegExp(
-          r'<itemref\b[^>]*>',
-          caseSensitive: false,
-        ).allMatches(opfXml).length;
-      }
-    }
-  }
-  final packageInfo = _readEpubPackageInfo(archive);
-  final selectedContentFiles = <String>[
-    if (packageInfo.spineOrderedPaths.isNotEmpty)
-      ...packageInfo.spineOrderedPaths,
-  ];
-  if (selectedContentFiles.isEmpty) {
-    selectedContentFiles.addAll(
-      archive.files
-          .where((entry) {
-            final name = p.normalize(entry.name).toLowerCase();
-            return entry.isFile &&
-                (name.endsWith('.xhtml') || name.endsWith('.html'));
-          })
-          .map((entry) => p.normalize(entry.name))
-          .toList()
-        ..sort(),
-    );
-  }
-
-  final xhtmlHtmlEntries =
-      archive.files
-          .where((entry) {
-            final name = p.normalize(entry.name).toLowerCase();
-            return entry.isFile &&
-                (name.endsWith('.xhtml') || name.endsWith('.html'));
-          })
-          .map((entry) => p.normalize(entry.name))
-          .toList(growable: false)
-        ..sort();
+  final archive = archiveInspection.archive!;
+  final selectedContentFiles = archiveInspection.selectedContentFiles;
 
   final bodyFoundByFile = <String, bool>{};
   var paragraphCandidateCount = 0;
@@ -339,15 +296,17 @@ Future<PioneerEpubInspectionReport> inspectPioneerEpubBytes(
 
   return PioneerEpubInspectionReport(
     byteCount: bytes.length,
-    isValidZip: isValidZip,
-    hasMimeType: hasMimeType,
-    hasContainerXml: hasContainerXml,
-    opfPath: opfPath,
-    manifestCount: manifestCount,
-    spineCount: spineCount == 0 ? selectedContentFiles.length : spineCount,
-    spineHrefs: List<String>.unmodifiable(selectedContentFiles),
-    xhtmlHtmlEntries: List<String>.unmodifiable(xhtmlHtmlEntries),
-    selectedContentFiles: List<String>.unmodifiable(selectedContentFiles),
+    isValidZip: archiveInspection.isValidZip,
+    hasMimeType: archiveInspection.hasMimeType,
+    hasContainerXml: archiveInspection.hasContainerXml,
+    opfPath: archiveInspection.opfPath,
+    manifestCount: archiveInspection.manifestCount,
+    spineCount: archiveInspection.spineCount == 0
+        ? selectedContentFiles.length
+        : archiveInspection.spineCount,
+    spineHrefs: archiveInspection.spineHrefs,
+    xhtmlHtmlEntries: archiveInspection.xhtmlHtmlEntries,
+    selectedContentFiles: selectedContentFiles,
     bodyFoundByFile: Map<String, bool>.unmodifiable(bodyFoundByFile),
     rawTextPreviewLength: rawTextPreviewLength,
     rawTextPreview: rawTextPreview,
@@ -587,172 +546,6 @@ class PioneerEpubParserProfile {
       return aplibZip;
     }
     return generic;
-  }
-}
-
-class PioneerPublicDomainExtractionProfile {
-  const PioneerPublicDomainExtractionProfile._();
-
-  static const Set<String> _frontMatterTitles = <String>{
-    'cover',
-    'contents',
-    'table of contents',
-    'toc',
-    'copyright',
-    'title page',
-    'titlepage',
-    'illustrations',
-    'publication information',
-    'source credits',
-    'publisher note',
-    'editor note',
-    'editorial note',
-    'publisher',
-    'preface to the edition',
-  };
-
-  static const Set<String> _bodyStartTitles = <String>{
-    'preface',
-    'introduction',
-    'chapter 1',
-    'chapter i',
-    'chapter one',
-    'part 1',
-    'part i',
-  };
-
-  static bool isSectionFrontMatter({
-    required String title,
-    required String rawText,
-  }) {
-    final normalizedTitle = _normalizeText(title);
-    if (normalizedTitle.isEmpty) return true;
-    if (_frontMatterTitles.contains(normalizedTitle)) return true;
-
-    final normalizedText = normalizeWhitespace(rawText);
-    if (normalizedText.isEmpty) return true;
-
-    final lowerText = normalizedText.toLowerCase();
-    if (lowerText.contains('adventist pioneer library')) return true;
-    if (lowerText.contains('www.aplib.org')) return true;
-    if (lowerText.contains('isbn:')) return true;
-    if (lowerText.contains('published in the usa')) return true;
-    if (lowerText.contains('originally published in')) return true;
-    if (lowerText.contains('the original table of contents contained')) {
-      return true;
-    }
-    if (lowerText.contains('support the ministry') ||
-        lowerText.contains('donate') ||
-        lowerText.contains('donation')) {
-      return true;
-    }
-    if (RegExp(
-      r'^©\s*\d{4}\s+adventist pioneer library$',
-      caseSensitive: false,
-    ).hasMatch(normalizedText)) {
-      return true;
-    }
-    if (RegExp(
-      r'^\+?\d[\d\s().-]{7,}$',
-      caseSensitive: false,
-    ).hasMatch(normalizedText)) {
-      return true;
-    }
-    if (RegExp(
-          r'^\d{1,5}\s+[A-Za-z][A-Za-z0-9 .,\-#/&()]*$',
-          caseSensitive: false,
-        ).hasMatch(normalizedText) &&
-        (lowerText.contains('road') ||
-            lowerText.contains('street') ||
-            lowerText.contains('avenue') ||
-            lowerText.contains('lane') ||
-            lowerText.contains('drive') ||
-            lowerText.contains('highway') ||
-            lowerText.contains('oregon') ||
-            lowerText.contains('usa') ||
-            lowerText.contains('aplib'))) {
-      return true;
-    }
-    if (RegExp(
-      r'^(january|february|march|april|may|june|july|august|september|october|november|december),\s*\d{4}$',
-      caseSensitive: false,
-    ).hasMatch(normalizedText)) {
-      return true;
-    }
-    return false;
-  }
-
-  static bool isBodyStartTitle(String title) {
-    final normalizedTitle = _normalizeText(title);
-    return _bodyStartTitles.contains(normalizedTitle);
-  }
-
-  static List<String> filterLeadingFrontMatterParagraphs(
-    List<String> paragraphs,
-  ) {
-    var firstBodyParagraphIndex = 0;
-    var foundBodyParagraph = false;
-    for (var i = 0; i < paragraphs.length; i++) {
-      final paragraph = paragraphs[i].trim();
-      if (paragraph.isEmpty) continue;
-      if (_looksLikeFrontMatterParagraph(paragraph)) {
-        continue;
-      }
-      firstBodyParagraphIndex = i;
-      foundBodyParagraph = true;
-      break;
-    }
-    if (!foundBodyParagraph) {
-      return const <String>[];
-    }
-    if (firstBodyParagraphIndex <= 0) {
-      return List<String>.unmodifiable(paragraphs);
-    }
-    return List<String>.unmodifiable(
-      paragraphs.sublist(firstBodyParagraphIndex),
-    );
-  }
-
-  static bool _looksLikeFrontMatterParagraph(String text) {
-    final normalizedText = normalizeWhitespace(text);
-    if (normalizedText.isEmpty) return true;
-    final lowerText = normalizedText.toLowerCase();
-    if (lowerText.contains('adventist pioneer library')) return true;
-    if (lowerText.contains('www.aplib.org')) return true;
-    if (lowerText.contains('isbn:')) return true;
-    if (lowerText.contains('published in the usa')) return true;
-    if (lowerText.contains('originally published in')) return true;
-    if (lowerText.contains('the original table of contents contained')) {
-      return true;
-    }
-    if (RegExp(
-      r'^©\s*\d{4}\s+adventist pioneer library$',
-      caseSensitive: false,
-    ).hasMatch(normalizedText)) {
-      return true;
-    }
-    if (RegExp(
-      r'^\+?\d[\d\s().-]{7,}$',
-      caseSensitive: false,
-    ).hasMatch(normalizedText)) {
-      return true;
-    }
-    if (RegExp(
-          r'^\d{1,5}\s+[A-Za-z][A-Za-z0-9 .,\-#/&()]*$',
-          caseSensitive: false,
-        ).hasMatch(normalizedText) &&
-        (lowerText.contains('road') ||
-            lowerText.contains('street') ||
-            lowerText.contains('avenue') ||
-            lowerText.contains('lane') ||
-            lowerText.contains('drive') ||
-            lowerText.contains('highway') ||
-            lowerText.contains('oregon') ||
-            lowerText.contains('usa') ||
-            lowerText.contains('aplib'))) {
-      return true;
-    }
-    return false;
   }
 }
 
@@ -1457,8 +1250,19 @@ class PioneerTextImportService {
       throw const FormatException('Choose a Pioneer EPUB file.');
     }
 
+    // The catalog describes a work's historically preferred source, which
+    // may be capturedHtml. The selected file is authoritative for this import
+    // operation: always route an explicitly selected .epub through the EPUB
+    // parser while preserving the catalog work's stable identity.
+    final epubWork = work.copyWith(
+      sourceType: 'epub',
+      sourceUrl: sourceFile.uri.toString(),
+      directFileUrl: sourceFile.uri.toString(),
+      directFileType: 'epub',
+    );
+
     final bytes = await sourceFile.readAsBytes();
-    final inspection = await inspectPioneerEpubBytes(bytes, work: work);
+    final inspection = await inspectPioneerEpubBytes(bytes, work: epubWork);
     if (!inspection.isValidZip ||
         !inspection.hasContainerXml ||
         inspection.sectionCount == 0 ||
@@ -1471,9 +1275,9 @@ class PioneerTextImportService {
       );
     }
 
-    final document = await _parseDocument(work, bytes);
+    final document = await _parseDocument(epubWork, bytes);
     final qualityValidation = _validatePioneerEpubImportQuality(
-      work: work,
+      work: epubWork,
       document: document,
     );
     if (!qualityValidation.isValid) {
@@ -1483,8 +1287,8 @@ class PioneerTextImportService {
     final db = await ELibraryDatabase.instance.database;
     final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
     final coverPath = await cachePioneerCaptureCoverPath(
-      coverPath: work.coverImagePath,
-      itemId: work.stableLibraryItemId,
+      coverPath: epubWork.coverImagePath,
+      itemId: epubWork.stableLibraryItemId,
     );
     final downloadResult = PioneerSourceDownloadResult(
       bytes: bytes,
@@ -1495,8 +1299,8 @@ class PioneerTextImportService {
     return _writeImportedWork(
       db: db,
       deviceId: deviceId,
-      work: work,
-      libraryItemId: work.stableLibraryItemId,
+      work: epubWork,
+      libraryItemId: epubWork.stableLibraryItemId,
       replaceCanonicalSiblings: overwriteExisting,
       document: document,
       sourceBytes: bytes,
@@ -1507,7 +1311,7 @@ class PioneerTextImportService {
       sourceUrl: sourceFile.uri.toString(),
       sourceType: 'epub',
       sourceSite: 'local_cloud_file',
-      relativePath: _buildVirtualRelativePath(work),
+      relativePath: _buildVirtualRelativePath(epubWork),
       coverPath: coverPath,
       qualityValidation: qualityValidation,
     );
@@ -2656,6 +2460,14 @@ class PioneerTextImportService {
       limit: 1,
     );
     final createdNew = existingItemRows.isEmpty;
+    final resolvedCoverPath = await _fallbackCoverPathForNewItem(
+      createdNew: createdNew,
+      coverPath: coverPath,
+      sourceBytes: sourceBytes,
+      itemId: itemId,
+      title: work.title,
+      author: work.authorName,
+    );
     final existingItem = existingItemRows.isEmpty
         ? null
         : existingItemRows.first;
@@ -2994,7 +2806,7 @@ class PioneerTextImportService {
           ? sourceLabel!.trim()
           : 'EGW Writings copied range',
       'source_type': sourceType,
-      'cover_path': coverPath,
+      'cover_path': resolvedCoverPath,
       'date_added': existingItem?['date_added'] ?? now,
       'last_opened': existingItem?['last_opened'],
       'indexed_at': now,
@@ -3228,6 +3040,14 @@ class PioneerTextImportService {
       limit: 1,
     );
     final createdNew = existingItemRows.isEmpty;
+    final resolvedCoverPath = await _fallbackCoverPathForNewItem(
+      createdNew: createdNew,
+      coverPath: coverPath,
+      sourceBytes: sourceBytes,
+      itemId: itemId,
+      title: work.title,
+      author: work.authorName,
+    );
     final now = _utcNow();
     final fileHash = sha256.convert(sourceBytes).toString();
     final resolvedRelativePath =
@@ -3270,6 +3090,7 @@ class PioneerTextImportService {
           txn,
           work: work,
           keepItemId: itemId,
+          contentHash: fileHash,
         );
       }
       await txn.delete(
@@ -3313,7 +3134,7 @@ class PioneerTextImportService {
         'source_site': sourceHost,
         'source_url': resolvedSourceUrl,
         'source_type': resolvedSourceType,
-        'cover_path': coverPath,
+        'cover_path': resolvedCoverPath,
         'date_added': now,
         'last_opened': null,
         'indexed_at': now,
@@ -3337,6 +3158,7 @@ class PioneerTextImportService {
       await _upsertLibraryItem(txn, itemRow);
       await _writeContributorRows(txn, itemId, resolvedContributors, now);
 
+      final depthToId = <int, String>{};
       for (
         var sectionIndex = 0;
         sectionIndex < document.sections.length;
@@ -3344,20 +3166,43 @@ class PioneerTextImportService {
       ) {
         final section = document.sections[sectionIndex];
         final sectionNumber = sectionIndex + 1;
+        final sectionId = _navigationItemId(itemId, sectionNumber);
+        depthToId[section.depth] = sectionId;
+        final parentId = section.depth > 0
+            ? depthToId[section.depth - 1]
+            : null;
+
         final isBodyStart = sectionIndex == firstMeaningfulSectionIndex;
+        // A section ahead of firstMeaningfulSectionIndex is only genuine
+        // front matter (and so gets sunk to the bottom of the Contents
+        // display — see _navigationDisplayBucket) when it is ALSO not real
+        // reading content on its own. libraryIsFrontMatterOpeningLabel (which
+        // firstMeaningfulSectionIndex is gated on) matches labels like
+        // "Introduction"/"Preface" purely by text, on purpose, so a fresh
+        // reader defaults past a typically-skippable opening rather than a
+        // real chapter — but some books' "Introduction" *is* a substantial,
+        // meaningful chapter (e.g. SL27's), and demoting that to the end of
+        // the Contents list is wrong even though skipping past it as the
+        // default open position is still fine.
         final isFrontMatter =
             firstMeaningfulSectionIndex != null &&
-            sectionIndex < firstMeaningfulSectionIndex;
+            sectionIndex < firstMeaningfulSectionIndex &&
+            !libraryIsMeaningfulReadingSection(
+              title: section.title,
+              href: section.href,
+              paragraphs: section.paragraphs,
+              bookTitle: work.title,
+            );
         await txn.insert('library_navigation_items', <String, Object?>{
-          'id': _navigationItemId(itemId, sectionNumber),
+          'id': sectionId,
           'library_item_id': itemId,
-          'parent_id': null,
+          'parent_id': parentId,
           'label': section.title,
           'href': section.href,
-          'anchor_id': null,
+          'anchor_id': section.anchorId,
           'spine_index': section.spineIndex,
           'sort_order': sectionNumber,
-          'depth': 0,
+          'depth': section.depth,
           'nav_type': 'toc',
           'content_kind': 'chapter',
           'is_front_matter': isFrontMatter ? 1 : 0,
@@ -3578,6 +3423,7 @@ class PioneerTextImportService {
     DatabaseExecutor txn, {
     required PioneerSourceWork work,
     required String keepItemId,
+    required String contentHash,
   }) async {
     for (final itemId in _canonicalCapturedImportItemIds(work)) {
       if (itemId == keepItemId) {
@@ -3586,6 +3432,54 @@ class PioneerTextImportService {
       }
       await _deleteImportedWorkRowsPreservingMarkups(txn, itemId);
       await _softDeleteLibraryItem(txn, itemId);
+    }
+    await _retireLegacySameTitleEpubRows(
+      txn,
+      work: work,
+      keepItemId: keepItemId,
+      contentHash: contentHash,
+    );
+  }
+
+  /// Retires a prior `pioneer_epub_import` row only when it is provably the
+  /// *same* work: either it already carries this work's `source_work_id`, or
+  /// its stored file fingerprint (`pioneer_source_fingerprint`, a sha256 of
+  /// the raw file bytes) matches [contentHash], the sha256 of the bytes just
+  /// imported. Title strings are never used — two different scans/editions
+  /// can share a title, and a same-titled row must never be collided with
+  /// just because it sorts next to this one alphabetically.
+  Future<void> _retireLegacySameTitleEpubRows(
+    DatabaseExecutor txn, {
+    required PioneerSourceWork work,
+    required String keepItemId,
+    required String contentHash,
+  }) async {
+    final normalizedHash = contentHash.trim();
+    final workIdentity = work.stableLibraryItemId.trim();
+    if (normalizedHash.isEmpty && workIdentity.isEmpty) return;
+    final rows = await txn.query(
+      'library_items',
+      columns: const <String>['id'],
+      where:
+          'id != ? AND deleted_at IS NULL '
+          "AND LOWER(COALESCE(source_type, '')) = 'pioneer_epub_import' "
+          'AND ('
+          "(? != '' AND LOWER(COALESCE(source_work_id, '')) = LOWER(?)) OR "
+          "(? != '' AND LOWER(COALESCE(pioneer_source_fingerprint, '')) = LOWER(?))"
+          ')',
+      whereArgs: <Object?>[
+        keepItemId,
+        workIdentity,
+        workIdentity,
+        normalizedHash,
+        normalizedHash,
+      ],
+    );
+    for (final row in rows) {
+      final legacyId = row['id']?.toString().trim() ?? '';
+      if (legacyId.isEmpty) continue;
+      await _deleteImportedWorkRowsPreservingMarkups(txn, legacyId);
+      await _softDeleteLibraryItem(txn, legacyId);
     }
   }
 
@@ -4137,6 +4031,36 @@ class PioneerTextImportService {
     }
 
     return candidateIds.toList(growable: false);
+  }
+
+  /// Falls back to [PioneerCoverAssignmentService] (embedded EPUB cover, or
+  /// a generated placeholder) for a brand-new row that didn't already
+  /// resolve a cover from known catalog metadata (`cachePioneerCaptureCoverPath`).
+  /// Mirrors the "brand-new row only" gate used by the EPUB bulk-import and
+  /// archive.org install paths: a pre-existing row's cover_path is never
+  /// touched here — [_upsertLibraryItem] alone decides update-time
+  /// cover_path preservation.
+  Future<String?> _fallbackCoverPathForNewItem({
+    required bool createdNew,
+    required String? coverPath,
+    required Uint8List sourceBytes,
+    required String itemId,
+    required String title,
+    required String author,
+  }) async {
+    if (!createdNew || coverPath?.trim().isNotEmpty == true) {
+      return coverPath;
+    }
+    final rootPath =
+        (await LibraryRootService.instance.accessibleLibraryRootPath())?.trim();
+    if (rootPath == null || rootPath.isEmpty) return coverPath;
+    return PioneerCoverAssignmentService.instance.ensureCoverPath(
+      epubBytes: sourceBytes,
+      rootPath: rootPath,
+      itemId: itemId,
+      title: title,
+      author: author,
+    );
   }
 
   Future<void> _upsertLibraryItem(
@@ -4841,7 +4765,7 @@ PioneerEpubQualityValidationResult _validatePioneerEpubImportQuality({
       .where(
         (section) =>
             section.paragraphs.any((p) => p.trim().isNotEmpty) &&
-            !PioneerPublicDomainExtractionProfile.isSectionFrontMatter(
+            PioneerEpubQualityValidationPolicy.isMeaningfulBodySection(
               title: section.title,
               rawText: section.paragraphs.join(' '),
             ),
@@ -4944,7 +4868,7 @@ PioneerEpubQualityValidationResult _validatePioneerEpubImportQuality({
 
   final badFirstSection = firstBodySectionTitle == null
       ? false
-      : PioneerPublicDomainExtractionProfile.isSectionFrontMatter(
+      : !PioneerEpubQualityValidationPolicy.isMeaningfulBodySection(
           title: firstBodySectionTitle,
           rawText: meaningfulSections.first.paragraphs.join(' '),
         );
@@ -5181,6 +5105,9 @@ List<Map<String, Object?>> _generatePublicDomainReferenceIndexRows({
           sectionIndex: sectionIndex + 1,
           paragraphIndexInSection: paragraphIndex + 1,
           paragraphText: paragraphText,
+          sourceRefCode: paragraphIndex < section.referenceCodes.length
+              ? section.referenceCodes[paragraphIndex]
+              : null,
         ),
       );
     }
@@ -5218,15 +5145,29 @@ List<Map<String, Object?>> _generatePublicDomainReferenceIndexRows({
           : bookInitialPageNumber;
     }
 
+    final rawSourceRefCode = entry.sourceRefCode?.trim();
+    String? normalizedSourceRefCode;
+    if (rawSourceRefCode?.isNotEmpty == true) {
+      final lastSpace = rawSourceRefCode!.lastIndexOf(' ');
+      if (lastSpace != -1) {
+        normalizedSourceRefCode =
+            '$abbreviation ${rawSourceRefCode.substring(lastSpace + 1)}';
+      } else {
+        normalizedSourceRefCode = '$abbreviation $rawSourceRefCode';
+      }
+    }
+
     final pageNumber = hasPageMarkers
         ? (currentPageNumber ?? bookInitialPageNumber ?? 1)
         : entry.sectionIndex;
     final paragraphOnPage = hasPageMarkers
         ? paragraphNumberOnPage + 1
         : entry.paragraphIndexInSection;
-    final refCode = hasPageMarkers
-        ? '$abbreviation $pageNumber.$paragraphOnPage'
-        : '$abbreviation ${entry.sectionIndex}.${entry.paragraphIndexInSection}';
+    final refCode =
+        normalizedSourceRefCode ??
+        (hasPageMarkers
+            ? '$abbreviation $pageNumber.$paragraphOnPage'
+            : '$abbreviation ${entry.sectionIndex}.${entry.paragraphIndexInSection}');
     final normalizedHref = _normalizeEpubPath(entry.href);
 
     rows.add({
@@ -5253,7 +5194,9 @@ List<Map<String, Object?>> _generatePublicDomainReferenceIndexRows({
       ),
       'plain_text': entry.paragraphText,
       'text_hash': sha256.convert(utf8.encode(entry.paragraphText)).toString(),
-      'ref_source': hasPageMarkers
+      'ref_source': rawSourceRefCode?.isNotEmpty == true
+          ? 'epub_data_refcode'
+          : hasPageMarkers
           ? 'generated_from_page_marker'
           : 'generated_from_section_paragraph',
     });
@@ -5295,12 +5238,14 @@ class _PublicDomainParagraphEntry {
     required this.sectionIndex,
     required this.paragraphIndexInSection,
     required this.paragraphText,
+    this.sourceRefCode,
   });
 
   final String href;
   final int sectionIndex;
   final int paragraphIndexInSection;
   final String paragraphText;
+  final String? sourceRefCode;
 }
 
 Future<PioneerImportDocument> _parseSourceDocument(
@@ -5410,36 +5355,20 @@ List<PioneerImportSection> _parseNcxAnchoredEpubSections({
   );
   if (ncxEntry == null) return const <PioneerImportSection>[];
 
-  final ncxPath = p.normalize(ncxEntry.name);
-  final ncxDirectory = p.dirname(ncxPath);
-  final ncx = utf8.decode(ncxEntry.content as List<int>, allowMalformed: true);
-  final targetPattern = RegExp(
-    r'<navLabel\b[^>]*>\s*<text\b[^>]*>(.*?)</text>\s*</navLabel>\s*'
-    r'<content\b[^>]*\bsrc\s*=\s*["'
-    ']([^"'
-    ']+)["'
-    '][^>]*/?>',
-    caseSensitive: false,
-    dotAll: true,
+  final navigationTargets = PioneerEpubNavigationParser.parse(
+    archive: archive,
+    fallbackTitle: work.title,
   );
-  final targets = <({String title, String path, String anchor})>[];
-  for (final match in targetPattern.allMatches(ncx)) {
-    final title = _cleanSectionTitle(
-      match.group(1) ?? '',
-      fallback: work.title,
-    );
-    final source = (match.group(2) ?? '').trim();
-    final hashIndex = source.indexOf('#');
-    if (hashIndex <= 0 || hashIndex >= source.length - 1) continue;
-    final encodedPath = source.substring(0, hashIndex);
-    final anchor = Uri.decodeComponent(source.substring(hashIndex + 1));
-    if (anchor.isEmpty) continue;
-    final decodedPath = Uri.decodeFull(encodedPath);
-    final resolvedPath = _normalizeEpubPath(
-      p.normalize(p.join(ncxDirectory, decodedPath)),
-    );
-    targets.add((title: title, path: resolvedPath, anchor: anchor));
-  }
+  final targets = navigationTargets
+      .map(
+        (target) => (
+          title: target.title,
+          path: target.path,
+          anchor: target.anchor,
+          depth: target.depth,
+        ),
+      )
+      .toList(growable: false);
   if (targets.length < 3) return const <PioneerImportSection>[];
 
   final sections = <PioneerImportSection>[];
@@ -5449,13 +5378,27 @@ List<PioneerImportSection> _parseNcxAnchoredEpubSections({
     final entry = _findArchiveFileByNormalizedName(archive, target.path);
     if (entry == null || !entry.isFile) continue;
     final raw = utf8.decode(entry.content as List<int>, allowMalformed: true);
-    final anchorPattern = RegExp(
-      '<[^>]*\\bid\\s*=\\s*["\\\']${RegExp.escape(target.anchor)}'
-      '["\\\'][^>]*>',
-      caseSensitive: false,
-    );
-    final startMatch = anchorPattern.firstMatch(raw);
-    if (startMatch == null) continue;
+    Match? startMatch;
+    if (target.anchor.isEmpty) {
+      final bodyPattern = RegExp(r'<body\b[^>]*>', caseSensitive: false);
+      startMatch = bodyPattern.firstMatch(raw);
+    } else {
+      final anchorPattern = RegExp(
+        '<[^>]*\\bid\\s*=\\s*["\\\']${RegExp.escape(target.anchor)}'
+        '["\\\'][^>]*>',
+        caseSensitive: false,
+      );
+      startMatch = anchorPattern.firstMatch(raw);
+    }
+
+    if (startMatch == null) {
+      if (target.anchor.isEmpty) {
+        // Fallback if no body tag exists, start at beginning
+        startMatch = RegExp(r'^').firstMatch(raw);
+      } else {
+        continue;
+      }
+    }
 
     var end = raw.length;
     for (
@@ -5465,12 +5408,21 @@ List<PioneerImportSection> _parseNcxAnchoredEpubSections({
     ) {
       final next = targets[nextIndex];
       if (next.path != target.path) break;
+      if (next.anchor == target.anchor) {
+        end = startMatch!.end;
+        break;
+      }
+
+      if (next.anchor.isEmpty) {
+        continue; // Should not happen that a later target in same file has empty anchor
+      }
+
       final nextPattern = RegExp(
         '<[^>]*\\bid\\s*=\\s*["\\\']${RegExp.escape(next.anchor)}'
         '["\\\'][^>]*>',
         caseSensitive: false,
       );
-      final nextMatches = nextPattern.allMatches(raw, startMatch.end);
+      final nextMatches = nextPattern.allMatches(raw, startMatch!.end);
       final nextMatch = nextMatches.isEmpty ? null : nextMatches.first;
       if (nextMatch != null) {
         end = nextMatch.start;
@@ -5478,24 +5430,50 @@ List<PioneerImportSection> _parseNcxAnchoredEpubSections({
       }
     }
 
-    final fragment = raw.substring(startMatch.start, end);
+    final fragment = raw.substring(startMatch!.start, end);
     final blocks = _extractHtmlBlocks(fragment, profile: profile);
-    final normalizedTitle = _normalizeText(target.title);
+    // Multiple NCX entries can collapse onto the same start position (an
+    // identical anchor, or several anchor-less "whole file" entries in a
+    // row) — only the last one in the run keeps its content. Its fragment
+    // can still contain the *earlier* collapsed entries' own heading text
+    // (e.g. a preceding "Chapter Two" navPoint sharing this position with
+    // "Chapter Three"), which must be skipped too, not just this target's
+    // own title, or that heading text leaks into paragraphs as if it were
+    // body content.
+    final groupTitles = <String>{_normalizeText(target.title)};
+    var groupCursor = targetIndex - 1;
+    while (groupCursor >= 0 &&
+        targets[groupCursor].anchor == target.anchor &&
+        targets[groupCursor].path == target.path) {
+      groupTitles.add(_normalizeText(targets[groupCursor].title));
+      groupCursor--;
+    }
     final paragraphs = <String>[];
+    final referenceCodes = <String?>[];
     for (final block in blocks) {
       final text = block.text.trim();
       if (text.isEmpty) continue;
-      if (paragraphs.isEmpty && _normalizeText(text) == normalizedTitle) {
+      if (paragraphs.isEmpty && groupTitles.contains(_normalizeText(text))) {
         continue;
       }
       paragraphs.add(text);
+      referenceCodes.add(block.refCode);
     }
+    final bool isDuplicateAnchor =
+        targetIndex + 1 < targets.length &&
+        targets[targetIndex + 1].anchor == target.anchor &&
+        targets[targetIndex + 1].path == target.path;
+    final ncxSectionHref =
+        '${target.path}${target.anchor.isNotEmpty ? '#${target.anchor}' : ''}';
     sections.add(
       PioneerImportSection(
-        href: '${target.path}#${target.anchor}',
+        href: ncxSectionHref,
         title: target.title,
         paragraphs: List<String>.unmodifiable(paragraphs),
-        spineIndex: spineIndex++,
+        spineIndex: isDuplicateAnchor ? spineIndex : spineIndex++,
+        depth: target.depth,
+        referenceCodes: List<String?>.unmodifiable(referenceCodes),
+        anchorId: _hrefFragment(ncxSectionHref),
       ),
     );
   }
@@ -5549,72 +5527,53 @@ List<PioneerImportSection> _parseHtmlSections(
   final body = _extractHtmlBody(raw);
   final blocks = _extractHtmlBlocks(body ?? raw, profile: profile);
   final sections = <PioneerImportSection>[];
+  final unfilteredSections = PioneerEpubSectionParser.sectionize(
+    blocks: blocks
+        .map(
+          (block) => PioneerEpubContentBlock(
+            kind: block.kind,
+            text: block.text,
+            referenceCode: block.refCode,
+          ),
+        )
+        .toList(growable: false),
+    fallbackTitle: work.title,
+    baseHref: baseHref,
+    startingSpineIndex: startingSpineIndex,
+  );
   var spineIndex = startingSpineIndex;
   var sectionNumber = 1;
-  var sectionTitle = work.title;
-  var sectionHref = _sectionHref(baseHref, sectionNumber);
-  final sectionParagraphs = <String>[];
   final usePublicDomainCleanup = profile.appliesPublicDomainCleanup;
 
-  void flushSection() {
-    if (sectionParagraphs.isEmpty) {
-      sectionTitle = work.title;
-      sectionHref = _sectionHref(baseHref, sectionNumber + 1);
-      return;
-    }
-
-    final title = _cleanSectionTitle(sectionTitle, fallback: work.title);
-    final rawText = sectionParagraphs.join(' ');
+  for (final unfiltered in unfilteredSections) {
+    final title = _cleanSectionTitle(unfiltered.title, fallback: work.title);
+    final sectionHref = _sectionHref(baseHref, sectionNumber);
+    final rawText = unfiltered.paragraphs.join(' ');
     final shouldSkipSection = usePublicDomainCleanup
-        ? PioneerPublicDomainExtractionProfile.isSectionFrontMatter(
+        ? PioneerEpubRetentionPolicy.shouldSkipSection(
             title: title,
             rawText: rawText,
           )
         : _shouldSkipBoilerplateSection(title, sectionHref, rawText);
     if (shouldSkipSection) {
-      sectionParagraphs.clear();
-      sectionTitle = work.title;
-      sectionHref = _sectionHref(baseHref, sectionNumber + 1);
-      return;
+      continue;
     }
-
     sections.add(
       PioneerImportSection(
         href: sectionHref,
         title: title,
-        paragraphs: List<String>.unmodifiable(sectionParagraphs),
+        paragraphs: unfiltered.paragraphs,
         spineIndex: spineIndex,
+        anchorId: _hrefFragment(sectionHref),
       ),
     );
     spineIndex += 1;
     sectionNumber += 1;
-    sectionParagraphs.clear();
-    sectionTitle = work.title;
-    sectionHref = _sectionHref(baseHref, sectionNumber);
-  }
-
-  for (final block in blocks) {
-    if (block.kind == 'heading') {
-      if (sectionParagraphs.isNotEmpty) {
-        flushSection();
-      }
-      sectionTitle = block.text;
-      sectionHref = _sectionHref(baseHref, sectionNumber);
-      continue;
-    }
-
-    final text = block.text.trim();
-    if (text.isEmpty) continue;
-    sectionParagraphs.add(text);
-  }
-
-  if (sectionParagraphs.isNotEmpty) {
-    flushSection();
   }
 
   if (sections.isEmpty) {
     final paragraphs = usePublicDomainCleanup
-        ? PioneerPublicDomainExtractionProfile.filterLeadingFrontMatterParagraphs(
+        ? PioneerEpubRetentionPolicy.filterLeadingFrontMatterParagraphs(
             _extractParagraphTexts(body ?? raw),
           )
         : _extractParagraphTexts(body ?? raw);
@@ -5625,6 +5584,7 @@ List<PioneerImportSection> _parseHtmlSections(
           title: work.title,
           paragraphs: paragraphs,
           spineIndex: startingSpineIndex,
+          anchorId: _hrefFragment(baseHref),
         ),
       );
     }
@@ -5662,12 +5622,7 @@ String _cleanSectionTitle(String value, {required String fallback}) {
 }
 
 String? _extractHtmlBody(String raw) {
-  final match = RegExp(
-    r'<body\b[^>]*>(.*?)</body>',
-    caseSensitive: false,
-    dotAll: true,
-  ).firstMatch(raw);
-  return match?.group(1);
+  return PioneerEpubHtmlBodyParser.extractBody(raw);
 }
 
 List<String> _extractParagraphTexts(String raw) {
@@ -5720,7 +5675,23 @@ List<_HtmlBlock> _extractHtmlBlocks(
     if (openIndex < 0) continue;
     final frame = stack.removeAt(openIndex);
     final innerHtml = source.substring(frame.contentStart, match.start);
-    final text = _stripHtml(innerHtml).replaceAll(RegExp(r'\s+'), ' ').trim();
+    // A refcode can live on the block's own attribute (invisible, nothing
+    // to strip) and/or on a nested marker element such as
+    // `<span class="refcode">{SL27 12.3}</span>` — the real convention
+    // written by both the EPUB generator and the browser-capture pipeline,
+    // confirmed against the real SL27 EPUB — whose own visible text *is*
+    // the citation (see the matching, already-tested strip in
+    // `LibraryDocumentCanonicalizer._stripRefCodeSpans`). That marker's
+    // text must not survive into plain_text even when the block also
+    // carries its own data-refcode — otherwise the ref code shows up
+    // twice: once via the marker's own text and once via the ref_code
+    // column. The block's own attribute stays authoritative for ref_code
+    // either way.
+    final ownRefCode = _htmlAttribute(frame.attrs, 'data-refcode');
+    final nestedRefCode = _htmlAttribute(innerHtml, 'data-refcode');
+    final refCode = ownRefCode ?? nestedRefCode;
+    final textSource = _stripRefCodeMarkupElement(innerHtml);
+    final text = _stripHtml(textSource).replaceAll(RegExp(r'\s+'), ' ').trim();
     if (text.isEmpty) continue;
     if (_isHiddenHtmlBlock(frame.attrs, innerHtml)) continue;
 
@@ -5736,7 +5707,7 @@ List<_HtmlBlock> _extractHtmlBlocks(
       text: text,
       profile: profile,
     )) {
-      blocks.add(_HtmlBlock(kind: 'heading', text: text));
+      blocks.add(_HtmlBlock(kind: 'heading', text: text, refCode: refCode));
       continue;
     }
 
@@ -5749,7 +5720,7 @@ List<_HtmlBlock> _extractHtmlBlocks(
       }
     }
 
-    blocks.add(_HtmlBlock(kind: 'paragraph', text: text));
+    blocks.add(_HtmlBlock(kind: 'paragraph', text: text, refCode: refCode));
   }
 
   if (blocks.isEmpty) {
@@ -5761,6 +5732,25 @@ List<_HtmlBlock> _extractHtmlBlocks(
 
   return blocks;
 }
+
+String? _htmlAttribute(String attrs, String name) => RegExp(
+  '''\\b${RegExp.escape(name)}\\s*=\\s*["']([^"']*)["']''',
+  caseSensitive: false,
+).firstMatch(attrs)?.group(1)?.trim();
+
+// Matches a nested refcode marker element by either convention seen in real
+// content: an explicit `data-refcode` attribute, or (the actual convention
+// written by the EPUB generator and browser-capture pipeline, confirmed
+// against the real SL27 EPUB) a `class="refcode"` token — same pattern as
+// the already-tested `LibraryDocumentCanonicalizer._refCodeSpanPattern`.
+final RegExp _refCodeMarkupElementPattern = RegExp(
+  r'''<(\w+)\b[^>]*(?:\bdata-refcode\s*=\s*["'][^"']*["']|\bclass\s*=\s*["'][^"']*\brefcode\b[^"']*["'])[^>]*>.*?</\1>''',
+  caseSensitive: false,
+  dotAll: true,
+);
+
+String _stripRefCodeMarkupElement(String html) =>
+    html.replaceAll(_refCodeMarkupElementPattern, '');
 
 bool _looksLikeHeadingLikeBlock({
   required String tag,
@@ -5983,29 +5973,15 @@ String? _responseBodySnippet(List<int> bytes) {
 }
 
 String _stripHtml(String value) {
-  return value
-      .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
-      .replaceAll(RegExp(r'<[^>]+>'), ' ')
-      .replaceAll('&nbsp;', ' ')
-      .replaceAll('&amp;', '&')
-      .replaceAll('&lt;', '<')
-      .replaceAll('&gt;', '>')
-      .replaceAll('&quot;', '"')
-      .replaceAll('&#39;', "'")
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
+  return PioneerEpubHtmlBodyParser.plainText(value);
 }
 
 String normalizeWhitespace(String value) {
-  return value.replaceAll(RegExp(r'\s+'), ' ').trim();
+  return PioneerEpubFilteringNormalization.collapseWhitespace(value);
 }
 
 String _normalizeText(String value) {
-  return value
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
+  return PioneerEpubFilteringNormalization.comparisonKey(value);
 }
 
 bool _looksLikeManualVerificationText(String? text) {
@@ -6115,15 +6091,17 @@ Future<PioneerImportDocument> _parseCapturedTextDocument(
     if (sectionParagraphs.isEmpty) {
       return;
     }
+    final sectionHref = _capturedTextHref(
+      sourceUrl: sourceUrl,
+      sectionIndex: sectionIndex,
+    );
     sections.add(
       PioneerImportSection(
-        href: _capturedTextHref(
-          sourceUrl: sourceUrl,
-          sectionIndex: sectionIndex,
-        ),
+        href: sectionHref,
         title: currentTitle,
         paragraphs: List<String>.unmodifiable(sectionParagraphs),
         spineIndex: sectionIndex,
+        anchorId: _hrefFragment(sectionHref),
       ),
     );
     sectionIndex += 1;
@@ -6163,14 +6141,19 @@ Future<PioneerImportDocument> _parseCapturedTextDocument(
         paragraphCount: 0,
       );
     }
+    final fallbackHref = _capturedTextHref(
+      sourceUrl: sourceUrl,
+      sectionIndex: 1,
+    );
     sections.add(
       PioneerImportSection(
-        href: _capturedTextHref(sourceUrl: sourceUrl, sectionIndex: 1),
+        href: fallbackHref,
         title: sourceLabel?.trim().isNotEmpty == true
             ? sourceLabel!.trim()
             : work.title,
         paragraphs: fallbackParagraphs,
         spineIndex: 1,
+        anchorId: _hrefFragment(fallbackHref),
       ),
     );
   }
@@ -6277,10 +6260,11 @@ class _CopiedRangeSectionInfo {
 }
 
 class _HtmlBlock {
-  const _HtmlBlock({required this.kind, required this.text});
+  const _HtmlBlock({required this.kind, required this.text, this.refCode});
 
   final String kind;
   final String text;
+  final String? refCode;
 }
 
 class _HtmlFrame {

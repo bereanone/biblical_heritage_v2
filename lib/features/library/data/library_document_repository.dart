@@ -4,6 +4,25 @@ import 'library_document_models.dart';
 import 'library_search_navigation_target.dart';
 import 'library_section_heuristics.dart';
 
+/// A Contents node whose target has been resolved directly to one canonical
+/// heading block.  Unlike the legacy EPUB navigation rows, this object cannot
+/// exist without a real persisted destination.
+class LibraryCanonicalNavigationDestination {
+  const LibraryCanonicalNavigationDestination({
+    required this.id,
+    required this.parentId,
+    required this.label,
+    required this.depth,
+    required this.block,
+  });
+
+  final String id;
+  final String? parentId;
+  final String label;
+  final int depth;
+  final LibraryDocumentBlock block;
+}
+
 class LibraryDocumentRepository {
   const LibraryDocumentRepository(this.db);
   final Database db;
@@ -122,6 +141,84 @@ class LibraryDocumentRepository {
       orderBy: 'display_order ASC',
     );
     return rows.map(LibraryDocumentBlock.fromRow).toList(growable: false);
+  }
+
+  /// Resolves EPUB TOC rows to canonical headings exclusively by their
+  /// package-relative href and fragment identity. There is deliberately no
+  /// label, spine, file-level, or first-heading fallback: an unresolved row
+  /// is omitted rather than navigating the reader to the wrong content.
+  Future<List<LibraryCanonicalNavigationDestination>>
+  loadCanonicalNavigationDestinations(String libraryItemId) async {
+    final rows = await db.query(
+      'library_navigation_items',
+      columns: const <String>[
+        'id',
+        'parent_id',
+        'label',
+        'href',
+        'anchor_id',
+        'depth',
+      ],
+      where: 'library_item_id = ? AND deleted_at IS NULL',
+      whereArgs: <Object?>[libraryItemId],
+      orderBy: 'sort_order ASC',
+    );
+    final headings = await loadHeadings(libraryItemId);
+    final headingByTarget = <String, LibraryDocumentBlock>{};
+    final headingsByAnchor = <String, List<LibraryDocumentBlock>>{};
+    for (final heading in headings) {
+      final href = _canonicalNavigationPath(heading.sourceHref);
+      final anchor = heading.sourceAnchor?.trim();
+      if (href.isEmpty || anchor == null || anchor.isEmpty) continue;
+      headingByTarget.putIfAbsent('$href#$anchor', () => heading);
+      headingsByAnchor
+          .putIfAbsent(anchor, () => <LibraryDocumentBlock>[])
+          .add(heading);
+    }
+    final result = <LibraryCanonicalNavigationDestination>[];
+    final resolvedIds = <String>{};
+    for (final row in rows) {
+      final href = _canonicalNavigationPath(row['href']?.toString());
+      final anchor = row['anchor_id']?.toString().trim() ?? '';
+      if (href.isEmpty || anchor.isEmpty) continue;
+      // Some producers write nav hrefs relative to the package while their
+      // OPF/spine resolution stores a different-but-equivalent path prefix.
+      // A fragment is still an exact canonical identity when unique within
+      // the publication; ambiguity is rejected, never resolved by position.
+      final byAnchor = headingsByAnchor[anchor] ?? const [];
+      final heading =
+          headingByTarget['$href#$anchor'] ??
+          (byAnchor.length == 1 ? byAnchor.single : null);
+      if (heading == null) continue;
+      final id = row['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+      resolvedIds.add(id);
+      result.add(
+        LibraryCanonicalNavigationDestination(
+          id: id,
+          parentId: row['parent_id']?.toString(),
+          label: row['label']?.toString() ?? heading.plainText,
+          depth: (row['depth'] as num?)?.toInt() ?? 0,
+          block: heading,
+        ),
+      );
+    }
+    // Preserve a usable tree when an invalid parent was omitted: promote the
+    // valid child rather than retaining a dangling hierarchy reference.
+    return result
+        .map(
+          (entry) =>
+              entry.parentId == null || resolvedIds.contains(entry.parentId)
+              ? entry
+              : LibraryCanonicalNavigationDestination(
+                  id: entry.id,
+                  parentId: null,
+                  label: entry.label,
+                  depth: 0,
+                  block: entry.block,
+                ),
+        )
+        .toList(growable: false);
   }
 
   Future<List<LibraryDocumentBlock>> searchCurrentBook(
@@ -365,6 +462,21 @@ class LibraryDocumentRepository {
       secondaryHeading: secondary.firstOrNull,
     );
   }
+}
+
+String _canonicalNavigationPath(String? value) {
+  final path = (value ?? '').trim().split('#').first.replaceAll('\\', '/');
+  if (path.isEmpty) return '';
+  final parts = <String>[];
+  for (final part in path.split('/')) {
+    if (part.isEmpty || part == '.') continue;
+    if (part == '..') {
+      if (parts.isNotEmpty) parts.removeLast();
+      continue;
+    }
+    parts.add(part);
+  }
+  return parts.join('/').toLowerCase();
 }
 
 int _firstIntValue(List<Map<String, Object?>> rows) =>

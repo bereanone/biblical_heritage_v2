@@ -120,6 +120,10 @@ void main() {
       'lessons_on_faith',
     );
     expect(
+      matchPioneerWorkForLocalEpub(catalog, '/CloudFiles/SL27.epub')?.id,
+      'sl27',
+    );
+    expect(
       matchPioneerWorkForLocalEpub(catalog, '/CloudFiles/unknown.epub'),
       isNull,
     );

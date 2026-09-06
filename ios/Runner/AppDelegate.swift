@@ -462,7 +462,13 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
         }
       }
       if selectionKind == .importCollectionCopy {
-        let invalidNames = urls.map { $0.lastPathComponent }.filter { !$0.lowercased().hasSuffix(".studycollection") }
+        // A .studycollection file is itself a ZIP archive, so a user who
+        // downloaded or renamed it as a plain .zip shouldn't be blocked here;
+        // the Dart-side inspect() validates the actual archive contents.
+        let invalidNames = urls.map { $0.lastPathComponent }.filter {
+          let lower = $0.lowercased()
+          return !lower.hasSuffix(".studycollection") && !lower.hasSuffix(".zip")
+        }
         if !invalidNames.isEmpty {
           finish(FlutterError(code: "invalid_studycollection_selection", message: "That is an individual book package. Choose Pioneers.studycollection to check the full collection.", details: invalidNames))
           return

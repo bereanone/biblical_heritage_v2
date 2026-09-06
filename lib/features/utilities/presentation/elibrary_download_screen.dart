@@ -6,6 +6,7 @@ import '../../library/data/library_catalog_service.dart';
 import '../../reader/data/commentary_research_library_service.dart';
 import '../data/elibrary_download_service.dart';
 import '../data/elibrary_storage_policy.dart';
+import 'big_progress_bar.dart';
 import 'library_indexing_prompt_dialogs.dart';
 
 class ELibraryDownloadScreen extends StatefulWidget {
@@ -241,8 +242,22 @@ class _ELibraryDownloadScreenState extends State<ELibraryDownloadScreen> {
                     ),
                     const SizedBox(height: 16),
                     if (_running) ...[
-                      const LinearProgressIndicator(),
+                      BigProgressBar(
+                        value: (progress?.totalPlannedCount ?? 0) > 0
+                            ? (progress!.completedCount /
+                                      progress.totalPlannedCount)
+                                  .clamp(0.0, 1.0)
+                            : null,
+                      ),
                       const SizedBox(height: 12),
+                      Text(
+                        (progress?.totalPlannedCount ?? 0) > 0
+                            ? '${((progress!.completedCount / progress.totalPlannedCount) * 100).round()}%'
+                            : 'Starting…',
+                        style: theme.textTheme.headlineMedium,
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
                       Text(progress?.statusMessage ?? 'Starting download...'),
                       const SizedBox(height: 8),
                       Text(
@@ -304,24 +319,11 @@ class _ELibraryDownloadScreenState extends State<ELibraryDownloadScreen> {
                     ],
                     if (_indexing) ...[
                       const SizedBox(height: 16),
-                      LinearProgressIndicator(
-                        value: _indexTotal > 0
-                            ? _indexCompleted / _indexTotal
-                            : null,
+                      IndexingProgressStatus(
+                        completed: _indexCompleted,
+                        total: _indexTotal,
+                        currentTitle: _indexCurrentTitle,
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _indexTotal > 0
-                            ? 'Indexing $_indexCompleted of $_indexTotal'
-                            : 'Indexing new/changed books...',
-                      ),
-                      if (_indexCurrentTitle != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          'Current: $_indexCurrentTitle',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
                     ],
                     if (!_indexing && _indexResult != null) ...[
                       const SizedBox(height: 16),

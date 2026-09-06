@@ -74,6 +74,8 @@ assets/library_covers/*
 !assets/library_covers/FP187.png
 !assets/library_covers/SSP.png
 !assets/library_covers/WOR.png
+!assets/library_covers/templates/
+!assets/library_covers/templates/pioneer_cover_template.png
 !assets/library_covers/thumbs/
 assets/library_covers/thumbs/*
 !assets/library_covers/thumbs/.gitkeep

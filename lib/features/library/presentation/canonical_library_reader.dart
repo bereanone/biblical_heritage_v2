@@ -31,6 +31,7 @@ import 'reader_tilt_motion_source.dart';
 import 'reader_tilt_preferences.dart';
 import 'mac_reader_autoscroll_controller.dart';
 import 'mac_reader_autoscroll_controls.dart';
+import 'library_navigation_tree.dart';
 
 /// Legacy developer override retained for proof-harness compatibility.
 ///
@@ -181,6 +182,115 @@ List<InlineSpan> canonicalInlineTextSpans({
     TextSpan(text: ' $code', style: referenceStyle),
 ];
 
+/// The heading the reader is currently inside of: the last heading in
+/// document order at or before [currentOrder]. Returns `null` if
+/// [currentOrder] falls before every heading (e.g. still in front matter).
+@visibleForTesting
+LibraryDocumentBlock? canonicalContentsCurrentHeading({
+  required List<LibraryDocumentBlock> headings,
+  required int currentOrder,
+}) {
+  LibraryDocumentBlock? currentHeading;
+  for (final heading in headings) {
+    if (heading.displayOrder > currentOrder) break;
+    currentHeading = heading;
+  }
+  return currentHeading;
+}
+
+@visibleForTesting
+Map<String, int> canonicalContentsHeadingDepths({
+  required List<LibraryDocumentBlock> headings,
+  required List<LibraryCatalogNavigationItem> navigationItems,
+}) {
+  int localDepth(LibraryDocumentBlock heading) => switch (heading.headingRole) {
+    'section' => 1,
+    'minor' => 2,
+    _ => 0,
+  };
+
+  if (navigationItems.isEmpty) {
+    return <String, int>{
+      for (final heading in headings) heading.id: localDepth(heading),
+    };
+  }
+
+  bool isSupportEntry(LibraryCatalogNavigationItem item) =>
+      switch (item.contentKind?.trim().toLowerCase()) {
+        'cover' ||
+        'title_page' ||
+        'about' ||
+        'copyright' ||
+        'foreword' ||
+        'introduction' => true,
+        _ => false,
+      };
+
+  final tree = buildLibraryNavigationTree(navigationItems);
+  final navigationDepths = <String, int>{};
+  void visit(List<LibraryCatalogNavigationItem> items, int depth) {
+    for (final item in items) {
+      final supportEntry = isSupportEntry(item);
+      if (!supportEntry) navigationDepths[item.id] = depth;
+      visit(
+        tree.childrenByParent[item.id] ?? const [],
+        supportEntry ? depth : depth + 1,
+      );
+    }
+  }
+
+  visit(tree.childrenByParent[null] ?? const [], 0);
+
+  final usableItems = tree.items
+      .where((item) => navigationDepths.containsKey(item.id))
+      .toList(growable: false);
+  final itemsByHref = <String, List<LibraryCatalogNavigationItem>>{};
+  final itemsByLabel = <String, List<LibraryCatalogNavigationItem>>{};
+  for (final item in usableItems) {
+    final href = item.href?.trim() ?? '';
+    if (href.isNotEmpty) {
+      itemsByHref
+          .putIfAbsent(normalizeLibrarySourceHref(href), () => [])
+          .add(item);
+    }
+    final label = _normalizeCanonicalContentsLabel(item.label);
+    if (label.isNotEmpty) itemsByLabel.putIfAbsent(label, () => []).add(item);
+  }
+
+  final result = <String, int>{};
+  for (final heading in headings) {
+    LibraryCatalogNavigationItem? match;
+    final sourceHref = heading.sourceHref?.trim() ?? '';
+    if (sourceHref.isNotEmpty) {
+      final hrefMatches = itemsByHref[normalizeLibrarySourceHref(sourceHref)];
+      if (hrefMatches != null && hrefMatches.isNotEmpty) {
+        final headingLabel = _normalizeCanonicalContentsLabel(
+          heading.plainText,
+        );
+        match = hrefMatches.firstWhere(
+          (item) =>
+              _normalizeCanonicalContentsLabel(item.label) == headingLabel,
+          orElse: () => hrefMatches.first,
+        );
+      }
+    }
+    if (match == null) {
+      final labelMatches =
+          itemsByLabel[_normalizeCanonicalContentsLabel(heading.plainText)];
+      if (labelMatches != null && labelMatches.isNotEmpty) {
+        match = labelMatches.first;
+      }
+    }
+    result[heading.id] =
+        (match == null ? 0 : navigationDepths[match.id] ?? 0) +
+        localDepth(heading);
+  }
+  return result;
+}
+
+String _normalizeCanonicalContentsLabel(String value) =>
+    value.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+
 class CanonicalReaderPreparation {
   const CanonicalReaderPreparation({
     required this.repository,
@@ -243,36 +353,10 @@ const bool useCanonicalEpubReader = bool.fromEnvironment(
 /// not-yet-indexed EPUB always keeps its existing fallback behavior.
 bool supportsCanonicalEpubReader(LibraryCatalogItem item) {
   if ((item.fileFormat ?? '').trim().toLowerCase() != 'epub') return false;
-  final relativePath = item.relativePath.trim();
-  if (relativePath.isEmpty) return false;
-  final sourceType = (item.sourceType ?? '').trim().toLowerCase();
-  if (sourceType == 'official_download') {
-    return isManagedEgwRelativePath(relativePath);
-  }
-  // Added for "Add My Own EPUB" (Phase 2): a user-selected individual EPUB
-  // is only eligible when it was actually copied into the dedicated
-  // user-imports folder by that flow — never an arbitrary path, and never
-  // any other source type. Official EGW eligibility above is unchanged.
-  if (sourceType == 'user_import') {
-    return isUserImportedEpubRelativePath(relativePath);
-  }
-  // Added for the raw Pioneer EPUB folder bulk import (Phase 3): a Pioneer
-  // EPUB is only eligible when it was actually copied into the dedicated
-  // ImportedPioneerEpubs folder by that flow — never an arbitrary path, and
-  // never any other source type.
-  if (sourceType == 'pioneer_epub_import') {
-    return isPioneerImportedEpubRelativePath(relativePath);
-  }
-  // Added for per-title EGW EPUB downloads made by "Import Pioneer Library"
-  // (pioneer_text_import_service.dart): the real .epub egwwritings.org
-  // publishes for the title, persisted after a successful canonicalization
-  // so its images can be shown alongside the existing flattened-text import.
-  // Only eligible when copied into the dedicated managed folder — never an
-  // arbitrary path.
-  if (sourceType == 'pioneer_egw_epub_source') {
-    return isPioneerEgwEpubSourceRelativePath(relativePath);
-  }
-  return false;
+  // The canonical reader is the EPUB reader. Provenance must not choose a
+  // second rendering/navigation model: if canonical preparation cannot read
+  // this item it returns null and the existing legacy fallback remains safe.
+  return item.relativePath.trim().isNotEmpty;
 }
 
 /// Canonicalizes (if needed) and prepares a real downloaded EPUB for the
@@ -404,7 +488,28 @@ class _CanonicalLibraryReaderGateState
             );
           }
           final preparation = snapshot.data;
-          if (preparation == null) return widget.legacyBuilder(context);
+          if (preparation == null) {
+            // EPUB Contents and rendering must never fall back to the legacy
+            // reader: it builds both from separate models and can silently
+            // open a valid-looking but wrong section. Capture/html retains
+            // its historical fallback while EPUB reports preparation failure
+            // explicitly, preserving correctness over a misleading route.
+            if (supportsCanonicalEpubReader(widget.item)) {
+              return Scaffold(
+                body: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'This EPUB could not be prepared for canonical reading. '
+                      'It was not opened with a fallback reader.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+              );
+            }
+            return widget.legacyBuilder(context);
+          }
           return CanonicalLibraryReaderScreen(
             item: widget.item,
             repository: preparation.repository,
@@ -562,6 +667,17 @@ class _CanonicalLibraryReaderScreenState
     });
   }
 
+  // The list only reports `_latestVisibleOrder` reactively, once its scroll
+  // position listener fires after layout. Setting it here too, as soon as
+  // the reader's opening/saved/search-target position is decided, means a
+  // toolbar action (Contents, jump-to-heading) taken before that first
+  // listener callback still reflects where the reader is actually about to
+  // land, rather than the field's stale `0` default.
+  void _setInitialSearchOrder(int order) {
+    _initialSearchOrder = order;
+    _latestVisibleOrder = order;
+  }
+
   Future<void> _initializeAtSearchTarget() async {
     final target = widget.searchTarget;
     if (target == null) {
@@ -590,11 +706,16 @@ class _CanonicalLibraryReaderScreenState
           'selectedSectionId=${widget.item.epubHref ?? "(canonical)"} '
           'selectedSectionTitle=(saved) reason=valid_saved_position',
         );
-        _initialSearchOrder = savedOrder;
+        _setInitialSearchOrder(savedOrder);
         await _controller.initialize(centerOrder: savedOrder);
         return;
       }
+      // Leave `_initialSearchOrder` null when there's no substantive
+      // section (the list keeps its natural top-of-book resting position),
+      // but `_latestVisibleOrder` should still reflect that resting
+      // position rather than an unrelated leftover value.
       _initialSearchOrder = openingOrder;
+      _latestVisibleOrder = openingOrder ?? 0;
       if (savedOrder != null) {
         debugPrint(
           'default_open_saved_position_repaired workId=${widget.item.id} '
@@ -645,7 +766,7 @@ class _CanonicalLibraryReaderScreenState
       });
       return;
     }
-    _initialSearchOrder = order;
+    _setInitialSearchOrder(order);
     debugPrint(
       'search_target_section_loaded ${target.diagnosticSummary} order=$order',
     );
@@ -687,7 +808,9 @@ class _CanonicalLibraryReaderScreenState
 
   Future<void> _saveCurrentLocation() async {
     if (widget.searchTarget != null && !_searchTargetPositioned) return;
-    final block = _location?.block;
+    // Prefer the synchronously-tracked scroll position over `_location`,
+    // which is debounced by 400ms and can lag behind on quick exits.
+    final block = _controller.blockAt(_latestVisibleOrder) ?? _location?.block;
     if (block == null) return;
     await LibraryReaderStateWriter.instance.saveCurrentLocation(
       libraryItemId: widget.item.id,
@@ -1048,18 +1171,34 @@ class _CanonicalLibraryReaderScreenState
   }
 
   Future<void> _openContents() async {
-    final headings = await widget.repository.loadHeadings(widget.item.id);
+    final destinations = await widget.repository
+        .loadCanonicalNavigationDestinations(widget.item.id);
+    // EPUBs with no usable nav document still expose their semantic headings;
+    // those headings are canonical blocks, not a second parser or fallback.
+    final entries = destinations.isNotEmpty
+        ? destinations
+        : (await widget.repository.loadHeadings(widget.item.id))
+              .map(
+                (block) => LibraryCanonicalNavigationDestination(
+                  id: block.id,
+                  parentId: null,
+                  label: block.plainText,
+                  depth: switch (block.headingRole) {
+                    'section' => 1,
+                    'minor' => 2,
+                    _ => 0,
+                  },
+                  block: block,
+                ),
+              )
+              .toList(growable: false);
     if (!mounted) return;
-    final currentOrder = _location?.block.displayOrder;
-    // The most recent heading at or before the current reading position is
-    // the one the reader is inside of right now.
-    LibraryDocumentBlock? currentHeading;
-    if (currentOrder != null) {
-      for (final heading in headings) {
-        if (heading.displayOrder > currentOrder) break;
-        currentHeading = heading;
-      }
-    }
+    // Use the synchronously-tracked scroll position rather than `_location`,
+    // which is only updated after a 400ms debounce and can still point at
+    // the previous chapter if Contents is opened right after scrolling.
+    final current = entries
+        .where((entry) => entry.block.displayOrder <= _latestVisibleOrder)
+        .lastOrNull;
     final theme = Theme.of(context);
     await showDialog<void>(
       context: context,
@@ -1069,25 +1208,27 @@ class _CanonicalLibraryReaderScreenState
           width: 420,
           child: ListView(
             shrinkWrap: true,
-            children: headings
+            children: entries
                 .map(
-                  (heading) => Padding(
-                    padding: EdgeInsets.only(
-                      left: _contentsHeadingDepth(heading) * 16.0,
-                    ),
+                  (entry) => Padding(
+                    padding: EdgeInsets.only(left: entry.depth * 16.0),
                     child: ListTile(
-                      selected: heading.id == currentHeading?.id,
-                      selectedTileColor: theme.colorScheme.primary
-                          .withValues(alpha: 0.12),
+                      selected: entry.id == current?.id,
+                      selectedTileColor: theme.colorScheme.primary.withValues(
+                        alpha: 0.12,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
-                        side: heading.id == currentHeading?.id
-                            ? BorderSide(color: theme.colorScheme.primary, width: 3)
+                        side: entry.id == current?.id
+                            ? BorderSide(
+                                color: theme.colorScheme.primary,
+                                width: 3,
+                              )
                             : BorderSide.none,
                       ),
                       title: Text(
-                        heading.plainText,
-                        style: heading.id == currentHeading?.id
+                        entry.label,
+                        style: entry.id == current?.id
                             ? TextStyle(
                                 fontWeight: FontWeight.bold,
                                 color: theme.colorScheme.primary,
@@ -1096,7 +1237,7 @@ class _CanonicalLibraryReaderScreenState
                       ),
                       onTap: () {
                         Navigator.of(context).pop();
-                        unawaited(_jumpToBlock(heading));
+                        unawaited(_jumpToBlock(entry.block));
                       },
                     ),
                   ),
@@ -1106,14 +1247,6 @@ class _CanonicalLibraryReaderScreenState
         ),
       ),
     );
-  }
-
-  int _contentsHeadingDepth(LibraryDocumentBlock heading) {
-    return switch (heading.headingRole) {
-      'section' => 1,
-      'minor' => 2,
-      _ => 0,
-    };
   }
 
   final CanonicalLibraryProofCommands _commands =
@@ -1128,7 +1261,7 @@ class _CanonicalLibraryReaderScreenState
   }
 
   Future<void> _jumpHeading(bool forward) async {
-    final current = _location?.block.displayOrder ?? 0;
+    final current = _latestVisibleOrder;
     final headings = (await widget.repository.loadHeadings(widget.item.id))
         .where(
           (block) => forward

@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:studybible2/core/database/elibrary_schema.dart';
 import 'package:studybible2/features/library/data/library_document_canonicalizer.dart';
+import 'package:studybible2/features/library/data/library_document_repository.dart';
 import 'package:studybible2/features/utilities/data/epub_download_validator.dart';
 
 Uint8List _epubBytes(Map<String, List<int>> files) {
@@ -172,6 +173,77 @@ void main() {
     );
     expect(blocks, hasLength(2));
   });
+
+  test(
+    'corrects the known SL27-style OCR heading defect "ARGUMET" to '
+    '"ARGUMENT"',
+    () async {
+      final source = File(p.join(directory.path, 'sl27.epub'));
+      await source.writeAsBytes(
+        _wellFormedEpubBytes(
+          chapters: <String, String>{
+            'ch1.xhtml': '<h2>ARGUMET</h2><p>Senator Blair. - Very well.</p>',
+          },
+        ),
+        flush: true,
+      );
+
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'SL27',
+        source: source,
+      );
+
+      final heading = await db.query(
+        'library_document_blocks',
+        where: 'library_item_id = ? AND block_type = ?',
+        whereArgs: <Object?>['SL27', 'heading'],
+      );
+      expect(heading.single['plain_text'], 'ARGUMENT');
+    },
+  );
+
+  test(
+    'the OCR heading correction only matches "ARGUMET" as a whole word, '
+    'case-sensitively, and only inside headings',
+    () async {
+      final source = File(p.join(directory.path, 'unrelated.epub'));
+      await source.writeAsBytes(
+        _wellFormedEpubBytes(
+          chapters: <String, String>{
+            'ch1.xhtml':
+                '<h2>COUNTERARGUMET Section</h2>'
+                '<p>ARGUMET should not change here.</p>',
+          },
+        ),
+        flush: true,
+      );
+
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'UNRELATED',
+        source: source,
+      );
+
+      final heading = await db.query(
+        'library_document_blocks',
+        where: 'library_item_id = ? AND block_type = ?',
+        whereArgs: <Object?>['UNRELATED', 'heading'],
+      );
+      // Whole-word boundary: "ARGUMET" glued onto "COUNTER" must not match.
+      expect(heading.single['plain_text'], 'COUNTERARGUMET Section');
+      final paragraph = await db.query(
+        'library_document_blocks',
+        where: 'library_item_id = ? AND block_type = ?',
+        whereArgs: <Object?>['UNRELATED', 'paragraph'],
+      );
+      // The correction is scoped to headings only.
+      expect(
+        paragraph.single['plain_text'],
+        'ARGUMET should not change here.',
+      );
+    },
+  );
 
   test(
     'EPUB sections follow spine order when chapter filenames sort lexically',
@@ -695,6 +767,226 @@ void main() {
           reason: title,
         );
       }
+    },
+  );
+
+  test(
+    'recovers chapter headings from unmarked OCR "NN - TITLE" runs when a '
+    'book has no semantic heading tags anywhere in its spine',
+    () async {
+      final source = File(p.join(directory.path, 'archive_org_scan.epub'));
+      // Reproduces the real archive.org page-scan shape: one flat <p> per
+      // scanned page, no <h#> tags anywhere, chapter titles buried
+      // mid-paragraph with no boundary marker, and a front-matter page that
+      // dumps the whole table of contents as one more "NN - CAPS" blob (out
+      // of sequence, so it must be rejected rather than misread as chapter
+      // 21).
+      await source.writeAsBytes(
+        _wellFormedEpubBytes(
+          chapters: <String, String>{
+            'page_0.xhtml': '<p>The Test Book Some Author</p>',
+            'page_1.xhtml':
+                '<p>21 - THE NEW JERUSALEM 22 - THE TREE AND THE RIVER OF LIFE '
+                    'APPENDIX 1. RESEMBLANCE BETWEEN OUR TIMES</p>',
+            'page_2.xhtml':
+                '<p>Response of History to the Prophecy 01 - DANIEL IN '
+                    'CAPTIVITY Character sketch of Daniel continues here as '
+                    'real body prose about his early life.</p>',
+            'page_3.xhtml':
+                '<p>More body text continuing chapter one across a page '
+                    'boundary with no heading markup at all.</p>',
+            'page_4.xhtml':
+                '<p>02 - THE GREAT IMAGE A Difficulty Explained - Daniel '
+                    'Enters upon His Work - outline text. VERSE 1. And in '
+                    'the second year of the reign of Nebuchadnezzar.</p>',
+          },
+        ),
+        flush: true,
+      );
+
+      final result = await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'OCR_SCAN',
+        source: source,
+      );
+      expect(result.activated, isTrue);
+
+      final headingRows = await db.query(
+        'library_document_blocks',
+        columns: const <String>['plain_text', 'formatted_content'],
+        where: 'library_item_id = ? AND block_type = ?',
+        whereArgs: <Object?>['OCR_SCAN', 'heading'],
+        orderBy: 'display_order',
+      );
+      expect(
+        headingRows.map((row) => row['plain_text']),
+        orderedEquals(<String>['01 - DANIEL IN CAPTIVITY', '02 - THE GREAT IMAGE']),
+      );
+      for (final row in headingRows) {
+        expect(row['formatted_content'].toString(), contains('"heading_role":"chapter"'));
+      }
+
+      // The TOC dump's out-of-sequence "21 -"/"22 -" runs must survive as
+      // ordinary paragraph text, not be misread as chapters.
+      final tocParagraph = await db.query(
+        'library_document_blocks',
+        columns: const <String>['plain_text'],
+        where: 'library_item_id = ? AND block_type = ? AND plain_text LIKE ?',
+        whereArgs: <Object?>['OCR_SCAN', 'paragraph', '21 - THE NEW JERUSALEM%'],
+      );
+      expect(tocParagraph, hasLength(1));
+
+      final repository = LibraryDocumentRepository(db);
+      final opening = await repository.openingDisplayOrder('OCR_SCAN');
+      final openingRow = await db.query(
+        'library_document_blocks',
+        columns: const <String>['plain_text'],
+        where: 'library_item_id = ? AND display_order = ?',
+        whereArgs: <Object?>['OCR_SCAN', opening],
+      );
+      expect(openingRow.single['plain_text'], '01 - DANIEL IN CAPTIVITY');
+    },
+  );
+
+  test(
+    'a book with at least one real semantic heading anywhere is never '
+    'touched by OCR heading recovery, even if most pages are flat <p> text',
+    () async {
+      final source = File(p.join(directory.path, 'mixed.epub'));
+      await source.writeAsBytes(
+        _wellFormedEpubBytes(
+          chapters: <String, String>{
+            'page_0.xhtml': '<p>Front matter with no heading markup.</p>',
+            'page_1.xhtml': '<h2>Chapter 1</h2><p>Real semantic heading.</p>',
+            'page_2.xhtml':
+                '<p>02 - SOME LATER PAGE that would match the OCR pattern '
+                    'if recovery were active here, but it must not be.</p>',
+          },
+        ),
+        flush: true,
+      );
+
+      final result = await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'MIXED',
+        source: source,
+      );
+      expect(result.activated, isTrue);
+
+      final headingRows = await db.query(
+        'library_document_blocks',
+        columns: const <String>['plain_text'],
+        where: 'library_item_id = ? AND block_type = ?',
+        whereArgs: <Object?>['MIXED', 'heading'],
+      );
+      expect(headingRows.map((row) => row['plain_text']), <String>['Chapter 1']);
+    },
+  );
+
+  test(
+    'OCR heading recovery still fires when the only real heading tag in the '
+    'whole spine belongs to the EPUB nav document itself (the real '
+    'archive.org export shape: nav.xhtml carries its own <h2> title and is '
+    'itself the first spine entry)',
+    () async {
+      final source = File(p.join(directory.path, 'nav_doc.epub'));
+      await source.writeAsBytes(
+        _wellFormedEpubBytes(
+          chapters: <String, String>{
+            'nav.xhtml':
+                '<nav epub:type="toc" id="id" role="doc-toc">'
+                    '<h2>Adventist Pioneer Authors - Test Author</h2>'
+                    '<ol><li><a href="notice.html">Notice</a></li></ol>'
+                    '</nav>',
+            'page_0.xhtml': '<p>Test Book Test Author</p>',
+            'page_1.xhtml':
+                '<p>01 - CHAPTER ONE Some outline text continues the page '
+                    'with real body prose about the opening chapter.</p>',
+            'page_2.xhtml':
+                '<p>More body text finishing chapter one across a page '
+                    'boundary.</p>',
+            'page_3.xhtml':
+                '<p>02 - CHAPTER TWO More outline text and body prose for '
+                    'the second chapter follows here.</p>',
+          },
+        ),
+        flush: true,
+      );
+
+      final result = await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'NAV_DOC',
+        source: source,
+      );
+      expect(result.activated, isTrue);
+
+      final headingRows = await db.query(
+        'library_document_blocks',
+        columns: const <String>['plain_text'],
+        where: 'library_item_id = ? AND block_type = ?',
+        whereArgs: <Object?>['NAV_DOC', 'heading'],
+        orderBy: 'display_order',
+      );
+      expect(
+        headingRows.map((row) => row['plain_text']),
+        <String>[
+          'Adventist Pioneer Authors - Test Author',
+          '01 - CHAPTER ONE',
+          '02 - CHAPTER TWO',
+        ],
+      );
+    },
+  );
+
+  test(
+    'OCR recovered chapter titles stop cleanly at the next chapter\'s own '
+    'number and at APPENDIX/INDEX/PART back-matter markers, instead of '
+    'running on into adjacent text with no boundary of their own',
+    () async {
+      final source = File(p.join(directory.path, 'boundaries.epub'));
+      await source.writeAsBytes(
+        _wellFormedEpubBytes(
+          chapters: <String, String>{
+            'page_0.xhtml': '<p>Front matter with no chapter markup.</p>',
+            'page_1.xhtml': '<p>Second page of front matter, still none.</p>',
+            'page_2.xhtml': '<p>Third page, still no chapter markers here.</p>',
+            // Back-to-back chapter headings on the same page with no body
+            // text between them — chapter 1's title must not swallow "02".
+            'page_3.xhtml':
+                '<p>01 - CHAPTER ONE 02 - CHAPTER TWO real body text for '
+                    'chapter two follows immediately here.</p>',
+            // The final chapter runs straight into back matter with no
+            // boundary at all — must stop before "APPENDIX".
+            'page_4.xhtml':
+                '<p>03 - CHAPTER THREE APPENDIX 1. SOME BACK MATTER LISTING '
+                    'that must not be absorbed into the chapter title.</p>',
+          },
+        ),
+        flush: true,
+      );
+
+      final result = await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'BOUNDARIES',
+        source: source,
+      );
+      expect(result.activated, isTrue);
+
+      final headingRows = await db.query(
+        'library_document_blocks',
+        columns: const <String>['plain_text'],
+        where: 'library_item_id = ? AND block_type = ?',
+        whereArgs: <Object?>['BOUNDARIES', 'heading'],
+        orderBy: 'display_order',
+      );
+      expect(
+        headingRows.map((row) => row['plain_text']),
+        <String>[
+          '01 - CHAPTER ONE',
+          '02 - CHAPTER TWO',
+          '03 - CHAPTER THREE',
+        ],
+      );
     },
   );
 }

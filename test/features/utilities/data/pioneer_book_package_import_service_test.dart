@@ -476,7 +476,7 @@ void main() {
         isA<PioneerBookPackageImportException>().having(
           (e) => e.message,
           'message',
-          contains('Please select a .studybook CaptureClipper package'),
+          contains('Please select a .zip CaptureClipper package'),
         ),
       ),
     );

@@ -43,6 +43,7 @@ class ImportPioneerLibraryScreen extends StatefulWidget {
   const ImportPioneerLibraryScreen({
     super.key,
     this.startWithZipPicker = false,
+    this.initialZipPath,
     this.pickFolder,
     this.pickZipFile,
     this.extractZip,
@@ -55,6 +56,13 @@ class ImportPioneerLibraryScreen extends StatefulWidget {
   });
 
   final bool startWithZipPicker;
+
+  /// A zip file path already chosen by the caller (e.g. a plain zip of loose
+  /// EPUBs selected via "Check for New Books" that turned out not to be a
+  /// .studycollection manifest). When set, this screen skips its own file
+  /// picker on open and goes straight to extracting/scanning this file,
+  /// landing the user on the normal review/import UI.
+  final String? initialZipPath;
 
   final PioneerFolderPicker? pickFolder;
   final PioneerZipPicker? pickZipFile;
@@ -93,11 +101,18 @@ class _ImportPioneerLibraryScreenState
   @override
   void initState() {
     super.initState();
-    _loadConfiguredFolder();
-    if (widget.startWithZipPicker) {
+    final initialZipPath = widget.initialZipPath;
+    if (initialZipPath != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _chooseZipFile();
+        if (mounted) _importZipFile(initialZipPath);
       });
+    } else {
+      _loadConfiguredFolder();
+      if (widget.startWithZipPicker) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _chooseZipFile();
+        });
+      }
     }
     PioneerArchiveOrgInstallService.instance
         .inspect()
@@ -138,6 +153,12 @@ class _ImportPioneerLibraryScreenState
     setState(() {
       _running = true;
       _message = null;
+      _progress = const LibraryAcquisitionBatchProgress(
+        current: 0,
+        total: 0,
+        currentTitle: '',
+        phase: LibraryAcquisitionPhase.preparing,
+      );
     });
     var installed = 0;
     var alreadyInLibrary = 0;
@@ -146,7 +167,16 @@ class _ImportPioneerLibraryScreenState
       final archiveResult = await PioneerArchiveOrgInstallService.instance
           .install(
             onProgress: (progress) {
-              if (mounted) setState(() => _onlineProgress = progress);
+              if (!mounted) return;
+              setState(() {
+                _onlineProgress = progress;
+                _progress = LibraryAcquisitionBatchProgress(
+                  current: progress.current,
+                  total: progress.total,
+                  currentTitle: progress.title,
+                  phase: LibraryAcquisitionPhase.downloading,
+                );
+              });
             },
           );
       installed += archiveResult.installed;
@@ -158,6 +188,7 @@ class _ImportPioneerLibraryScreenState
       setState(() {
         _running = false;
         _onlineProgress = null;
+        _progress = null;
         _result = const LibraryAcquisitionBatchResult(
           targets: [],
           outcomes: [],
@@ -170,6 +201,8 @@ class _ImportPioneerLibraryScreenState
       if (mounted) {
         setState(() {
           _running = false;
+          _onlineProgress = null;
+          _progress = null;
           _message =
               'Installation cancelled. Your existing Library was not changed.';
         });
@@ -178,6 +211,8 @@ class _ImportPioneerLibraryScreenState
       if (mounted) {
         setState(() {
           _running = false;
+          _onlineProgress = null;
+          _progress = null;
           _message =
               'The online installation could not finish. Tap Retry to continue safely.\n$error';
         });
@@ -240,11 +275,15 @@ class _ImportPioneerLibraryScreenState
   /// particular tends to just list every file with no clear way to select
   /// the enclosing folder) than the standard SAF folder picker.
   Future<void> _chooseZipFile() async {
+    final zipPath =
+        await (widget.pickZipFile?.call() ??
+            LibraryRootNative.pickPioneerZipFile());
+    if (zipPath == null) return;
+    await _importZipFile(zipPath);
+  }
+
+  Future<void> _importZipFile(String zipPath) async {
     try {
-      final zipPath =
-          await (widget.pickZipFile?.call() ??
-              LibraryRootNative.pickPioneerZipFile());
-      if (zipPath == null) return;
       setState(() {
         _loading = false;
         _scanning = true;
@@ -621,6 +660,16 @@ class _ImportPioneerLibraryScreenState
           style: Theme.of(context).textTheme.titleMedium,
           textAlign: TextAlign.center,
         ),
+        if (inventory.skippedNonEpubCount > 0) ...[
+          const SizedBox(height: 6),
+          Text(
+            '${inventory.skippedNonEpubCount} non-book ${inventory.skippedNonEpubCount == 1 ? 'file was' : 'files were'} ignored',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
         if (_message != null) ...[
           const SizedBox(height: 10),
           Text(_message!, textAlign: TextAlign.center),
@@ -694,6 +743,14 @@ class _ImportPioneerLibraryScreenState
           '$_needsAttention ${_needsAttention == 1 ? 'file needs' : 'files need'} attention',
           textAlign: TextAlign.center,
         ),
+        if ((_inventory?.skippedNonEpubCount ?? 0) > 0)
+          Text(
+            '${_inventory!.skippedNonEpubCount} non-book ${_inventory!.skippedNonEpubCount == 1 ? 'file was' : 'files were'} ignored',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            textAlign: TextAlign.center,
+          ),
         const SizedBox(height: 24),
         FilledButton(
           onPressed: () => setState(() => _result = null),

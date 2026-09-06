@@ -11,6 +11,8 @@ import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/elibrary_database.dart';
 import '../../library/data/canonical_activation.dart';
 import '../../library/data/library_document_repository.dart';
+import '../../library/data/pioneer_cover_assignment_service.dart';
+import '../../reader/data/commentary_research_library_service.dart';
 import 'elibrary_folder_policy.dart';
 import 'epub_download_validator.dart';
 
@@ -68,6 +70,23 @@ class PioneerArchiveOrgInstallService {
       0,
       (sum, author) => sum + author.works.length,
     );
+    // A handful of manifest entries are distinct archive.org derivatives of
+    // the same nominal title (e.g. Uriah Smith's "Daniel and The Revelation"
+    // has separate `DAR` and `DAR1909` editions) that would otherwise
+    // sanitize to the identical destination file name below. Left alone,
+    // the second one silently overwrites the first on disk while both still
+    // get their own `library_items` row (`canonicalLibraryItemId` keys off
+    // `work.canonicalCode`, not the file name) — the row for whichever
+    // edition lost the overwrite race then points at a file it no longer
+    // matches. Counting title collisions up front lets every colliding
+    // work's real, unique `code` become part of its file name instead.
+    final titleCollisionCounts = <String, int>{};
+    for (final author in authors) {
+      for (final work in author.works) {
+        final base = _sanitizedTitleBase(work.title);
+        titleCollisionCounts.update(base, (v) => v + 1, ifAbsent: () => 1);
+      }
+    }
     if (totalWorks == 0) {
       return const PioneerArchiveOrgInstallResult(
         installed: 0,
@@ -181,11 +200,13 @@ class PioneerArchiveOrgInstallService {
             final outcome = await _stageActivateAndPromote(
               db: db,
               deviceId: deviceId,
+              rootPath: rootPath,
               destinationDir: destinationDir,
               author: author,
               work: work,
               bytes: bytes,
               sourceUri: uri,
+              titleCollisionCounts: titleCollisionCounts,
             );
             if (!outcome.isReady) {
               failed += 1;
@@ -267,26 +288,36 @@ class PioneerArchiveOrgInstallService {
   Future<LibraryAcquisitionOutcome> _stageActivateAndPromote({
     required Database db,
     required String deviceId,
+    required String rootPath,
     required Directory destinationDir,
     required _PioneerArchiveOrgAuthor author,
     required _PioneerArchiveOrgWork work,
     required Uint8List bytes,
     required Uri sourceUri,
+    required Map<String, int> titleCollisionCounts,
   }) async {
     final libraryItemId = canonicalLibraryItemId(
       author: author.author,
       canonicalCode: work.canonicalCode,
     );
-    final sanitizedBase = work.title
-        .replaceAll(RegExp(r'[\\/:*?"<>|]+'), '_')
-        .trim();
-    final fileName =
-        '${sanitizedBase.isEmpty ? work.code : sanitizedBase}.epub';
+    final fileName = destinationFileNameFor(
+      title: work.title,
+      code: work.code,
+      titleCollisionCounts: titleCollisionCounts,
+    );
     final destination = File(p.join(destinationDir.path, fileName));
+    // The staging name keeps a real `.epub` extension (the timestamp/hidden
+    // marker goes in front, not appended after) because
+    // `LibraryDocumentCanonicalizer.canonicalize` decides whether to unzip a
+    // source file purely by its extension. A trailing `.downloading` suffix
+    // used to shadow the real `.epub` extension, so canonicalize() treated
+    // every archive.org download as a non-EPUB and stored the raw ZIP bytes
+    // as if they were plain text — corrupting every book imported this way
+    // (no parsed text, no navigation).
     final staging = File(
       p.join(
         destinationDir.path,
-        '.$fileName.${DateTime.now().microsecondsSinceEpoch}.downloading',
+        '.${DateTime.now().microsecondsSinceEpoch}.downloading.$fileName',
       ),
     );
     await staging.writeAsBytes(bytes, flush: true);
@@ -370,15 +401,37 @@ class PioneerArchiveOrgInstallService {
         await destination.delete();
       }
       await staging.rename(destination.path);
+      // Only a brand-new row gets a cover assigned here — a re-run against
+      // an already-imported title must never touch its existing cover_path,
+      // whether that came from the EPUB itself or a prior generated cover.
+      final coverPath = createdProvisionalRow
+          ? await PioneerCoverAssignmentService.instance.ensureCoverPath(
+              epubBytes: bytes,
+              rootPath: rootPath,
+              itemId: libraryItemId,
+              title: work.title,
+              author: author.author,
+            )
+          : null;
       await db.update(
         'library_items',
         <String, Object?>{
           ...payload,
           'relative_path': finalRelativePath,
           'updated_at': DateTime.now().toUtc().toIso8601String(),
+          if (coverPath != null) 'cover_path': coverPath,
         },
         where: 'id = ?',
         whereArgs: <Object?>[libraryItemId],
+      );
+      // The canonicalizer behind CanonicalActivation only ever writes
+      // library_document_blocks/sections — it never builds the navigation
+      // tree the reader's Contents/TOC UI depends on, so that step must be
+      // driven explicitly here for every archive.org download.
+      await CommentaryResearchLibraryService.instance.ensureNavigationIndexed(
+        db: db,
+        libraryItemId: libraryItemId,
+        file: destination,
       );
       return outcome;
     } catch (_) {
@@ -393,6 +446,25 @@ class PioneerArchiveOrgInstallService {
     } finally {
       if (await staging.exists()) await staging.delete();
     }
+  }
+
+  static String _sanitizedTitleBase(String title) =>
+      title.replaceAll(RegExp(r'[\\/:*?"<>|]+'), '_').trim();
+
+  /// The on-disk `.epub` file name for a manifest work. When another work in
+  /// the same install run sanitizes to the identical title-based name (per
+  /// [titleCollisionCounts]), the work's own unique `code` is folded in so
+  /// the two files never collide — see the collision-avoidance note above
+  /// [install] for why an uncaught collision corrupts the library.
+  static String destinationFileNameFor({
+    required String title,
+    required String code,
+    required Map<String, int> titleCollisionCounts,
+  }) {
+    final sanitizedBase = _sanitizedTitleBase(title);
+    final collides = (titleCollisionCounts[sanitizedBase] ?? 0) > 1;
+    final effectiveBase = collides ? '$sanitizedBase [$code]' : sanitizedBase;
+    return '${effectiveBase.isEmpty ? code : effectiveBase}.epub';
   }
 
   static String _stableKeyStatic(String value) {

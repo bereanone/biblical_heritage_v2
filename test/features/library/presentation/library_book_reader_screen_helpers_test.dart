@@ -1389,6 +1389,77 @@ void main() {
       expect(headings.last.paragraphs.single, 'Chapter two body text.');
     });
 
+    test(
+      'continuous scroll does not reprint a heading-only ancestor already '
+      'shown by the immediately preceding readable unit '
+      '(regression: "APPENDIX A" printing twice before its nested '
+      '"OPEN LETTER" subsection)',
+      () {
+        final chapter2Heading = headingOnlySection(
+          'chapter2-heading.html',
+          'CHAPTER 2.',
+          20,
+        );
+        final chapter2Body = readableSection(
+          'chapter2-body.html',
+          'THE SEVEN CHURCHES',
+          'Chapter two body text.',
+          21,
+        );
+        final chapter2HeadingNav = navItem(
+          id: 'chapter2-heading',
+          label: 'CHAPTER 2.',
+          href: 'chapter2-heading.html',
+          sortOrder: 20,
+        );
+        final chapter2BodyNav = navItem(
+          id: 'chapter2-body',
+          parentId: 'chapter2-heading',
+          label: 'THE SEVEN CHURCHES',
+          href: 'chapter2-body.html',
+          sortOrder: 21,
+          depth: 1,
+        );
+        final chapter2Tree = buildLibraryNavigationTree([
+          chapter2HeadingNav,
+          chapter2BodyNav,
+        ]);
+        final chapter2Sections = [chapter2Heading, chapter2Body];
+
+        // Unit 1: the ancestor's own continuous-scroll unit — no preceding
+        // unit shares any of its heading path, so nothing is stripped.
+        final previousUnitHeadings = libraryReaderComposedHeadingSections(
+          navItem: chapter2HeadingNav,
+          tree: chapter2Tree,
+          sections: chapter2Sections,
+        );
+        final firstUnit = libraryReaderContinuousUnitHeadings(
+          composedHeadings: previousUnitHeadings,
+          previousComposedHeadings: const <LibraryBookSection>[],
+        );
+        expect(firstUnit.map((section) => section.title), <String>[
+          'CHAPTER 2.',
+        ]);
+
+        // Unit 2: the nested body's own composed path re-includes "CHAPTER
+        // 2." as its ancestor. Since unit 1 already printed it, it must be
+        // dropped here — only the newly-entered "THE SEVEN CHURCHES" heading
+        // should remain.
+        final currentUnitComposed = libraryReaderComposedHeadingSections(
+          navItem: chapter2BodyNav,
+          tree: chapter2Tree,
+          sections: chapter2Sections,
+        );
+        final secondUnit = libraryReaderContinuousUnitHeadings(
+          composedHeadings: currentUnitComposed,
+          previousComposedHeadings: previousUnitHeadings,
+        );
+        expect(secondUnit.map((section) => section.title), <String>[
+          'THE SEVEN CHURCHES',
+        ]);
+      },
+    );
+
     test('structural heading and readable descendant are composed once', () {
       final chain = libraryReaderFirstReadableDescendant(
         navItem: navChapter1,
@@ -2406,5 +2477,325 @@ void main() {
         },
       );
     });
+  });
+
+  group('libraryReaderComposedHeadingSections – sibling headings sharing one '
+      'physical file (SL27 shape)', () {
+    // A.T. Jones' "The National Sunday Law" [SL27] stores every heading
+    // (INTRODUCTION, ARGUMENT, "ARTICLE", APPENDIX A, ...) as anchors within
+    // one shared OEBPS/content.xhtml, all as genuine top-level siblings with
+    // no parent_id in the database. Each heading still gets its own
+    // LibraryBookSection, keyed by the anchor-qualified entryName, exactly
+    // like the text-block importer does.
+    // Neither matching function can disambiguate these by href alone: the
+    // fragment-preserving comparison in _navigationIndexForSectionIndex would
+    // work, but libraryReaderComposedHeadingSections resolves sections via
+    // _librarySectionIndexForNavigationItem, which strips the fragment via
+    // _cleanNavigationHref before comparing — so, exactly as in production,
+    // disambiguation here falls through to the per-heading spineIndex that
+    // the text-block importer stamps on both the section and its nav item.
+    LibraryBookSection headingSection(String anchorId, String title, int spineIndex) {
+      return LibraryBookSection(
+        entryName: 'OEBPS/content.xhtml#$anchorId',
+        title: title,
+        paragraphs: <String>['Body text for $title.'],
+        blocks: const <LibraryBookBlock>[],
+        spineIndex: spineIndex,
+      );
+    }
+
+    LibraryCatalogNavigationItem siblingNavItem({
+      required String id,
+      required String label,
+      required String anchorId,
+      required int sortOrder,
+    }) {
+      return LibraryCatalogNavigationItem(
+        id: id,
+        parentId: null,
+        label: label,
+        href: 'OEBPS/content.xhtml#$anchorId',
+        anchorId: anchorId,
+        spineIndex: sortOrder,
+        sortOrder: sortOrder,
+        depth: 0,
+        navType: 'toc',
+        contentKind: null,
+        isFrontMatter: false,
+        isBodyStart: sortOrder == 1,
+        bodyOrder: sortOrder,
+      );
+    }
+
+    final introductionSection = headingSection(
+      'heading-2-1',
+      'INTRODUCTION',
+      1,
+    );
+    final argumentSection = headingSection('heading-2-3', 'ARGUMENT', 3);
+    final appendixASection = headingSection('heading-2-11', 'APPENDIX A', 11);
+
+    final navIntroduction = siblingNavItem(
+      id: 'introduction',
+      label: 'INTRODUCTION',
+      anchorId: 'heading-2-1',
+      sortOrder: 1,
+    );
+    final navArgument = siblingNavItem(
+      id: 'argument',
+      label: 'ARGUMENT',
+      anchorId: 'heading-2-3',
+      sortOrder: 3,
+    );
+    final navAppendixA = siblingNavItem(
+      id: 'appendix-a',
+      label: 'APPENDIX A',
+      anchorId: 'heading-2-11',
+      sortOrder: 11,
+    );
+
+    final sections = <LibraryBookSection>[
+      introductionSection,
+      argumentSection,
+      appendixASection,
+    ];
+    final navigationItems = <LibraryCatalogNavigationItem>[
+      navIntroduction,
+      navArgument,
+      navAppendixA,
+    ];
+    final tree = buildLibraryNavigationTree(navigationItems);
+
+    test(
+      'scrolling into a later sibling replaces the heading trail instead of '
+      'stacking the first sibling above it',
+      () {
+        final introductionHeadings = libraryReaderComposedHeadingSections(
+          navItem: navIntroduction,
+          tree: tree,
+          sections: sections,
+        );
+        expect(introductionHeadings.map((s) => s.title), <String>[
+          'INTRODUCTION',
+        ]);
+
+        final appendixHeadings = libraryReaderComposedHeadingSections(
+          navItem: navAppendixA,
+          tree: tree,
+          sections: sections,
+        );
+        expect(appendixHeadings.map((s) => s.title), <String>['APPENDIX A']);
+      },
+    );
+
+    test(
+      'a middle sibling composes just its own heading, not the first '
+      'sibling in the shared file',
+      () {
+        final argumentHeadings = libraryReaderComposedHeadingSections(
+          navItem: navArgument,
+          tree: tree,
+          sections: sections,
+        );
+        expect(argumentHeadings.map((s) => s.title), <String>['ARGUMENT']);
+      },
+    );
+
+    test(
+      'a substantial "INTRODUCTION" chapter wrongly flagged front matter at '
+      'import is not sunk to the bottom of the Contents list (regression: '
+      'SL27\'s real Introduction sorting last, after APPENDIX B)',
+      () {
+        // Mirrors production: firstMeaningfulSectionIndex's front-matter-label
+        // check treats "INTRODUCTION" as skippable-by-label for picking a
+        // default open position, so import stamps is_front_matter=1 on it
+        // even though — unlike a real cover or boilerplate title page — it
+        // has substantial prose of its own, unlike the short placeholder
+        // body introductionSection uses for the composed-heading tests above.
+        final substantialIntroductionSection = LibraryBookSection(
+          entryName: introductionSection.entryName,
+          title: introductionSection.title,
+          paragraphs: const <String>[
+            'THIS pamphlet is a report of an argument made upon the national '
+                'Sunday bill introduced by Senator Blair in the fiftieth '
+                'Congress. It is not, however, exactly the argument that was '
+                'made before the Senate Committee.',
+          ],
+          blocks: const <LibraryBookBlock>[],
+          spineIndex: introductionSection.spineIndex,
+        );
+        final frontMatterFlaggedIntroduction = navIntroduction.copyWith(
+          isFrontMatter: true,
+        );
+
+        final corrected = libraryReaderContentsDisplayNavigationItems(
+          items: [frontMatterFlaggedIntroduction, navArgument, navAppendixA],
+          sections: [
+            substantialIntroductionSection,
+            argumentSection,
+            appendixASection,
+          ],
+          bookTitle: 'The National Sunday Law',
+        );
+
+        final correctedIntroduction = corrected.firstWhere(
+          (item) => item.id == 'introduction',
+        );
+        expect(correctedIntroduction.isFrontMatter, isFalse);
+
+        final tree = buildLibraryNavigationTree(corrected);
+        expect(tree.items.map((item) => item.id), <String>[
+          'introduction',
+          'argument',
+          'appendix-a',
+        ]);
+      },
+    );
+
+    test(
+      'the default-open-position promotion also moves off a later section '
+      'once the earlier one it was skipping past is corrected (regression: '
+      'Introduction landing second, after the subtitle heading that was '
+      'picked as the default open position, instead of first)',
+      () {
+        // Mirrors production exactly: INTRODUCTION (sort_order 1) is real
+        // content wrongly flagged front matter by label; the book's own
+        // verbose subtitle heading (sort_order 2) was picked instead as
+        // isBodyStart because firstMeaningfulSectionIndex skipped past
+        // INTRODUCTION by label without looking at its content.
+        final substantialIntroductionSection = LibraryBookSection(
+          entryName: introductionSection.entryName,
+          title: introductionSection.title,
+          paragraphs: const <String>[
+            'THIS pamphlet is a report of an argument made upon the national '
+                'Sunday bill introduced by Senator Blair in the fiftieth '
+                'Congress. It is not, however, exactly the argument that was '
+                'made before the Senate Committee.',
+          ],
+          blocks: const <LibraryBookBlock>[],
+          spineIndex: introductionSection.spineIndex,
+        );
+        final frontMatterFlaggedIntroduction = navIntroduction.copyWith(
+          isFrontMatter: true,
+          isBodyStart: false,
+        );
+        final subtitleSection = LibraryBookSection(
+          entryName: 'OEBPS/content.xhtml#heading-2-2',
+          title: 'THE NATIONAL SUNDAY LAW ARGUMENT OF ALONZO T. JONES',
+          paragraphs: const <String>['Senator Blair.—There are gentlemen...'],
+          blocks: const <LibraryBookBlock>[],
+          spineIndex: 2,
+        );
+        final navSubtitle = LibraryCatalogNavigationItem(
+          id: 'subtitle',
+          parentId: null,
+          label: 'THE NATIONAL SUNDAY LAW ARGUMENT OF ALONZO T. JONES',
+          href: 'OEBPS/content.xhtml#heading-2-2',
+          anchorId: 'heading-2-2',
+          spineIndex: 2,
+          sortOrder: 2,
+          depth: 0,
+          navType: 'toc',
+          contentKind: null,
+          isFrontMatter: false,
+          isBodyStart: true,
+          bodyOrder: 2,
+        );
+
+        final corrected = libraryReaderContentsDisplayNavigationItems(
+          items: [
+            frontMatterFlaggedIntroduction,
+            navSubtitle,
+            navArgument,
+            navAppendixA,
+          ],
+          sections: [
+            substantialIntroductionSection,
+            subtitleSection,
+            argumentSection,
+            appendixASection,
+          ],
+          bookTitle: 'The National Sunday Law',
+        );
+
+        final correctedIntroduction = corrected.firstWhere(
+          (item) => item.id == 'introduction',
+        );
+        final correctedSubtitle = corrected.firstWhere(
+          (item) => item.id == 'subtitle',
+        );
+        expect(correctedIntroduction.isFrontMatter, isFalse);
+        expect(
+          correctedIntroduction.isBodyStart,
+          isTrue,
+          reason:
+              'the earliest non-front-matter item should keep the default '
+              'open promotion',
+        );
+        expect(
+          correctedSubtitle.isBodyStart,
+          isFalse,
+          reason:
+              'a later section must not keep floating to the top once the '
+              'earlier, genuinely substantial section is no longer treated '
+              'as front matter',
+        );
+
+        final tree = buildLibraryNavigationTree(corrected);
+        expect(tree.items.map((item) => item.id), <String>[
+          'introduction',
+          'subtitle',
+          'argument',
+          'appendix-a',
+        ]);
+      },
+    );
+
+    test(
+      'a genuinely decorative front-matter item (no substantial content of '
+      'its own) still sinks to the bottom of the Contents list',
+      () {
+        final coverSection = LibraryBookSection(
+          entryName: 'OEBPS/content.xhtml#heading-2-0',
+          title: 'Cover',
+          paragraphs: const <String>[],
+          blocks: const <LibraryBookBlock>[],
+          spineIndex: 0,
+        );
+        final navCover = LibraryCatalogNavigationItem(
+          id: 'cover',
+          parentId: null,
+          label: 'Cover',
+          href: 'OEBPS/content.xhtml#heading-2-0',
+          anchorId: 'heading-2-0',
+          spineIndex: 0,
+          sortOrder: 0,
+          depth: 0,
+          navType: 'toc',
+          contentKind: null,
+          isFrontMatter: true,
+          isBodyStart: false,
+          bodyOrder: 0,
+        );
+
+        final corrected = libraryReaderContentsDisplayNavigationItems(
+          items: [navCover, navArgument, navAppendixA],
+          sections: [coverSection, argumentSection, appendixASection],
+          bookTitle: 'The National Sunday Law',
+        );
+
+        final correctedCover = corrected.firstWhere(
+          (item) => item.id == 'cover',
+        );
+        expect(correctedCover.isFrontMatter, isTrue);
+
+        final tree = buildLibraryNavigationTree(corrected);
+        expect(tree.items.map((item) => item.id), <String>[
+          'argument',
+          'appendix-a',
+          'cover',
+        ]);
+      },
+    );
   });
 }

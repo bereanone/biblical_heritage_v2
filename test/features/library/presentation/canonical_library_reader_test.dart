@@ -38,6 +38,117 @@ void main() {
     contentHash: 'hash',
   );
 
+  group('canonical Contents hierarchy', () {
+    LibraryDocumentBlock heading(
+      String id,
+      String text,
+      String href, {
+      String role = 'chapter',
+    }) => LibraryDocumentBlock(
+      id: id,
+      libraryItemId: 'item',
+      sectionId: 'section',
+      displayOrder: 1,
+      blockType: LibraryDocumentBlockType.heading,
+      plainText: text,
+      formattedContent: LibraryFormattedContent(
+        nodes: <Map<String, Object?>>[
+          <String, Object?>{'type': 'text', 'text': text},
+        ],
+        metadata: <String, Object?>{'heading_role': role},
+      ).toJson(),
+      sourceHref: href,
+      contentHash: 'hash-$id',
+    );
+
+    LibraryCatalogNavigationItem nav(
+      String id,
+      String label,
+      String href, {
+      String? parentId,
+      int depth = 0,
+      String? contentKind,
+    }) => LibraryCatalogNavigationItem(
+      id: id,
+      parentId: parentId,
+      label: label,
+      href: href,
+      anchorId: null,
+      spineIndex: null,
+      sortOrder: depth,
+      depth: depth,
+      navType: null,
+      contentKind: contentKind,
+      isFrontMatter: false,
+      isBodyStart: false,
+      bodyOrder: null,
+    );
+
+    test('uses the EPUB navigation tree to group cross-file chapters', () {
+      final depths = canonicalContentsHeadingDepths(
+        headings: <LibraryDocumentBlock>[
+          heading('section', 'Experience and Views', 'section.xhtml'),
+          heading('chapter', 'My First Vision', 'vision.xhtml'),
+          heading(
+            'subheading',
+            'Texts Referred to on Preceding Page',
+            'vision.xhtml',
+            role: 'section',
+          ),
+        ],
+        navigationItems: <LibraryCatalogNavigationItem>[
+          nav('section-nav', 'Experience and Views', 'section.xhtml'),
+          nav(
+            'chapter-nav',
+            'My First Vision',
+            'vision.xhtml#start',
+            parentId: 'section-nav',
+            depth: 1,
+          ),
+        ],
+      );
+
+      expect(depths, <String, int>{
+        'section': 0,
+        'chapter': 1,
+        'subheading': 2,
+      });
+    });
+
+    test('falls back to heading roles when navigation rows are absent', () {
+      final depths = canonicalContentsHeadingDepths(
+        headings: <LibraryDocumentBlock>[
+          heading('chapter', 'Chapter', 'chapter.xhtml'),
+          heading('section', 'Section', 'chapter.xhtml', role: 'section'),
+          heading('minor', 'Minor', 'chapter.xhtml', role: 'minor'),
+        ],
+        navigationItems: const <LibraryCatalogNavigationItem>[],
+      );
+
+      expect(depths, <String, int>{'chapter': 0, 'section': 1, 'minor': 2});
+    });
+
+    test('ignores support rows and can fall back to normalized labels', () {
+      final depths = canonicalContentsHeadingDepths(
+        headings: <LibraryDocumentBlock>[
+          heading('chapter', 'My First Vision!', 'synthetic/vision.xhtml'),
+        ],
+        navigationItems: <LibraryCatalogNavigationItem>[
+          nav('about', 'About', 'about.xhtml', contentKind: 'about'),
+          nav(
+            'chapter-nav',
+            'My First Vision',
+            'actual/vision.xhtml',
+            parentId: 'about',
+            depth: 1,
+          ),
+        ],
+      );
+
+      expect(depths['chapter'], 0);
+    });
+  });
+
   group('inline canonical reference codes', () {
     const bodyStyle = TextStyle(fontSize: 18, color: Colors.black);
     const referenceStyle = TextStyle(
@@ -471,6 +582,63 @@ void main() {
     await tester.runAsync(() async {
       await completedSetup.db.close();
       await completedSetup.dir.delete(recursive: true);
+    });
+  });
+
+  group('canonicalContentsCurrentHeading', () {
+    LibraryDocumentBlock headingAt(int order, String text) =>
+        LibraryDocumentBlock(
+          id: 'heading-$order',
+          libraryItemId: 'item',
+          sectionId: 'section',
+          displayOrder: order,
+          blockType: LibraryDocumentBlockType.heading,
+          plainText: text,
+          formattedContent: LibraryFormattedContent.plain(text).toJson(),
+          sourceHref: 'chapter-$order.xhtml',
+          contentHash: 'hash-$order',
+        );
+
+    final headings = <LibraryDocumentBlock>[
+      headingAt(0, 'Foreword'),
+      headingAt(20, 'Chapter 1 - Christ Our Righteousness'),
+      headingAt(105, 'Chapter 2 - A Message of Supreme Importance'),
+      headingAt(133, 'Chapter 3 - Preparatory Messages'),
+    ];
+
+    test('selects the heading actually containing the current position', () {
+      // Reproduces the reported bug: the reader has scrolled into Chapter 2
+      // (a paragraph right after its heading at order 105) — Contents must
+      // highlight Chapter 2, not the previous, already-passed Chapter 1.
+      final current = canonicalContentsCurrentHeading(
+        headings: headings,
+        currentOrder: 106,
+      );
+      expect(current?.plainText, 'Chapter 2 - A Message of Supreme Importance');
+    });
+
+    test('selects the heading exactly at the current order', () {
+      final current = canonicalContentsCurrentHeading(
+        headings: headings,
+        currentOrder: 105,
+      );
+      expect(current?.plainText, 'Chapter 2 - A Message of Supreme Importance');
+    });
+
+    test('returns null before the first heading', () {
+      final current = canonicalContentsCurrentHeading(
+        headings: headings,
+        currentOrder: -1,
+      );
+      expect(current, isNull);
+    });
+
+    test('selects the last heading once past every heading', () {
+      final current = canonicalContentsCurrentHeading(
+        headings: headings,
+        currentOrder: 9000,
+      );
+      expect(current?.plainText, 'Chapter 3 - Preparatory Messages');
     });
   });
 }

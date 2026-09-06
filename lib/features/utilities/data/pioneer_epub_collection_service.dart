@@ -244,6 +244,27 @@ Future<PioneerSourceWork?> loadPioneerWorkFromFolderFile(
   return catalog.workById(p.basenameWithoutExtension(normalized));
 }
 
+/// Builds a deterministic Pioneer work from the metadata embedded in any
+/// readable local EPUB. This lets individually generated Pioneer EPUBs import
+/// before they have been added to the shipped catalog or copied into the
+/// configured Pioneers folder.
+Future<PioneerSourceWork?> loadPioneerWorkFromLocalEpubFile(
+  String filePath,
+) async {
+  final normalized = p.normalize(filePath.trim());
+  if (p.extension(normalized).toLowerCase() != '.epub') return null;
+  final file = File(normalized);
+  if (!await file.exists()) return null;
+  final metadata = await _readLocalEpubMetadata(file);
+  if (metadata == null) return null;
+  return _localEpubWork(
+    file,
+    metadata,
+    sourceLabel: 'Selected file',
+    provider: 'localfile',
+  );
+}
+
 Future<PioneerSourceCatalog> _loadDefaultLocalPioneerCatalog() async {
   final root = await LibraryRootService.instance.accessibleLibraryRootPath();
   if (root == null || root.trim().isEmpty) {
@@ -275,9 +296,13 @@ Future<PioneerSourceCatalog> loadPioneerCatalogFromFolder(
   for (final file in files) {
     final metadata = await _readLocalEpubMetadata(file);
     if (metadata == null) continue;
+    // Preserve the established folder-catalog identity contract: these work
+    // IDs come from their stable source filenames. One-off selected files use
+    // embedded metadata via [loadPioneerWorkFromLocalEpubFile] instead.
     final workId = _stableId(p.basenameWithoutExtension(file.path));
     if (workId.isEmpty || !workIds.add(workId)) continue;
-    final authorId = _stableId(metadata.author);
+    final work = _localEpubWork(file, metadata, workId: workId);
+    final authorId = work.authorId;
     final group = authors.putIfAbsent(
       authorId,
       () => _AuthorGroup(
@@ -286,41 +311,7 @@ Future<PioneerSourceCatalog> loadPioneerCatalogFromFolder(
         sortKey: metadata.author.toLowerCase(),
       ),
     );
-    group.works.add(
-      PioneerSourceWork(
-        id: workId,
-        authorId: authorId,
-        authorName: metadata.author,
-        sourceFamily: 'CloudFiles Pioneer EPUB',
-        title: metadata.title,
-        abbreviation: _abbreviationForTitle(metadata.title),
-        group: 'Pioneer Authors',
-        subgroup: 'EPUB',
-        availability: PioneerSourceAvailability.available,
-        verified: true,
-        catalogImportable: true,
-        sourceType: 'epub',
-        sourceUrl: file.uri.toString(),
-        collectionUrl: null,
-        captureUrl: null,
-        readerUrl: null,
-        directFileUrl: file.uri.toString(),
-        directFileType: 'epub',
-        sourceLabel: 'CloudFiles',
-        notes: 'Discovered from $kPioneerEpubFolderRelativePath.',
-        sourceCandidates: [
-          PioneerSourceCandidate(
-            provider: 'cloudfiles',
-            sourceType: 'epub',
-            url: file.uri.toString(),
-            priority: 0,
-            qualityTier: 'epub',
-            availability: PioneerSourceAvailability.available,
-            notes: 'Permanent CloudFiles source.',
-          ),
-        ],
-      ),
-    );
+    group.works.add(work);
   }
 
   final sourceAuthors =
@@ -348,6 +339,62 @@ Future<PioneerSourceCatalog> loadPioneerCatalogFromFolder(
       for (final author in sourceAuthors)
         for (final work in author.works) work.id: work,
     }),
+  );
+}
+
+PioneerSourceWork _localEpubWork(
+  File file,
+  _LocalEpubMetadata metadata, {
+  String? workId,
+  String sourceLabel = 'CloudFiles',
+  String provider = 'cloudfiles',
+}) {
+  final resolvedWorkId = workId ?? _localEpubWorkId(file, metadata);
+  final authorId = _stableId(metadata.author);
+  return PioneerSourceWork(
+    id: resolvedWorkId,
+    authorId: authorId,
+    authorName: metadata.author,
+    sourceFamily: 'CloudFiles Pioneer EPUB',
+    title: metadata.title,
+    abbreviation: _abbreviationForTitle(metadata.title),
+    group: 'Pioneer Authors',
+    subgroup: 'EPUB',
+    availability: PioneerSourceAvailability.available,
+    verified: true,
+    catalogImportable: true,
+    sourceType: 'epub',
+    sourceUrl: file.uri.toString(),
+    collectionUrl: null,
+    captureUrl: null,
+    readerUrl: null,
+    directFileUrl: file.uri.toString(),
+    directFileType: 'epub',
+    sourceLabel: sourceLabel,
+    notes: 'Discovered from local EPUB metadata.',
+    sourceCandidates: [
+      PioneerSourceCandidate(
+        provider: provider,
+        sourceType: 'epub',
+        url: file.uri.toString(),
+        priority: 0,
+        qualityTier: 'epub',
+        availability: PioneerSourceAvailability.available,
+        notes: 'User-selected local EPUB source.',
+      ),
+    ],
+  );
+}
+
+String _localEpubWorkId(File file, _LocalEpubMetadata metadata) {
+  final bracketedCode = RegExp(
+    r'\[([A-Za-z][A-Za-z0-9_-]{1,31})\]',
+  ).firstMatch(metadata.title)?.group(1);
+  return _stableId(
+    bracketedCode ??
+        (metadata.title.trim().isNotEmpty
+            ? metadata.title
+            : p.basenameWithoutExtension(file.path)),
   );
 }
 

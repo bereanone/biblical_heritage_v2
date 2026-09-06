@@ -202,6 +202,106 @@ void main() {
   }
 
   test(
+    'an already-indexed item whose stored research index_version is stale '
+    'gets rebuilt on the next ensureNavigationIndexed call, not skipped',
+    () async {
+      final file = _writeEpub(
+        File(p.join(supportDir.path, 'stale_version_book.epub')),
+        {
+          'META-INF/container.xml': _containerXml,
+          'OEBPS/content.opf': _opfXml(includeSpine: true),
+          'OEBPS/content1.xhtml': _healthyContentXhtml,
+        },
+      );
+      const itemId = 'stale_version_test_item';
+      final db = await ELibraryDatabase.instance.database;
+
+      // Build real nav/text-block rows once, under the current version.
+      await CommentaryResearchLibraryService.instance.ensureNavigationIndexed(
+        db: db,
+        libraryItemId: itemId,
+        file: file,
+      );
+      final freshNav = await db.query(
+        'library_navigation_items',
+        where: 'library_item_id = ?',
+        whereArgs: [itemId],
+      );
+      expect(freshNav, isNotEmpty);
+      final conversionAfterFirstRun = await db.query(
+        'library_research_index_conversion',
+        where: 'library_item_id = ?',
+        whereArgs: [itemId],
+      );
+      expect(
+        conversionAfterFirstRun.single['index_version'],
+        CommentaryResearchLibraryService.researchIndexVersion,
+      );
+
+      // Simulate rows built by an older, pre-fix version of the indexer:
+      // downgrade the stored version and plant an obviously-stale nav row
+      // that a real re-parse of this file would never produce. A
+      // version-unaware "already has rows, skip" check would leave this
+      // marker row in place forever.
+      await db.update(
+        'library_research_index_conversion',
+        {'index_version': 0},
+        where: 'library_item_id = ?',
+        whereArgs: [itemId],
+      );
+      await db.delete(
+        'library_navigation_items',
+        where: 'library_item_id = ?',
+        whereArgs: [itemId],
+      );
+      final now = DateTime.now().toUtc().toIso8601String();
+      await db.insert('library_navigation_items', <String, Object?>{
+        'id': 'stale_marker_nav_row',
+        'library_item_id': itemId,
+        'label': 'STALE PRE-FIX ROW',
+        'href': 'content1.xhtml',
+        'anchor_id': 'stale',
+        'sort_order': 0,
+        'depth': 0,
+        'nav_type': 'body',
+        'content_kind': 'body_subsection',
+        'created_at': now,
+        'updated_at': now,
+        'device_id': 'test-device',
+      });
+
+      await CommentaryResearchLibraryService.instance.ensureNavigationIndexed(
+        db: db,
+        libraryItemId: itemId,
+        file: file,
+      );
+
+      final navAfterRebuild = await db.query(
+        'library_navigation_items',
+        where: 'library_item_id = ?',
+        whereArgs: [itemId],
+      );
+      expect(
+        navAfterRebuild.any((row) => row['label'] == 'STALE PRE-FIX ROW'),
+        isFalse,
+        reason: 'a stale index_version must trigger a real rebuild, not a '
+            'skip that leaves the pre-fix marker row in place',
+      );
+      expect(navAfterRebuild, isNotEmpty);
+
+      final conversionAfterRebuild = await db.query(
+        'library_research_index_conversion',
+        where: 'library_item_id = ?',
+        whereArgs: [itemId],
+      );
+      expect(
+        conversionAfterRebuild.single['index_version'],
+        CommentaryResearchLibraryService.researchIndexVersion,
+      );
+    },
+  );
+
+  test(
     'retained EPUB recovery discovers and indexes the explicit download root',
     () async {
       final retainedRoot = Directory(p.join(supportDir.path, 'retained_root'));

@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../utilities/data/epub_download_validator.dart';
+import '../../utilities/data/epub_internal_anchor_section_splitter.dart';
 import '../../utilities/data/pioneer_html_capture_folder_scanner.dart';
 import 'library_document_import_validator.dart';
 import 'library_document_models.dart';
@@ -53,12 +54,12 @@ typedef LibraryCanonicalizationFailureHook = void Function(int blockIndex);
 class LibraryDocumentCanonicalizer {
   const LibraryDocumentCanonicalizer({this.failureHook});
 
-  /// Bumped alongside the introduction of the pre-parse structural EPUB
-  /// gate below: every generation built by an older version was never
-  /// checked against [EpubDownloadValidator], so it must be treated as
-  /// untrustworthy and revalidated (never assumed complete) the next time
-  /// this item is canonicalized.
-  static const int version = 6;
+  /// Bumped when source-preservation or structural parsing changes. Every
+  /// change to this file that alters what
+  /// canonicalize() produces for existing content MUST bump this constant —
+  /// otherwise the version-equality check below silently treats
+  /// already-imported books as up to date and the fix never reaches them.
+  static const int version = 12;
   final LibraryCanonicalizationFailureHook? failureHook;
 
   /// Builds a candidate generation of canonical sections/blocks in the
@@ -156,7 +157,19 @@ class LibraryDocumentCanonicalizer {
         source.path,
         sections,
       );
+      final ocrHeadingTracker = _needsOcrChapterHeadingRecovery(sections)
+          ? _OcrChapterHeadingTracker()
+          : null;
       var written = 0;
+      // A single href now split into multiple sections (see _readSections's
+      // internal-anchor splitting) still needs a stable-id ordinal that's
+      // unique across all of that href's blocks, not just within whichever
+      // split section a block landed in -- otherwise two sections sharing an
+      // href each restart `blockIndex` at 0 and their same-type,
+      // same-anchor(null) blocks (most plain paragraphs) collide on the same
+      // stable id. Tracked per normalized href so ordinary, unsplit sections
+      // (each with a distinct href) are unaffected.
+      final blockOrdinalByHref = <String, int>{};
       await db.transaction((txn) async {
         var globalOrder = 0;
         for (
@@ -176,6 +189,9 @@ class LibraryDocumentCanonicalizer {
             section.html,
             refCodeTracker: refCodeTracker,
           );
+          if (ocrHeadingTracker != null) {
+            parsed = ocrHeadingTracker.recoverHeadings(parsed);
+          }
           if (archive != null) {
             parsed = _extractSectionImages(
               parsed,
@@ -202,12 +218,14 @@ class LibraryDocumentCanonicalizer {
             if (block.type == LibraryDocumentBlockType.paragraph) {
               paragraphOrdinal++;
             }
+            final stableBlockOrdinal = blockOrdinalByHref[normalizedHref] ?? 0;
+            blockOrdinalByHref[normalizedHref] = stableBlockOrdinal + 1;
             final blockId = stableLibraryDocumentBlockId(
               libraryItemId: libraryItemId,
               sourceHref: normalizedHref,
               sourceAnchor: block.anchor,
               blockType: block.type,
-              sourceBlockOrdinal: blockIndex,
+              sourceBlockOrdinal: stableBlockOrdinal,
             );
             final contentHash = sha256
                 .convert(
@@ -523,26 +541,57 @@ class LibraryDocumentCanonicalizer {
       ];
     }
     final entries = _epubSpineEntries(archive);
-    return entries
-        .map((entry) {
-          final html = utf8.decode(
-            entry.content as List<int>,
-            allowMalformed: true,
-          );
-          final title =
-              RegExp(
-                r'<title\b[^>]*>(.*?)</title>',
-                caseSensitive: false,
-                dotAll: true,
-              ).firstMatch(html)?.group(1) ??
-              p.basenameWithoutExtension(entry.name);
-          return LibraryCanonicalSourceSection(
+    // A book authored as one physical file per book rather than one per
+    // chapter (e.g. a Capture Clipper full-work capture) has all of its
+    // chapters living inside a single entry here. Left as one section, every
+    // block in it inherits whichever heading happens to be extracted above
+    // as the section title, so distinct chapters (e.g. INTRODUCTION and
+    // APPENDIX A) end up misattributed to the same section identity. Where
+    // the book's own NCX/nav.xhtml places 2+ authored destinations inside
+    // one entry via distinct internal anchors, split that entry into one
+    // section per destination instead.
+    final targetsByPath = EpubInternalAnchorSectionSplitter.readTargetsByPath(
+      archive: archive,
+      fallbackTitle: p.basenameWithoutExtension(path),
+    );
+    final sections = <LibraryCanonicalSourceSection>[];
+    for (final entry in entries) {
+      final html = utf8.decode(
+        entry.content as List<int>,
+        allowMalformed: true,
+      );
+      final title =
+          RegExp(
+            r'<title\b[^>]*>(.*?)</title>',
+            caseSensitive: false,
+            dotAll: true,
+          ).firstMatch(html)?.group(1) ??
+          p.basenameWithoutExtension(entry.name);
+      final wholeFileTitle = _plain(title);
+      final targets =
+          targetsByPath[EpubInternalAnchorSectionSplitter.normalizedEpubPathKey(
+            entry.name,
+          )];
+      final splitSections = targets == null || targets.length < 2
+          ? <EpubAnchorSplitSection>[
+              EpubAnchorSplitSection(title: wholeFileTitle, html: html),
+            ]
+          : EpubInternalAnchorSectionSplitter.splitByAnchors(
+              rawHtml: html,
+              targets: targets,
+              wholeFileTitle: wholeFileTitle,
+            );
+      for (final split in splitSections) {
+        sections.add(
+          LibraryCanonicalSourceSection(
             href: entry.name,
-            title: _plain(title),
-            html: html,
-          );
-        })
-        .toList(growable: false);
+            title: split.title,
+            html: split.html,
+          ),
+        );
+      }
+    }
+    return List<LibraryCanonicalSourceSection>.unmodifiable(sections);
   }
 
   List<ArchiveFile> _epubSpineEntries(Archive archive) {
@@ -990,13 +1039,35 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(
     dotAll: true,
   );
   final result = <_ParsedCanonicalBlock>[];
+  // EPUB navigation commonly targets an empty named anchor immediately
+  // preceding a heading (`<a id="chapter-1"></a><h1>…`).  The anchor is a
+  // real document location, even though it is not part of the heading node.
+  // Carry it forward to the next readable block rather than replacing it with
+  // that block's unrelated `id` (or a generated one).
+  var anchorScanOffset = 0;
+  String? pendingAnchor;
   for (final match in pattern.allMatches(html)) {
     final tag = match.group(1)!.toLowerCase();
     final attrs = match.group(2) ?? '';
     final inner = match.group(3) ?? '';
+    final prefix = html.substring(anchorScanOffset, match.start);
+    final leadingAnchors = RegExp(
+      r'''<a\b[^>]*(?:\bid|\bname)\s*=\s*(["'])([^"']+)\1[^>]*>\s*</a\s*>''',
+      caseSensitive: false,
+      dotAll: true,
+    ).allMatches(prefix);
+    for (final anchor in leadingAnchors) {
+      final value = anchor.group(2)?.trim();
+      if (value != null && value.isNotEmpty) pendingAnchor = value;
+    }
+    anchorScanOffset = match.end;
+    // Keep `inner` unstripped for the pagebreak refcode tracker below (it
+    // needs to see pagebreak markers), but derive prose text/nodes from a
+    // copy with any refcode marker span removed.
+    final proseInner = _stripRefCodeSpans(inner);
     final text = tag == 'img'
         ? (_attribute(attrs, 'alt') ?? '')
-        : _plain(inner);
+        : _plain(proseInner);
     // A bare 1-4 digit heading (post entity-decoding, trimmed) is a printed
     // page number from the source layout (common in Apple Pages EPUB
     // exports), not a real chapter/section heading — "Chapter 71" or "71."
@@ -1032,7 +1103,7 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(
               'alt': text,
             },
           ]
-        : _inlineNodes(inner, className: className);
+        : _inlineNodes(proseInner, className: className);
     final headingRole = switch (tag) {
       'h1' => 'book_title',
       'h2' => 'chapter',
@@ -1057,7 +1128,7 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(
             'heading_role': headingRole,
           }..removeWhere((_, value) => value == null)),
         ),
-        anchor: _attribute(attrs, 'id'),
+        anchor: pendingAnchor ?? _attribute(attrs, 'id'),
         refcode:
             _attribute(attrs, 'data-refcode') ??
             (type == LibraryDocumentBlockType.paragraph
@@ -1065,6 +1136,7 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(
                 : null),
       ),
     );
+    pendingAnchor = null;
   }
   if (result.isEmpty) {
     final text = _plain(html);
@@ -1167,6 +1239,238 @@ class _EpubRefCodeTracker {
   }
 }
 
+/// Detects EPUBs with no semantic heading markup anywhere in their spine —
+/// the shape of a raw archive.org OCR page-scan export (one `<p>` per
+/// scanned page, no `<h1>`-`<h6>` tags at all, and typically a `nav.xhtml`
+/// with no real chapter list). Gated on the absence of any heading tag
+/// across the *whole* book, not on source type or provenance, so any future
+/// import with the same shape is recovered automatically and real semantic
+/// EPUBs (which always carry at least one heading somewhere) are never
+/// affected. The `sections.length > 3` floor keeps this from misfiring on
+/// tiny single/few-page imports where "no headings" is simply correct.
+///
+/// The navigation document itself (identified by the EPUB3
+/// `epub:type="toc"` marker, not by filename) is excluded from this scan:
+/// it commonly carries its own real heading for the TOC page's title (e.g.
+/// "<h2>Adventist Pioneer Authors - Uriah Smith</h2>") and, per the spine
+/// order these archive.org exports use, is itself the book's first spine
+/// entry — so without this exclusion that one structural heading would
+/// wrongly count as "this book has real semantic headings" for every OCR
+/// scan in the cohort, even though not a single page of actual content has
+/// any heading markup at all.
+bool _needsOcrChapterHeadingRecovery(
+  List<LibraryCanonicalSourceSection> sections,
+) {
+  final contentSections = sections
+      .where((section) => !_isEpubNavigationDocument(section.html))
+      .toList(growable: false);
+  return contentSections.length > 3 &&
+      !contentSections.any(
+        (section) =>
+            RegExp(r'<h[1-6]\b', caseSensitive: false).hasMatch(section.html),
+      );
+}
+
+bool _isEpubNavigationDocument(String html) => RegExp(
+  '''epub:type\\s*=\\s*["'][^"']*\\btoc\\b[^"']*["']''',
+  caseSensitive: false,
+).hasMatch(html);
+
+/// Recovers chapter headings for OCR-scanned EPUBs whose page text carries
+/// no semantic markup at all: chapter titles exist only as an unmarked
+/// "number - TITLE" run that OCR left sitting mid-paragraph (e.g. "07 -
+/// THE FOUR BEASTS Chronological Connection..."), immediately followed by
+/// unrelated outline/body text with no boundary marker of any kind.
+///
+/// Recovery requires the number to match the next expected chapter in
+/// strict monotonic sequence — the same technique already used for the
+/// "CHAPTER (roman numeral)." tracker in [_parseCapturedEgwBlocks] above —
+/// so a "number - CAPS" run that happens to occur elsewhere in body prose
+/// can only be misread as a heading if it lands on the exact next chapter
+/// number in order, which is effectively never in practice. The title
+/// itself is bounded by the run of ALL-CAPS/numeral words that follows,
+/// stopping at the first mixed-case word — the same "line == uppercase"
+/// signal [_parseCapturedEgwBlocks] uses, applied to a word run instead of
+/// a whole line since OCR text here has no line breaks to key off.
+///
+/// Only ever touches paragraph blocks whose formatted content is a single
+/// plain, unstyled text node (exactly what an OCR page's flat `<p>`
+/// produces) — a block with links/marks/multiple nodes is left completely
+/// alone rather than risk corrupting real formatting this heuristic can't
+/// see.
+class _OcrChapterHeadingTracker {
+  int _expectedChapter = 1;
+
+  List<_ParsedCanonicalBlock> recoverHeadings(
+    List<_ParsedCanonicalBlock> blocks,
+  ) {
+    var changed = false;
+    final result = <_ParsedCanonicalBlock>[];
+    for (final block in blocks) {
+      if (block.type != LibraryDocumentBlockType.paragraph ||
+          !_isSimplePlainTextParagraph(block)) {
+        result.add(block);
+        continue;
+      }
+      final split = _splitForHeadings(block);
+      if (split.length != 1 || split.first != block) changed = true;
+      result.addAll(split);
+    }
+    return changed ? result : blocks;
+  }
+
+  bool _isSimplePlainTextParagraph(_ParsedCanonicalBlock block) {
+    final nodes = block.formatted.nodes;
+    if (nodes.length != 1) return false;
+    final node = nodes.first;
+    return node['type'] == 'text' &&
+        node['text'] == block.text &&
+        node['marks'] == null &&
+        node['link'] == null;
+  }
+
+  List<_ParsedCanonicalBlock> _splitForHeadings(_ParsedCanonicalBlock block) {
+    final text = block.text;
+    final className = block.formatted.nodes.first['class'] as String?;
+    final pieces = <_ParsedCanonicalBlock>[];
+    var cursor = 0;
+    while (true) {
+      final match = _nextOcrChapterHeadingMatch(text, cursor, _expectedChapter);
+      if (match == null) break;
+      final before = text.substring(cursor, match.start).trim();
+      if (before.isNotEmpty) {
+        pieces.add(_ocrPlainParagraph(before, className: className));
+      }
+      pieces.add(_ocrRecoveredHeading(match.text, className: className));
+      cursor = match.end;
+      _expectedChapter++;
+    }
+    if (pieces.isEmpty) return <_ParsedCanonicalBlock>[block];
+    final tail = text.substring(cursor).trim();
+    if (tail.isNotEmpty) {
+      pieces.add(_ocrPlainParagraph(tail, className: className));
+    }
+    return pieces;
+  }
+}
+
+class _OcrHeadingMatch {
+  const _OcrHeadingMatch({
+    required this.start,
+    required this.end,
+    required this.text,
+  });
+  final int start;
+  final int end;
+  final String text;
+}
+
+final RegExp _ocrChapterAnchorPattern = RegExp(
+  r'(?:^|\s)(\d{1,3})\s*-\s*(?=[A-Z])',
+);
+
+_OcrHeadingMatch? _nextOcrChapterHeadingMatch(
+  String text,
+  int fromIndex,
+  int expectedChapter,
+) {
+  for (final anchor in _ocrChapterAnchorPattern.allMatches(text, fromIndex)) {
+    if (int.tryParse(anchor.group(1)!) != expectedChapter) continue;
+    final digitStart = text.indexOf(anchor.group(1)!, anchor.start);
+    final titleEnd = _consumeOcrUppercaseTitleRun(text, anchor.end);
+    if (titleEnd == null) continue;
+    return _OcrHeadingMatch(
+      start: digitStart,
+      end: titleEnd,
+      text: text.substring(digitStart, titleEnd).trim(),
+    );
+  }
+  return null;
+}
+
+/// Consumes a run of whitespace-separated tokens starting at [from] that
+/// are each either all-uppercase (ignoring surrounding punctuation, at
+/// least 2 letters/digits) or purely numeric, stopping at the first token
+/// that is neither — the boundary between a printed ALL-CAPS chapter title
+/// and the mixed-case outline/body text that immediately follows it with no
+/// other separator in the raw OCR text. Returns null (no usable title) if
+/// not even one qualifying word follows, or caps the run at a sane word
+/// count as a defensive backstop against pathological input.
+///
+/// A bare number immediately followed by a "-" token is never consumed,
+/// even though it would otherwise pass the "purely numeric" test: that
+/// shape is the *next* chapter's own "NN - TITLE" anchor sitting right
+/// after this one with no body text in between (short back-to-back
+/// chapters, or a page that starts one chapter and ends another) — without
+/// this guard, chapter 1's recovered title would swallow chapter 2's
+/// leading number, e.g. "01 - DANIEL IN CAPTIVITY 02" instead of stopping
+/// cleanly at "CAPTIVITY".
+///
+/// A handful of structural back-matter markers (APPENDIX/INDEX/PART) also
+/// end the run before being consumed, even though each is itself a
+/// qualifying all-caps word: the last real chapter in a pioneer book is
+/// routinely followed immediately (no page/body boundary at all in the OCR
+/// text) by the start of the back matter, e.g. "...THE TREE AND THE RIVER
+/// OF LIFE APPENDIX 1. RESEMBLANCE..." — without this the final chapter's
+/// title would run on into the appendix listing.
+const Set<String> _ocrTitleRunStopWords = <String>{'APPENDIX', 'INDEX', 'PART'};
+
+int? _consumeOcrUppercaseTitleRun(String text, int from) {
+  final tokens = RegExp(r'\S+').allMatches(text.substring(from)).toList();
+  var end = from;
+  var words = 0;
+  for (var i = 0; i < tokens.length; i++) {
+    final token = tokens[i];
+    final word = token.group(0)!;
+    final core = word.replaceAll(RegExp(r'^[^A-Za-z0-9]+|[^A-Za-z0-9]+$'), '');
+    final isDigits = core.isNotEmpty && RegExp(r'^\d+$').hasMatch(core);
+    final isUpperWord =
+        core.length >= 2 &&
+        core == core.toUpperCase() &&
+        core.toUpperCase() != core.toLowerCase();
+    if (isUpperWord && words > 0 && _ocrTitleRunStopWords.contains(core)) {
+      break;
+    }
+    if (isDigits) {
+      final next = i + 1 < tokens.length ? tokens[i + 1].group(0)! : '';
+      if (next.startsWith('-')) break;
+    }
+    if (!isDigits && !isUpperWord) break;
+    end = from + token.end;
+    words++;
+    if (words >= 12) break;
+  }
+  return words == 0 ? null : end;
+}
+
+_ParsedCanonicalBlock _ocrPlainParagraph(String text, {String? className}) =>
+    _ParsedCanonicalBlock(
+      type: LibraryDocumentBlockType.paragraph,
+      text: text,
+      formatted: LibraryFormattedContent.plain(text, className: className),
+    );
+
+_ParsedCanonicalBlock _ocrRecoveredHeading(String text, {String? className}) =>
+    _ParsedCanonicalBlock(
+      type: LibraryDocumentBlockType.heading,
+      text: text,
+      formatted: LibraryFormattedContent(
+        nodes: <Map<String, Object?>>[
+          <String, Object?>{
+            'type': 'text',
+            'text': text,
+            if (className != null && className.isNotEmpty) 'class': className,
+          },
+        ],
+        metadata: const <String, Object?>{
+          'source_tag': 'p',
+          'heading_role': 'chapter',
+          'classification_reason':
+              'recovered from unmarked OCR chapter-number title run',
+        },
+      ),
+    );
+
 /// Normalization is intentionally locator-only: backslashes become slashes,
 /// query/fragment parts are removed, dot segments are collapsed, leading
 /// slashes are removed, and ASCII case is folded. Text never participates.
@@ -1200,6 +1504,21 @@ String? _attribute(String attrs, String name) => RegExp(
   '''\\b$name\\s*=\\s*["']([^"']*)["']''',
   caseSensitive: false,
 ).firstMatch(attrs)?.group(1);
+
+// A `class="refcode"` marker span carries the same citation the paragraph's
+// own `data-refcode` attribute (or the pagebreak tracker) already exposes as
+// separate, toggleable `source_refcode` metadata. Left in place, its visible
+// text (e.g. "{SL27 iii.1}") survives into plain prose and gets rendered a
+// second time, unconditionally, alongside the toggleable copy.
+final RegExp _refCodeSpanPattern = RegExp(
+  '''<(\\w+)\\b[^>]*\\bclass\\s*=\\s*["'][^"']*\\brefcode\\b[^"']*["'][^>]*>.*?</\\1\\s*>''',
+  caseSensitive: false,
+  dotAll: true,
+);
+
+String _stripRefCodeSpans(String html) =>
+    html.replaceAll(_refCodeSpanPattern, '');
+
 String? _alignment(String attrs, String? className) {
   final value = '${_attribute(attrs, 'style') ?? ''} ${className ?? ''}'
       .toLowerCase();

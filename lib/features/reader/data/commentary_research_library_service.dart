@@ -18,6 +18,7 @@ import '../../library/data/library_citation_display_helper.dart';
 import '../../library/data/library_item_identity.dart';
 import '../../library/data/library_section_heuristics.dart';
 import '../../utilities/data/elibrary_catalog_duplicate_repair_service.dart';
+import '../../utilities/data/epub_internal_anchor_section_splitter.dart';
 import 'commentary_research_models.dart';
 import 'commentary_research_filters.dart';
 import 'commentary_reference_parser.dart';
@@ -39,6 +40,18 @@ class CommentaryResearchLibraryService
 
   static final CommentaryResearchLibraryService instance =
       CommentaryResearchLibraryService._();
+
+  /// Bumped whenever a change to how an EPUB is parsed into
+  /// `library_text_blocks`/`library_navigation_items` would produce
+  /// different output for an already-indexed item -- e.g.
+  /// `EpubInternalAnchorSectionSplitter`'s internal-anchor splitting fix
+  /// for single-spine-file books. Compared against
+  /// `library_research_index_conversion.index_version` (the research
+  /// pipeline's equivalent of `LibraryDocumentCanonicalizer.version`/
+  /// `canonicalizer_version`): a missing row or a stored value below this
+  /// constant means an item's stored rows predate the fix and must be
+  /// rebuilt rather than skipped as "already indexed".
+  static const int researchIndexVersion = 1;
 
   String? preferredCommentaryVolumeCodeForBook(int bookId) {
     return _volumeForBook(bookId);
@@ -477,7 +490,8 @@ class CommentaryResearchLibraryService
     // absent from disk and are read exclusively through the canonical
     // reader — this legacy indexer must not try to open them and flag them
     // broken.
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT relative_path, folder_type, title
       FROM library_items
       WHERE deleted_at IS NULL
@@ -489,8 +503,15 @@ class CommentaryResearchLibraryService
             SELECT 1 FROM library_text_blocks
             WHERE library_item_id = library_items.id
           )
+          OR NOT EXISTS (
+            SELECT 1 FROM library_research_index_conversion c
+            WHERE c.library_item_id = library_items.id
+              AND c.index_version >= ?
+          )
         )
-    ''');
+    ''',
+      <Object?>[researchIndexVersion],
+    );
 
     if (rows.isEmpty) {
       return (indexed: 0, skipped: 0, failed: 0);
@@ -560,6 +581,86 @@ class CommentaryResearchLibraryService
       '[CommentaryResearch] indexLocalCatalogedEpubs complete in ${stopwatch.elapsedMilliseconds}ms indexed=$indexed skipped=$skipped failed=$failed root=$rootPath',
     );
     return (indexed: indexed, skipped: skipped, failed: failed);
+  }
+
+  /// Builds the navigation tree (`library_navigation_items`) and search text
+  /// blocks (`library_text_blocks`) for a single already-cataloged EPUB
+  /// library item, addressed by its exact, already-assigned [libraryItemId]
+  /// — unlike [indexLocalCatalogedEpubs], this never recomputes or changes
+  /// that id, and it never touches the item's `library_items` row (title,
+  /// author, source_type, pioneer bookkeeping columns, etc.) at all. That
+  /// makes it safe to call from any acquisition/import pipeline immediately
+  /// after a book's readable content is canonicalized, regardless of what
+  /// identity scheme that pipeline uses for [libraryItemId].
+  ///
+  /// A no-op when [libraryItemId] already has navigation rows built under
+  /// the current [researchIndexVersion] (so repeated calls — retries,
+  /// redownloads, re-activations — cost one cheap indexed lookup instead of
+  /// a full re-parse) or when [file] isn't a `.epub`. A stored
+  /// `library_research_index_conversion.index_version` below
+  /// [researchIndexVersion] is treated the same as having no rows at all —
+  /// the existing rows predate a parsing-logic fix (e.g.
+  /// `EpubInternalAnchorSectionSplitter`) and must be rebuilt, not skipped.
+  /// Never throws: this is auxiliary metadata for the Contents/TOC UI and
+  /// search, not required for the book to be readable, so a parsing failure
+  /// here must never fail the caller's acquisition outcome.
+  Future<void> ensureNavigationIndexed({
+    required Database db,
+    required String libraryItemId,
+    required File file,
+  }) async {
+    if (p.extension(file.path).toLowerCase() != '.epub') return;
+    try {
+      final existingNav = await db.query(
+        'library_navigation_items',
+        columns: const ['id'],
+        where: 'library_item_id = ?',
+        whereArgs: [libraryItemId],
+        limit: 1,
+      );
+      final versionRow = await db.query(
+        'library_research_index_conversion',
+        columns: const ['index_version'],
+        where: 'library_item_id = ?',
+        whereArgs: [libraryItemId],
+        limit: 1,
+      );
+      final storedIndexVersion = versionRow.isEmpty
+          ? null
+          : (versionRow.first['index_version'] as num?)?.toInt();
+      final isUpToDate =
+          storedIndexVersion != null &&
+          storedIndexVersion >= researchIndexVersion;
+      if (existingNav.isNotEmpty && isUpToDate) return;
+      if (!await file.exists()) return;
+
+      final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+      final now = DateTime.now().toUtc().toIso8601String();
+      await _storeNavigationMetadata(
+        db: db,
+        file: file,
+        libraryItemId: libraryItemId,
+        relativePath: '',
+        title: '',
+        deviceId: deviceId,
+      );
+      await _storeLibraryTextBlocks(
+        db: db,
+        file: file,
+        libraryItemId: libraryItemId,
+        now: now,
+      );
+      await db.insert('library_research_index_conversion', {
+        'library_item_id': libraryItemId,
+        'index_version': researchIndexVersion,
+        'indexed_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    } catch (error) {
+      debugPrint(
+        '[CommentaryResearch] ensureNavigationIndexed failed for '
+        '$libraryItemId: $error',
+      );
+    }
   }
 
   Future<List<CommentaryResearchNavigationItem>> loadNavigationItems({

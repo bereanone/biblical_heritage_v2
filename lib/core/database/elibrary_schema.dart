@@ -6,13 +6,15 @@ import 'elibrary_sdp_cleanup.dart';
 class ELibrarySchema {
   ELibrarySchema._();
 
-  static const currentVersion = 5;
+  static const currentVersion = 6;
   static const initialMigrationKey = 'phase_1_initial_schema';
   static const contributorsMigrationKey = 'phase_2_contributors';
   static const packageLineageMigrationKey = 'phase_3_package_lineage';
   static const storagePolicyMigrationKey = 'phase_4_epub_storage_policy';
   static const pioneerEpubProvenanceMigrationKey =
       'phase_5_pioneer_epub_provenance';
+  static const researchIndexVersionMigrationKey =
+      'phase_6_research_index_version';
 
   static Future<void> ensure(Database db) async {
     await _retryOnLocked(() async {
@@ -20,6 +22,7 @@ class ELibrarySchema {
       await _createCoreTables(db);
       await _createCanonicalDocumentTables(db);
       await _createCanonicalStagingTables(db);
+      await _createResearchIndexConversionTable(db);
       await _ensurePackageLineageColumns(db);
       await _ensureStoragePolicyColumns(db);
       await _ensurePioneerEpubProvenanceColumns(db);
@@ -28,6 +31,25 @@ class ELibrarySchema {
       await ELibraryBogusSdpCleanupService.instance.run(db);
       await ELibraryLegacyItemIdMigrationService.instance.run(db);
     });
+  }
+
+  /// Tracks, per research-pipeline library item, which
+  /// `CommentaryResearchLibraryService.researchIndexVersion` its stored
+  /// `library_text_blocks`/`library_navigation_items` rows were built
+  /// under -- the research-pipeline equivalent of
+  /// `library_document_conversion.canonicalizer_version`. A missing row or
+  /// a stored `index_version` below the current constant means those rows
+  /// were built by parsing logic older than the constant's last bump (e.g.
+  /// the `EpubInternalAnchorSectionSplitter` internal-anchor-splitting fix)
+  /// and must be rebuilt, not treated as already up to date.
+  static Future<void> _createResearchIndexConversionTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_research_index_conversion (
+        library_item_id TEXT PRIMARY KEY,
+        index_version INTEGER NOT NULL,
+        indexed_at TEXT
+      )
+    ''');
   }
 
   static Future<void> _createCanonicalDocumentTables(Database db) async {
@@ -574,6 +596,15 @@ class ELibrarySchema {
       'status': 'completed',
       'details':
           'Added nullable pioneer_source_relative_path/pioneer_source_fingerprint to library_items for raw Pioneer EPUB folder bulk import.',
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.insert('elibrary_schema_migrations', {
+      'migration_key': researchIndexVersionMigrationKey,
+      'from_version': 5,
+      'to_version': currentVersion,
+      'applied_at': now,
+      'status': 'completed',
+      'details':
+          'Added library_research_index_conversion to track which research-pipeline indexing logic version built each item\'s library_text_blocks/library_navigation_items rows.',
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 

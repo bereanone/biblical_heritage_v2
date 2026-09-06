@@ -523,6 +523,30 @@ void main() {
     },
   );
 
+  test('selected EPUB overrides a catalog capturedHtml source type', () async {
+    final work = _work(
+      id: 'sl27',
+      authorId: 'at_jones',
+      authorName: 'A. T. Jones',
+      title: 'The National Sunday Law [SL27]',
+      abbreviation: 'SL27',
+      sourceType: 'capturedHtml',
+      sourceUrl: 'asset://assets/scans/SL27/capture.html',
+      sourceLabel: 'CaptureClipper',
+    );
+    final epubFile = File('${libraryRootDir.path}/SL27.epub')
+      ..writeAsBytesSync(_epubBytes());
+
+    final result = await PioneerTextImportService.instance.importLocalEpubFile(
+      work: work,
+      filePath: epubFile.path,
+    );
+
+    expect(result.status, PioneerImportWorkStatus.imported);
+    expect(result.libraryItemId, work.stableLibraryItemId);
+    expect(result.parsedParagraphCount, greaterThan(0));
+  });
+
   test(
     'skips a missing DAR ZIP candidate without attempting a download',
     () async {
@@ -1461,6 +1485,35 @@ void main() {
       expect(navRows[2]['is_front_matter'], 0);
       expect(navRows[2]['is_body_start'], 1);
       expect(navRows[2]['label'], 'CHAPTER I. THE SEER OF PATMOS');
+      expect(
+        navRows.map((row) => row['label']),
+        [
+          'The Story of the Seer of Patmos',
+          'FOREWORD',
+          'CHAPTER I. THE SEER OF PATMOS',
+        ],
+      );
+      final textRows = await eLibraryDb.query(
+        'library_text_blocks',
+        columns: const <String>[
+          'epub_href',
+          'spine_index',
+          'paragraph_index',
+          'section_title',
+          'plain_text',
+        ],
+        where: 'library_item_id = ?',
+        whereArgs: [itemId],
+        orderBy: 'spine_index ASC, paragraph_index ASC',
+      );
+      expect(textRows.map((row) => row['section_title']), [
+        'The Story of the Seer of Patmos',
+        'The Story of the Seer of Patmos',
+        'FOREWORD',
+        'CHAPTER I. THE SEER OF PATMOS',
+        'CHAPTER I. THE SEER OF PATMOS',
+      ]);
+      expect(textRows.last['plain_text'], contains('"best gift."'));
     },
   );
 
@@ -2579,7 +2632,18 @@ The great image prophecy opens a new chapter of the captured work. DAR 32.1
       );
       expect(itemRows, hasLength(1));
       expect(itemRows.single['source_type'], 'egw_html_capture');
-      expect(itemRows.single['cover_path'], isNull);
+      // No source cover was supplied, so a brand-new row falls back to a
+      // generated placeholder cover (PioneerCoverAssignmentService) instead
+      // of being left without one.
+      expect(
+        itemRows.single['cover_path'],
+        p.join(
+          libraryRootDir.path,
+          'Graphics',
+          'eLibraryCovers',
+          '${work.stableLibraryItemId}.png',
+        ),
+      );
       expect(
         itemRows.single['source_type']?.toString().toLowerCase(),
         isNot(contains('epub')),

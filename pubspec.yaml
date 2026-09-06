@@ -79,9 +79,20 @@ flutter:
     - assets/databases/user.db
     - assets/databases/eLibrary.db
     - assets/elibrary_sources/pioneer_sources.json
-    - assets/scans/
+    # Flutter directory assets are not recursive. Keep each bundled capture
+    # folder explicit so release builds contain the HTML, metadata, and cover.
+    - assets/scans/CIS/
+    - assets/scans/DAR/
+    - assets/scans/FP187/
+    - assets/scans/NSLRL/
+    - assets/scans/PH045/
+    - assets/scans/SL18/
+    - assets/scans/SL27/
+    - assets/scans/SSP/
+    - assets/scans/WOR/
     - assets/library_covers/
     - assets/library_covers/thumbs/
+    - assets/library_covers/templates/
     - assets/icons/GoldLogo.png
     - assets/icons/Logo2.png
     - tool/elibrary_download_manifest.json

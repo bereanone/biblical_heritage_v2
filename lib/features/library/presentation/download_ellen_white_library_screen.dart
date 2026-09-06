@@ -88,6 +88,9 @@ class _DownloadEllenWhiteLibraryScreenState
                       result: _result,
                       onCancel: _running ? _cancel : null,
                       onRetryFailed: _retryFailed,
+                      onDone: _running
+                          ? null
+                          : () => Navigator.of(context).pop(),
                     )
                   : Column(
                       mainAxisSize: MainAxisSize.min,

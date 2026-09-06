@@ -36,7 +36,5 @@ String _normalizedNavigationValue(String? value) {
 String? _normalizedNavigationHref(String? href) {
   final value = href?.trim() ?? '';
   if (value.isEmpty) return null;
-  final clean = value.split('#').first.split('?').first.trim();
-  if (clean.isEmpty) return null;
-  return p.normalize(clean).toLowerCase();
+  return p.normalize(value).toLowerCase();
 }

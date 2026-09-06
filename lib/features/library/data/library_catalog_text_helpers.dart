@@ -6,6 +6,23 @@ DateTime? _parseDate(String? value) {
   return DateTime.tryParse(trimmed);
 }
 
+/// Matches a trailing catalog edition/scan code such as ` [SL27]`, ` [RLL]`,
+/// or ` [FP187]` — short, all-caps-and-digits tags used internally to keep
+/// same-titled editions unique in `library_items.title` for cataloging and
+/// retirement-matching. Deliberately excludes brackets containing lowercase
+/// letters or spaces (e.g. `[Nos. 19-96]` in Manuscript Releases titles),
+/// which are legitimate authored title content, not catalog codes.
+final RegExp _trailingCatalogEditionCodePattern = RegExp(
+  r'\s*\[[A-Z][A-Z0-9]{1,7}\]\s*$',
+);
+
+/// Strips a trailing catalog edition code (see
+/// [_trailingCatalogEditionCodePattern]) from a title for display purposes
+/// only. Never mutates `library_items.title` itself.
+String _stripCatalogEditionCodeSuffix(String title) {
+  return title.replaceFirst(_trailingCatalogEditionCodePattern, '').trimRight();
+}
+
 String? _canonicalPeriodicalTitle(String title) {
   final lower = title.toLowerCase();
   if (lower.contains('review') && lower.contains('herald')) {

@@ -204,10 +204,13 @@ class PioneerEpubFolderInventory {
       needsImport.fold(0, (sum, e) => sum + e.fileSizeBytes);
 }
 
-/// Surveys a user-selected raw Pioneer EPUB folder without importing
-/// anything. Read-only: every source file is only opened for reading, never
-/// renamed, moved, modified, or deleted, and nothing is written to the
-/// canonical database during this pass.
+/// Surveys the immediate contents of a user-selected raw Pioneer EPUB folder
+/// without importing anything. Subfolders are deliberately excluded: a
+/// source-folder pick must never pull EPUBs from backup, staging, export, or
+/// other incidental folders that happen to sit beneath the selected path.
+/// Read-only: every source file is only opened for reading, never renamed,
+/// moved, modified, or deleted, and nothing is written to the canonical
+/// database during this pass.
 class PioneerEpubFolderInventoryService {
   PioneerEpubFolderInventoryService._();
 
@@ -223,10 +226,7 @@ class PioneerEpubFolderInventoryService {
     var skippedNonEpub = 0;
 
     final files = <File>[];
-    await for (final entity in folder.list(
-      recursive: true,
-      followLinks: false,
-    )) {
+    await for (final entity in folder.list(followLinks: false)) {
       if (entity is! File) continue;
       final baseName = p.basename(entity.path);
       if (baseName.startsWith('.')) {
@@ -361,9 +361,19 @@ class PioneerEpubFolderInventoryService {
     );
     if (work == null) return null;
 
-    // Deliberately exclude rows produced by this importer. This lookup is
-    // solely a bridge from a pre-existing capture/package identity to the new
-    // EPUB source identity.
+    // Deliberately exclude rows *produced by this scanner's own identity
+    // scheme* (an `id_<embedded-uuid>` or `path_<relative-path>` candidate
+    // from `_stableIdentityKey`) — this lookup is solely a bridge from a
+    // pre-existing capture/package identity to the new EPUB source identity,
+    // and must never bridge to a row this same scanner already created for a
+    // *different* file. Filtering on `source_type == 'pioneer_epub_import'`
+    // instead (as this used to) was too broad: the hardcoded legacy-bridge
+    // targets above (CIS, SSP, etc., renamed by
+    // `elibrary_legacy_item_id_migration.dart`) also carry that source_type
+    // for catalog-display consistency, so that check wrongly excluded the
+    // very rows this bridge exists to find — causing the scanner to create a
+    // brand new `library_item_pioneer_epub_import_id_...` duplicate for a
+    // file that already had a real, canonical row.
     final rows = await db.query(
       'library_items',
       columns: const <String>['id', 'title', 'author', 'source_type'],
@@ -371,8 +381,11 @@ class PioneerEpubFolderInventoryService {
     );
     final matches = rows
         .where((row) {
-          if (row['source_type']?.toString() == 'pioneer_epub_import')
+          final id = row['id']?.toString() ?? '';
+          if (id.startsWith('library_item_pioneer_epub_import_id_') ||
+              id.startsWith('library_item_pioneer_epub_import_path_')) {
             return false;
+          }
           final candidateTitle = _normalizeIdentityText(
             row['title']?.toString() ?? '',
           );

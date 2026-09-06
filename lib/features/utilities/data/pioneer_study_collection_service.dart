@@ -12,6 +12,16 @@ import 'pioneer_capture_folder_metadata.dart';
 import 'pioneer_source_catalog.dart';
 import 'pioneer_text_import_service.dart';
 
+/// Thrown by [PioneerStudyCollectionService.inspect] specifically when a zip
+/// has no root inventory.json — i.e. it's a plain zip of loose book files
+/// rather than an official collection manifest. Distinct from other
+/// [FormatException]s thrown by inspect() (unsafe entries, oversized
+/// archives, unsupported schema, etc.) so callers can offer a fallback
+/// import path instead of just reporting a generic failure.
+class PioneerCollectionMissingManifestException extends FormatException {
+  const PioneerCollectionMissingManifestException(super.message);
+}
+
 enum StudyCollectionBookStatus { newBook, update, current, needsAttention }
 
 enum StudyCollectionItemType { studybook, epub, pdf }
@@ -112,7 +122,12 @@ class PioneerStudyCollectionService {
   final Future<String> Function()? managedEpubRootPath;
 
   Future<StudyCollectionInventory> inspect(String sourcePath) async {
-    if (p.extension(sourcePath).toLowerCase() != '.studycollection') {
+    // A .studycollection file is itself a ZIP archive (validated below by
+    // its actual contents: a root inventory.json plus safe entries), so
+    // accept a plain .zip too — that's the format users are most likely to
+    // actually have after downloading or renaming the file.
+    final extension = p.extension(sourcePath).toLowerCase();
+    if (extension != '.studycollection' && extension != '.zip') {
       throw const FormatException('Select a .studycollection file.');
     }
     final archive = ZipDecoder().decodeBytes(
@@ -141,7 +156,15 @@ class PioneerStudyCollectionService {
     final inventoryEntries = archive
         .where((entry) => entry.name == 'inventory.json')
         .toList();
-    if (inventoryEntries.length != 1) {
+    if (inventoryEntries.isEmpty) {
+      throw const PioneerCollectionMissingManifestException(
+        'This zip is not a Pioneers.studycollection manifest (no root '
+        'inventory.json was found). If you are trying to import books from '
+        'a zip file, use "Import Pioneer Library" instead — "Check for New '
+        'Books" only works with the official collection manifest.',
+      );
+    }
+    if (inventoryEntries.length > 1) {
       throw const FormatException(
         'Collection must contain one root inventory.json.',
       );

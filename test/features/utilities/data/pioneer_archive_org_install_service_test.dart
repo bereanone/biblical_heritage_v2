@@ -67,6 +67,89 @@ void main() {
   });
 
   test(
+    'destination file name only folds in the code when titles collide',
+    () {
+      // No collision: the plain sanitized title is used, matching every
+      // already-downloaded file on disk today.
+      expect(
+        PioneerArchiveOrgInstallService.destinationFileNameFor(
+          title: 'The Atonement',
+          code: 'ATO',
+          titleCollisionCounts: const {'The Atonement': 1},
+        ),
+        'The Atonement.epub',
+      );
+      // Colliding titles (e.g. Uriah Smith's DAR and DAR1909 editions of
+      // "Daniel and The Revelation") must resolve to distinct file names —
+      // otherwise the second download silently overwrites the first on disk
+      // while both still get their own `library_items` row, leaving one row
+      // pointing at a file that is no longer what it claims to be.
+      const collidingTitle = 'Daniel and The Revelation';
+      final dar = PioneerArchiveOrgInstallService.destinationFileNameFor(
+        title: collidingTitle,
+        code: 'DAR',
+        titleCollisionCounts: const {'Daniel and The Revelation': 2},
+      );
+      final dar1909 = PioneerArchiveOrgInstallService.destinationFileNameFor(
+        title: collidingTitle,
+        code: 'DAR1909',
+        titleCollisionCounts: const {'Daniel and The Revelation': 2},
+      );
+      expect(dar, isNot(dar1909));
+      expect(dar, endsWith('.epub'));
+      expect(dar1909, endsWith('.epub'));
+      expect(dar, contains('DAR'));
+      expect(dar1909, contains('DAR1909'));
+    },
+  );
+
+  test(
+    'the bundled manifest never lets two works collide on the same file name',
+    () async {
+      final raw = await rootBundle.loadString(
+        PioneerArchiveOrgInstallService.manifestAssetKey,
+      );
+      final decoded = jsonDecode(raw) as Map<String, Object?>;
+      final authors = decoded['authors'] as List;
+
+      final titleCollisionCounts = <String, int>{};
+      final allWorks = <Map<String, Object?>>[];
+      for (final entry in authors) {
+        final works = (entry as Map<String, Object?>)['works'] as List;
+        for (final workEntry in works) {
+          final work = workEntry as Map<String, Object?>;
+          allWorks.add(work);
+          final base = (work['title'] as String)
+              .replaceAll(RegExp(r'[\\/:*?"<>|]+'), '_')
+              .trim();
+          titleCollisionCounts.update(
+            base,
+            (value) => value + 1,
+            ifAbsent: () => 1,
+          );
+        }
+      }
+
+      final resolvedFileNames = <String>{};
+      for (final work in allWorks) {
+        final fileName = PioneerArchiveOrgInstallService.destinationFileNameFor(
+          title: work['title'] as String,
+          code: work['code'] as String,
+          titleCollisionCounts: titleCollisionCounts,
+        );
+        expect(
+          resolvedFileNames.add(fileName),
+          isTrue,
+          reason:
+              'Two manifest works resolved to the same destination file '
+              'name ($fileName) — one would silently overwrite the other '
+              'on disk.',
+        );
+      }
+    },
+  );
+
+  test(
     'bundled manifest only lists authors with real archive.org EPUB files',
     () async {
       final raw = await rootBundle.loadString(

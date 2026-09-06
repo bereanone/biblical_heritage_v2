@@ -220,6 +220,37 @@ void main() {
   );
 
   test(
+    'a pioneer_archive_org_download EPUB in ImportedPioneerEpubs is eligible '
+    'for the canonical reader the same as pioneer_epub_import (both write '
+    'into the same folder; the source-type label must not gate routing)',
+    () async {
+      final relativePath = p.join('ImportedPioneerEpubs', 'Some Book.epub');
+      final item = _managedEpubItem(
+        id: 'ARCHIVE_ORG_ITEM',
+        relativePath: relativePath,
+        sourceType: 'pioneer_archive_org_download',
+      );
+
+      expect(supportsCanonicalEpubReader(item), isTrue);
+    },
+  );
+
+  test(
+    'a pioneer_archive_org_download EPUB outside ImportedPioneerEpubs is '
+    'still ineligible — the folder-path check still applies',
+    () async {
+      final relativePath = p.join('Imports', 'archive_org_download.epub');
+      final item = _managedEpubItem(
+        id: 'ARCHIVE_ORG_OUTSIDE',
+        relativePath: relativePath,
+        sourceType: 'pioneer_archive_org_download',
+      );
+
+      expect(supportsCanonicalEpubReader(item), isFalse);
+    },
+  );
+
+  test(
     'a managed EPUB that fails validation keeps the EPUB and does not open canonically',
     () async {
       final relativePath = p.join('ePubs', 'EGW', 'EGW_Books', 'blank.epub');

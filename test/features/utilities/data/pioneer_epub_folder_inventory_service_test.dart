@@ -153,6 +153,27 @@ void main() {
     expect(inventory.skippedNonEpubCount, 3);
   });
 
+  test('only direct EPUBs in the selected source folder are inventoried',
+      () async {
+    await File(p.join(sourceFolder.path, 'Canonical Book.epub')).writeAsBytes(
+      _wellFormedEpubBytes(title: 'Canonical Book'),
+      flush: true,
+    );
+    final stagingFolder = Directory(p.join(sourceFolder.path, 'staging'));
+    await stagingFolder.create();
+    await File(p.join(stagingFolder.path, 'Half Baked Copy.epub')).writeAsBytes(
+      _wellFormedEpubBytes(title: 'Half Baked Copy'),
+      flush: true,
+    );
+
+    final inventory = await PioneerEpubFolderInventoryService.instance.survey(
+      sourceFolder,
+    );
+
+    expect(inventory.totalFound, 1);
+    expect(inventory.entries.single.fileName, 'Canonical Book.epub');
+  });
+
   test('Pioneer OPF display metadata is decoded and deduplicated', () async {
     await File(p.join(sourceFolder.path, 'Daily.epub')).writeAsBytes(
       _wellFormedEpubBytes(

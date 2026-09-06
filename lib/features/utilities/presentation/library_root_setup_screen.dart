@@ -8,6 +8,7 @@ import '../../../core/bootstrap/startup_coordinator.dart';
 import '../data/elibrary_file_management_service.dart';
 import '../data/elibrary_root_migration_service.dart';
 import '../../reader/data/commentary_research_library_service.dart';
+import 'big_progress_bar.dart';
 
 class LibraryRootSetupScreen extends StatefulWidget {
   const LibraryRootSetupScreen({super.key});
@@ -32,6 +33,9 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
   bool _showAdvanced = false;
   String? _indexResult;
   String? _migrationResult;
+  int _indexCompleted = 0;
+  int _indexTotal = 0;
+  String? _indexCurrentTitle;
 
   @override
   void initState() {
@@ -373,9 +377,21 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
     setState(() {
       _indexing = true;
       _indexResult = null;
+      _indexCompleted = 0;
+      _indexTotal = 0;
+      _indexCurrentTitle = null;
     });
     final result = await CommentaryResearchLibraryService.instance
-        .indexLocalCatalogedEpubs();
+        .indexLocalCatalogedEpubs(
+          onProgress: (completed, total, currentTitle) {
+            if (!mounted) return;
+            setState(() {
+              _indexCompleted = completed;
+              _indexTotal = total;
+              _indexCurrentTitle = currentTitle;
+            });
+          },
+        );
     if (!mounted) return;
     final total = result.indexed + result.skipped + result.failed;
     setState(() {
@@ -602,6 +618,14 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
                                   child: const Text('Rescan Library'),
                                 ),
                               ],
+                            ),
+                          ],
+                          if (_indexing) ...[
+                            const SizedBox(height: 12),
+                            IndexingProgressStatus(
+                              completed: _indexCompleted,
+                              total: _indexTotal,
+                              currentTitle: _indexCurrentTitle,
                             ),
                           ],
                           if (_indexResult != null) ...[

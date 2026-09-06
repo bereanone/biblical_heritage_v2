@@ -66,13 +66,25 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
       whereArgs: [itemId],
       limit: 1,
     );
+    final versionRow = await db.query(
+      'library_research_index_conversion',
+      columns: const ['index_version'],
+      where: 'library_item_id = ?',
+      whereArgs: [itemId],
+      limit: 1,
+    );
+    final storedIndexVersion = versionRow.isEmpty
+        ? null
+        : (versionRow.first['index_version'] as num?)?.toInt();
     final needsIndex =
         refresh ||
         existing.isEmpty ||
         (existing.first['file_hash']?.toString() ?? '') != fingerprint ||
         (existing.first['index_status']?.toString() ?? '').toLowerCase() !=
             'indexed' ||
-        (existing.first['index_error']?.toString().trim() ?? '').isNotEmpty;
+        (existing.first['index_error']?.toString().trim() ?? '').isNotEmpty ||
+        storedIndexVersion == null ||
+        storedIndexVersion < CommentaryResearchLibraryService.researchIndexVersion;
     final existingRow = existing.isEmpty
         ? const <String, Object?>{}
         : existing.first;
@@ -307,6 +319,11 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
         where: 'id = ?',
         whereArgs: [itemId],
       );
+      await db.insert('library_research_index_conversion', {
+        'library_item_id': itemId,
+        'index_version': CommentaryResearchLibraryService.researchIndexVersion,
+        'indexed_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
 
       final managedEgwAbbreviation = _managedEgwReferenceBookAbbreviation(
         title: title,
@@ -692,6 +709,24 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
       }
     }
 
+    // A Contents row is useful only if its package-relative destination can
+    // actually be reached.  Keep the publisher's nav hierarchy intact, but
+    // discard stale links instead of letting reader fallback heuristics jump
+    // to the first heading in a shared XHTML file.
+    final reachableEntries = entries
+        .where(
+          (entry) => _navigationDestinationExists(
+            archive: archive,
+            packageInfo: packageInfo,
+            href: entry.href,
+            anchorId: entry.anchorId,
+          ),
+        )
+        .toList(growable: false);
+    entries
+      ..clear()
+      ..addAll(reachableEntries);
+
     // Every TOC/navMap entry is eligible to anchor its own file's body
     // content here, regardless of whether it's nested under another entry
     // for display purposes (a nested chapter still owns its own spine page).
@@ -708,6 +743,7 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     if (!hasTOCRoots) {
       var spineSortOrder = 0;
       for (final spinePath in packageInfo.spineOrderedPaths) {
+        if (packageInfo.isNavigationPath(spinePath)) continue;
         final entry = packageInfo.findArchiveEntry(archive, spinePath);
         final sectionTitle = entry == null
             ? p.basenameWithoutExtension(spinePath)
@@ -751,6 +787,7 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
     }
 
     for (final spinePath in packageInfo.spineOrderedPaths) {
+      if (packageInfo.isNavigationPath(spinePath)) continue;
       final entry = packageInfo.findArchiveEntry(archive, spinePath);
       if (entry == null) continue;
       final raw = utf8.decode(entry.content as List<int>, allowMalformed: true);
@@ -853,6 +890,26 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     }
+  }
+
+  bool _navigationDestinationExists({
+    required Archive archive,
+    required _EpubPackageInfo packageInfo,
+    required String? href,
+    required String? anchorId,
+  }) {
+    final path = href?.trim();
+    if (path == null || path.isEmpty) return false;
+    final entry = packageInfo.findArchiveEntry(archive, path);
+    if (entry == null || !entry.isFile) return false;
+    final anchor = anchorId?.trim();
+    if (anchor == null || anchor.isEmpty) return true;
+    final raw = utf8.decode(entry.content as List<int>, allowMalformed: true);
+    return RegExp(
+      '''<(?:[a-zA-Z][a-zA-Z0-9:-]*)\\b[^>]*(?:\\bid|\\bname)\\s*=\\s*(["'])${RegExp.escape(anchor)}\\1''',
+      caseSensitive: false,
+      dotAll: true,
+    ).hasMatch(raw);
   }
 
   List<_NavigationEntryDraft> _finalizeNavigationEntries(

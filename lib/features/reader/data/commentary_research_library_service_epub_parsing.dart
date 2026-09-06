@@ -16,7 +16,19 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
     final sections = <_EpubSectionChunk>[];
     final fileId = libraryItemId;
 
-    for (final entry in archive) {
+    // The spine is the authoritative reading order. Archive iteration order
+    // is not an EPUB semantic and frequently puts generated nav documents or
+    // unrelated XHTML before content.
+    final targetsByPath = EpubInternalAnchorSectionSplitter.readTargetsByPath(
+      archive: archive,
+      fallbackTitle: p.basenameWithoutExtension(file.path),
+    );
+    final orderedEntries = packageInfo.spineOrderedPaths.isNotEmpty
+        ? packageInfo.spineOrderedPaths
+              .map((path) => packageInfo.findArchiveEntry(archive, path))
+              .whereType<ArchiveFile>()
+        : archive.where((entry) => entry.isFile);
+    for (final entry in orderedEntries) {
       if (!entry.isFile) continue;
       final entryName = p.normalize(entry.name);
       final lowerName = entryName.toLowerCase();
@@ -48,37 +60,61 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
         continue;
       }
 
-      final blocks = _extractBodyBlocks(
-        raw: raw,
-        chapterPath: entryName,
-        sectionTitle: title,
-        includeHeadingBlocks: preserveHeadingBlocks,
-      );
-      final paragraphs = blocks
-          .where((block) => block.kind == 'paragraph')
-          .map((block) => block.html)
-          .toList(growable: false);
-      if (blocks.isEmpty) {
-        stats?.recordSkippedSection(
-          libraryItemId: fileId,
-          hrefPath: entryName,
-          sectionTitle: title,
-          reasonSkipped: 'No readable HTML content.',
-          category: 'other',
-        );
-        continue;
-      }
+      // A book authored as one physical file per book rather than one per
+      // chapter (e.g. a Capture Clipper full-work capture) has all of its
+      // chapters living inside this one entry. Left unsplit, every
+      // paragraph below inherits this single `title`, so distinct chapters
+      // (e.g. INTRODUCTION and APPENDIX A) end up misattributed to the
+      // same section_title. Where the book's own NCX/nav.xhtml places 2+
+      // authored destinations inside this entry via distinct internal
+      // anchors, split it into one section per destination instead.
+      final targets =
+          targetsByPath[EpubInternalAnchorSectionSplitter.normalizedEpubPathKey(
+            entryName,
+          )];
+      final splitSections = targets == null || targets.length < 2
+          ? <EpubAnchorSplitSection>[
+              EpubAnchorSplitSection(title: title, html: raw),
+            ]
+          : EpubInternalAnchorSectionSplitter.splitByAnchors(
+              rawHtml: raw,
+              targets: targets,
+              wholeFileTitle: title,
+            );
 
-      stats?.sectionsIndexed += 1;
-      sections.add(
-        _EpubSectionChunk(
-          entryName: entryName,
-          sectionTitle: title,
-          paragraphs: paragraphs,
-          blocks: blocks,
-          spineIndex: packageInfo.spineIndexForPath(entryName),
-        ),
-      );
+      for (final split in splitSections) {
+        final blocks = _extractBodyBlocks(
+          raw: split.html,
+          chapterPath: entryName,
+          sectionTitle: split.title,
+          includeHeadingBlocks: preserveHeadingBlocks,
+        );
+        if (blocks.isEmpty) {
+          stats?.recordSkippedSection(
+            libraryItemId: fileId,
+            hrefPath: entryName,
+            sectionTitle: split.title,
+            reasonSkipped: 'No readable HTML content.',
+            category: 'other',
+          );
+          continue;
+        }
+
+        final paragraphs = blocks
+            .where((block) => block.kind == 'paragraph')
+            .map((block) => block.html)
+            .toList(growable: false);
+        stats?.sectionsIndexed += 1;
+        sections.add(
+          _EpubSectionChunk(
+            entryName: entryName,
+            sectionTitle: split.title,
+            paragraphs: paragraphs,
+            blocks: blocks,
+            spineIndex: packageInfo.spineIndexForPath(entryName),
+          ),
+        );
+      }
     }
 
     if (sections.isEmpty) {
@@ -479,9 +515,19 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
   }) {
     final entries = <_NavigationEntryDraft>[];
     var sortOrder = 0;
-    final navigationSource = navType.toLowerCase() == 'toc'
-        ? _extractTocDocument(raw)
-        : raw;
+    final navigationSource =
+        (navType.toLowerCase() == 'toc' ? _extractTocDocument(raw) : raw)
+        // A navigation document can additionally contain landmarks, page
+        // lists, and other navigation classes. They are not a table of
+        // contents and must not be emitted as ordinary TOC rows.
+        .replaceAll(
+          RegExp(
+            r'''<nav\b[^>]*(?:epub:type|type)\s*=\s*["'][^"']*\b(?:landmarks|page-list|loi|lot)\b[^"']*["'][^>]*>.*?</nav\s*>''',
+            caseSensitive: false,
+            dotAll: true,
+          ),
+          '',
+        );
     final anchorPattern = RegExp(
       r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
       caseSensitive: false,
@@ -561,6 +607,8 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
       dotAll: true,
     );
     var bodyOrder = 0;
+    var anchorScanOffset = 0;
+    String? pendingAnchor;
 
     for (final match in blockPattern.allMatches(source)) {
       final isClosing = (match.group(1) ?? '').isNotEmpty;
@@ -569,6 +617,17 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
       final token = match.group(0) ?? '';
 
       if (!isClosing) {
+        final prefix = source.substring(anchorScanOffset, match.start);
+        final anchors = RegExp(
+          r'''<a\b[^>]*(?:\bid|\bname)\s*=\s*(["'])([^"']+)\1[^>]*>\s*</a\s*>''',
+          caseSensitive: false,
+          dotAll: true,
+        ).allMatches(prefix);
+        for (final anchor in anchors) {
+          final value = anchor.group(2)?.trim();
+          if (value != null && value.isNotEmpty) pendingAnchor = value;
+        }
+        anchorScanOffset = match.end;
         if (token.endsWith('/>')) {
           continue;
         }
@@ -587,7 +646,21 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
       if (openIndex < 0) continue;
       final frame = stack.removeAt(openIndex);
       final innerHtml = source.substring(frame.contentStart, match.start);
-      final text = libraryCleanVisibleMarginArtifacts(_stripHtml(innerHtml));
+      // Capture Clipper places a display reference code in a nested span in
+      // every heading. It is a locator, not part of the heading label, and
+      // retaining it here makes the auto-derived heading differ from the nav
+      // document label, producing duplicate TOC rows.
+      final readableInnerHtml = innerHtml.replaceAll(
+        RegExp(
+          r'''<span\b[^>]*\bclass\s*=\s*["'][^"']*\brefcode\b[^"']*["'][^>]*>.*?</span\s*>''',
+          caseSensitive: false,
+          dotAll: true,
+        ),
+        '',
+      );
+      final text = libraryCleanVisibleMarginArtifacts(
+        _stripHtml(readableInnerHtml),
+      );
       if (text.isEmpty) continue;
       if (_isHiddenLikeBlock(attrs: frame.attrs, innerHtml: innerHtml) ||
           _isFootnoteOrEndnoteBlock(attrs: frame.attrs)) {
@@ -607,6 +680,7 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
         attrs: frame.attrs,
         innerHtml: innerHtml,
       );
+      final destinationAnchorId = pendingAnchor ?? explicitAnchorId;
       final headingLike =
           headingLevel != null ||
           _looksLikeHeadingLikeBlock(
@@ -635,17 +709,18 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
             sourceTag: tag,
             className: _extractClassName(frame.attrs),
             headingLevel: headingLevel ?? _headingLevelForHeadingLike(attrs),
-            anchorId: explicitAnchorId?.trim().isNotEmpty == true
-                ? explicitAnchorId!.trim()
+            anchorId: destinationAnchorId?.trim().isNotEmpty == true
+                ? destinationAnchorId!.trim()
                 : _generatedHeadingAnchor(
                     chapterPath: chapterPath,
                     headingIndex: bodyOrder,
                     headingText: text,
-                    explicitAnchorId: explicitAnchorId,
+                    explicitAnchorId: destinationAnchorId,
                   ),
             bodyOrder: bodyOrder,
           ),
         );
+        pendingAnchor = null;
         continue;
       }
 
@@ -657,12 +732,13 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
           kind: tag == 'blockquote' ? 'blockquote' : 'paragraph',
           sourceTag: tag,
           className: _extractClassName(frame.attrs),
-          anchorId: explicitAnchorId?.trim().isNotEmpty == true
-              ? explicitAnchorId!.trim()
+          anchorId: destinationAnchorId?.trim().isNotEmpty == true
+              ? destinationAnchorId!.trim()
               : null,
           bodyOrder: bodyOrder,
         ),
       );
+      pendingAnchor = null;
     }
 
     return blocks;
@@ -797,34 +873,8 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
       return true;
     }
 
-    if (RegExp(
-      r'''style\s*=\s*["'][^"']*(font-weight\s*:\s*(bold|700|800)|text-align\s*:\s*center)[^"']*["']''',
-      caseSensitive: false,
-      dotAll: true,
-    ).hasMatch(attrs)) {
-      return true;
-    }
-
-    if (RegExp(
-          r'<(strong|b)\b',
-          caseSensitive: false,
-          dotAll: true,
-        ).hasMatch(innerHtml) &&
-        normalizedText.split(RegExp(r'\s+')).length <= 16 &&
-        normalizedText.length <= 140) {
-      return true;
-    }
-
-    final lowerAttrs = attrs.toLowerCase();
-    if ((lowerAttrs.contains('font-weight:bold') ||
-            lowerAttrs.contains('font-weight: bold') ||
-            lowerAttrs.contains('font-weight:700') ||
-            lowerAttrs.contains('font-weight: 700')) &&
-        normalizedText.split(RegExp(r'\s+')).length <= 16 &&
-        normalizedText.length <= 140) {
-      return true;
-    }
-
+    // Bold or centered prose is presentation, not structure. Treating it as
+    // a heading promoted author bylines and publisher metadata into the TOC.
     return false;
   }
 

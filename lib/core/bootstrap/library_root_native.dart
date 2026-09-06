@@ -7,11 +7,25 @@ import 'package:path/path.dart' as p;
 
 import 'local_settings_store.dart';
 
-// Some export/backup tools append a redundant .zip suffix on top of
-// .studybook (e.g. "Book.studybook.zip"); a .studybook package is itself a
-// ZIP archive, so accept that variant too.
+// .zip is the standard CaptureClipper book package format; a .studybook
+// package is itself a ZIP archive under a legacy extension, and some
+// export/backup tools append a redundant .zip suffix on top of it (e.g.
+// "Book.studybook.zip"), so all three are accepted here. .studybook is kept
+// only for backward compatibility with packages captured before the .zip
+// switch.
 bool _isStudyBookPath(String lowerPath) =>
-    lowerPath.endsWith('.studybook') || lowerPath.endsWith('.studybook.zip');
+    lowerPath.endsWith('.zip') ||
+    lowerPath.endsWith('.studybook') ||
+    lowerPath.endsWith('.studybook.zip');
+
+// A .studycollection file is itself a ZIP archive (of book packages plus an
+// inventory.json manifest), so users who downloaded or renamed it as a plain
+// .zip should not be blocked from selecting it here — pioneer_study_
+// collection_service.dart's inspect() validates the actual archive contents
+// (inventory.json, safe entry paths, size limits), so the extension check
+// only needs to admit the file, not fully gate it.
+bool _isStudyCollectionPath(String lowerPath) =>
+    lowerPath.endsWith('.studycollection') || lowerPath.endsWith('.zip');
 
 bool _isPioneerPackagePath(String lowerPath) =>
     _isStudyBookPath(lowerPath) ||
@@ -24,11 +38,13 @@ String validateAndroidPioneerPickerPath(
 }) {
   final normalized = path.trim();
   final lower = normalized.toLowerCase();
-  if (collection && !lower.endsWith('.studycollection')) {
+  if (collection && !_isStudyCollectionPath(lower)) {
     throw const FormatException('Choose Pioneers.studycollection.');
   }
   if (!collection && !_isStudyBookPath(lower)) {
-    throw const FormatException('Choose a .studybook Pioneer package.');
+    throw const FormatException(
+      'Choose a .zip Pioneer package (or legacy .studybook).',
+    );
   }
   return normalized;
 }
@@ -104,9 +120,9 @@ class LibraryRootNative {
   static Future<({String path, String bookmark})?> pickFolder() async {
     if (Platform.isIOS || defaultTargetPlatform == TargetPlatform.iOS) {
       throw UnsupportedError(
-        'iPhone and iPad import books by selecting a .studybook package or '
-        'CaptureClipper files. A persistent Files-provider folder is not '
-        'required or supported.',
+        'iPhone and iPad import books by selecting a .zip Pioneer package '
+        '(or legacy .studybook) or CaptureClipper files. A persistent '
+        'Files-provider folder is not required or supported.',
       );
     }
     if (usesAndroidDocumentTree) {
@@ -216,7 +232,8 @@ class LibraryRootNative {
       if (kind == 'pioneerPackage') {
         if (!_isPioneerPackagePath(resolvedPath.toLowerCase())) {
           throw const FormatException(
-            'Choose a .studybook, .studycollection, or .epub Pioneer file.',
+            'Choose a .zip, .studycollection, or .epub Pioneer file (legacy '
+            '.studybook also accepted).',
           );
         }
         return <String>[resolvedPath];
@@ -258,7 +275,7 @@ class LibraryRootNative {
           ? 'Choose a Pioneer book, EPUB, or collection'
           : collection
           ? 'Choose Pioneers.studycollection'
-          : 'Choose a Pioneer .studybook package';
+          : 'Choose a Pioneer .zip package';
       final result = await FilePicker.platform.pickFiles(
         type: FileType.any,
         allowMultiple: false,
@@ -276,7 +293,8 @@ class LibraryRootNative {
       if (anyPioneerPackage) {
         if (!_isPioneerPackagePath(selectedPath.toLowerCase())) {
           throw const FormatException(
-            'Choose a .studybook, .studycollection, or .epub Pioneer file.',
+            'Choose a .zip, .studycollection, or .epub Pioneer file (legacy '
+            '.studybook also accepted).',
           );
         }
         return <String>[selectedPath];
@@ -306,7 +324,7 @@ class LibraryRootNative {
         : const <String>[];
     if (kind == 'collection') {
       final invalid = paths.where(
-        (path) => !path.toLowerCase().endsWith('.studycollection'),
+        (path) => !_isStudyCollectionPath(path.toLowerCase()),
       );
       if (invalid.isNotEmpty) {
         throw const FormatException(

@@ -41,12 +41,13 @@ PioneerEpubInventoryEntry _entry({
 PioneerEpubFolderInventory _inventory(
   Directory folder, {
   required List<PioneerEpubInventoryEntry> entries,
+  int skippedNonEpubCount = 0,
 }) {
   return PioneerEpubFolderInventory(
     folderPath: folder.path,
     scannedAt: DateTime.utc(2026),
     entries: entries,
-    skippedNonEpubCount: 0,
+    skippedNonEpubCount: skippedNonEpubCount,
   );
 }
 
@@ -197,6 +198,46 @@ void main() {
       expect(find.byKey(const Key('pioneer-primary-action')), findsOneWidget);
     },
   );
+
+  testWidgets('ignored non-book files are informational and do not block', (
+    tester,
+  ) async {
+    final folder = Directory.systemTemp.createTempSync('pioneer_ui_ignored_');
+    addTearDown(() => folder.deleteSync(recursive: true));
+    final inventory = _inventory(
+      folder,
+      entries: [_entry(id: 'one', unchanged: true)],
+      skippedNonEpubCount: 3,
+    );
+
+    await _pumpScreen(tester, folder: folder, inventory: inventory);
+
+    expect(find.text('Your Pioneer Library is ready.'), findsOneWidget);
+    expect(find.text('3 non-book files were ignored'), findsOneWidget);
+    expect(find.textContaining('need attention'), findsNothing);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.ancestor(
+              of: find.text('Update Verified Pioneer Books'),
+              matching: find.byType(FilledButton),
+            ),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.ancestor(
+              of: find.text('Import / Update Pioneer Library'),
+              matching: find.byType(OutlinedButton),
+            ),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
 
   testWidgets(
     'primary action uses injected production-service boundaries and skips unchanged',

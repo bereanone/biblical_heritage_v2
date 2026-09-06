@@ -207,6 +207,125 @@ List<LibraryBookSection> libraryReaderComposedHeadingSections({
   return List<LibraryBookSection>.unmodifiable(result);
 }
 
+/// Drops the leading heading(s) [composedHeadings] shares with
+/// [previousComposedHeadings], comparing by section entry-name identity.
+///
+/// [libraryReaderComposedHeadingSections] includes every heading-only
+/// ancestor above a nested section (e.g. "APPENDIX A" above its nested
+/// "OPEN LETTER") so a book opened directly onto that nested section still
+/// shows its full context. In a continuous-scroll reading list, though, an
+/// ancestor already printed as its own preceding unit's heading — reprinting
+/// it here would stack the same heading twice back-to-back. This keeps only
+/// the heading(s) newly entered by this unit relative to the immediately
+/// preceding readable unit.
+List<LibraryBookSection> libraryReaderContinuousUnitHeadings({
+  required List<LibraryBookSection> composedHeadings,
+  required List<LibraryBookSection> previousComposedHeadings,
+}) {
+  var sharedPrefixLength = 0;
+  while (sharedPrefixLength < composedHeadings.length &&
+      sharedPrefixLength < previousComposedHeadings.length &&
+      _libraryBookSectionEntryIdentity(
+            composedHeadings[sharedPrefixLength],
+          ) ==
+          _libraryBookSectionEntryIdentity(
+            previousComposedHeadings[sharedPrefixLength],
+          )) {
+    sharedPrefixLength += 1;
+  }
+  if (sharedPrefixLength == 0) return composedHeadings;
+  return composedHeadings.sublist(sharedPrefixLength);
+}
+
+String _libraryBookSectionEntryIdentity(LibraryBookSection section) {
+  return p.normalize(section.entryName).toLowerCase();
+}
+
+/// Corrects a stored `is_front_matter` misclassification before the Contents
+/// list is built, for every book that opens this popup — the one shared
+/// place every book's Contents modal list is assembled.
+///
+/// `buildLibraryNavigationTree` sinks any item flagged front matter to the
+/// bottom of its top-level siblings (see `_navigationDisplayBucket` in
+/// library_navigation_tree.dart) — the right call for genuinely decorative
+/// sections (a cover, a boilerplate title page, a one-line foreword) that
+/// import time correctly identified as skippable. But some books' actual
+/// opening chapter is literally titled "Introduction" (or "Preface", etc.)
+/// and contains real, substantial prose — import time's front-matter flag is
+/// set purely from that label (see `libraryIsFrontMatterOpeningLabel`, used
+/// to pick a sensible default *reading position*, not to hide a real chapter
+/// from the Contents list). Re-checking each front-matter-flagged item's own
+/// paragraph content here fixes the display for every affected title without
+/// touching the stored flag or requiring a reimport.
+///
+/// The same misclassification also affects `isBodyStart`: it marks the
+/// section a fresh reader should open to by default, chosen by skipping past
+/// any front-matter-labeled section regardless of content (see
+/// `_firstMeaningfulSectionIndex` in pioneer_text_import_service.dart) — so
+/// it can land on a section *after* one this function just corrected to
+/// non-front-matter, like SL27's own title/subtitle heading landing after
+/// its real "Introduction". `_navigationDisplayBucket` floats `isBodyStart`
+/// unconditionally to the top of its siblings, which would otherwise still
+/// jump that later section ahead of the earlier, now-correctly-non-front-
+/// matter one. For display, only the earliest non-front-matter item in
+/// natural document order should keep that promotion.
+List<LibraryCatalogNavigationItem> libraryReaderContentsDisplayNavigationItems({
+  required List<LibraryCatalogNavigationItem> items,
+  required List<LibraryBookSection> sections,
+  required String bookTitle,
+}) {
+  final withCorrectedFrontMatter = [
+    for (final item in items)
+      if (item.isFrontMatter &&
+          _navigationItemHasSubstantialOwnContent(
+            item: item,
+            sections: sections,
+            bookTitle: bookTitle,
+          ))
+        item.copyWith(isFrontMatter: false)
+      else
+        item,
+  ];
+
+  final hadBodyStart = withCorrectedFrontMatter.any((item) => item.isBodyStart);
+  if (!hadBodyStart) return withCorrectedFrontMatter;
+
+  String? earliestNonFrontMatterId;
+  var earliestSortOrder = 1 << 30;
+  for (final item in withCorrectedFrontMatter) {
+    if (item.isFrontMatter) continue;
+    final sortOrder = item.sortOrder ?? (1 << 30);
+    if (sortOrder < earliestSortOrder) {
+      earliestSortOrder = sortOrder;
+      earliestNonFrontMatterId = item.id;
+    }
+  }
+
+  return [
+    for (final item in withCorrectedFrontMatter)
+      item.copyWith(isBodyStart: item.id == earliestNonFrontMatterId),
+  ];
+}
+
+bool _navigationItemHasSubstantialOwnContent({
+  required LibraryCatalogNavigationItem item,
+  required List<LibraryBookSection> sections,
+  required String bookTitle,
+}) {
+  final sectionIndex = _librarySectionIndexForNavigationItem(
+    sections: sections,
+    navItem: item,
+  );
+  if (sectionIndex == null) return false;
+  final section = sections[sectionIndex];
+  return libraryIsMeaningfulReadingSection(
+    title: section.title,
+    href: section.entryName,
+    paragraphs: section.paragraphs,
+    bookTitle: bookTitle,
+  );
+}
+
 List<String> libraryReaderLiveSectionHeadingLabels({
   required List<LibraryBookSection> composedSections,
   required String bookTitle,

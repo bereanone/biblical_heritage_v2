@@ -8,6 +8,7 @@ import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/elibrary_database.dart';
 import '../../library/data/canonical_activation.dart';
 import '../../library/data/library_acquisition_batch_runner.dart';
+import '../../library/data/pioneer_cover_assignment_service.dart';
 import 'elibrary_folder_policy.dart';
 import 'pioneer_epub_folder_inventory_service.dart';
 
@@ -87,6 +88,7 @@ class PioneerEpubBulkImportService {
         final relativePath = await _copyAndRegister(
           entry: entry,
           destinationDir: destinationDir,
+          rootPath: rootPath,
           db: db,
           deviceId: deviceId,
           title: title,
@@ -130,6 +132,7 @@ class PioneerEpubBulkImportService {
   Future<String> _copyAndRegister({
     required PioneerEpubInventoryEntry entry,
     required Directory destinationDir,
+    required String rootPath,
     required Database db,
     required String deviceId,
     required String title,
@@ -181,12 +184,23 @@ class PioneerEpubBulkImportService {
       'deleted_at': null,
     };
     if (existingRows.isEmpty) {
+      // Only a brand-new row gets a cover assigned here — leaving an
+      // already-imported title's existing cover_path (embedded or
+      // previously generated) untouched on re-registration.
+      final coverPath = await PioneerCoverAssignmentService.instance
+          .ensureCoverPath(
+            epubBytes: await destination.readAsBytes(),
+            rootPath: rootPath,
+            itemId: entry.libraryItemId,
+            title: title,
+            author: entry.author?.trim() ?? '',
+          );
       await db.insert('library_items', <String, Object?>{
         'id': entry.libraryItemId,
         ...sharedPayload,
         'source_site': null,
         'source_url': null,
-        'cover_path': null,
+        'cover_path': coverPath,
         'date_added': now,
         'last_opened': null,
         'index_status': 'metadata_only',

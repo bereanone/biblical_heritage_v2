@@ -26,6 +26,7 @@ import '../data/pioneer_captured_html_import_folder_service.dart';
 import '../data/pioneer_epub_collection_service.dart';
 import '../data/pioneer_source_catalog.dart';
 import '../data/pioneer_text_import_service.dart';
+import 'big_progress_bar.dart';
 import 'library_indexing_prompt_dialogs.dart';
 import 'study_collection_import_dialog.dart';
 import 'pioneer_captured_html_import_dialogs.dart';
@@ -167,9 +168,10 @@ class CaptureClipperPackageImportControls extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'Select one .studybook or .studycollection file from OneDrive, iCloud Drive, '
-          'Google Drive, or On My iPad. StudyBible2 copies and unpacks it '
-          'locally. Your cloud file is not changed.',
+          'Select one .zip or .studycollection file from OneDrive, iCloud Drive, '
+          'Google Drive, or On My iPad (older .studybook files also work). '
+          'StudyBible2 copies and unpacks it locally. Your cloud file is not '
+          'changed.',
           style: theme.textTheme.bodySmall?.copyWith(
             color: scheme.onSurfaceVariant,
           ),
@@ -346,79 +348,59 @@ class ELibraryStorageSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          statusLabel,
+          style: theme.textTheme.titleMedium?.copyWith(
+            color: scheme.primary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          helperText,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
           children: [
-            Text('Library Storage', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 8),
-            Text(
-              statusLabel,
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: scheme.primary,
-                fontWeight: FontWeight.w700,
+            OutlinedButton(
+              onPressed: disableActions ? null : onIndexNewChangedBooks,
+              child: Text(
+                manualIndexing
+                    ? 'Indexing new/changed books...'
+                    : 'Index New/Changed Books',
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              helperText,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
+            OutlinedButton(
+              onPressed: disableActions ? null : onManageStorage,
+              child: const Text('Manage Storage'),
             ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                FilledButton(
-                  onPressed: disableActions ? null : onManageStorage,
-                  child: const Text('Manage Storage'),
-                ),
-                OutlinedButton(
-                  onPressed: disableActions ? null : onIndexNewChangedBooks,
-                  child: Text(
-                    manualIndexing
-                        ? 'Indexing new/changed books...'
-                        : 'Index New/Changed Books',
-                  ),
-                ),
-                OutlinedButton(
-                  onPressed: disableActions ? null : onRefreshStatus,
-                  child: const Text('Refresh Status'),
-                ),
-              ],
+            OutlinedButton(
+              onPressed: disableActions ? null : onRefreshStatus,
+              child: const Text('Refresh Status'),
             ),
-            if (manualIndexing) ...[
-              const SizedBox(height: 12),
-              LinearProgressIndicator(
-                value: manualIndexTotal > 0
-                    ? manualIndexCompleted / manualIndexTotal
-                    : null,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                manualIndexTotal > 0
-                    ? 'Indexing $manualIndexCompleted of $manualIndexTotal'
-                    : 'Indexing new/changed books...',
-              ),
-              if (manualIndexCurrentTitle != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Current: $manualIndexCurrentTitle',
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ],
-            if (manualIndexStatus != null) ...[
-              const SizedBox(height: 8),
-              Text(manualIndexStatus!),
-            ],
           ],
         ),
-      ),
+        if (manualIndexing) ...[
+          const SizedBox(height: 12),
+          IndexingProgressStatus(
+            completed: manualIndexCompleted,
+            total: manualIndexTotal,
+            currentTitle: manualIndexCurrentTitle,
+          ),
+        ],
+        if (manualIndexStatus != null) ...[
+          const SizedBox(height: 8),
+          Text(manualIndexStatus!),
+        ],
+      ],
     );
   }
 }
@@ -477,7 +459,7 @@ class CaptureClipperImportsSection extends StatelessWidget {
               isIOS
                   ? 'Import the Pioneer Library from a folder you already have, or choose a book package from OneDrive, iCloud Drive, or another Files location. StudyBible copies it locally so it remains available offline.'
                   : isAndroid
-                  ? 'Import the Pioneer Library from a folder you already have, or choose Pioneers.studycollection or a .studybook package from Files or cloud storage. Imported packages are copied into StudyBible2 storage.'
+                  ? 'Import the Pioneer Library from a folder you already have, or choose Pioneers.studycollection or a .zip package from Files or cloud storage (older .studybook files also work). Imported packages are copied into StudyBible2 storage.'
                   : 'Import the Pioneer Library from a folder you already have, or choose Pioneers.studycollection from the Collections folder in your cloud storage. StudyBible2 shows what will change before importing.',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: scheme.onSurfaceVariant,
@@ -886,226 +868,218 @@ class ELibraryInstallCollectionsSection extends StatelessWidget {
       return _isMeaningfulCollectionEstimateText(estimate) ? estimate : null;
     }
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Choose Collections', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 6),
+        Text(
+          'Choose your eLibrary collections and formats, then use Install Selected to begin. The selection buttons only change checkmarks; they do not start a download.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
           children: [
-            Text(
-              'Install eLibrary Collections',
-              style: theme.textTheme.titleLarge,
+            ActionChip(
+              label: const Text('Select All Collections + All File Types'),
+              onPressed: running ? null : onSelectAllCollectionsAndFormats,
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Choose your eLibrary collections and formats, then use Install Selected to begin. The selection buttons only change checkmarks; they do not start a download.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
+            ActionChip(
+              label: const Text('Clear All'),
+              onPressed: running ? null : onClearAllSelections,
             ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                ActionChip(
-                  label: const Text('Select All Collections + All File Types'),
-                  onPressed: running ? null : onSelectAllCollectionsAndFormats,
-                ),
-                ActionChip(
-                  label: const Text('Clear All'),
-                  onPressed: running ? null : onClearAllSelections,
-                ),
-                ActionChip(
-                  label: const Text('EPUB Only'),
-                  onPressed: running ? null : onSetPresetEpubOnly,
-                ),
-                ActionChip(
-                  label: const Text('PDF Only'),
-                  onPressed: running ? null : onSetPresetPdfOnly,
-                ),
-                ActionChip(
-                  label: const Text('EPUB + PDF'),
-                  onPressed: running ? null : onSetPresetBoth,
-                ),
-              ],
+            ActionChip(
+              label: const Text('EPUB Only'),
+              onPressed: running ? null : onSetPresetEpubOnly,
             ),
-            if (selectionWarning != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                selectionWarning!,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: scheme.error,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-            const SizedBox(height: 16),
-            CheckboxListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              controlAffinity: ListTileControlAffinity.trailing,
-              value: installBooks,
-              onChanged: running ? null : onBooksChanged,
-              title: Text(collectionTitle(0)),
-              subtitle: collectionEstimateText(0) == null
-                  ? null
-                  : Text(
-                      collectionEstimateText(0)!,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-              contentPadding: EdgeInsets.zero,
+            ActionChip(
+              label: const Text('PDF Only'),
+              onPressed: running ? null : onSetPresetPdfOnly,
             ),
-            CheckboxListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              controlAffinity: ListTileControlAffinity.trailing,
-              value: installDevotionals,
-              onChanged: running ? null : onDevotionalsChanged,
-              title: Text(collectionTitle(1)),
-              subtitle: collectionEstimateText(1) == null
-                  ? null
-                  : Text(
-                      collectionEstimateText(1)!,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-              contentPadding: EdgeInsets.zero,
-            ),
-            CheckboxListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              controlAffinity: ListTileControlAffinity.trailing,
-              value: installCommentaries,
-              onChanged: running ? null : onCommentariesChanged,
-              title: Text(collectionTitle(2)),
-              subtitle: collectionEstimateText(2) == null
-                  ? null
-                  : Text(
-                      collectionEstimateText(2)!,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-              contentPadding: EdgeInsets.zero,
-            ),
-            CheckboxListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              controlAffinity: ListTileControlAffinity.trailing,
-              value: installMiscCollections,
-              onChanged: running ? null : onMiscCollectionsChanged,
-              title: Text(collectionTitle(3)),
-              subtitle: collectionEstimateText(3) == null
-                  ? null
-                  : Text(
-                      collectionEstimateText(3)!,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-              contentPadding: EdgeInsets.zero,
-            ),
-            CheckboxListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              controlAffinity: ListTileControlAffinity.trailing,
-              value: installPamphlets,
-              onChanged: running ? null : onPamphletsChanged,
-              title: Text(collectionTitle(4)),
-              subtitle: collectionEstimateText(4) == null
-                  ? null
-                  : Text(
-                      collectionEstimateText(4)!,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-              contentPadding: EdgeInsets.zero,
-            ),
-            CheckboxListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              controlAffinity: ListTileControlAffinity.trailing,
-              value: installPeriodicals,
-              onChanged: running ? null : onPeriodicalsChanged,
-              title: Text(collectionTitle(5)),
-              subtitle: collectionEstimateText(5) == null
-                  ? null
-                  : Text(
-                      collectionEstimateText(5)!,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-              contentPadding: EdgeInsets.zero,
-            ),
-            CheckboxListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              controlAffinity: ListTileControlAffinity.trailing,
-              value: installManuscriptReleases,
-              onChanged: running ? null : onManuscriptReleasesChanged,
-              title: Text(collectionTitle(6)),
-              subtitle: collectionEstimateText(6) == null
-                  ? null
-                  : Text(
-                      collectionEstimateText(6)!,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-              contentPadding: EdgeInsets.zero,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _displaySelectedDownloadSummary(selectedDownloadSummary),
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: scheme.primary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const Divider(height: 24),
-            CheckboxListTile(
-              value: installEpub,
-              onChanged: running ? null : onEpubChanged,
-              title: const Text('EPUB'),
-              contentPadding: EdgeInsets.zero,
-            ),
-            CheckboxListTile(
-              value: installPdf,
-              onChanged: running ? null : onPdfChanged,
-              title: const Text('PDF'),
-              contentPadding: EdgeInsets.zero,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _installCollectionsDisclosureText,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                FilledButton(
-                  onPressed: running ? null : onStartSetup,
-                  child: const Text('Install Selected'),
-                ),
-                OutlinedButton(
-                  onPressed: running ? onCancel : null,
-                  child: const Text('Cancel'),
-                ),
-              ],
+            ActionChip(
+              label: const Text('EPUB + PDF'),
+              onPressed: running ? null : onSetPresetBoth,
             ),
           ],
         ),
-      ),
+        if (selectionWarning != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            selectionWarning!,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.error,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+        const SizedBox(height: 16),
+        CheckboxListTile(
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          controlAffinity: ListTileControlAffinity.trailing,
+          value: installBooks,
+          onChanged: running ? null : onBooksChanged,
+          title: Text(collectionTitle(0)),
+          subtitle: collectionEstimateText(0) == null
+              ? null
+              : Text(
+                  collectionEstimateText(0)!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+          contentPadding: EdgeInsets.zero,
+        ),
+        CheckboxListTile(
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          controlAffinity: ListTileControlAffinity.trailing,
+          value: installDevotionals,
+          onChanged: running ? null : onDevotionalsChanged,
+          title: Text(collectionTitle(1)),
+          subtitle: collectionEstimateText(1) == null
+              ? null
+              : Text(
+                  collectionEstimateText(1)!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+          contentPadding: EdgeInsets.zero,
+        ),
+        CheckboxListTile(
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          controlAffinity: ListTileControlAffinity.trailing,
+          value: installCommentaries,
+          onChanged: running ? null : onCommentariesChanged,
+          title: Text(collectionTitle(2)),
+          subtitle: collectionEstimateText(2) == null
+              ? null
+              : Text(
+                  collectionEstimateText(2)!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+          contentPadding: EdgeInsets.zero,
+        ),
+        CheckboxListTile(
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          controlAffinity: ListTileControlAffinity.trailing,
+          value: installMiscCollections,
+          onChanged: running ? null : onMiscCollectionsChanged,
+          title: Text(collectionTitle(3)),
+          subtitle: collectionEstimateText(3) == null
+              ? null
+              : Text(
+                  collectionEstimateText(3)!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+          contentPadding: EdgeInsets.zero,
+        ),
+        CheckboxListTile(
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          controlAffinity: ListTileControlAffinity.trailing,
+          value: installPamphlets,
+          onChanged: running ? null : onPamphletsChanged,
+          title: Text(collectionTitle(4)),
+          subtitle: collectionEstimateText(4) == null
+              ? null
+              : Text(
+                  collectionEstimateText(4)!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+          contentPadding: EdgeInsets.zero,
+        ),
+        CheckboxListTile(
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          controlAffinity: ListTileControlAffinity.trailing,
+          value: installPeriodicals,
+          onChanged: running ? null : onPeriodicalsChanged,
+          title: Text(collectionTitle(5)),
+          subtitle: collectionEstimateText(5) == null
+              ? null
+              : Text(
+                  collectionEstimateText(5)!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+          contentPadding: EdgeInsets.zero,
+        ),
+        CheckboxListTile(
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          controlAffinity: ListTileControlAffinity.trailing,
+          value: installManuscriptReleases,
+          onChanged: running ? null : onManuscriptReleasesChanged,
+          title: Text(collectionTitle(6)),
+          subtitle: collectionEstimateText(6) == null
+              ? null
+              : Text(
+                  collectionEstimateText(6)!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+          contentPadding: EdgeInsets.zero,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _displaySelectedDownloadSummary(selectedDownloadSummary),
+          style: theme.textTheme.titleMedium?.copyWith(
+            color: scheme.primary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const Divider(height: 24),
+        CheckboxListTile(
+          value: installEpub,
+          onChanged: running ? null : onEpubChanged,
+          title: const Text('EPUB'),
+          contentPadding: EdgeInsets.zero,
+        ),
+        CheckboxListTile(
+          value: installPdf,
+          onChanged: running ? null : onPdfChanged,
+          title: const Text('PDF'),
+          contentPadding: EdgeInsets.zero,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _installCollectionsDisclosureText,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            FilledButton(
+              onPressed: running ? null : onStartSetup,
+              child: const Text('Install Selected'),
+            ),
+            OutlinedButton(
+              onPressed: running ? onCancel : null,
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -1653,7 +1627,8 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       var directlyImported = 0;
       for (final path in [path]) {
         try {
-          if (p.extension(path).toLowerCase() == '.studycollection') {
+          final pathExtension = p.extension(path).toLowerCase();
+          if (pathExtension == '.studycollection' || pathExtension == '.zip') {
             final service = const PioneerStudyCollectionService();
             final inventory = await service.compareWithLocal(
               await service.inspect(path),
@@ -1701,6 +1676,22 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                 batch.epubResults.where((result) => result.isImported).length +
                 batch.pdfWorkIds.length;
           }
+        } on PioneerCollectionMissingManifestException {
+          // Not a .studycollection manifest — most likely a plain zip of
+          // loose book files. Hand off to the bulk zip importer, which
+          // already knows how to extract, scan (recursively, matching each
+          // epub's own metadata), and import a zip like this with no
+          // manifest required.
+          if (!mounted) return;
+          setState(() => _captureFolderBusy = false);
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (context) =>
+                  ImportPioneerLibraryScreen(initialZipPath: path),
+            ),
+          );
+          if (mounted) await _loadCaptureFolderState();
+          return;
         } catch (error) {
           failures.add('${p.basename(path)}: $error');
         }
@@ -1725,7 +1716,9 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       await _loadCaptureFolderState();
       if (!mounted) return;
       setState(() => _captureFolderStatus = message);
-      messenger.showSnackBar(SnackBar(content: Text(message)));
+      messenger.showSnackBar(
+        SnackBar(content: Text(message), duration: const Duration(seconds: 10)),
+      );
     } catch (error) {
       if (!mounted) return;
       debugPrint('Pioneer collection import failed: $error');
@@ -1737,9 +1730,9 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
           'The Pioneer collection could not be imported. The selected collection may be invalid.',
       };
       setState(() => _captureFolderStatus = message);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), duration: const Duration(seconds: 10)),
+      );
     } finally {
       if (mounted) {
         setState(() => _captureFolderBusy = false);
@@ -1792,7 +1785,8 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         final catalog = await PioneerSourceCatalog.load();
         final work =
             matchPioneerWorkForLocalEpub(catalog, path) ??
-            await loadPioneerWorkFromFolderFile(path);
+            await loadPioneerWorkFromFolderFile(path) ??
+            await loadPioneerWorkFromLocalEpubFile(path);
         if (work == null) {
           throw PioneerBookPackageImportException(
             'The selected EPUB could not be matched to a Pioneer catalog '
@@ -3259,35 +3253,125 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
         top: false,
         child: _loading
             ? const Center(child: CircularProgressIndicator())
+            : _running
+            ? _RunningFocalPanel(
+                indexing: _indexing,
+                progress: _progress,
+                indexCompleted: _manualIndexCompleted,
+                indexTotal: _manualIndexTotal,
+                indexCurrentTitle: _manualIndexCurrentTitle,
+                statusMessage: _setupStatusMessage,
+                onCancel: _cancelSetup,
+              )
             : ListView(
                 padding: const EdgeInsets.all(20),
                 children: [
-                  LibraryIndexingPendingCard(
-                    pendingCount: _pendingIndexCount,
-                    busy: _manualIndexing,
-                    onIndexNow: _runManualIndex,
-                  ),
-                  if (_pendingIndexCount > 0) const SizedBox(height: 12),
-                  LibraryNeedsAttentionCard(
-                    items: _needsAttentionItems,
-                    onRetryRepairable: _runManualIndex,
-                    onRefresh: _refreshNeedsAttentionItems,
-                  ),
-                  if (_needsAttentionItems.isNotEmpty)
-                    const SizedBox(height: 12),
-                  ELibraryStorageSection(
-                    statusLabel: libraryStorageStatusText(selection),
-                    helperText: libraryStorageHelperText(selection),
-                    disableActions:
-                        _running || _manualIndexing || _refreshingEstimateCache,
-                    onManageStorage: _chooseRoot,
-                    onIndexNewChangedBooks: _runManualIndex,
-                    onRefreshStatus: _refreshEstimateCache,
-                    manualIndexing: _manualIndexing,
-                    manualIndexStatus: _manualIndexStatus,
-                    manualIndexCompleted: _manualIndexCompleted,
-                    manualIndexTotal: _manualIndexTotal,
-                    manualIndexCurrentTitle: _manualIndexCurrentTitle,
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('eLibrary', style: theme.textTheme.titleLarge),
+                          const SizedBox(height: 12),
+                          LibraryIndexingPendingCard(
+                            pendingCount: _pendingIndexCount,
+                            busy: _manualIndexing,
+                            onIndexNow: _runManualIndex,
+                          ),
+                          if (_pendingIndexCount > 0)
+                            const SizedBox(height: 12),
+                          LibraryNeedsAttentionCard(
+                            items: _needsAttentionItems,
+                            onRetryRepairable: _runManualIndex,
+                            onRefresh: _refreshNeedsAttentionItems,
+                          ),
+                          if (_needsAttentionItems.isNotEmpty)
+                            const SizedBox(height: 12),
+                          ELibraryStorageSection(
+                            statusLabel: libraryStorageStatusText(selection),
+                            helperText: libraryStorageHelperText(selection),
+                            disableActions:
+                                _running ||
+                                _manualIndexing ||
+                                _refreshingEstimateCache,
+                            onManageStorage: _chooseRoot,
+                            onIndexNewChangedBooks: _runManualIndex,
+                            onRefreshStatus: _refreshEstimateCache,
+                            manualIndexing: _manualIndexing,
+                            manualIndexStatus: _manualIndexStatus,
+                            manualIndexCompleted: _manualIndexCompleted,
+                            manualIndexTotal: _manualIndexTotal,
+                            manualIndexCurrentTitle: _manualIndexCurrentTitle,
+                          ),
+                          const Divider(height: 32),
+                          ELibraryInstallCollectionsSection(
+                            running: _running,
+                            selectionWarning: _selectionWarning,
+                            installBooks: _installBooks,
+                            installDevotionals: _installDevotionals,
+                            installCommentaries: _installCommentaries,
+                            installMiscCollections: _installMiscCollections,
+                            installPamphlets: _installPamphlets,
+                            installPeriodicals: _installPeriodicals,
+                            installManuscriptReleases:
+                                _installManuscriptReleases,
+                            installEpub: _installEpub,
+                            installPdf: _installPdf,
+                            collectionEstimateLines: List<String>.generate(
+                              7,
+                              _estimateLineForCollection,
+                            ),
+                            selectedDownloadSummary: _selectedDownloadSummary(),
+                            onSelectAllCollectionsAndFormats:
+                                _selectAllCollectionsAndFormats,
+                            onClearAllSelections: _clearAllSelections,
+                            onSetPresetEpubOnly: _setPresetEpubOnly,
+                            onSetPresetPdfOnly: _setPresetPdfOnly,
+                            onSetPresetBoth: _setPresetBoth,
+                            onStartSetup: _startSetup,
+                            onCancel: _cancelSetup,
+                            onBooksChanged: (value) => setState(() {
+                              _installBooks = value ?? false;
+                              _clearSelectionWarning();
+                            }),
+                            onDevotionalsChanged: (value) => setState(() {
+                              _installDevotionals = value ?? false;
+                              _clearSelectionWarning();
+                            }),
+                            onCommentariesChanged: (value) => setState(() {
+                              _installCommentaries = value ?? false;
+                              _clearSelectionWarning();
+                            }),
+                            onMiscCollectionsChanged: (value) => setState(() {
+                              _installMiscCollections = value ?? false;
+                              _clearSelectionWarning();
+                            }),
+                            onPamphletsChanged: (value) => setState(() {
+                              _installPamphlets = value ?? false;
+                              _clearSelectionWarning();
+                            }),
+                            onPeriodicalsChanged: (value) => setState(() {
+                              _installPeriodicals = value ?? false;
+                              _clearSelectionWarning();
+                            }),
+                            onManuscriptReleasesChanged: (value) =>
+                                setState(() {
+                                  _installManuscriptReleases = value ?? false;
+                                  _clearSelectionWarning();
+                                }),
+                            onEpubChanged: (value) => setState(() {
+                              _installEpub = value ?? false;
+                              _clearSelectionWarning();
+                            }),
+                            onPdfChanged: (value) => setState(() {
+                              _installPdf = value ?? false;
+                              _clearSelectionWarning();
+                            }),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   CaptureClipperImportsSection(
@@ -3316,69 +3400,6 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                           relatedFilesOnly: true,
                         ),
                     onChangeImportLocation: () => _chooseCaptureFolder(),
-                  ),
-                  const SizedBox(height: 12),
-                  ELibraryInstallCollectionsSection(
-                    running: _running,
-                    selectionWarning: _selectionWarning,
-                    installBooks: _installBooks,
-                    installDevotionals: _installDevotionals,
-                    installCommentaries: _installCommentaries,
-                    installMiscCollections: _installMiscCollections,
-                    installPamphlets: _installPamphlets,
-                    installPeriodicals: _installPeriodicals,
-                    installManuscriptReleases: _installManuscriptReleases,
-                    installEpub: _installEpub,
-                    installPdf: _installPdf,
-                    collectionEstimateLines: List<String>.generate(
-                      7,
-                      _estimateLineForCollection,
-                    ),
-                    selectedDownloadSummary: _selectedDownloadSummary(),
-                    onSelectAllCollectionsAndFormats:
-                        _selectAllCollectionsAndFormats,
-                    onClearAllSelections: _clearAllSelections,
-                    onSetPresetEpubOnly: _setPresetEpubOnly,
-                    onSetPresetPdfOnly: _setPresetPdfOnly,
-                    onSetPresetBoth: _setPresetBoth,
-                    onStartSetup: _startSetup,
-                    onCancel: _cancelSetup,
-                    onBooksChanged: (value) => setState(() {
-                      _installBooks = value ?? false;
-                      _clearSelectionWarning();
-                    }),
-                    onDevotionalsChanged: (value) => setState(() {
-                      _installDevotionals = value ?? false;
-                      _clearSelectionWarning();
-                    }),
-                    onCommentariesChanged: (value) => setState(() {
-                      _installCommentaries = value ?? false;
-                      _clearSelectionWarning();
-                    }),
-                    onMiscCollectionsChanged: (value) => setState(() {
-                      _installMiscCollections = value ?? false;
-                      _clearSelectionWarning();
-                    }),
-                    onPamphletsChanged: (value) => setState(() {
-                      _installPamphlets = value ?? false;
-                      _clearSelectionWarning();
-                    }),
-                    onPeriodicalsChanged: (value) => setState(() {
-                      _installPeriodicals = value ?? false;
-                      _clearSelectionWarning();
-                    }),
-                    onManuscriptReleasesChanged: (value) => setState(() {
-                      _installManuscriptReleases = value ?? false;
-                      _clearSelectionWarning();
-                    }),
-                    onEpubChanged: (value) => setState(() {
-                      _installEpub = value ?? false;
-                      _clearSelectionWarning();
-                    }),
-                    onPdfChanged: (value) => setState(() {
-                      _installPdf = value ?? false;
-                      _clearSelectionWarning();
-                    }),
                   ),
                   const SizedBox(height: 12),
                   ELibrarySetupAdvancedSection(
@@ -3435,69 +3456,6 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  if (_running) ...[
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (_indexing) ...[
-                              const LinearProgressIndicator(),
-                              const SizedBox(height: 12),
-                              Text(
-                                _setupStatusMessage ??
-                                    'Indexing new/changed books...',
-                              ),
-                            ] else ...[
-                              LinearProgressIndicator(
-                                value: (_progress?.totalPlannedCount ?? 0) > 0
-                                    ? (_progress!.completedCount /
-                                              _progress!.totalPlannedCount)
-                                          .clamp(0.0, 1.0)
-                                    : null,
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                _setupStatusMessage ??
-                                    _progress?.statusMessage ??
-                                    'Preparing download...',
-                              ),
-                              if ((_progress?.totalPlannedCount ?? 0) > 0) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  '${_progress!.completedCount} of '
-                                  '${_progress!.totalPlannedCount} prepared',
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ],
-                            ],
-                            const SizedBox(height: 8),
-                            Text(
-                              '${_progress?.currentCollection ?? 'Collection'} '
-                              '${_progress?.collectionIndex ?? 0}/${_progress?.collectionTotal ?? 0}',
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Downloaded: ${_progress?.downloadedCount ?? 0}  '
-                              'Skipped: ${_progress?.skippedCount ?? 0}  '
-                              'Unavailable in selected format: ${_progress?.unavailableCount ?? 0}  '
-                              'Failed: ${_progress?.failedCount ?? 0}',
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Current file: ${_progress?.currentFile ?? '-'}',
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Elapsed: ${(_progress?.elapsedSeconds ?? 0).toStringAsFixed(1)}s',
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
                   if (_downloadReport != null) ...[
                     Card(
                       child: Padding(
@@ -3674,5 +3632,132 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
 
   double _setupLeadingWidth() {
     return 56 + (defaultTargetPlatform == TargetPlatform.macOS ? 48.0 : 0.0);
+  }
+}
+
+/// The single focal point shown while a download or indexing run is active.
+/// Replaces the whole scrollable setup screen so nothing needs to be
+/// scrolled past to see current progress.
+class _RunningFocalPanel extends StatelessWidget {
+  const _RunningFocalPanel({
+    required this.indexing,
+    required this.progress,
+    required this.indexCompleted,
+    required this.indexTotal,
+    required this.indexCurrentTitle,
+    required this.statusMessage,
+    required this.onCancel,
+  });
+
+  final bool indexing;
+  final ELibraryDownloadProgress? progress;
+  final int indexCompleted;
+  final int indexTotal;
+  final String? indexCurrentTitle;
+  final String? statusMessage;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final totalPlanned = progress?.totalPlannedCount ?? 0;
+    final double? downloadProgressValue = totalPlanned > 0
+        ? (progress!.completedCount / totalPlanned).clamp(0.0, 1.0)
+        : null;
+    final int? downloadPercent = downloadProgressValue == null
+        ? null
+        : (downloadProgressValue * 100).round();
+
+    Widget detail(String text) => Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: scheme.onSurfaceVariant,
+        ),
+      ),
+    );
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    indexing ? 'Indexing your library' : 'Downloading eLibrary',
+                    style: theme.textTheme.titleLarge,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+                  if (indexing) ...[
+                    IndexingProgressStatus(
+                      completed: indexCompleted,
+                      total: indexTotal,
+                      currentTitle: indexCurrentTitle,
+                    ),
+                  ] else ...[
+                    BigProgressBar(value: downloadProgressValue),
+                    const SizedBox(height: 12),
+                    Text(
+                      downloadPercent != null
+                          ? '$downloadPercent%'
+                          : 'Preparing…',
+                      style: theme.textTheme.headlineMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      statusMessage ??
+                          progress?.statusMessage ??
+                          'Preparing download...',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    if (totalPlanned > 0)
+                      detail(
+                        '${progress!.completedCount} of $totalPlanned prepared',
+                      ),
+                    const SizedBox(height: 12),
+                    detail(
+                      '${progress?.currentCollection ?? 'Collection'} '
+                      '${progress?.collectionIndex ?? 0}/${progress?.collectionTotal ?? 0}',
+                    ),
+                    detail(
+                      'Downloaded: ${progress?.downloadedCount ?? 0}  '
+                      'Skipped: ${progress?.skippedCount ?? 0}  '
+                      'Unavailable: ${progress?.unavailableCount ?? 0}  '
+                      'Failed: ${progress?.failedCount ?? 0}',
+                    ),
+                    detail('Current file: ${progress?.currentFile ?? '-'}'),
+                  ],
+                  detail(
+                    'Elapsed: ${(progress?.elapsedSeconds ?? 0).toStringAsFixed(1)}s',
+                  ),
+                  const SizedBox(height: 20),
+                  Center(
+                    child: OutlinedButton(
+                      onPressed: onCancel,
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

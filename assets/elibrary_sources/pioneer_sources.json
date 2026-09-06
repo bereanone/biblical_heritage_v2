@@ -270,6 +270,20 @@
               "notes": "APLIB complete Pioneer collection EPUB ZIP."
             }
           ]
+        },
+        {
+          "work_id": "SL27",
+          "title": "The National Sunday Law [SL27]",
+          "abbreviation": "SL27",
+          "group": "Pioneer Authors",
+          "subgroup": "Religious Liberty",
+          "availability_status": "available",
+          "source_type": "capturedHtml",
+          "source_family": "Pioneer",
+          "source_label": "CaptureClipper",
+          "verified": true,
+          "importable": true,
+          "notes": "Catalog identity shared by the bundled CaptureClipper source and generated SL27 EPUB."
         }
       ]
     },

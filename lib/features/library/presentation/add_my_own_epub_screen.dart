@@ -85,7 +85,15 @@ class _AddMyOwnEpubScreenState extends State<AddMyOwnEpubScreen> {
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: _running || result != null
-                  ? LibraryAcquisitionProgressView(result: result)
+                  ? LibraryAcquisitionProgressView(
+                      result: result,
+                      onDone: _running
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                      doneLabel: result?.readyCount == 1
+                          ? 'Back to Library'
+                          : 'Done',
+                    )
                   : Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,

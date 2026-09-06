@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../utilities/presentation/big_progress_bar.dart';
 import '../data/library_acquisition_batch_runner.dart';
 import 'library_acquisition_status_text.dart';
 
@@ -18,6 +19,8 @@ class LibraryAcquisitionProgressView extends StatelessWidget {
     this.result,
     this.onCancel,
     this.onRetryFailed,
+    this.onDone,
+    this.doneLabel = 'Done',
   });
 
   /// An in-flight batch update; null once the batch has finished.
@@ -34,13 +37,26 @@ class LibraryAcquisitionProgressView extends StatelessWidget {
   /// Shown only when [result] has at least one unavailable outcome.
   final VoidCallback? onRetryFailed;
 
+  /// Shown once [result] is non-null, as the primary way to leave this
+  /// screen. Without it, a fully successful batch leaves the screen on a
+  /// dead-end summary with no next step but the app bar's back arrow.
+  final VoidCallback? onDone;
+
+  /// Label for the [onDone] button.
+  final String doneLabel;
+
   @override
   Widget build(BuildContext context) {
     final activeProgress = progress;
     final finished = result;
 
     if (finished != null) {
-      return _ResultView(result: finished, onRetryFailed: onRetryFailed);
+      return _ResultView(
+        result: finished,
+        onRetryFailed: onRetryFailed,
+        onDone: onDone,
+        doneLabel: doneLabel,
+      );
     }
     if (activeProgress != null) {
       return _InProgressView(progress: activeProgress, onCancel: onCancel);
@@ -61,6 +77,12 @@ class _InProgressView extends StatelessWidget {
       phase: progress.phase,
       title: progress.currentTitle,
     );
+    final double? progressValue = progress.total > 0
+        ? (progress.current / progress.total).clamp(0.0, 1.0)
+        : null;
+    final int? percent = progressValue == null
+        ? null
+        : (progressValue * 100).round();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -72,8 +94,12 @@ class _InProgressView extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 12),
-        LinearProgressIndicator(
-          value: progress.total > 0 ? progress.current / progress.total : null,
+        BigProgressBar(value: progressValue),
+        const SizedBox(height: 12),
+        Text(
+          percent != null ? '$percent%' : 'Preparing…',
+          style: Theme.of(context).textTheme.headlineMedium,
+          textAlign: TextAlign.center,
         ),
         if (onCancel != null) ...[
           const SizedBox(height: 12),
@@ -87,10 +113,17 @@ class _InProgressView extends StatelessWidget {
 }
 
 class _ResultView extends StatefulWidget {
-  const _ResultView({required this.result, this.onRetryFailed});
+  const _ResultView({
+    required this.result,
+    this.onRetryFailed,
+    this.onDone,
+    this.doneLabel = 'Done',
+  });
 
   final LibraryAcquisitionBatchResult result;
   final VoidCallback? onRetryFailed;
+  final VoidCallback? onDone;
+  final String doneLabel;
 
   @override
   State<_ResultView> createState() => _ResultViewState();
@@ -154,6 +187,13 @@ class _ResultViewState extends State<_ResultView> {
                     .toList(growable: false),
               ),
             ),
+        ],
+        if (widget.onDone != null) ...[
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: widget.onDone,
+            child: Text(widget.doneLabel),
+          ),
         ],
       ],
     );

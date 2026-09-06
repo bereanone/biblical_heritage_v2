@@ -534,4 +534,41 @@ void main() {
     expect(work.title, 'Sanctification');
     expect(work.authorName, 'Daniel T. Bordeau');
   });
+
+  test(
+    'resolves any local generated EPUB idempotently from metadata',
+    () async {
+      final root = await Directory.systemTemp.createTemp('pioneer_local_epub_');
+      addTearDown(() => root.delete(recursive: true));
+      final file = File('${root.path}/newly-generated.epub')
+        ..writeAsBytesSync(
+          _zipBytes([
+            MapEntry(
+              'META-INF/container.xml',
+              '<container><rootfiles><rootfile full-path="OPS/book.opf"/>'
+                      '</rootfiles></container>'
+                  .codeUnits,
+            ),
+            MapEntry(
+              'OPS/book.opf',
+              '<package><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                      '<dc:title>The National Sunday Law [SL27]</dc:title>'
+                      '<dc:creator>Alonzo T. Jones</dc:creator>'
+                      '</metadata></package>'
+                  .codeUnits,
+            ),
+          ]),
+        );
+
+      final first = await loadPioneerWorkFromLocalEpubFile(file.path);
+      final second = await loadPioneerWorkFromLocalEpubFile(file.path);
+
+      expect(first, isNotNull);
+      expect(first!.id, 'sl27');
+      expect(first.title, 'The National Sunday Law [SL27]');
+      expect(first.authorName, 'Alonzo T. Jones');
+      expect(second!.id, first.id);
+      expect(second.stableLibraryItemId, first.stableLibraryItemId);
+    },
+  );
 }

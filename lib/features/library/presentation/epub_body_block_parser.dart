@@ -130,13 +130,29 @@ class _SectionBlockView extends StatelessWidget {
         ? '{$cleanReferenceCode}'
         : null;
     final hasRefCodeSpan = appendedRefString != null;
+    // Legacy captured-text imports (see pioneer_text_import_service.dart)
+    // preserve the source's own "{ABBR loc.n}" marker inline in the stored
+    // paragraph text — display-only, never separately indexed at import
+    // time. This reader independently computes the same citation as
+    // `referenceCode` above and renders it as its own (toggleable) span, so
+    // the identical marker baked into the source text must be stripped here
+    // or it renders twice. Only the exact computed code is removed, so a
+    // block with no matching bracketed marker is left untouched.
+    final displayHtml = _stripBakedInReferenceCodeMarker(
+      block.html,
+      referenceCode,
+    );
+    final displayText = _stripBakedInReferenceCodeMarker(
+      block.text,
+      referenceCode,
+    );
     final geometrySeeds = <TextRangeLayoutSeed>[];
     final textSpan = TextSpan(
       style: resolvedStyle,
       children: [
         ...buildLibraryInteractiveEpubSpans(
-          html: block.html,
-          fallbackText: block.text,
+          html: displayHtml,
+          fallbackText: displayText,
           baseStyle: resolvedStyle,
           selectionHighlightSpec: selectionHighlightSpec,
           isNightMode: isNightMode,
@@ -282,6 +298,13 @@ class _SectionBlockView extends StatelessWidget {
       },
     );
   }
+}
+
+String _stripBakedInReferenceCodeMarker(String source, String? referenceCode) {
+  final trimmedCode = referenceCode?.trim() ?? '';
+  if (trimmedCode.isEmpty) return source;
+  final pattern = RegExp(r'\s*\{\s*' + RegExp.escape(trimmedCode) + r'\s*\}');
+  return source.replaceAll(pattern, '');
 }
 
 String _geometryContentKeyForBlock(LibraryBookBlock block, int index) {

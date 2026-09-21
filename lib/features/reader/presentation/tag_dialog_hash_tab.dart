@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'tag_dialog_models.dart';
 import 'tag_dialog_styles.dart';
+import 'tag_playback/tag_playback_popup.dart';
 import 'tag_quick_apply_helper.dart';
 
 class TagDialogHashTab extends StatelessWidget {
@@ -458,13 +459,34 @@ class TagDialogHashTab extends StatelessWidget {
                             fontWeight: FontWeight.w800,
                           ),
                         ),
-                        trailing: IconButton(
-                          onPressed: () => onOpenSummaryDetails(summary),
-                          tooltip: 'Open verses',
-                          icon: Icon(
-                            Icons.menu_book_outlined,
-                            color: TagDialogStyles.title(theme),
-                          ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              onPressed: summary.count == 0
+                                  ? null
+                                  : () => showTagPlaybackPopup(
+                                      context,
+                                      tag: summary.tag,
+                                      category: summary.category,
+                                      isDollar: tagSymbol == r'$',
+                                      fontScale: fontScale,
+                                    ),
+                              tooltip: 'Listen to this tag',
+                              icon: Icon(
+                                Icons.headphones_rounded,
+                                color: TagDialogStyles.title(theme),
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () => onOpenSummaryDetails(summary),
+                              tooltip: 'Open verses',
+                              icon: Icon(
+                                Icons.menu_book_outlined,
+                                color: TagDialogStyles.title(theme),
+                              ),
+                            ),
+                          ],
                         ),
                         onTap: () => onOpenSummaryDetails(summary),
                       ),

@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.0.5+50
+version: 2.0.5+62
 
 environment:
   sdk: ^3.11.1
@@ -28,6 +28,8 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  audioplayers: ^6.7.1
+  sherpa_onnx: ^1.13.6
   flutter:
     sdk: flutter
 
@@ -46,6 +48,8 @@ dependencies:
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
@@ -74,6 +78,7 @@ flutter:
 
   uses-material-design: true
   assets:
+    - assets/audio/pronunciation/
     - assets/databases/bible_base.db
     - assets/databases/cross_references.db
     - assets/databases/user.db
@@ -95,6 +100,11 @@ flutter:
     - assets/library_covers/templates/
     - assets/icons/GoldLogo.png
     - assets/icons/Logo2.png
+    - assets/audio/kokoro/models/kokoro-v1.0.onnx
+    - assets/audio/kokoro/models/voices-v1.0.bin
+    - assets/audio/kokoro/sherpa/kokoro-multi-lang-v1_0/
+    - assets/audio/kokoro/sherpa/kokoro-multi-lang-v1_0/espeak-ng-data/
+    - assets/audio/kokoro/sherpa/kokoro-multi-lang-v1_0/espeak-ng-data/lang/gmw/
     - tool/elibrary_download_manifest.json
     - tool/pioneer_epub_download_manifest.json
 
@@ -131,3 +141,10 @@ flutter:
     - family: SBLHebrew
       fonts:
         - asset: assets/fonts/SBL_Hbrw.ttf
+
+# Local native fix: explicit Kokoro dictionary mode; upstream package preserved.
+dependency_overrides:
+  sherpa_onnx_ios:
+    path: packages/sherpa_onnx_ios_lexicon
+  sherpa_onnx_macos:
+    path: packages/sherpa_onnx_macos_lexicon

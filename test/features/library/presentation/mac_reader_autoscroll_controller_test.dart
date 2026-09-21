@@ -20,6 +20,44 @@ class _Target implements ReaderAutoScrollTarget {
 }
 
 void main() {
+  test('voice rate restores fine increments and bounds invalid settings', () {
+    expect(
+      MacAutoscrollPreferences.fromStoredValues(speechRate: '1.15').speechRate,
+      1.15,
+    );
+    expect(normalizeSpeechRate(double.nan), 1.0);
+    expect(normalizeSpeechRate(8), 1.5);
+    expect(normalizeSpeechRate(0.1), 0.75);
+  });
+
+  test('narration never runs the pixel scrolling driver', () {
+    final target = _Target();
+    final controller = MacReaderAutoScrollController(
+      scrollTarget: target,
+      preferences: const MacAutoscrollPreferences(audioEnabled: true),
+      narrationControlsPacing: true,
+      driveFrames: false,
+    );
+    addTearDown(controller.dispose);
+    controller.toggle();
+    controller.setSignedStep(1);
+    expect(controller.pixelsPerSecond, 0);
+    controller.tick(const Duration(seconds: 5));
+    expect(target.deltas, isEmpty);
+    controller.advanceDownward();
+    expect(controller.speechRate, 1.05);
+    expect(controller.signedStep, 1);
+    controller.advanceUpward();
+    expect(controller.speechRate, 1.0);
+    controller.setSignedStep(0);
+    expect(controller.pixelsPerSecond, 0);
+    controller.setSignedStep(-1);
+    expect(controller.pixelsPerSecond, 0);
+    controller.updatePreferences(const MacAutoscrollPreferences());
+    controller.setSignedStep(1);
+    expect(controller.pixelsPerSecond, 18);
+  });
+
   test('direction buttons traverse one continuous signed ladder', () {
     final target = _Target();
     final controller = MacReaderAutoScrollController(

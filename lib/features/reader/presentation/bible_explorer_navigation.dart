@@ -93,6 +93,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
   }
 
   void _handleVisibleBlockChanged(int blockId) {
+    if (_narrationRunning) return;
     final line = _viewerData.getBlock(blockId);
     if (line == null) return;
     final session = _activeBibleSearchSession;

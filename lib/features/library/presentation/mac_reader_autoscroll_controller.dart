@@ -27,6 +27,8 @@ const List<int> macAutoscrollSignedSpeedSteps = <int>[
 const int _boundaryConfirmationFrames = 8;
 const Duration macAutoscrollMaximumFrameElapsed = Duration(milliseconds: 100);
 const double macAutoscrollMaximumFrameDeltaPixels = 200;
+const double _audioNarrationScrollScale = 1 / 3;
+const double _maximumAudioNarrationPixelsPerSecond = 18;
 
 double cappedMacAutoscrollFrameDelta({
   required double pixelsPerSecond,
@@ -58,20 +60,31 @@ int normalizeMacAutoscrollRememberedStep(int? value, int maximumStep) {
   return candidate.clamp(-maximum, maximum);
 }
 
+double normalizeSpeechRate(double value) =>
+    value.isFinite ? (value.clamp(0.75, 1.5) * 20).round() / 20 : 1.0;
+
 class MacAutoscrollPreferences {
   const MacAutoscrollPreferences({
     this.baseSpeed = defaultMacAutoscrollBaseSpeed,
     this.lastNonzeroStep = 1,
     this.maximumStep = defaultMacAutoscrollMaximumStep,
     this.statusBannerMode = ReaderTiltStatusBannerMode.autoHide,
+    this.audioEnabled = false,
+    this.announceChapter = false,
+    this.announceVerseNumbers = false,
+    this.speechRate = 1.0,
   });
 
   factory MacAutoscrollPreferences.fromStoredValues({
     String? baseSpeed,
+    String? speechRate,
     String? lastNonzeroStep,
     String? maximumStep,
     ReaderTiltStatusBannerMode statusBannerMode =
         ReaderTiltStatusBannerMode.autoHide,
+    bool audioEnabled = false,
+    bool announceChapter = false,
+    bool announceVerseNumbers = false,
   }) {
     final parsedMaximum = int.tryParse(maximumStep ?? '');
     final maximum = parsedMaximum != null && parsedMaximum >= 1
@@ -85,16 +98,24 @@ class MacAutoscrollPreferences {
     final step = normalizeMacAutoscrollRememberedStep(parsedStep, maximum);
     return MacAutoscrollPreferences(
       baseSpeed: base,
+      speechRate: normalizeSpeechRate(double.tryParse(speechRate ?? '') ?? 1),
       lastNonzeroStep: step,
       maximumStep: maximum,
       statusBannerMode: statusBannerMode,
+      audioEnabled: audioEnabled,
+      announceChapter: announceChapter,
+      announceVerseNumbers: announceVerseNumbers,
     );
   }
 
+  final double speechRate;
   final double baseSpeed;
   final int lastNonzeroStep;
   final int maximumStep;
   final ReaderTiltStatusBannerMode statusBannerMode;
+  final bool audioEnabled;
+  final bool announceChapter;
+  final bool announceVerseNumbers;
 }
 
 class MacReaderAutoScrollController extends ChangeNotifier {
@@ -103,7 +124,9 @@ class MacReaderAutoScrollController extends ChangeNotifier {
     MacAutoscrollPreferences preferences = const MacAutoscrollPreferences(),
     Ticker Function(TickerCallback callback)? tickerFactory,
     this.driveFrames = true,
-  }) : _baseSpeed = preferences.baseSpeed,
+    this.narrationControlsPacing = false,
+  }) : _speechRate = normalizeSpeechRate(preferences.speechRate),
+       _baseSpeed = preferences.baseSpeed,
        _lastNonzeroStep = normalizeMacAutoscrollRememberedStep(
          preferences.lastNonzeroStep,
          preferences.maximumStep,
@@ -113,9 +136,16 @@ class MacReaderAutoScrollController extends ChangeNotifier {
          defaultMacAutoscrollMaximumStep,
        ),
        _statusBannerMode = preferences.statusBannerMode,
+       _audioEnabled = preferences.audioEnabled,
+       _announceChapter = preferences.announceChapter,
+       _announceVerseNumbers = preferences.announceVerseNumbers,
        _tickerFactory = tickerFactory ?? Ticker.new;
 
   final ReaderAutoScrollTarget scrollTarget;
+
+  /// The Bible narrator holds the page during speech; motion is only the
+  /// brief transition to the next verse, independent of spoken-word speed.
+  final bool narrationControlsPacing;
   @visibleForTesting
   final bool driveFrames;
   final Ticker Function(TickerCallback callback) _tickerFactory;
@@ -127,7 +157,24 @@ class MacReaderAutoScrollController extends ChangeNotifier {
   int _lastNonzeroStep;
   int _maximumStep;
   ReaderTiltStatusBannerMode _statusBannerMode;
+  bool _audioEnabled;
+  bool _announceChapter;
+  bool _announceVerseNumbers;
   double _baseSpeed;
+  double _speechRate;
+  double get speechRate => _speechRate;
+  bool get isNarrationMode => narrationControlsPacing && _audioEnabled;
+
+  void setSpeechRate(double value) {
+    final next = normalizeSpeechRate(value);
+    if (_disposed || next == _speechRate) return;
+    _speechRate = next;
+    _showStatus();
+  }
+
+  bool get audioEnabled => _audioEnabled;
+  bool get announceChapter => _announceChapter;
+  bool get announceVerseNumbers => _announceVerseNumbers;
   int statusRevision = 0;
   int keyboardStatusRevision = 0;
   int _consecutiveBlockedFrames = 0;
@@ -141,9 +188,34 @@ class MacReaderAutoScrollController extends ChangeNotifier {
   bool get isActive => _enabled;
   bool get isScrolling => _enabled && _signedStep != 0;
   bool get hasFrameDriver => _ticker != null;
-  double get pixelsPerSecond => _signedStep * _baseSpeed;
+  bool get isPixelScrolling => isScrolling && !isNarrationMode;
+
+  /// Pause audio without consuming the pointer sequence used to select text.
+  void pauseNarrationForInteraction() {
+    if (isNarrationMode && isScrolling) stopForManualInteraction();
+  }
+
+  // Offline narration needs longer on each verse than plain screen reading.
+  // Keep the user's step ladder intact, but slow the visual rate only while
+  // Audio is On so the centered text can stay with the spoken text.
+  double get pixelsPerSecond {
+    if (!_audioEnabled) return _signedStep * _baseSpeed;
+    if (narrationControlsPacing) {
+      return 0;
+    }
+    final requestedMagnitude =
+        _signedStep.abs() * _baseSpeed * _audioNarrationScrollScale;
+    final permittedMagnitude = requestedMagnitude.clamp(
+      0.0,
+      _maximumAudioNarrationPixelsPerSecond,
+    );
+    return _signedStep.isNegative ? -permittedMagnitude : permittedMagnitude;
+  }
 
   String get statusLabel {
+    if (isNarrationMode) {
+      return '${isScrolling ? 'Reading' : 'Speech paused'} ${_speechRate.toStringAsFixed(2)}×';
+    }
     if (!_enabled) return 'Autoscroll stopped';
     if (_signedStep == 0) return 'Autoscroll paused';
     return _signedStep > 0
@@ -156,11 +228,23 @@ class MacReaderAutoScrollController extends ChangeNotifier {
 
   void advanceDownward() {
     if (!_enabled) return;
+    if (isNarrationMode) {
+      if (_signedStep == 0) {
+        setSignedStep(1);
+      } else {
+        setSpeechRate(_speechRate + 0.05);
+      }
+      return;
+    }
     setSignedStep(_adjacentSignedStep(1));
   }
 
   void advanceUpward() {
     if (!_enabled) return;
+    if (isNarrationMode) {
+      setSpeechRate(_speechRate - 0.05);
+      return;
+    }
     setSignedStep(_adjacentSignedStep(-1));
   }
 
@@ -222,6 +306,7 @@ class MacReaderAutoScrollController extends ChangeNotifier {
   }
 
   void updatePreferences(MacAutoscrollPreferences preferences) {
+    _speechRate = normalizeSpeechRate(preferences.speechRate);
     _baseSpeed = preferences.baseSpeed;
     _maximumStep = preferences.maximumStep.clamp(
       1,
@@ -232,15 +317,26 @@ class MacReaderAutoScrollController extends ChangeNotifier {
       _maximumStep,
     );
     _statusBannerMode = preferences.statusBannerMode;
+    _audioEnabled = preferences.audioEnabled;
+    _announceChapter = preferences.announceChapter;
+    _announceVerseNumbers = preferences.announceVerseNumbers;
     if (_signedStep != 0) {
       _signedStep = _signedStep.clamp(-_maximumStep, _maximumStep);
+    }
+    if (isNarrationMode) {
+      _disposeTicker();
+    } else if (isScrolling) {
+      _ensureTicker();
     }
     notifyListeners();
   }
 
   @visibleForTesting
   void tick(Duration elapsed, {bool enforceFrameSafetyCap = false}) {
-    if (!isScrolling || elapsed <= Duration.zero || !scrollTarget.isAttached) {
+    if (isNarrationMode ||
+        !isScrolling ||
+        elapsed <= Duration.zero ||
+        !scrollTarget.isAttached) {
       return;
     }
     final delta = enforceFrameSafetyCap
@@ -264,7 +360,7 @@ class MacReaderAutoScrollController extends ChangeNotifier {
   }
 
   void _ensureTicker() {
-    if (!driveFrames) return;
+    if (!driveFrames || isNarrationMode) return;
     if (_ticker != null) return;
     _lastElapsed = null;
     _ticker = _tickerFactory((elapsed) {

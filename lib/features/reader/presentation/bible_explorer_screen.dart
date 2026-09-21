@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/services.dart';
 
+import '../../../core/audio/narration_diagnostics.dart';
+import '../../../core/audio/narration_media_session.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/app_theme_mode.dart';
@@ -16,12 +18,17 @@ import '../../library/presentation/reader_tilt_autoscroll_controller.dart';
 import '../../library/presentation/reader_tilt_autoscroll_controls.dart';
 import '../../library/presentation/reader_tilt_motion_source.dart';
 import '../../library/presentation/reader_tilt_preferences.dart';
+import '../../library/presentation/speech_tilt_binding.dart';
 import '../data/highlights_repository.dart';
 import '../data/history_log_service.dart';
 import '../data/navigation_history_service.dart';
 import '../data/bible_memory_repository.dart';
 import 'bible_memory_screen.dart';
+import 'bible_narration_media_controls.dart';
 import 'bible_visible_location_controller.dart';
+import 'kokoro_mac_test_narrator.dart';
+import 'pronunciation_editor.dart';
+import 'narration_pronunciation.dart';
 import 'highlight_popup.dart';
 import 'viewer_body.dart';
 import 'viewer_bottom_bar.dart';
@@ -39,6 +46,7 @@ import 'viewer_presentation_settings.dart';
 import 'viewer_reference_picker.dart';
 import 'viewer_range_actions_sheet.dart';
 import 'viewer_range_selection.dart';
+import 'viewer_selection_clipboard.dart';
 import 'viewer_markup_applier.dart';
 import 'viewer_markup_span_builder.dart';
 import 'viewer_passage_models.dart';
@@ -120,13 +128,38 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   final Map<int, String> _bookNames = <int, String>{};
   final BibleLiveReferenceController _liveVisibleLocation =
       BibleLiveReferenceController();
+  late final KokoroMacTestNarrator _kokoroNarrator;
+  int _narrationSession = 0;
+  int? _narrationBlockId;
+  bool _narrationRunning = false;
+  bool _narrationPrimed = false;
+  bool _lastAudioEnabled = false;
+  late final Future<void> _pronunciationsReady;
   final List<int> _crossReferenceReturnBlockIds = <int>[];
   late final BibleLocationPersistenceCoordinator _locationPersistence;
   bool _wasTiltAutoScrollActive = false;
+  SpeechTiltBinding? _speechTilt;
+  BibleNarrationMediaControls? _narrationMedia;
 
   @override
   void initState() {
     super.initState();
+    _kokoroNarrator = KokoroMacTestNarrator(
+      onPlaybackComplete: _advanceNarration,
+      onError: _narrationFailed,
+    );
+    _pronunciationsReady = AppSettingsService.instance
+        .loadRawSetting('narration_pronunciations_v1')
+        .then((value) async {
+          final rules = decodeNarrationPronunciations(value);
+          _kokoroNarrator.pronunciationCorrections = rules;
+          _kokoroNarrator.deferredPronunciationCorrections =
+              await loadDeferredNarrationPronunciations(
+                rules: rules,
+                load: AppSettingsService.instance.loadRawSetting,
+                save: AppSettingsService.instance.saveRawSetting,
+              );
+        });
     WidgetsBinding.instance.addObserver(this);
     _locationPersistence = BibleLocationPersistenceCoordinator(
       writer: (location) => NavigationHistoryService.instance.saveSelection(
@@ -136,18 +169,39 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         verse: location.verse,
       ),
     );
+    _liveVisibleLocation.addListener(_onLiveVerseChanged);
     _tiltAutoScroll = ReaderTiltAutoScrollController(
       motionSource: PlatformReaderTiltMotionSource(),
       scrollTarget: _tiltScrollTarget,
     )..addListener(_onTiltAutoScrollChanged);
-    _usesMacAutoscroll = Platform.isMacOS || Platform.isWindows;
+    // narrationControlsPacing below is unconditionally true, so on every
+    // platform this controller runs in narration mode (block-advance on
+    // speech completion), never continuous pixel autoscroll — safe to widen
+    // to iOS now that the Kokoro engine is confirmed to synthesize audio
+    // there (see kokoro_speech_worker.dart's platform-conditional `lang`).
+    _usesMacAutoscroll =
+        Platform.isMacOS || Platform.isWindows || Platform.isIOS;
     if (_usesMacAutoscroll) {
       _macAutoScroll = MacReaderAutoScrollController(
         scrollTarget: _tiltScrollTarget,
+        narrationControlsPacing: true,
       )..addListener(_onMacAutoscrollChanged);
       AppSettingsService.instance.loadMacAutoscrollPreferences().then((value) {
         if (mounted) _macAutoScroll?.updatePreferences(value);
       });
+    }
+    if (Platform.isIOS && _macAutoScroll != null) {
+      _speechTilt = SpeechTiltBinding(
+        _macAutoScroll!,
+        _tiltAutoScroll,
+        (rate) => unawaited(_kokoroNarrator.setLiveRate(rate)),
+      );
+      _narrationMedia = BibleNarrationMediaControls(
+        autoscroll: _macAutoScroll!,
+        location: _liveVisibleLocation,
+        bookNames: _bookNames,
+        skip: (delta) => unawaited(_skipNarration(delta)),
+      );
     }
     _loadTiltPreferences();
     _initializeViewer();
@@ -319,6 +373,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                     child: Listener(
                       behavior: HitTestBehavior.translucent,
                       onPointerDown: (_) {
+                        _macAutoScroll?.pauseNarrationForInteraction();
                         if (_usesMacAutoscroll) {
                           _readerFocusNode.requestFocus();
                         }
@@ -361,6 +416,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                               onSelectVerseNumberLongPressMove:
                                   _dragVerseAnchor,
                               onSelectTokenLongPress: _selectTokenAnchor,
+                              onTokenLongPressEnd: _finishTokenSelection,
                               onSelectTokenLongPressMove: _dragTokenAnchor,
                               onTapSelectedRange: _openRangeActions,
                               rangeSelection: _rangeSelection,
@@ -375,6 +431,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                             ),
                     ),
                   ),
+                  if (_macAutoScroll != null) _speechControls(),
                   ViewerBottomBar(
                     themeMode: widget.themeMode,
                     onToggleThemeMode: _toggleThemeMode,
@@ -434,8 +491,11 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
           listenables: <Listenable>[_tiltAutoScroll, ?_macAutoScroll],
           isScrolling: () =>
               _tiltAutoScroll.isActive ||
-              (_macAutoScroll?.isScrolling ?? false),
+              (_macAutoScroll?.isPixelScrolling ?? false),
           onStop: _stopReaderAutoscroll,
+          bottomInset: (_macAutoScroll?.audioEnabled ?? false)
+              ? 120
+              : kBottomNavigationBarHeight,
         ),
       ],
     );
@@ -486,6 +546,8 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _speechTilt?.dispose();
+    _narrationMedia?.dispose();
     _macAutoScroll
       ?..removeListener(_onMacAutoscrollChanged)
       ..dispose();
@@ -494,6 +556,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       ..dispose();
     _readerFocusNode.dispose();
     _liveVisibleLocation.dispose();
+    _kokoroNarrator.dispose();
     _locationPersistence.dispose();
     super.dispose();
   }
@@ -516,7 +579,11 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   void _onMacAutoscrollChanged() {
     final controller = _macAutoScroll;
     if (!mounted || controller == null) return;
+    if (_lastAudioEnabled != controller.audioEnabled) {
+      setState(() => _lastAudioEnabled = controller.audioEnabled);
+    }
     _updateAutoscrollPersistenceSuspension();
+    _syncKokoroNarration();
     if (controller.statusRevision == _lastMacAutoscrollStatusRevision) return;
     _lastMacAutoscrollStatusRevision = controller.statusRevision;
     unawaited(
@@ -526,10 +593,320 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
           lastNonzeroStep: controller.lastNonzeroStep,
           maximumStep: controller.maximumStep,
           statusBannerMode: controller.statusBannerMode,
+          audioEnabled: controller.audioEnabled,
+          speechRate: controller.speechRate,
+          announceChapter: controller.announceChapter,
+          announceVerseNumbers: controller.announceVerseNumbers,
         ),
       ),
     );
   }
+
+  void _onLiveVerseChanged() {
+    if (!_narrationRunning) unawaited(_syncKokoroNarration());
+  }
+
+  bool _narrationIsCurrent(int session) =>
+      mounted &&
+      session == _narrationSession &&
+      (_macAutoScroll?.isNarrationMode ?? false) &&
+      (_macAutoScroll?.isScrolling ?? false);
+
+  void _narrationFailed(String message) {
+    NarrationDiagnostics.log('bible narration FAILED: $message');
+    if (!mounted) return;
+    _macAutoScroll?.stopForManualInteraction();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Speech stopped: $message')));
+  }
+
+  Future<void> _syncKokoroNarration() async {
+    final controller = _macAutoScroll;
+    if (controller == null ||
+        !controller.isNarrationMode ||
+        !controller.isScrolling) {
+      if (_narrationRunning) {
+        _narrationRunning = false;
+        ++_narrationSession;
+        await _kokoroNarrator.stop();
+      }
+      return;
+    }
+    if (_narrationRunning) return;
+    final location = _liveVisibleLocation.value;
+    if (location == null) return;
+    _narrationRunning = true;
+    _narrationPrimed = false;
+    final session = ++_narrationSession;
+    try {
+      await _pronunciationsReady;
+      final sharedRules = await AppSettingsService.instance.loadRawSetting(
+        'narration_pronunciations_v1',
+      );
+      _kokoroNarrator.pronunciationCorrections = decodeNarrationPronunciations(
+        sharedRules,
+      );
+      if (!_narrationIsCurrent(session)) return;
+      await _speakNarrationBlock(
+        location.blockId,
+        session,
+        announceChapter: true,
+      );
+    } catch (error) {
+      if (_narrationIsCurrent(session)) _narrationFailed(error.toString());
+    }
+  }
+
+  String _narrationText(VerseLine line, {required bool announceChapter}) {
+    final controller = _macAutoScroll!;
+    return [
+      if (announceChapter && controller.announceChapter)
+        '${_bookNames[line.bookNumber] ?? 'Book ${line.bookNumber}'} ${line.chapter}.',
+      if (controller.announceVerseNumbers) 'Verse ${line.verse}.',
+      line.text,
+    ].join(' ');
+  }
+
+  Future<void> _speakNarrationBlock(
+    int blockId,
+    int session, {
+    required bool announceChapter,
+  }) async {
+    await _viewerData.ensureWindow(blockId);
+    if (!_narrationIsCurrent(session)) return;
+    final line = _viewerData.getBlock(blockId);
+    if (line == null || line.text.trim().isEmpty) {
+      _narrationFailed('No verse text is available at this position.');
+      return;
+    }
+    // Deep priming pays off only with the screen on. Resumed from the lock
+    // screen, speak the first verse at once and buffer behind it.
+    if (NarrationMediaSession.instance.backgrounded.value) {
+      _narrationPrimed = true;
+    }
+    if (Platform.isIOS && !_narrationPrimed) {
+      await _kokoroNarrator.prepare(
+        blockId: blockId,
+        text: _narrationText(line, announceChapter: announceChapter),
+        speed: _macAutoScroll!.speechRate,
+      );
+      if (!_narrationIsCurrent(session)) return;
+      await _prefetchBibleVerses(blockId, session);
+      if (!_narrationIsCurrent(session)) return;
+      _narrationPrimed = true;
+    }
+    _narrationBlockId = blockId;
+    setState(() {
+      _selectedBlockId = blockId;
+      _bookNumber = line.bookNumber;
+      _chapter = line.chapter;
+      _verse = line.verse;
+    });
+    _liveVisibleLocation.updateSelected(
+      BibleVisibleLocation(
+        blockId: blockId,
+        bookNumber: line.bookNumber,
+        chapter: line.chapter,
+        verse: line.verse,
+      ),
+    );
+    await _kokoroNarrator.speak(
+      verseKey: '$session-$blockId',
+      blockId: blockId,
+      text: _narrationText(line, announceChapter: announceChapter),
+      speed: _macAutoScroll!.speechRate,
+    );
+    if (!_narrationIsCurrent(session)) return;
+    unawaited(_prefetchBibleVerses(blockId, session));
+  }
+
+  Future<void> _prefetchBibleVerses(int blockId, int session) async {
+    try {
+      final count = KokoroMacTestNarrator.prefetchAhead();
+      for (var offset = 1; offset <= count; offset++) {
+        if (!_narrationIsCurrent(session)) return;
+        final id = blockId + offset;
+        if (id > _viewerData.maxBlockId) return;
+        await _viewerData.ensureWindow(id);
+        if (!_narrationIsCurrent(session)) return;
+        final next = _viewerData.getBlock(id);
+        final previous = _viewerData.getBlock(id - 1);
+        if (next == null) return;
+        await _kokoroNarrator.prepare(
+          blockId: id,
+          text: _narrationText(
+            next,
+            announceChapter:
+                previous == null ||
+                previous.chapter != next.chapter ||
+                previous.bookNumber != next.bookNumber,
+          ),
+          speed: _macAutoScroll!.speechRate,
+        );
+      }
+    } catch (error) {
+      debugPrint('Speech prefetch failed: $error');
+    }
+  }
+
+  void _advanceNarration() {
+    final session = _narrationSession;
+    final currentId = _narrationBlockId;
+    if (!_narrationRunning ||
+        !_narrationIsCurrent(session) ||
+        currentId == null) {
+      return;
+    }
+    if (currentId >= _viewerData.maxBlockId) {
+      _macAutoScroll?.stopForManualInteraction();
+      return;
+    }
+    final current = _viewerData.getBlock(currentId);
+    final next = _viewerData.getBlock(currentId + 1);
+    unawaited(
+      _speakNarrationBlock(
+        currentId + 1,
+        session,
+        announceChapter:
+            next == null ||
+            next.chapter != current?.chapter ||
+            next.bookNumber != current?.bookNumber,
+      ).catchError((Object error) {
+        if (_narrationIsCurrent(session)) _narrationFailed(error.toString());
+      }),
+    );
+  }
+
+  /// Lock screen next/previous: jumps narration by whole verses.
+  Future<void> _skipNarration(int delta) async {
+    final current = _narrationBlockId;
+    if (!_narrationRunning || current == null) return;
+    final target = current + delta;
+    if (target < 1 || target > _viewerData.maxBlockId) return;
+    _narrationBlockId = target;
+    final session = ++_narrationSession;
+    await _kokoroNarrator.stop();
+    if (!_narrationIsCurrent(session)) return;
+    try {
+      await _speakNarrationBlock(target, session, announceChapter: true);
+    } catch (error) {
+      if (_narrationIsCurrent(session)) _narrationFailed(error.toString());
+    }
+  }
+
+  Future<void> _openPronunciations() async {
+    _macAutoScroll?.stopForManualInteraction();
+    await _kokoroNarrator.stop();
+    await _pronunciationsReady;
+    if (!mounted) return;
+    _readerShortcutsSuspended = true;
+    final original = Map<String, String>.of(
+      _kokoroNarrator.pronunciationCorrections,
+    );
+    var saved = false;
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => PronunciationEditor(
+        initial: original,
+        onPreview: (text, rules) async {
+          await _kokoroNarrator.stop();
+          _kokoroNarrator.pronunciationCorrections = rules;
+          await _kokoroNarrator.speak(
+            verseKey: 'preview-${DateTime.now().microsecondsSinceEpoch}',
+            preferDictionary: false,
+            text: text,
+            speed: _macAutoScroll?.speechRate ?? 1,
+          );
+        },
+        onStopPreview: _kokoroNarrator.stop,
+        onSave: (rules) async {
+          await AppSettingsService.instance.saveRawSetting(
+            'narration_pronunciations_v1',
+            jsonEncode(rules),
+          );
+          _kokoroNarrator.pronunciationCorrections = Map.of(rules);
+          saved = true;
+        },
+      ),
+    );
+    await _kokoroNarrator.stop();
+    if (!saved) _kokoroNarrator.pronunciationCorrections = original;
+    _readerShortcutsSuspended = false;
+    if (mounted) _readerFocusNode.requestFocus();
+  }
+
+  Widget _speechControls() => ListenableBuilder(
+    listenable: _macAutoScroll!,
+    builder: (context, _) {
+      final controller = _macAutoScroll!;
+      if (!controller.audioEnabled) {
+        // The toolbar's autoscroll button prefers tilt settings on any
+        // platform with a motion sensor (including iOS), so its long-press
+        // never reaches the mac-style audio toggle. This bootstrap button is
+        // the only iOS-reachable way to turn narration on, mirroring the
+        // equivalent fallback in library_speech_controls.dart.
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            icon: const Icon(Icons.volume_up_outlined),
+            label: const Text('Read aloud'),
+            onPressed: () {
+              controller.updatePreferences(
+                MacAutoscrollPreferences(
+                  baseSpeed: controller.baseSpeed,
+                  lastNonzeroStep: controller.lastNonzeroStep,
+                  maximumStep: controller.maximumStep,
+                  statusBannerMode: controller.statusBannerMode,
+                  audioEnabled: true,
+                  announceChapter: controller.announceChapter,
+                  announceVerseNumbers: controller.announceVerseNumbers,
+                  speechRate: controller.speechRate,
+                ),
+              );
+              controller.setSignedStep(1);
+              _readerFocusNode.requestFocus();
+            },
+          ),
+        );
+      }
+      return SizedBox(
+        height: 64,
+        child: Row(
+          children: [
+            TextButton.icon(
+              label: const Text('Voice'),
+              onPressed: () {
+                controller.setSignedStep(controller.isScrolling ? 0 : 1);
+                _readerFocusNode.requestFocus();
+              },
+              icon: Icon(
+                controller.isScrolling ? Icons.pause : Icons.play_arrow,
+              ),
+            ),
+            Expanded(
+              child: Slider(
+                key: const ValueKey('narration-speed'),
+                value: controller.speechRate,
+                min: 0.75,
+                max: 1.5,
+                divisions: 15,
+                label: '${controller.speechRate.toStringAsFixed(2)}×',
+                onChanged: controller.setSpeechRate,
+              ),
+            ),
+            Text('${controller.speechRate.toStringAsFixed(2)}×'),
+            TextButton.icon(
+              onPressed: _openPronunciations,
+              icon: const Icon(Icons.record_voice_over),
+              label: const Text('Pronunciations'),
+            ),
+          ],
+        ),
+      );
+    },
+  );
 
   void _toggleMacAutoscroll() {
     if (!_macAutoScroll!.isActive) {
@@ -553,6 +930,10 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         lastNonzeroStep: controller.lastNonzeroStep,
         maximumStep: controller.maximumStep,
         statusBannerMode: controller.statusBannerMode,
+        audioEnabled: controller.audioEnabled,
+        speechRate: controller.speechRate,
+        announceChapter: controller.announceChapter,
+        announceVerseNumbers: controller.announceVerseNumbers,
       ),
     );
     if (!mounted) return;
@@ -570,6 +951,10 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   }
 
   void _toggleTiltAutoScroll() {
+    if (_macAutoScroll?.audioEnabled == true) {
+      _macAutoScroll!.setSignedStep(_macAutoScroll!.isScrolling ? 0 : 1);
+      return;
+    }
     if (_tiltAutoScroll.isActive) {
       _tiltAutoScroll.stop();
     } else {
@@ -591,10 +976,13 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   }
 
   Future<void> _openTiltSettings() async {
+    _macAutoScroll?.stopForManualInteraction();
     await _tiltAutoScroll.stop();
     if (!mounted) return;
     await showReaderTiltSettingsSheet(
       context,
+      speechController: _macAutoScroll,
+      onPronunciations: _openPronunciations,
       preferences: _tiltAutoScroll.preferences,
       includeChapterTilt: false,
       onChanged: _saveTiltPreferences,
@@ -610,7 +998,10 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
-      _stopReaderAutoscroll();
+      // iOS keeps narrating behind a locked screen; stopping here would end it.
+      if (!(_narrationMedia?.keepsSpeakingInBackground ?? false)) {
+        _stopReaderAutoscroll();
+      }
       unawaited(_locationPersistence.resumeAndFlush());
     }
   }

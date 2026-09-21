@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import 'reader_tilt_autoscroll_controller.dart';
 import 'reader_tilt_preferences.dart';
+import 'mac_reader_autoscroll_controller.dart';
+import '../../../core/theme/app_settings_service.dart';
 
 class ReaderTiltAutoScrollIconButton extends StatelessWidget {
   const ReaderTiltAutoScrollIconButton({
@@ -189,6 +191,8 @@ Future<void> showReaderTiltSettingsSheet(
   required bool includeChapterTilt,
   required ValueChanged<ReaderTiltPreferences> onChanged,
   required VoidCallback onRecalibrate,
+  MacReaderAutoScrollController? speechController,
+  VoidCallback? onPronunciations,
 }) => showModalBottomSheet<void>(
   context: context,
   isScrollControlled: true,
@@ -216,10 +220,15 @@ Future<void> showReaderTiltSettingsSheet(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'Tilt Auto-scroll Settings',
+                    'Autoscroll Settings',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 12),
+                  if (speechController != null)
+                    ReaderSpeechSettings(
+                      controller: speechController,
+                      onPronunciations: onPronunciations,
+                    ),
                   SegmentedButton<bool>(
                     segments: const [
                       ButtonSegment(
@@ -542,4 +551,75 @@ class _ReaderTiltStatusBannerContent extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Shared voice options in the phone's existing long-press settings panel.
+class ReaderSpeechSettings extends StatelessWidget {
+  const ReaderSpeechSettings({
+    super.key,
+    required this.controller,
+    this.onPronunciations,
+  });
+  final MacReaderAutoScrollController controller;
+  final VoidCallback? onPronunciations;
+  void _update({bool? audio, bool? chapter, bool? verses}) {
+    final c = controller;
+    final next = MacAutoscrollPreferences(
+      baseSpeed: c.baseSpeed,
+      lastNonzeroStep: c.lastNonzeroStep,
+      maximumStep: c.maximumStep,
+      statusBannerMode: c.statusBannerMode,
+      speechRate: c.speechRate,
+      audioEnabled: audio ?? c.audioEnabled,
+      announceChapter: chapter ?? c.announceChapter,
+      announceVerseNumbers: verses ?? c.announceVerseNumbers,
+    );
+    c.stopForManualInteraction();
+    c.updatePreferences(next);
+    unawaited(AppSettingsService.instance.saveMacAutoscrollPreferences(next));
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: controller,
+    builder: (context, _) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Read aloud'),
+          value: controller.audioEnabled,
+          onChanged: (v) => _update(audio: v),
+        ),
+        Text('Voice speed: ${controller.speechRate.toStringAsFixed(2)}×'),
+        Slider(
+          value: controller.speechRate,
+          min: .75,
+          max: 1.5,
+          divisions: 15,
+          label: '${controller.speechRate.toStringAsFixed(2)}×',
+          onChanged: controller.setSpeechRate,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Announce chapters'),
+          value: controller.announceChapter,
+          onChanged: (v) => _update(chapter: v),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Announce verse numbers'),
+          value: controller.announceVerseNumbers,
+          onChanged: (v) => _update(verses: v),
+        ),
+        if (onPronunciations != null)
+          TextButton.icon(
+            onPressed: onPronunciations,
+            icon: const Icon(Icons.record_voice_over),
+            label: const Text('Pronunciations'),
+          ),
+        const Divider(),
+      ],
+    ),
+  );
 }

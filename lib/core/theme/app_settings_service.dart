@@ -240,9 +240,15 @@ class AppSettingsService {
     return presetForMode(AppThemeMode.sepia).viewerFontScale;
   }
 
+  static const _macSpeechRateKey = 'mac_narration_speech_rate';
   static const _macAutoscrollBaseSpeedKey = 'mac_autoscroll_base_speed';
   static const _macAutoscrollLastStepKey = 'mac_autoscroll_last_nonzero_step';
   static const _macAutoscrollMaximumStepKey = 'mac_autoscroll_maximum_step';
+  static const _macAutoscrollAudioEnabledKey = 'mac_autoscroll_audio_enabled';
+  static const _macAutoscrollAnnounceChapterKey =
+      'mac_autoscroll_announce_chapter';
+  static const _macAutoscrollAnnounceVerseNumbersKey =
+      'mac_autoscroll_announce_verse_numbers';
 
   Future<MacAutoscrollPreferences> loadMacAutoscrollPreferences() async {
     final tiltPreferences = await const ReaderTiltPreferencesStore().load();
@@ -250,11 +256,15 @@ class AppSettingsService {
     final rows = await db.query(
       'app_settings',
       columns: const ['key', 'value'],
-      where: 'key IN (?, ?, ?)',
+      where: 'key IN (?, ?, ?, ?, ?, ?, ?)',
       whereArgs: const [
+        _macSpeechRateKey,
         _macAutoscrollBaseSpeedKey,
         _macAutoscrollLastStepKey,
         _macAutoscrollMaximumStepKey,
+        _macAutoscrollAudioEnabledKey,
+        _macAutoscrollAnnounceChapterKey,
+        _macAutoscrollAnnounceVerseNumbersKey,
       ],
     );
     final values = <String, String>{
@@ -263,8 +273,13 @@ class AppSettingsService {
     };
     return MacAutoscrollPreferences.fromStoredValues(
       baseSpeed: values[_macAutoscrollBaseSpeedKey],
+      speechRate: values[_macSpeechRateKey],
       lastNonzeroStep: values[_macAutoscrollLastStepKey],
       maximumStep: values[_macAutoscrollMaximumStepKey],
+      audioEnabled: values[_macAutoscrollAudioEnabledKey] == 'true',
+      announceChapter: values[_macAutoscrollAnnounceChapterKey] == 'true',
+      announceVerseNumbers:
+          values[_macAutoscrollAnnounceVerseNumbersKey] == 'true',
       statusBannerMode: tiltPreferences.statusBannerMode,
     );
   }
@@ -280,8 +295,24 @@ class AppSettingsService {
     final db = await UserDatabase.instance.database;
     final batch = db.batch();
     batch.insert('app_settings', {
+      'key': _macSpeechRateKey,
+      'value': preferences.speechRate.toStringAsFixed(2),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    batch.insert('app_settings', {
       'key': _macAutoscrollBaseSpeedKey,
       'value': preferences.baseSpeed.toStringAsFixed(1),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    batch.insert('app_settings', {
+      'key': _macAutoscrollAnnounceChapterKey,
+      'value': preferences.announceChapter ? 'true' : 'false',
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    batch.insert('app_settings', {
+      'key': _macAutoscrollAnnounceVerseNumbersKey,
+      'value': preferences.announceVerseNumbers ? 'true' : 'false',
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    batch.insert('app_settings', {
+      'key': _macAutoscrollAudioEnabledKey,
+      'value': preferences.audioEnabled ? 'true' : 'false',
     }, conflictAlgorithm: ConflictAlgorithm.replace);
     batch.insert('app_settings', {
       'key': _macAutoscrollLastStepKey,

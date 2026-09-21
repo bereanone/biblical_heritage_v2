@@ -83,6 +83,7 @@ class ViewerBody extends StatefulWidget {
     this.onOpenCrossReferences,
     this.onSelectVerseNumber = _noopVerseSelection,
     this.onSelectTokenLongPress,
+    this.onTokenLongPressEnd,
     this.onSelectTokenLongPressMove,
     this.onSelectVerseNumberLongPressMove,
     this.onTapSelectedRange = _noop,
@@ -109,6 +110,7 @@ class ViewerBody extends StatefulWidget {
   final ValueChanged<VerseLine>? onSelectVerseNumberLongPressMove;
   final VoidCallback onTapSelectedRange;
   final ViewerRangeSelection rangeSelection;
+  final VoidCallback? onTokenLongPressEnd;
   final int highlightRefreshTick;
   final int navigationTick;
   final CallbackReaderAutoScrollTarget? autoScrollTarget;
@@ -904,6 +906,7 @@ class _ViewerBodyState extends State<ViewerBody> {
                             ? _handleVerseGutterDrag
                             : null,
                         rangeSelection: widget.rangeSelection,
+                        onTokenLongPressEnd: widget.onTokenLongPressEnd,
                         onTokenLongPress: (tokenIndex) {
                           widget.onSelectTokenLongPress?.call(line, tokenIndex);
                         },

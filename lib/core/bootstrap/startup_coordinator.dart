@@ -15,6 +15,7 @@ import 'sandbox_bootstrap.dart';
 import 'development_runtime_overrides.dart';
 import '../../features/library/data/canonical_epub_generation_repair_service.dart';
 import '../../features/library/data/library_catalog_service.dart';
+import '../../features/reader/presentation/tag_playback/tag_playback_settings.dart';
 import '../../features/utilities/data/pioneer_captured_html_import_availability_service.dart';
 import '../../features/utilities/data/elibrary_catalog_duplicate_repair_service.dart';
 
@@ -166,6 +167,7 @@ class StartupCoordinator {
   }) async {
     final startedAt = DateTime.now();
     debugPrint('Startup background maintenance started.');
+    await AppTagPlaybackSettingsStore.removeRetiredKeys();
     if (LibraryRootNative.usesAndroidDocumentTree) {
       try {
         final report = await LibraryRootNative.scanAndroidLibraryTree(

@@ -29,6 +29,7 @@ InlineSpan buildViewerMarkupSpan({
   int? blockId,
   ViewerRangeSelection? rangeSelection,
   ValueChanged<int>? onTokenLongPress,
+  VoidCallback? onTokenLongPressEnd,
   ValueChanged<int>? onTokenLongPressMove,
   ValueChanged<LongPressMoveUpdateDetails>? onTokenLongPressMoveDetails,
   List<VerseHighlightRecord> persistedHighlights =
@@ -102,7 +103,8 @@ InlineSpan buildViewerMarkupSpan({
             ..onLongPress = () {
               onTokenLongPress(tokenIndex);
             }
-            ..onLongPressMoveUpdate = moveUpdateCallback)
+            ..onLongPressMoveUpdate = moveUpdateCallback
+            ..onLongPressEnd = (_) => onTokenLongPressEnd?.call())
         : null;
     spans.add(
       TextSpan(text: segment.text, style: style, recognizer: recognizer),

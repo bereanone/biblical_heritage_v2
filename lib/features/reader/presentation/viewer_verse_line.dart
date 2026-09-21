@@ -29,6 +29,7 @@ class ViewerVerseLine extends StatelessWidget {
     this.onVerseNumberLongPressMoveDetails,
     this.rangeSelection,
     this.onTokenLongPress,
+    this.onTokenLongPressEnd,
     this.onTokenLongPressMove,
     this.onTokenLongPressMoveDetails,
     this.geometryRegistry,
@@ -53,6 +54,7 @@ class ViewerVerseLine extends StatelessWidget {
   onVerseNumberLongPressMoveDetails;
   final ViewerRangeSelection? rangeSelection;
   final ValueChanged<int>? onTokenLongPress;
+  final VoidCallback? onTokenLongPressEnd;
   final ValueChanged<int>? onTokenLongPressMove;
   final ValueChanged<LongPressMoveUpdateDetails>? onTokenLongPressMoveDetails;
   final TextRangeGeometryRegistry? geometryRegistry;
@@ -121,6 +123,7 @@ class ViewerVerseLine extends StatelessWidget {
           blockId: line.blockId,
           rangeSelection: rangeSelection,
           onTokenLongPress: onTokenLongPress,
+          onTokenLongPressEnd: onTokenLongPressEnd,
           onTokenLongPressMove: onTokenLongPressMove,
           onTokenLongPressMoveDetails: onTokenLongPressMoveDetails,
           persistedHighlights: tokenHighlights,
@@ -132,6 +135,7 @@ class ViewerVerseLine extends StatelessWidget {
     final textWidget = _enableTextRangeGeometry && registry != null
         ? GestureDetector(
             behavior: HitTestBehavior.translucent,
+            onLongPressEnd: (_) => onTokenLongPressEnd?.call(),
             onLongPressStart: (details) {
               final anchor = _nearestAnchorForGlobalPosition(
                 registry: registry,

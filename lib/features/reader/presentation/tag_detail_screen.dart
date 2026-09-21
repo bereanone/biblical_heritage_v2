@@ -19,6 +19,7 @@ import '../data/presentation/presentation_models.dart';
 import '../data/presentation/presentation_text_format.dart';
 import 'presentation_prep/presentation_ui_helpers.dart';
 import 'tag_dialog_styles.dart';
+import 'tag_playback/tag_playback_popup.dart';
 import 'tag_quick_apply_helper.dart';
 import 'viewer_presentation_launcher.dart';
 
@@ -122,6 +123,14 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   }
 
   bool get _isDollarRepository => widget.repository is DollarTagRepository;
+
+  void _listenToTag() => showTagPlaybackPopup(
+    context,
+    tag: widget.tag,
+    category: _resolvedCategory,
+    isDollar: _isDollarRepository,
+    fontScale: widget.fontScale,
+  );
 
   bool _isNoteOnlyEntry(HashTagEntry entry) {
     return entry.bookNumber == 0 &&
@@ -1479,6 +1488,14 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                     ? null
                                     : _openPresentationMode,
                               ),
+                              phoneAction(
+                                icon: Icons.headphones_rounded,
+                                label: 'Listen',
+                                tooltip: 'Listen to this tag',
+                                onPressed: _entries.isEmpty
+                                    ? null
+                                    : _listenToTag,
+                              ),
                             ],
                           ),
                           Wrap(
@@ -1613,6 +1630,20 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                       ? null
                                       : _openPresentationMode,
                                   icon: const Icon(Icons.slideshow_rounded),
+                                  color: headerButtonForeground,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 36,
+                                    height: 36,
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                IconButton(
+                                  tooltip: 'Listen to this tag',
+                                  onPressed: _entries.isEmpty
+                                      ? null
+                                      : _listenToTag,
+                                  icon: const Icon(Icons.headphones_rounded),
                                   color: headerButtonForeground,
                                   constraints: const BoxConstraints.tightFor(
                                     width: 36,

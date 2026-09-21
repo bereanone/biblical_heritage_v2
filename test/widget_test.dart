@@ -11,6 +11,8 @@ import 'package:studybible2/core/database/user_database.dart';
 import 'package:studybible2/core/theme/app_settings_service.dart';
 import 'package:studybible2/core/theme/theme_preferences.dart';
 
+import 'support/fake_audioplayers_platform.dart';
+
 Future<void> _pumpUntilEntryScreen(WidgetTester tester) async {
   await _pumpUntilText(tester, 'Biblical Heritage #StudyBible');
 }
@@ -41,6 +43,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
+  installFakeAudioplayers();
 
   late Directory supportDir;
   late Directory documentsDir;

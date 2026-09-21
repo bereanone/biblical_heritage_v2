@@ -95,6 +95,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
   }
 
   void _selectTokenAnchor(VerseLine line, int tokenIndex) {
+    _stopReaderAutoscroll();
     _clearBibleSearchSessionForManualSelection();
     final blockId = line.blockId ?? 0;
     if (blockId <= 0 || tokenIndex <= 0) return;
@@ -116,6 +117,22 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
     setState(() {
       _rangeSelection = _rangeSelection.beginTokenRange(blockId, tokenIndex);
     });
+  }
+
+  void _finishTokenSelection() {
+    if (!mounted || !_rangeSelection.hasTokenSelection) return;
+    if (!_rangeSelection.hasCompletedRange) {
+      final blockId = _rangeSelection.startBlockId;
+      final tokenIndex = _rangeSelection.startTokenIndex;
+      if (blockId == null || tokenIndex == null) return;
+      setState(() {
+        _rangeSelection = _rangeSelection.completeTokenRange(
+          blockId,
+          tokenIndex,
+        );
+      });
+    }
+    unawaited(_openRangeActions());
   }
 
   void _dragVerseAnchor(VerseLine line) {
@@ -182,6 +199,10 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         tokenPreview ??
         selectedLines.map((line) => '${line.verse} ${line.text}').join('\n');
 
+    final copyText =
+        tokenPreview ??
+        selectedLines.map((line) => line.text.trim()).join('\n');
+
     final verseRefs = selectedLines
         .map((line) => '${passage.bookName} ${line.chapter}:${line.verse}')
         .toList(growable: false);
@@ -207,10 +228,10 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
 
     switch (action) {
       case ViewerRangeAction.copyNoCitation:
-        await _copyRangeToClipboard(selectedLines, includeCitation: false);
+        await _copyRangeToClipboard(copyText, label, includeCitation: false);
         break;
       case ViewerRangeAction.copyWithCitation:
-        await _copyRangeToClipboard(selectedLines, includeCitation: true);
+        await _copyRangeToClipboard(copyText, label, includeCitation: true);
         break;
       case ViewerRangeAction.highlight:
         if (_rangeSelection.hasTokenSelection) {
@@ -430,22 +451,18 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
   }
 
   Future<void> _copyRangeToClipboard(
-    List<VerseLine> lines, {
+    String selectedText,
+    String citation, {
     required bool includeCitation,
   }) async {
-    final passage = await _currentPassageOrLoad();
-    if (!mounted || lines.isEmpty) return;
-    final text = lines.map((line) => line.text.trim()).join('\n');
-    final payload = includeCitation
-        ? '$text\n${_buildRangeLabel(passage.bookName, lines.first, lines.last)}'
-        : text;
-    await Clipboard.setData(ClipboardData(text: payload));
-    if (!mounted) return;
-    _showRangeActionMessage(
-      includeCitation
-          ? 'Range copied with citation.'
-          : 'Range copied without citation.',
+    await copyViewerSelectionToClipboard(
+      selectedText: selectedText,
+      citation: citation,
+      includeCitation: includeCitation,
     );
+    if (!mounted) return;
+    // Copy closes the action menu; no extra confirmation needs dismissing.
+    ScaffoldMessenger.of(context).clearSnackBars();
   }
 
   Future<void> _clearRangeMarkup(

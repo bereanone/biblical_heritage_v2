@@ -61,18 +61,26 @@ class ReaderAutoscrollTapShield extends StatelessWidget {
     required this.listenables,
     required this.isScrolling,
     required this.onStop,
+    this.bottomInset = kBottomNavigationBarHeight,
   });
 
   final List<Listenable> listenables;
   final bool Function() isScrolling;
   final VoidCallback onStop;
+  final double bottomInset;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: Listenable.merge(listenables),
     builder: (context, _) {
       if (!isScrolling()) return const SizedBox.shrink();
-      return Positioned.fill(
+      // Keep the reader area tappable to stop movement, while leaving the
+      // bottom controls available for their normal tap and long-press actions.
+      return Positioned(
+        top: 0,
+        right: 0,
+        bottom: bottomInset,
+        left: 0,
         child: Listener(
           key: const ValueKey('reader-autoscroll-tap-shield'),
           behavior: HitTestBehavior.opaque,
@@ -332,9 +340,13 @@ class _MacAutoscrollSettingsDialog extends StatefulWidget {
 class _MacAutoscrollSettingsDialogState
     extends State<_MacAutoscrollSettingsDialog> {
   late double _baseSpeed = widget.initial.baseSpeed;
+  late double _speechRate = widget.initial.speechRate;
   late int _maximumStep = widget.initial.maximumStep;
   late ReaderTiltStatusBannerMode _statusBannerMode =
       widget.initial.statusBannerMode;
+  late bool _audioEnabled = widget.initial.audioEnabled;
+  late bool _announceChapter = widget.initial.announceChapter;
+  late bool _announceVerseNumbers = widget.initial.announceVerseNumbers;
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -346,36 +358,52 @@ class _MacAutoscrollSettingsDialogState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('Reading speed: ${_baseSpeed.round()} pixels per second'),
-            Slider(
-              key: const ValueKey('mac-autoscroll-base-speed'),
-              value: _baseSpeed,
-              min: 6,
-              max: 60,
-              divisions: 18,
-              onChanged: (value) => setState(() => _baseSpeed = value),
-            ),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<int>(
-              key: const ValueKey('mac-autoscroll-maximum-step'),
-              initialValue: _maximumStep,
-              decoration: const InputDecoration(
-                labelText: 'Maximum speed step',
+            if (!_audioEnabled) ...[
+              Text('Reading speed: ${_baseSpeed.round()} pixels per second'),
+              Slider(
+                key: const ValueKey('mac-autoscroll-base-speed'),
+                value: _baseSpeed,
+                min: 6,
+                max: 60,
+                divisions: 18,
+                onChanged: (value) => setState(() => _baseSpeed = value),
               ),
-              items: macAutoscrollSpeedSteps
-                  .map(
-                    (value) => DropdownMenuItem<int>(
-                      value: value,
-                      child: Text('$value×'),
-                    ),
-                  )
-                  .toList(growable: false),
-              onChanged: (value) {
-                if (value != null) setState(() => _maximumStep = value);
-              },
-            ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<int>(
+                key: const ValueKey('mac-autoscroll-maximum-step'),
+                initialValue: _maximumStep,
+                decoration: const InputDecoration(
+                  labelText: 'Maximum speed step',
+                ),
+                items: macAutoscrollSpeedSteps
+                    .map(
+                      (value) => DropdownMenuItem<int>(
+                        value: value,
+                        child: Text('$value×'),
+                      ),
+                    )
+                    .toList(growable: false),
+                onChanged: (value) {
+                  if (value != null) setState(() => _maximumStep = value);
+                },
+              ),
+            ],
+            if (_audioEnabled) ...[
+              Text('Voice speed: ${_speechRate.toStringAsFixed(2)}×'),
+              Slider(
+                value: _speechRate,
+                min: 0.75,
+                max: 1.5,
+                divisions: 15,
+                onChanged: (value) =>
+                    setState(() => _speechRate = normalizeSpeechRate(value)),
+              ),
+              const Text(
+                'The text follows the spoken verse. Arrow keys adjust voice speed by 0.05×.',
+              ),
+            ],
             const SizedBox(height: 16),
-            if (widget.showKeyboardHelp) ...[
+            if (widget.showKeyboardHelp && !_audioEnabled) ...[
               const Text('Arrow keys change speed and direction.'),
               const Text('Up Arrow: one step upward'),
               const Text('Down Arrow: one step downward'),
@@ -409,11 +437,32 @@ class _MacAutoscrollSettingsDialogState
                 ),
               ),
             ],
+            const SizedBox(height: 16),
+            const Text('Narration'),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Announce chapter changes'),
+              value: _announceChapter,
+              onChanged: (value) => setState(() => _announceChapter = value),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Speak verse numbers'),
+              value: _announceVerseNumbers,
+              onChanged: (value) =>
+                  setState(() => _announceVerseNumbers = value),
+            ),
           ],
         ),
       ),
     ),
     actions: <Widget>[
+      Switch(
+        key: const ValueKey('mac-autoscroll-audio-toggle'),
+        value: _audioEnabled,
+        onChanged: (value) => setState(() => _audioEnabled = value),
+      ),
+      Text(_audioEnabled ? 'Audio On' : 'Audio Off'),
       TextButton(
         key: const ValueKey('mac-autoscroll-cancel'),
         onPressed: () => Navigator.of(context).pop(),
@@ -430,6 +479,10 @@ class _MacAutoscrollSettingsDialogState
             ),
             maximumStep: _maximumStep,
             statusBannerMode: _statusBannerMode,
+            audioEnabled: _audioEnabled,
+            speechRate: _speechRate,
+            announceChapter: _announceChapter,
+            announceVerseNumbers: _announceVerseNumbers,
           ),
         ),
         child: const Text('Save'),

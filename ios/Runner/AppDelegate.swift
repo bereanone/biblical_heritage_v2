@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var libraryRootBridge: LibraryRootFolderBridge?
   private var readerTiltMotionBridge: ReaderTiltMotionBridge?
+  private var narrationMediaBridge: NarrationMediaBridge?
 
   override func application(
     _ application: UIApplication,
@@ -24,6 +25,10 @@ import UniformTypeIdentifiers
     }
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ReaderTiltMotionBridge") {
       readerTiltMotionBridge = ReaderTiltMotionBridge(registrar: registrar)
+    }
+    // After plugin registration, so its audio session wins over audioplayers'.
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NarrationMediaBridge") {
+      narrationMediaBridge = NarrationMediaBridge(registrar: registrar)
     }
   }
 }

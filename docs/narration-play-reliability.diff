@@ -1,0 +1,1336 @@
+--- a/ios/Runner/NarrationMediaBridge.swift
++++ b/ios/Runner/NarrationMediaBridge.swift
+@@ -42,7 +42,11 @@
+     case "updateNowPlaying":
+       if let arguments = call.arguments as? [String: Any] { updateNowPlaying(arguments) }
+     case "setBuffering":
+-      setBuffering(call.arguments as? Bool ?? false)
++      dartBuffering = call.arguments as? Bool ?? false
++      refreshBackgroundTask()
++    case "activate":
++      result(activateSession(reason: "dart request"))
++      return
+     default:
+       result(FlutterMethodNotImplemented)
+       return
+@@ -50,16 +54,44 @@
+     result(nil)
+   }
+ 
+-  private func configureSession() {
+-    try? AVAudioSession.sharedInstance().setCategory(
+-      .playback, mode: .spokenAudio, options: [])
++  /// Every failure here is reported to the Dart event log with the error code
++  /// so a session that could not be set up is never silent.
++  @discardableResult
++  private func configureSession() -> Bool {
++    do {
++      try AVAudioSession.sharedInstance().setCategory(
++        .playback, mode: .spokenAudio, options: [])
++      return true
++    } catch {
++      report("setCategory FAILED \(describe(error)) \(sessionSummary())")
++      return false
++    }
+   }
+ 
++  /// Asserts our category and activates the session. audioplayers
++  /// deactivates the session whenever nothing is playing, and only `begin`
++  /// used to bring it back, so a resume after a long pause started with an
++  /// inactive session. Returns false if iOS refused.
++  private func activateSession(reason: String) -> Bool {
++    let configured = configureSession()
++    do {
++      try AVAudioSession.sharedInstance().setActive(true)
++      return configured
++    } catch {
++      report("activate FAILED (\(reason)) \(describe(error)) \(sessionSummary())")
++      return false
++    }
++  }
++
++  private func describe(_ error: Error) -> String {
++    let nsError = error as NSError
++    return "code=\(nsError.code) domain=\(nsError.domain) \(nsError.localizedDescription)"
++  }
++
+   private func begin() {
+     // audioplayers may have reset the session; assert ours on every start.
+-    configureSession()
+-    try? AVAudioSession.sharedInstance().setActive(true)
+-    report("begin \(sessionSummary())")
++    let activated = activateSession(reason: "begin")
++    report("begin activated=\(activated) \(sessionSummary())")
+     guard !active else { return }
+     active = true
+     registerCommands()
+@@ -80,11 +112,17 @@
+     stopCPUSampling()
+     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+     MPNowPlayingInfoCenter.default().playbackState = .stopped
+-    endBackgroundTask()
++    dartBuffering = false
++    commandHold = false
++    refreshBackgroundTask()
+     // Fails harmlessly while a player is still winding down; audioplayers
+     // deactivates the session itself when its last player stops.
+-    try? AVAudioSession.sharedInstance().setActive(
+-      false, options: .notifyOthersOnDeactivation)
++    do {
++      try AVAudioSession.sharedInstance().setActive(
++        false, options: .notifyOthersOnDeactivation)
++    } catch {
++      report("end: deactivate skipped \(describe(error))")
++    }
+   }
+ 
+   // MARK: Lock screen and Control Center
+@@ -101,7 +139,13 @@
+     for (command, name) in commands {
+       command.isEnabled = true
+       let target = command.addTarget { [weak self] _ in
+-        DispatchQueue.main.async { self?.channel.invokeMethod("command", arguments: name) }
++        DispatchQueue.main.async {
++          // A play from the lock screen wakes a suspended app for only a
++          // moment. Hold background time now rather than after Dart has
++          // scheduled its own request, so the first clip can be finished.
++          if name == "play" || name == "toggle" { self?.holdForCommand() }
++          self?.channel.invokeMethod("command", arguments: name)
++        }
+         return .success
+       }
+       commandTargets.append((command, target))
+@@ -173,7 +217,7 @@
+       let shouldResume = AVAudioSession.InterruptionOptions(rawValue: optionsRaw)
+         .contains(.shouldResume)
+       report("interruption ended options=\(optionsRaw) shouldResume=\(shouldResume) \(sessionSummary())")
+-      if shouldResume { try? AVAudioSession.sharedInstance().setActive(true) }
++      if shouldResume { _ = activateSession(reason: "interruption ended") }
+       channel.invokeMethod("interruptionEnded", arguments: ["shouldResume": shouldResume])
+     @unknown default:
+       report("interruption of unknown type \(raw)")
+@@ -262,20 +306,37 @@
+ 
+   // MARK: Background time
+ 
++  private var dartBuffering = false
++  private var commandHold = false
++
+   /// While the next clip is still being synthesized nothing is audible, so iOS
+   /// may suspend a locked app. A background task buys the time (about 30 s)
+-  /// to finish that clip and start it.
+-  private func setBuffering(_ buffering: Bool) {
+-    if buffering {
++  /// to finish that clip and start it. It is held while Dart reports
++  /// buffering, and for a short while after a lock screen play command.
++  private func refreshBackgroundTask() {
++    if dartBuffering || commandHold {
+       guard backgroundTask == .invalid else { return }
+       backgroundTask = UIApplication.shared.beginBackgroundTask(
+         withName: "narration-synthesis"
+-      ) { [weak self] in self?.endBackgroundTask() }
++      ) { [weak self] in
++        self?.report("background task expired")
++        self?.endBackgroundTask()
++      }
++      if backgroundTask == .invalid { report("beginBackgroundTask refused") }
+     } else {
+       endBackgroundTask()
+     }
+   }
+ 
++  private func holdForCommand() {
++    commandHold = true
++    refreshBackgroundTask()
++    DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
++      self?.commandHold = false
++      self?.refreshBackgroundTask()
++    }
++  }
++
+   private func endBackgroundTask() {
+     guard backgroundTask != .invalid else { return }
+     UIApplication.shared.endBackgroundTask(backgroundTask)
+--- a/lib/core/audio/narration_media_session.dart
++++ b/lib/core/audio/narration_media_session.dart
+@@ -81,6 +81,11 @@
+   Future<void> end();
+   Future<void> updateNowPlaying(Map<String, Object?> info);
+   Future<void> setBuffering(bool buffering);
++
++  /// Re-asserts the playback audio session. audioplayers deactivates it
++  /// whenever nothing is playing, so a resume after a pause finds it inactive.
++  /// Returns false, having logged why, if iOS refused.
++  Future<bool> activate();
+ }
+ 
+ class MethodChannelNarrationMediaPlatform implements NarrationMediaPlatform {
+@@ -124,6 +129,18 @@
+   @override
+   Future<void> setBuffering(bool buffering) =>
+       _invoke('setBuffering', buffering);
++
++  @override
++  Future<bool> activate() async {
++    try {
++      return await _channel.invokeMethod<bool>('activate') ?? false;
++    } on PlatformException catch (error) {
++      NarrationDiagnostics.log('session activate PlatformException: $error');
++      return false;
++    } on MissingPluginException {
++      return true; // No bridge on this platform: nothing to activate.
++    }
++  }
+ }
+ 
+ class _NoopNarrationMediaPlatform implements NarrationMediaPlatform {
+@@ -137,6 +154,8 @@
+   Future<void> updateNowPlaying(Map<String, Object?> info) async {}
+   @override
+   Future<void> setBuffering(bool buffering) async {}
++  @override
++  Future<bool> activate() async => true;
+ }
+ 
+ /// One app-wide owner of the system's now-playing slot. The Bible reader and
+@@ -201,7 +220,36 @@
+       unawaited(_platform.end());
+     } else if (wasOwner) {
+       _owner!._publish();
++    }
++  }
++
++  /// Makes sure the audio session is active before speech is synthesized or
++  /// played. Every attempt that fails is written to the event log with the
++  /// [reason] it was made for; native detail (error code, category, route)
++  /// follows as a `native activate` line. Returns whether iOS accepted it.
++  /// Playback is still attempted on failure, so the stage that actually
++  /// breaks is the one the log names.
++  Future<bool> activateAudioSession(String reason) async {
++    if (!supported) return true;
++    final watch = Stopwatch()..start();
++    var ok = false;
++    try {
++      ok = await _platform.activate().timeout(const Duration(seconds: 5));
++    } on TimeoutException {
++      NarrationDiagnostics.log(
++        'session activate ($reason) TIMED OUT after 5 s',
++      );
++      return false;
++    } catch (error) {
++      NarrationDiagnostics.log('session activate ($reason) FAILED: $error');
++      return false;
+     }
++    if (!ok) {
++      NarrationDiagnostics.log(
++        'session activate ($reason) FAILED after ${watch.elapsedMilliseconds} ms',
++      );
++    }
++    return ok;
+   }
+ 
+   int _holds = 0;
+--- a/lib/features/library/presentation/library_speech_controls.dart
++++ b/lib/features/library/presentation/library_speech_controls.dart
+@@ -1,6 +1,7 @@
+ import 'dart:async';
+ import 'dart:convert';
+ import 'package:flutter/material.dart';
++import '../../../core/audio/narration_diagnostics.dart';
+ import '../../../core/theme/app_settings_service.dart';
+ import '../../reader/presentation/kokoro_mac_test_narrator.dart';
+ import '../../reader/presentation/narration_pronunciation.dart';
+@@ -215,6 +216,7 @@
+   }
+ 
+   void _failed(String message) {
++    NarrationDiagnostics.log('library narration FAILED: $message');
+     if (!mounted) return;
+     unawaited(_queue.stop());
+     widget.controller.stopForManualInteraction();
+--- a/lib/features/reader/presentation/bible_explorer_screen.dart
++++ b/lib/features/reader/presentation/bible_explorer_screen.dart
+@@ -6,6 +6,8 @@
+ import 'package:flutter/material.dart';
+ import 'package:flutter/scheduler.dart';
+ 
++import '../../../core/audio/narration_diagnostics.dart';
++import '../../../core/audio/narration_media_session.dart';
+ import '../../../core/database/study_bible_database.dart';
+ import '../../../core/theme/app_settings_service.dart';
+ import '../../../core/theme/app_theme_mode.dart';
+@@ -611,6 +613,7 @@
+       (_macAutoScroll?.isScrolling ?? false);
+ 
+   void _narrationFailed(String message) {
++    NarrationDiagnostics.log('bible narration FAILED: $message');
+     if (!mounted) return;
+     _macAutoScroll?.stopForManualInteraction();
+     ScaffoldMessenger.of(
+@@ -676,6 +679,11 @@
+     if (line == null || line.text.trim().isEmpty) {
+       _narrationFailed('No verse text is available at this position.');
+       return;
++    }
++    // Deep priming pays off only with the screen on. Resumed from the lock
++    // screen, speak the first verse at once and buffer behind it.
++    if (NarrationMediaSession.instance.backgrounded.value) {
++      _narrationPrimed = true;
+     }
+     if (Platform.isIOS && !_narrationPrimed) {
+       await _kokoroNarrator.prepare(
+--- a/lib/features/reader/presentation/kokoro_engine_host.dart
++++ b/lib/features/reader/presentation/kokoro_engine_host.dart
+@@ -1,69 +1,209 @@
+ import 'dart:async';
+ import 'dart:io';
+ 
++import 'package:flutter/foundation.dart';
+ import 'package:flutter/services.dart';
+ import 'package:path_provider/path_provider.dart';
+ 
+ import '../../../core/audio/narration_diagnostics.dart';
+ import '../../../core/audio/narration_media_session.dart';
++import '../../../core/audio/speech_engine.dart';
+ import '../../../core/audio/synthesis_governor.dart';
+ import 'kokoro_speech_worker.dart';
+ 
++typedef SpeechEngineStarter = Future<SpeechEngine> Function();
++
+ /// Owns the single app-wide Kokoro engine (a 325 MB model in a background
+ /// isolate). Every [KokoroMacTestNarrator] leases it instead of loading a
+ /// private copy, so the Bible reader, eLibrary reader and tag playback can be
+ /// open together without duplicating the model in memory. The engine starts on
+-/// first lease and is freed when the last lease is released.
++/// first lease and is freed when the last lease is released (or, when
++/// [idleRelease] is set, that long afterwards).
++///
++/// A lease is a promise that the engine may be wanted, not proof that it is
++/// alive. [ensureLive] is what callers use before speaking: it rebuilds an
++/// engine that is closed or does not answer, so play works from any state.
+ class KokoroEngineHost {
+-  KokoroEngineHost._();
++  KokoroEngineHost._(
++    this._starter, {
++    this.idleRelease,
++    this.pingTimeout = const Duration(seconds: 2),
++    this.exitWait = const Duration(seconds: 10),
++    void Function(String message)? log,
++  }) : _log = log ?? NarrationDiagnostics.log;
+ 
+-  static final KokoroEngineHost instance = KokoroEngineHost._();
++  @visibleForTesting
++  factory KokoroEngineHost.forTesting({
++    required SpeechEngineStarter starter,
++    Duration? idleRelease,
++    Duration pingTimeout = const Duration(milliseconds: 200),
++    Duration exitWait = const Duration(milliseconds: 500),
++    void Function(String message)? log,
++  }) => KokoroEngineHost._(
++    starter,
++    idleRelease: idleRelease,
++    pingTimeout: pingTimeout,
++    exitWait: exitWait,
++    log: log ?? (_) {},
++  );
+ 
++  static final KokoroEngineHost instance = KokoroEngineHost._(_startKokoro);
++
+   static const _assetPrefix =
+       'assets/audio/kokoro/sherpa/kokoro-multi-lang-v1_0/';
++  static const _stagedMarker = '.staged-complete';
+ 
+-  KokoroSpeechWorker? _worker;
+-  Future<KokoroSpeechWorker>? _starting;
++  /// How long the engine stays loaded after the last lease is released.
++  /// Null (the default) frees it immediately. Idle release is deliberately
++  /// off: reloading the model inside the short wake window of a lock-screen
++  /// play would make resuming after a long pause worse, not better. Revisit
++  /// with the RSS and cold-start figures from the engine log.
++  Duration? idleRelease;
++
++  final SpeechEngineStarter _starter;
++  final Duration pingTimeout;
++  final Duration exitWait;
++  final void Function(String message) _log;
++
++  SpeechEngine? _worker;
++  Future<SpeechEngine>? _starting;
++  Future<void>? _pendingExit;
++  Timer? _idleTimer;
+   int _leases = 0;
+ 
+   /// Number of narrators currently holding the engine (for diagnostics/tests).
+   int get leaseCount => _leases;
+ 
++  @visibleForTesting
++  bool get hasEngine => _worker != null;
++
+   /// Counts a lease immediately, then resolves once the engine is running.
+   /// Every successful [acquire] must be paired with one [release], including
+   /// when the caller was disposed while the engine was still starting.
+-  Future<KokoroSpeechWorker> acquire() async {
++  Future<SpeechEngine> acquire() async {
+     _leases++;
++    _idleTimer?.cancel();
++    _idleTimer = null;
++    _log('engine acquire (leases $_leases)');
+     try {
+-      final ready = _worker;
+-      if (ready != null) return ready;
+-      return await (_starting ??= _start());
++      return await ensureLive();
+     } catch (_) {
+       _leases--;
+       rethrow;
+     }
+   }
+ 
++  /// A running engine that has just been confirmed to answer, starting or
++  /// replacing one if needed. Does not change the lease count, so a narrator
++  /// that already holds a lease calls this before every play.
++  Future<SpeechEngine> ensureLive() async {
++    for (;;) {
++      final current = _worker;
++      if (current == null) return _startShared();
++      if (current.isClosed) {
++        _log('engine found closed; replacing');
++        _discard(current);
++        continue;
++      }
++      if (await current.ping(timeout: pingTimeout)) {
++        if (identical(_worker, current) && !current.isClosed) return current;
++        continue;
++      }
++      _log(
++        'engine did not answer a ping within ${pingTimeout.inMilliseconds} ms; '
++        'replacing',
++      );
++      _discard(current);
++    }
++  }
++
+   void release() {
+     if (_leases == 0) return;
+     if (--_leases > 0) return;
+-    // Last lease: free the model.
+-    _worker?.dispose();
+-    _worker = null;
++    final wait = idleRelease;
++    if (wait == null) {
++      _log('engine last lease released; freeing the model');
++      _discardCurrent();
++      return;
++    }
++    _log('engine last lease released; freeing in ${wait.inSeconds} s if idle');
++    _idleTimer?.cancel();
++    _idleTimer = Timer(wait, () {
++      _idleTimer = null;
++      if (_leases > 0) return;
++      _log('engine idle for ${wait.inSeconds} s; freeing the model');
++      _discardCurrent();
++    });
+   }
+ 
+-  Future<KokoroSpeechWorker> _start() async {
++  void _discardCurrent() {
++    final worker = _worker;
++    if (worker != null) _discard(worker);
++  }
++
++  /// Disposes [engine] and remembers when its isolate is gone, so the next
++  /// start never has two models resident at once.
++  void _discard(SpeechEngine engine) {
++    if (identical(_worker, engine)) _worker = null;
++    engine.dispose();
++    _pendingExit = engine.exited;
++    _log('engine freed (rss ${_rssMb()} MB)');
++  }
++
++  Future<SpeechEngine> _startShared() =>
++      _starting ??= _start().whenComplete(() => _starting = null);
++
++  Future<SpeechEngine> _start() async {
++    final watch = Stopwatch()..start();
++    _log('engine start begin (leases $_leases, rss ${_rssMb()} MB)');
+     try {
+-      final root = await _stageAssets();
++      final exiting = _pendingExit;
++      if (exiting != null) {
++        await exiting.timeout(
++          exitWait,
++          onTimeout: () => _log(
++            'engine previous isolate still running after '
++            '${exitWait.inMilliseconds} ms; starting anyway',
++          ),
++        );
++        if (identical(_pendingExit, exiting)) _pendingExit = null;
++      }
++      final engine = await _starter();
++      _worker = engine;
++      _log(
++        'engine started in ${watch.elapsedMilliseconds} ms '
++        '(rss ${_rssMb()} MB)',
++      );
++      return engine;
++    } catch (error) {
++      _log('engine start FAILED after ${watch.elapsedMilliseconds} ms: $error');
++      rethrow;
++    }
++  }
++
++  static int _rssMb() {
++    try {
++      return ProcessInfo.currentRss ~/ (1024 * 1024);
++    } catch (_) {
++      return -1;
++    }
++  }
++
++  static Future<SpeechEngine> _startKokoro() async {
++    final root = await _stage('stage-assets', _stageAssets);
++    await _stage('write-lexicon', () async {
+       final contextLexicon = File('${root.path}/context-lexicon-v1.txt');
+       await contextLexicon.writeAsString(
+         await rootBundle.loadString(
+           'assets/audio/pronunciation/context-lexicon.txt',
+         ),
+       );
+-      // The caller that triggered startup still holds its lease until this
+-      // resolves, so the engine cannot be released while it is starting.
+-      final worker = await KokoroSpeechWorker.start(
++    });
++    // The caller that triggered startup still holds its lease until this
++    // resolves, so the engine cannot be released while it is starting.
++    return _stage(
++      'load-model',
++      () => KokoroSpeechWorker.start(
+         root.path,
+         // A locked iPhone is killed above ~80% CPU, and synthesis runs two
+         // threads flat out. Pace it while backgrounded; clips rendered ahead
+@@ -72,21 +212,43 @@
+           isThrottled: () => NarrationMediaSession.instance.backgrounded.value,
+           log: NarrationDiagnostics.log,
+         ),
++      ),
++    );
++  }
++
++  /// Runs one startup step, logging which one failed and why.
++  static Future<T> _stage<T>(String name, Future<T> Function() body) async {
++    final watch = Stopwatch()..start();
++    try {
++      final result = await body();
++      NarrationDiagnostics.log(
++        'engine $name ok in ${watch.elapsedMilliseconds} ms',
+       );
+-      _worker = worker;
+-      return worker;
+-    } finally {
+-      _starting = null;
++      return result;
++    } on SpeechEngineException catch (error) {
++      NarrationDiagnostics.log('engine $name FAILED: $error');
++      rethrow;
++    } catch (error) {
++      NarrationDiagnostics.log('engine $name FAILED: $error');
++      throw SpeechEngineException(
++        'Speech engine could not start ($name): $error',
++      );
+     }
+   }
+ 
+-  Future<Directory> _stageAssets() async {
++  static Future<Directory> _stageAssets() async {
+     final support = await getApplicationSupportDirectory();
+     final target = Directory('${support.path}/kokoro-multi-lang-v1_0-v2');
+-    if (await File('${target.path}/espeak-ng-data/phontab').exists()) {
++    final marker = File('${target.path}/$_stagedMarker');
++    if (await marker.exists()) return target;
++    // Older installs staged without a marker; accept them only if every file
++    // the engine opens is present, so a copy interrupted part way is redone.
++    if (await _hasEngineFiles(target)) {
++      await marker.writeAsString('legacy');
+       return target;
+     }
+     final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
++    var staged = 0;
+     for (final asset in manifest.listAssets().where(
+       (key) => key.startsWith(_assetPrefix),
+     )) {
+@@ -95,7 +257,23 @@
+       await file.parent.create(recursive: true);
+       final bytes = await rootBundle.load(asset);
+       await file.writeAsBytes(bytes.buffer.asUint8List());
++      staged++;
+     }
++    NarrationDiagnostics.log('engine staged $staged asset files');
++    await marker.writeAsString('complete');
+     return target;
+   }
++
++  static Future<bool> _hasEngineFiles(Directory target) async {
++    for (final name in const [
++      'model.onnx',
++      'voices.bin',
++      'tokens.txt',
++      'lexicon-us-en.txt',
++      'espeak-ng-data/phontab',
++    ]) {
++      if (!await File('${target.path}/$name').exists()) return false;
++    }
++    return true;
++  }
+ }
+--- a/lib/features/reader/presentation/kokoro_mac_test_narrator.dart
++++ b/lib/features/reader/presentation/kokoro_mac_test_narrator.dart
+@@ -7,10 +7,11 @@
+ import 'package:path_provider/path_provider.dart';
+ import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
+ 
++import '../../../core/audio/narration_diagnostics.dart';
+ import '../../../core/audio/narration_media_session.dart';
++import '../../../core/audio/speech_engine.dart';
+ import 'bible_pronunciation_map.dart';
+ import 'kokoro_engine_host.dart';
+-import 'kokoro_speech_worker.dart';
+ 
+ /// App-owned offline Kokoro reader. Its model is staged once from bundled
+ /// assets into the app sandbox; neither Python nor an external drive is used.
+@@ -21,13 +22,13 @@
+   final List<AudioPlayer> _players = [AudioPlayer(), AudioPlayer()];
+   final List<StreamSubscription<void>> _completionSubscriptions = [];
+   int _playerIndex = 0;
+-  KokoroSpeechWorker? _engine;
++  bool _holdsLease = false;
+   Map<String, String> pronunciationCorrections = {};
+   Map<String, String> deferredPronunciationCorrections = {};
+   Future<BiblePronunciationMap>? _pronunciationMap;
+   final Map<String, Future<File>> _prepared = {};
+   int _fileId = 0;
+-  Future<KokoroSpeechWorker>? _engineInitialization;
++  Future<SpeechEngine>? _engineInitialization;
+   bool _disposed = false;
+   String? _activeVerseKey;
+   var _generation = 0;
+@@ -71,17 +72,8 @@
+ 
+   bool get isAvailable => true;
+ 
+-  Future<void> recordDiagnostic(String message) async {
+-    try {
+-      final temporary = await getTemporaryDirectory();
+-      await File('${temporary.path}/narration-events.log').writeAsString(
+-        '${DateTime.now().toIso8601String()} $message\n',
+-        mode: FileMode.append,
+-      );
+-    } catch (_) {
+-      /* Diagnostics must not interrupt narration. */
+-    }
+-  }
++  Future<void> recordDiagnostic(String message) async =>
++      NarrationDiagnostics.log(message);
+ 
+   /// Starts the bundled engine while autoscroll is armed, before movement
+   /// begins. This makes the first spoken verse ready when scrolling starts.
+@@ -93,9 +85,19 @@
+       ]);
+     } catch (error) {
+       debugPrint('Native Kokoro warm-up failed: $error');
++      NarrationDiagnostics.log('warm-up FAILED: $error');
+     }
+   }
+ 
++  /// How long the audio player gets to open and start a clip before the
++  /// attempt is reported as failed rather than left hanging.
++  static const _audioStartTimeout = Duration(seconds: 20);
++
++  /// A play request still unfinished after this long is written to the event
++  /// log with the stage it is stuck in, so a hang is visible even though it
++  /// never produces an error.
++  static const _slowSpeakAfter = Duration(seconds: 20);
++
+   Future<void> speak({
+     required String verseKey,
+     required String text,
+@@ -108,6 +110,11 @@
+         text.trim().isEmpty ||
+         _isPlaying ||
+         _activeVerseKey == verseKey) {
++      NarrationDiagnostics.log(
++        'speak ignored key=$verseKey (disposed=$_disposed '
++        'empty=${text.trim().isEmpty} playing=$_isPlaying '
++        'active=$_activeVerseKey)',
++      );
+       return;
+     }
+     final generation = ++_generation;
+@@ -117,45 +124,118 @@
+     // that silence would let iOS suspend the app before it finishes.
+     final releaseBackgroundTime = NarrationMediaSession.instance
+         .holdBackgroundTime();
++    // Every failure below names the stage it happened in, and a stage that
++    // never returns is reported by [_slowSpeakAfter], so the event log shows
++    // exactly where a play request stopped.
++    final clock = _StageClock('audio-session');
++    final slow = Timer(
++      _slowSpeakAfter,
++      () => NarrationDiagnostics.log(
++        'speak SLOW key=$verseKey stage=${clock.current} '
++        'after ${_slowSpeakAfter.inSeconds} s',
++      ),
++    );
++    NarrationDiagnostics.log('speak begin key=$verseKey');
+     try {
+       debugPrint('Native Kokoro speak $verseKey');
+       if (voice != 'am_michael') throw ArgumentError.value(voice);
++      // audioplayers deactivates the audio session whenever nothing is
++      // playing, so a resume after a pause finds it inactive.
++      await NarrationMediaSession.instance.activateAudioSession('speak');
++      clock.enter('engine');
++      await _ensureEngine();
++      clock.enter('synthesize');
+       final output = await prepare(
+         text: text,
+         speed: speed,
+         blockId: blockId,
+         preferDictionary: preferDictionary,
+       );
+-      if (_disposed || generation != _generation) return;
++      if (_disposed || generation != _generation) {
++        NarrationDiagnostics.log(
++          'speak superseded key=$verseKey stage=${clock.current}',
++        );
++        return;
++      }
++      // Synthesis can take seconds; assert the session again just before use.
++      clock.enter('audio-session');
++      await NarrationMediaSession.instance.activateAudioSession('before-play');
+       // Darwin emits completion before releasing its old item. Alternate
+       // players so that cleanup cannot release the next verse's new item.
++      clock.enter('play');
+       _playerIndex = (_playerIndex + 1) % _players.length;
+       final player = _players[_playerIndex];
+       _clipSpeed = Platform.isIOS ? 1 : speed;
+-      await player.setPlaybackRate(Platform.isIOS ? (_liveRate ?? speed) : 1);
+-      await player.play(DeviceFileSource(output.path));
++      await _within(_audioStartTimeout, 'audio did not start', () async {
++        await player.setPlaybackRate(Platform.isIOS ? (_liveRate ?? speed) : 1);
++        await player.play(DeviceFileSource(output.path));
++      });
+       unawaited(recordDiagnostic('play $verseKey speed=$speed'));
+       if (_disposed || generation != _generation) return;
+-      onPlaybackReady?.call(await player.getDuration() ?? Duration.zero);
++      clock.enter('duration');
++      final duration = await player.getDuration().timeout(
++        _audioStartTimeout,
++        onTimeout: () => null,
++      );
++      onPlaybackReady?.call(duration ?? Duration.zero);
++      NarrationDiagnostics.log(
++        'speak ok key=$verseKey stages: ${clock.summary()}',
++      );
+     } catch (error) {
+       debugPrint('Native Kokoro failed: $error');
++      NarrationDiagnostics.log(
++        'speak FAILED key=$verseKey stage=${clock.current} '
++        'after ${clock.elapsedMs} ms: $error',
++      );
+       if (_disposed || generation != _generation) return;
+       _activeVerseKey = null;
+       _isPlaying = false;
+-      onError?.call(error.toString());
++      // A start that timed out may still complete later; make sure it cannot
++      // begin audio for a request that was already reported as failed.
++      unawaited(_silencePlayers());
++      onError?.call(_describeFailure(clock.current, error));
+     } finally {
++      slow.cancel();
+       releaseBackgroundTime();
+     }
+   }
+ 
+-  Future<KokoroSpeechWorker> _ensureEngine() {
++  static Future<void> _within(
++    Duration limit,
++    String what,
++    Future<void> Function() body,
++  ) => body().timeout(
++    limit,
++    onTimeout: () => throw _StageTimeout('$what within ${limit.inSeconds} s'),
++  );
++
++  static String _describeFailure(String stage, Object error) {
++    final doing = switch (stage) {
++      'audio-session' => 'preparing the audio session',
++      'engine' => 'starting the speech engine',
++      'synthesize' => 'synthesizing speech',
++      'play' => 'starting playback',
++      _ => 'playing',
++    };
++    return 'Narration failed while $doing ($error)';
++  }
++
++  Future<void> _silencePlayers() async {
++    for (final player in _players) {
++      try {
++        await player.stop().timeout(const Duration(seconds: 5));
++      } catch (_) {
++        /* Best effort; the failure itself is already logged. */
++      }
++    }
++  }
++
++  Future<SpeechEngine> _ensureEngine() {
+     if (_disposed) return Future.error(StateError('Narrator is disposed'));
+-    final ready = _engine;
+-    if (ready != null) return Future.value(ready);
+     return _engineInitialization ??= _initializeEngine();
+   }
+ 
+-  Future<KokoroSpeechWorker> _initializeEngine() async {
++  Future<SpeechEngine> _initializeEngine() async {
+     try {
+       return await _createEngine();
+     } finally {
+@@ -163,14 +243,22 @@
+     }
+   }
+ 
+-  /// Leases the app-wide engine; see [KokoroEngineHost].
+-  Future<KokoroSpeechWorker> _createEngine() async {
+-    final engine = await KokoroEngineHost.instance.acquire();
++  /// Leases the app-wide engine the first time, and on every later call asks
++  /// the host to confirm it still answers (rebuilding it if not); see
++  /// [KokoroEngineHost]. Never trusts a reference held from an earlier call.
++  Future<SpeechEngine> _createEngine() async {
++    final host = KokoroEngineHost.instance;
++    if (_holdsLease) {
++      final engine = await host.ensureLive();
++      if (_disposed) throw StateError('Narrator is disposed');
++      return engine;
++    }
++    final engine = await host.acquire();
+     if (_disposed) {
+-      KokoroEngineHost.instance.release();
++      host.release();
+       throw StateError('Narrator is disposed');
+     }
+-    _engine = engine;
++    _holdsLease = true;
+     return engine;
+   }
+ 
+@@ -262,7 +350,16 @@
+     final synthesisSpeed = synthesisSpeedFor(speed);
+     final key = '$synthesisSpeed|$spoken';
+     final existing = _prepared[key];
+-    if (existing != null) return existing;
++    if (existing != null) {
++      try {
++        final file = await existing;
++        if (await file.exists()) return file;
++        NarrationDiagnostics.log('clip file missing; rendering again');
++      } catch (_) {
++        // The earlier attempt failed (already logged); try once more.
++      }
++      if (identical(_prepared[key], existing)) _prepared.remove(key);
++    }
+     // Only current and upcoming clips are needed. The cache is deeper while
+     // backgrounded (see [prefetchAhead]); an evicted clip has already played,
+     // so its file goes too, or a long locked-screen session would fill the
+@@ -272,21 +369,61 @@
+     }
+     final result = _generateClip(spoken, synthesisSpeed);
+     _prepared[key] = result;
++    // A failed clip must not stay cached: replaying the same text would hand
++    // back the same failure forever.
++    unawaited(
++      result.then<void>(
++        (_) {},
++        onError: (Object error) {
++          NarrationDiagnostics.log('clip synthesis FAILED: $error');
++          if (identical(_prepared[key], result)) _prepared.remove(key);
++        },
++      ),
++    );
+     return result;
+   }
+ 
+   Future<File> _generateClip(String text, double speed) async {
+-    final engine = await _ensureEngine();
+-    final audio = await engine.generate(text, speed);
+-    final temporary = await getTemporaryDirectory();
+-    final output = File(
+-      '${temporary.path}/narration-${DateTime.now().microsecondsSinceEpoch}-${++_fileId}.wav',
+-    );
+-    await _writeWave(output, audio);
+-    return output;
++    // While something is audible iOS keeps the app running; otherwise this is
++    // the silent stretch that needs borrowed background time.
++    final releaseBackgroundTime = _isPlaying
++        ? null
++        : NarrationMediaSession.instance.holdBackgroundTime();
++    try {
++      final audio = await _synthesize(text, speed);
++      final temporary = await getTemporaryDirectory();
++      final output = File(
++        '${temporary.path}/narration-${DateTime.now().microsecondsSinceEpoch}-${++_fileId}.wav',
++      );
++      try {
++        await _writeWave(output, audio);
++      } catch (error) {
++        throw SpeechEngineException('Could not write the audio file: $error');
++      }
++      return output;
++    } finally {
++      releaseBackgroundTime?.call();
++    }
+   }
+ 
++  /// Synthesizes on a confirmed-live engine. If the engine turns out to be
++  /// dead or hung, asks the host for a fresh one and tries once more.
++  Future<sherpa.GeneratedAudio> _synthesize(String text, double speed) async {
++    for (var attempt = 1; ; attempt++) {
++      final engine = await _ensureEngine();
++      try {
++        return await engine.generate(text, speed);
++      } on SpeechEngineUnavailableException catch (error) {
++        NarrationDiagnostics.log(
++          'synthesis found the engine unavailable (attempt $attempt): $error',
++        );
++        if (_disposed || attempt >= 2) rethrow;
++      }
++    }
++  }
++
+   Future<void> stop() async {
++    NarrationDiagnostics.log('narrator stop key=$_activeVerseKey');
+     ++_generation;
+     _activeVerseKey = null;
+     _isPlaying = false;
+@@ -296,8 +433,8 @@
+   void dispose() {
+     _disposed = true;
+     ++_generation;
+-    if (_engine != null) {
+-      _engine = null;
++    if (_holdsLease) {
++      _holdsLease = false;
+       KokoroEngineHost.instance.release();
+     }
+     for (final clip in _prepared.values) {
+@@ -350,3 +487,38 @@
+     await output.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
+   }
+ }
++
++class _StageTimeout implements Exception {
++  const _StageTimeout(this.message);
++  final String message;
++  @override
++  String toString() => message;
++}
++
++/// Times each stage of a play request for the event log.
++class _StageClock {
++  _StageClock(this.current);
++
++  final Stopwatch _watch = Stopwatch()..start();
++  final List<String> _done = [];
++  String current;
++  int _mark = 0;
++
++  int get elapsedMs => _watch.elapsedMilliseconds;
++
++  void enter(String stage) {
++    _close();
++    current = stage;
++  }
++
++  void _close() {
++    final now = _watch.elapsedMilliseconds;
++    _done.add('$current=${now - _mark}ms');
++    _mark = now;
++  }
++
++  String summary() {
++    _close();
++    return _done.join(' ');
++  }
++}
+--- a/lib/features/reader/presentation/kokoro_speech_worker.dart
++++ b/lib/features/reader/presentation/kokoro_speech_worker.dart
+@@ -1,79 +1,223 @@
+ import 'dart:async';
+ import 'dart:io';
+ import 'dart:isolate';
++
++import 'package:flutter/foundation.dart';
+ import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
+ 
++import '../../../core/audio/narration_diagnostics.dart';
++import '../../../core/audio/speech_engine.dart';
+ import '../../../core/audio/synthesis_governor.dart';
+ 
+ /// A single native engine owned by a background isolate. The reader stays
+ /// responsive while the next verse is synthesized.
+-class KokoroSpeechWorker {
+-  KokoroSpeechWorker._(this._port, this._messages, this._governor);
++///
++/// The worker knows when its isolate is gone (`onExit`), never waits on a
++/// synthesis forever (each request has a deadline), and can be pinged. A
++/// worker that dies or hangs closes itself and fails everything pending with
++/// [SpeechEngineUnavailableException] so callers can rebuild it.
++class KokoroSpeechWorker implements SpeechEngine {
++  KokoroSpeechWorker._(
++    this._port,
++    this._messages,
++    this._governor,
++    this._requestTimeout,
++    this._log,
++  );
++
+   final SendPort _port;
+   final ReceivePort _messages;
+   final SynthesisGovernor _governor;
++  final Duration Function(String text) _requestTimeout;
++  final void Function(String message) _log;
+   final Map<int, Completer<sherpa.GeneratedAudio>> _pending = {};
++  final Map<int, Completer<void>> _pings = {};
++  final Completer<void> _exited = Completer<void>();
+   int _nextId = 0;
+   bool _closed = false;
+ 
++  /// Synthesis speed is at most about real time (0.78x measured on an
++  /// iPhone), and speech runs about 15 characters a second, so this is
++  /// several times what any clip needs. Only time spent inside the isolate
++  /// counts; waiting behind the [SynthesisGovernor] does not.
++  static Duration defaultRequestTimeout(String text) =>
++      Duration(seconds: 15, milliseconds: 120 * text.length);
++
+   static Future<KokoroSpeechWorker> start(
+     String root, {
+     SynthesisGovernor? governor,
++    Duration Function(String text) requestTimeout = defaultRequestTimeout,
++    Duration startTimeout = const Duration(seconds: 90),
++    void Function(String message) log = NarrationDiagnostics.log,
++    @visibleForTesting void Function(List<Object>) entry = _run,
+   }) async {
+     final messages = ReceivePort();
++    final exitPort = ReceivePort();
++    final errorPort = ReceivePort();
+     final ready = Completer<KokoroSpeechWorker>();
+     KokoroSpeechWorker? worker;
++
++    void closePorts() {
++      messages.close();
++      exitPort.close();
++      errorPort.close();
++    }
++
+     messages.listen((dynamic response) {
+       if (response is SendPort) {
+         worker = KokoroSpeechWorker._(
+           response,
+           messages,
+           governor ?? SynthesisGovernor(isThrottled: () => false),
++          requestTimeout,
++          log,
+         );
+         ready.complete(worker);
+       } else if (response is List && response.first == 'initError') {
+-        ready.completeError(StateError(response[1] as String));
++        if (!ready.isCompleted) {
++          ready.completeError(
++            SpeechEngineException(
++              'Speech engine failed to load: ${response[1]}',
++            ),
++          );
++        }
+         messages.close();
+       } else if (response is List) {
+-        final pending = worker?._pending.remove(response[0]);
+-        if (response[1] is sherpa.GeneratedAudio) {
+-          pending?.complete(response[1] as sherpa.GeneratedAudio);
+-        } else {
+-          pending?.completeError(StateError(response[1].toString()));
+-        }
++        worker?._onReply(response);
+       }
+     });
++    errorPort.listen((dynamic error) => log('engine isolate error: $error'));
++    exitPort.listen((dynamic _) {
++      final live = worker;
++      if (live != null) {
++        live._onExit();
++      } else if (!ready.isCompleted) {
++        ready.completeError(
++          const SpeechEngineUnavailableException(
++            'Speech engine exited while starting',
++          ),
++        );
++      }
++      closePorts();
++    });
++
++    Isolate? isolate;
+     try {
+-      await Isolate.spawn(_run, [messages.sendPort, root]);
+-      return await ready.future;
++      isolate = await Isolate.spawn(
++        entry,
++        [messages.sendPort, root],
++        onExit: exitPort.sendPort,
++        onError: errorPort.sendPort,
++      );
++      return await ready.future.timeout(
++        startTimeout,
++        onTimeout: () => throw SpeechEngineUnavailableException(
++          'Speech engine did not start within ${startTimeout.inSeconds} s',
++        ),
++      );
+     } catch (_) {
+-      messages.close();
++      isolate?.kill(priority: Isolate.immediate);
++      closePorts();
+       rethrow;
+     }
+   }
+ 
++  void _onReply(List<dynamic> response) {
++    if (response.first == 'pong') {
++      _pings.remove(response[1])?.complete();
++      return;
++    }
++    final pending = _pending.remove(response[0]);
++    if (response[1] is sherpa.GeneratedAudio) {
++      pending?.complete(response[1] as sherpa.GeneratedAudio);
++    } else {
++      pending?.completeError(SpeechEngineException(response[1].toString()));
++    }
++  }
++
++  void _onExit() {
++    if (!_closed) {
++      _log('engine isolate exited unexpectedly');
++      _closed = true;
++      _failPending('Speech engine stopped unexpectedly');
++      _messages.close();
++    }
++    if (!_exited.isCompleted) _exited.complete();
++  }
++
++  void _failPending(String reason) {
++    for (final pending in _pending.values) {
++      pending.completeError(SpeechEngineUnavailableException(reason));
++    }
++    _pending.clear();
++    _pings.clear();
++  }
++
++  @override
++  bool get isClosed => _closed;
++
++  @override
++  Future<void> get exited => _exited.future;
++
+   /// Every clip for every narration path is synthesized here, so this is
+   /// where a backgrounded app is paced (see [SynthesisGovernor]).
++  @override
+   Future<sherpa.GeneratedAudio> generate(String text, double speed) =>
+       _governor.run(() => _generate(text, speed));
+ 
+   Future<sherpa.GeneratedAudio> _generate(String text, double speed) {
+-    if (_closed) return Future.error(StateError('Speech worker closed'));
++    if (_closed) {
++      return Future.error(
++        const SpeechEngineUnavailableException('Speech worker closed'),
++      );
++    }
+     final id = ++_nextId;
+     final result = Completer<sherpa.GeneratedAudio>();
+     _pending[id] = result;
+     _port.send([id, text, speed]);
+-    return result.future;
++    final limit = _requestTimeout(text);
++    return result.future.timeout(
++      limit,
++      onTimeout: () {
++        _pending.remove(id);
++        _log(
++          'engine synthesis hung: no answer in ${limit.inSeconds} s for '
++          '${text.length} chars; discarding worker',
++        );
++        // The isolate may be stuck in native code. Ask it to free itself as
++        // soon as it returns; callers rebuild the engine rather than wait.
++        dispose();
++        throw SpeechEngineUnavailableException(
++          'Speech synthesis did not finish within ${limit.inSeconds} s',
++        );
++      },
++    );
+   }
+ 
++  @override
++  Future<bool> ping({Duration timeout = const Duration(seconds: 2)}) async {
++    if (_closed) return false;
++    if (_pending.isNotEmpty) return true; // Busy; generate has a deadline.
++    final id = ++_nextId;
++    final answered = Completer<void>();
++    _pings[id] = answered;
++    _port.send(['ping', id]);
++    try {
++      await answered.future.timeout(timeout);
++      return true;
++    } on TimeoutException {
++      return false;
++    } finally {
++      _pings.remove(id);
++    }
++  }
++
++  @override
+   void dispose() {
+     if (_closed) return;
+     _closed = true;
+     _port.send(null); // Free after any in-flight native generation returns.
+-    for (final pending in _pending.values) {
+-      pending.completeError(StateError('Speech worker closed'));
+-    }
+-    _pending.clear();
++    _failPending('Speech worker closed');
+     _messages.close();
+   }
+ 
+@@ -114,6 +258,10 @@
+         return;
+       }
+       final request = message as List;
++      if (request[0] == 'ping') {
++        reply.send(['pong', request[1]]);
++        return;
++      }
+       try {
+         final audio = engine.generate(
+           text: request[1] as String,
+--- a/lib/features/reader/presentation/tag_playback/tag_playback_controller.dart
++++ b/lib/features/reader/presentation/tag_playback/tag_playback_controller.dart
+@@ -205,7 +205,7 @@
+       if (_playRequested) return;
+       _playRequested = true;
+       if (_audioStarted) {
+-        unawaited(_player.resume());
++        unawaited(_resumeAudio());
+       } else {
+         _drive();
+       }
+@@ -226,6 +226,18 @@
+     _pump();
+     _drive();
+     _notify();
++  }
++
++  /// A resume that fails (the player or audio session is gone after a long
++  /// pause) ends the pass with a visible error rather than an unhandled one.
++  Future<void> _resumeAudio() async {
++    final epoch = _epoch;
++    try {
++      await _player.resume();
++    } catch (error) {
++      if (_disposed || epoch != _epoch) return;
++      _fail('Speech stopped: could not resume ($error)');
++    }
+   }
+ 
+   void pause() {
+--- a/lib/features/reader/presentation/tag_playback/tag_playback_kokoro_adapters.dart
++++ b/lib/features/reader/presentation/tag_playback/tag_playback_kokoro_adapters.dart
+@@ -5,6 +5,7 @@
+ import 'package:flutter/foundation.dart';
+ 
+ import '../../../../core/audio/narration_diagnostics.dart';
++import '../../../../core/audio/narration_media_session.dart';
+ import '../kokoro_mac_test_narrator.dart';
+ import 'tag_playback_models.dart';
+ import 'tag_playback_ports.dart';
+@@ -98,6 +99,27 @@
+     await idle.setSource(DeviceFileSource(path));
+   }
+ 
++  /// How long a player gets to start before the attempt is a failure the
++  /// controller can report, instead of an await that never returns.
++  static const _startTimeout = Duration(seconds: 20);
++
++  /// Runs [body] with the audio session asserted first (audioplayers lets it
++  /// go whenever nothing is playing) and a deadline, logging any failure.
++  Future<void> _start(String what, Future<void> Function() body) async {
++    try {
++      await NarrationMediaSession.instance.activateAudioSession('tag $what');
++      await body().timeout(
++        _startTimeout,
++        onTimeout: () => throw TimeoutException(
++          'audio did not start within ${_startTimeout.inSeconds} s',
++        ),
++      );
++    } catch (error) {
++      NarrationDiagnostics.log('tag audio $what FAILED: $error');
++      rethrow;
++    }
++  }
++
+   @override
+   Future<void> play(String path) async {
+     final preloaded = _preloadedPath == path;
+@@ -106,19 +128,21 @@
+     // short clip's completion is not dropped.
+     _active = 1 - _active;
+     final player = _players[_active];
+-    await player.setPlaybackRate(_playbackRate);
+-    if (preloaded) {
+-      await player.resume();
+-    } else {
+-      await player.play(DeviceFileSource(path));
+-    }
++    await _start('play', () async {
++      await player.setPlaybackRate(_playbackRate);
++      if (preloaded) {
++        await player.resume();
++      } else {
++        await player.play(DeviceFileSource(path));
++      }
++    });
+   }
+ 
+   @override
+   Future<void> pause() => _players[_active].pause();
+ 
+   @override
+-  Future<void> resume() => _players[_active].resume();
++  Future<void> resume() => _start('resume', _players[_active].resume);
+ 
+   @override
+   Future<void> stop() async {
+--- a/test/core/audio/fake_narration_media_platform.dart
++++ b/test/core/audio/fake_narration_media_platform.dart
+@@ -4,6 +4,8 @@
+ class FakeNarrationMediaPlatform implements NarrationMediaPlatform {
+   int begins = 0;
+   int ends = 0;
++  int activations = 0;
++  bool activationSucceeds = true;
+   final List<Map<String, Object?>> nowPlaying = [];
+   final List<bool> buffering = [];
+ 
+@@ -22,6 +24,11 @@
+       nowPlaying.add(info);
+   @override
+   Future<void> setBuffering(bool value) async => buffering.add(value);
++  @override
++  Future<bool> activate() async {
++    activations++;
++    return activationSucceeds;
++  }
+ }
+ 
+ NarrationMediaSession fakeSession(FakeNarrationMediaPlatform platform) =>

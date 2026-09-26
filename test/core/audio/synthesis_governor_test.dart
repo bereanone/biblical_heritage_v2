@@ -79,4 +79,122 @@ void main() {
     await governor.run(() => job(2, 4000, starts));
     expect(starts, ['1@$t0', '2@${t0 + 4000}']);
   });
+
+  group('lead-aware pacing', () {
+    late Duration? lead;
+
+    SynthesisGovernor leadAware() => SynthesisGovernor(
+      isThrottled: () => throttled,
+      duty: 0.5,
+      lead: () => lead,
+      log: logs.add,
+      now: () => clock,
+      delay: (wait) async => clock = clock.add(wait),
+    );
+
+    test('a healthy lead keeps the throttle', () async {
+      lead = const Duration(seconds: 60);
+      governor = leadAware();
+      final starts = <String>[];
+      final t0 = clock.millisecondsSinceEpoch;
+      await governor.run(() => job(1, 4000, starts));
+      await governor.run(() => job(2, 4000, starts));
+      expect(starts, ['1@$t0', '2@${t0 + 8000}']);
+      expect(logs.last, contains('waited=4000ms'));
+      expect(logs.last, contains('lead=60.0s'));
+    });
+
+    test('a low lead runs flat out and owes no idle time', () async {
+      lead = const Duration(seconds: 10);
+      governor = leadAware();
+      final starts = <String>[];
+      final t0 = clock.millisecondsSinceEpoch;
+      await governor.run(() => job(1, 4000, starts));
+      await governor.run(() => job(2, 4000, starts));
+      expect(starts, ['1@$t0', '2@${t0 + 4000}']);
+      expect(logs.first, contains('synth catch-up begin lead=10.0s'));
+      expect(
+        logs.where((l) => l.startsWith('synth catch-up busy')),
+        hasLength(2),
+      );
+    });
+
+    test('an empty lead, a clip being awaited, is the same as low', () async {
+      lead = Duration.zero;
+      governor = leadAware();
+      final starts = <String>[];
+      final t0 = clock.millisecondsSinceEpoch;
+      await governor.run(() => job(1, 4000, starts));
+      await governor.run(() => job(2, 4000, starts));
+      expect(starts.last, '2@${t0 + 4000}');
+    });
+
+    test(
+      'catch-up holds until the lead is rebuilt, then pacing resumes',
+      () async {
+        lead = const Duration(seconds: 10);
+        governor = leadAware();
+        final starts = <String>[];
+        final t0 = clock.millisecondsSinceEpoch;
+        await governor.run(() => job(1, 4000, starts));
+        lead = const Duration(seconds: 40); // above 30 s but below 45 s
+        await governor.run(() => job(2, 4000, starts));
+        expect(
+          starts.last,
+          '2@${t0 + 4000}',
+          reason: 'hysteresis: still catching up',
+        );
+        lead = const Duration(seconds: 50);
+        await governor.run(() => job(3, 4000, starts));
+        expect(logs, contains('synth catch-up end lead=50.0s'));
+        await governor.run(() => job(4, 4000, starts));
+        // Job 3 ran paced and owes 4 s idle before job 4.
+        expect(starts.last, '4@${t0 + 8000 + 4000 + 4000}');
+      },
+    );
+
+    test('a lead that falls during an idle ends the idle early', () async {
+      lead = const Duration(seconds: 60);
+      var idles = 0;
+      governor = SynthesisGovernor(
+        isThrottled: () => throttled,
+        duty: 0.5,
+        lead: () => lead,
+        log: logs.add,
+        now: () => clock,
+        delay: (wait) async {
+          clock = clock.add(wait);
+          if (++idles == 2) lead = const Duration(seconds: 5);
+        },
+      );
+      final starts = <String>[];
+      final t0 = clock.millisecondsSinceEpoch;
+      await governor.run(() => job(1, 10000, starts)); // owes 10 s idle
+      await governor.run(() => job(2, 1000, starts));
+      // Two 1 s polls, then the lead collapsed and the job ran at once.
+      expect(starts.last, '2@${t0 + 10000 + 2000}');
+    });
+
+    test('nobody listening keeps the throttle', () async {
+      lead = null;
+      governor = leadAware();
+      final starts = <String>[];
+      final t0 = clock.millisecondsSinceEpoch;
+      await governor.run(() => job(1, 4000, starts));
+      await governor.run(() => job(2, 4000, starts));
+      expect(starts.last, '2@${t0 + 8000}');
+    });
+
+    test('the foreground is never paced whatever the lead', () async {
+      throttled = false;
+      lead = const Duration(seconds: 90);
+      governor = leadAware();
+      final starts = <String>[];
+      final t0 = clock.millisecondsSinceEpoch;
+      await governor.run(() => job(1, 4000, starts));
+      await governor.run(() => job(2, 4000, starts));
+      expect(starts.last, '2@${t0 + 4000}');
+      expect(logs, isEmpty);
+    });
+  });
 }

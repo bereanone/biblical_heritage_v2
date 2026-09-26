@@ -404,14 +404,15 @@ void main() {
   });
 
   group('failures', () {
-    test('a clip that fails to synthesize is skipped, not fatal', () async {
+    test('a clip that fails to synthesize stops at its reference', () async {
       final h = Harness(entries(4));
       h.renderer.failing.add('v1.0');
       h.controller.play();
       await h.settle();
       await h.runToEnd();
-      expect(h.player.playedTexts, ['v0.0', 'v2.0', 'v3.0']);
-      expect(h.controller.status, TagPlaybackStatus.finished);
+      expect(h.player.playedTexts, ['v0.0']);
+      expect(h.controller.status, TagPlaybackStatus.error);
+      expect(h.controller.errorMessage, contains('Ref 1'));
       h.controller.dispose();
     });
 
@@ -430,7 +431,7 @@ void main() {
     });
 
     test(
-      'a hung render times out, is skipped, and is discarded if it ever lands',
+      'a hung render stops at its reference and is discarded if it lands',
       () async {
         final h = Harness(
           entries(3),
@@ -445,7 +446,8 @@ void main() {
           h.renderer.complete(path);
         }
         await Future<void>.delayed(const Duration(milliseconds: 120));
-        expect(h.player.playedTexts.first, 'v1.0');
+        expect(h.player.playedTexts, isEmpty);
+        expect(h.controller.status, TagPlaybackStatus.error);
         h.renderer.complete(hung);
         await h.settle();
         expect(h.renderer.discarded, contains(hung));

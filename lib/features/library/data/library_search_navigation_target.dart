@@ -4,6 +4,8 @@ class LibrarySearchNavigationTarget {
     required this.textBlockId,
     required this.href,
     required this.paragraphIndex,
+    this.canonicalBlockId,
+    this.canonicalContentHash,
     this.spineIndex,
     this.sectionTitle,
     this.paragraphOnSection,
@@ -18,6 +20,10 @@ class LibrarySearchNavigationTarget {
 
   final String libraryItemId;
   final int textBlockId;
+
+  /// Exact destination when the result came from canonical reading content.
+  final String? canonicalBlockId;
+  final String? canonicalContentHash;
   final String href;
   final int paragraphIndex;
   final int? spineIndex;
@@ -35,6 +41,8 @@ class LibrarySearchNavigationTarget {
       LibrarySearchNavigationTarget(
         libraryItemId: libraryItemId,
         textBlockId: textBlockId,
+        canonicalBlockId: canonicalBlockId,
+        canonicalContentHash: canonicalContentHash,
         href: href,
         paragraphIndex: paragraphIndex,
         spineIndex: spineIndex,

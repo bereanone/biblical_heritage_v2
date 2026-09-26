@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:studybible2/features/reader/presentation/tag_playback/tag_playback_models.dart';
 
@@ -5,6 +7,73 @@ import 'tag_playback_fakes.dart';
 
 void main() {
   group('ordering and notes', () {
+    test(
+      'Hebrews verse, note, then Romans verse plays without timing data',
+      () async {
+        final h = Harness([
+          fakeItem(0, notes: 1, label: 'Hebrews 12:14'),
+          fakeItem(1, label: 'Romans 6:17'),
+        ]);
+        h.controller.play();
+        await h.settle();
+        expect(h.renderer.requestedTexts, contains('v1.0'));
+        await h.runToEnd();
+        expect(h.player.playedTexts, ['v0.0', 'n0.0', 'v1.0']);
+        expect(h.controller.status, TagPlaybackStatus.finished);
+        h.controller.dispose();
+      },
+    );
+
+    test(
+      'a player stall at Romans stops visibly without skipping it',
+      () async {
+        final h = Harness([
+          fakeItem(0, notes: 1, label: 'Hebrews 12:14'),
+          fakeItem(1, label: 'Romans 6:17'),
+          fakeItem(2, label: 'John 1:1'),
+        ]);
+        h.controller.play();
+        await h.settle();
+        await h.finishClip();
+        await h.finishClip();
+        expect(h.player.playedTexts.last, 'v1.0');
+        h.player.failCurrent(TimeoutException('playhead stopped'));
+        await h.settle();
+        expect(h.controller.status, TagPlaybackStatus.error);
+        expect(h.controller.errorMessage, contains('playhead stopped'));
+        expect(h.player.playedTexts, isNot(contains('v2.0')));
+        h.controller.dispose();
+      },
+    );
+
+    test(
+      'stopping while the next verse renders discards its late audio',
+      () async {
+        final h = Harness([
+          fakeItem(0, notes: 1, label: 'Hebrews 12:14'),
+          fakeItem(1, label: 'Romans 6:17'),
+        ], auto: false);
+        h.controller.play();
+        await h.settle();
+        final pending = h.renderer.pendingPaths.toList();
+        for (final path in pending) {
+          h.renderer.complete(path);
+        }
+        await h.settle();
+        await h.finishClip();
+        final romans = h.renderer.pendingPaths.singleWhere(
+          (path) => path.contains('v1.0'),
+        );
+        h.controller.stop();
+        h.renderer.complete(romans);
+        await h.settle();
+        expect(h.controller.status, TagPlaybackStatus.idle);
+        expect(h.player.playedTexts, isNot(contains('v1.0')));
+        expect(h.renderer.discarded, contains(romans));
+        h.controller.dispose();
+      },
+    );
+
     test(
       'speaks each entry verse first, then its note, in list order',
       () async {

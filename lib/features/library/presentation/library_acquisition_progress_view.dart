@@ -20,6 +20,7 @@ class LibraryAcquisitionProgressView extends StatelessWidget {
     this.onCancel,
     this.onRetryFailed,
     this.onDone,
+    this.onOpenReady,
     this.doneLabel = 'Done',
   });
 
@@ -42,6 +43,9 @@ class LibraryAcquisitionProgressView extends StatelessWidget {
   /// dead-end summary with no next step but the app bar's back arrow.
   final VoidCallback? onDone;
 
+  /// Optional direct action for a single successfully prepared book.
+  final VoidCallback? onOpenReady;
+
   /// Label for the [onDone] button.
   final String doneLabel;
 
@@ -55,6 +59,7 @@ class LibraryAcquisitionProgressView extends StatelessWidget {
         result: finished,
         onRetryFailed: onRetryFailed,
         onDone: onDone,
+        onOpenReady: onOpenReady,
         doneLabel: doneLabel,
       );
     }
@@ -117,12 +122,14 @@ class _ResultView extends StatefulWidget {
     required this.result,
     this.onRetryFailed,
     this.onDone,
+    this.onOpenReady,
     this.doneLabel = 'Done',
   });
 
   final LibraryAcquisitionBatchResult result;
   final VoidCallback? onRetryFailed;
   final VoidCallback? onDone;
+  final VoidCallback? onOpenReady;
   final String doneLabel;
 
   @override
@@ -190,10 +197,15 @@ class _ResultViewState extends State<_ResultView> {
         ],
         if (widget.onDone != null) ...[
           const SizedBox(height: 16),
-          FilledButton(
-            onPressed: widget.onDone,
-            child: Text(widget.doneLabel),
-          ),
+          if (result.readyCount == 1 && widget.onOpenReady != null) ...[
+            FilledButton.icon(
+              onPressed: widget.onOpenReady,
+              icon: const Icon(Icons.menu_book_outlined),
+              label: const Text('Open Book'),
+            ),
+            const SizedBox(height: 8),
+          ],
+          FilledButton(onPressed: widget.onDone, child: Text(widget.doneLabel)),
         ],
       ],
     );

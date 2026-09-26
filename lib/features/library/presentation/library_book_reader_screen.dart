@@ -14,6 +14,7 @@ import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/library_root_native.dart';
 import '../../../core/database/elibrary_read_resolver.dart';
+import '../../../core/database/study_bible_database.dart';
 import '../../../core/database/user_database.dart';
 import '../../../core/theme/app_theme_mode.dart';
 import '../../../core/theme/app_settings_service.dart';
@@ -28,7 +29,6 @@ import '../../reader/data/commentary_research_library_service.dart';
 import '../../reader/presentation/highlight_render.dart';
 import '../../reader/presentation/tag_quick_apply_helper.dart';
 import '../../reader/presentation/tag_screen_launcher.dart';
-import '../../reader/presentation/tag_dialog_styles.dart';
 import '../../reader/presentation/reader_search_mode_picker.dart';
 import '../../reader/presentation/viewer_search_dialog.dart';
 import '../../reader/presentation/viewer_passage_models.dart';
@@ -47,7 +47,14 @@ import 'reader_tilt_motion_source.dart';
 import 'reader_tilt_preferences.dart';
 import 'mac_reader_autoscroll_controller.dart';
 import 'mac_reader_autoscroll_controls.dart';
+import 'library_narration_media_controls.dart';
+import 'library_speech_controls.dart';
+import 'library_speech_scroll_follower.dart';
 import 'canonical_library_reader.dart';
+import '../data/library_citation_links.dart';
+import 'library_verse_popup.dart';
+import 'library_book_reader_selection_menu.dart';
+export 'library_book_reader_selection_menu.dart';
 import '../../reader/presentation/text_range_geometry.dart';
 import '../../utilities/data/pioneer_captured_html_import_folder_service.dart';
 import '../../utilities/data/pioneer_book_package_import_service.dart';
@@ -59,8 +66,9 @@ part 'epub_body_block_parser.dart';
 part 'library_contents_popup.dart';
 part 'library_reader_bottom_bar.dart';
 part 'library_book_reader_range_selection.dart';
-part 'library_book_reader_selection_menu.dart';
+
 part 'library_book_reader_screen_helpers.dart';
+part 'library_search_hit_navigator.dart';
 
 const bool _enableTextRangeGeometry = false;
 const bool elibraryAutomaticTiltChapterTransitionsEnabled = false;
@@ -154,6 +162,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   List<LibraryBookSection> _sections = const [];
   List<LibraryCatalogNavigationItem> _navigationItems = const [];
   int _selectedIndex = 0;
+  String? _speechCursor;
   List<int> _readableSectionIndices = const <int>[];
   LibraryContinuousSectionWindow? _sectionWindow;
   final LibrarySectionVisibilityHysteresis _sectionVisibilityHysteresis =
@@ -178,6 +187,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       <String, Map<int, String>>{};
   Map<String, List<ElibraryMarkupRecord>> _elibraryMarkupsByHref =
       <String, List<ElibraryMarkupRecord>>{};
+  bool Function(String book, String locator)? _citationResolves;
 
   String get _geometryScopeId {
     final section = _sections.isEmpty
@@ -202,6 +212,14 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     );
     _steadyAutoScroll = MacReaderAutoScrollController(
       scrollTarget: _tiltScrollTarget,
+      // The toolbar's steady-autoscroll button is hidden on iOS
+      // (libraryReaderUsesSteadyAutoscroll), so this controller is otherwise
+      // unused there — safe to widen into narration mode, matching the
+      // Kokoro-confirmed-on-iOS path already used by canonical_library_reader
+      // and bible_explorer_screen.
+      narrationControlsPacing:
+          defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.iOS,
     )..addListener(_onMacAutoscrollChanged);
     _tiltScrollTarget.attach(_scrollContinuousDocument);
     _loadTiltPreferences();
@@ -211,10 +229,35 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     _lastSearchTerm = initialSearchTerm.isNotEmpty ? initialSearchTerm : null;
     _itemPositionsListener.itemPositions.addListener(_onBodyScroll);
     _load();
+    unawaited(_loadCitationResolver());
+  }
+
+  // Loaded once per reader session, app-wide: every detected reference is
+  // checked against this before it is ever underlined, so a reference that
+  // cannot resolve in the popup is never shown as if it could.
+  Future<void> _loadCitationResolver() async {
+    try {
+      final db = StudyBibleDatabase.instance;
+      final books = await db.loadBooks();
+      final verseCounts = await db.loadVerseCounts();
+      if (!mounted) return;
+      setState(() {
+        _citationResolves = (book, locator) =>
+            libraryCitationResolves(book, locator, books, verseCounts);
+      });
+    } catch (error) {
+      // Fail closed: ordinary text stays readable, but references are not
+      // presented as tappable when the installed Bible could not be checked.
+      debugPrint('Library citation resolver unavailable: $error');
+      if (mounted) setState(() => _citationResolves = (_, _) => false);
+    }
   }
 
   @override
   void dispose() {
+    for (final recognizer in _citationRecognizers.values) {
+      recognizer.dispose();
+    }
     WidgetsBinding.instance.removeObserver(this);
     _tiltAutoScroll.dispose();
     _steadyAutoScroll
@@ -229,6 +272,26 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   }
 
   Timer? _geometryDebounce;
+
+  final _citationRecognizers = <String, TapGestureRecognizer>{};
+
+  GestureRecognizer _citationRecognizer(String href) =>
+      _citationRecognizers.putIfAbsent(
+        href,
+        () => TapGestureRecognizer()
+          ..onTap = () async {
+            _steadyAutoScroll.stopForManualInteraction();
+            await _tiltAutoScroll.stop();
+            if (!mounted) return;
+            await showLibraryVersePopup(
+              context,
+              Uri.decodeComponent(
+                href.substring('studybible-citation:'.length),
+              ),
+              _fontScale * _zoomScale,
+            );
+          },
+      );
 
   void _onBodyScroll() {
     if (_windowUpdateScheduled || _bodyScrollPosition == null) return;
@@ -311,6 +374,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       lastNonzeroStep: _steadyAutoScroll.lastNonzeroStep,
       maximumStep: _steadyAutoScroll.maximumStep,
       statusBannerMode: _steadyAutoScroll.statusBannerMode,
+      audioEnabled: _steadyAutoScroll.audioEnabled,
+      speechRate: _steadyAutoScroll.speechRate,
+      announceChapter: _steadyAutoScroll.announceChapter,
+      announceVerseNumbers: _steadyAutoScroll.announceVerseNumbers,
     );
     _readerShortcutsSuspended = true;
     final preferences = await (defaultTargetPlatform == TargetPlatform.macOS
@@ -330,6 +397,98 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     _readerFocusNode.requestFocus();
   }
 
+  String _initialSpeechCursor() {
+    final section = _contentSectionForIndex(_selectedIndex);
+    final visible = _visibleBlockForSection(_selectedIndex);
+    final index = visible == null ? 0 : section?.blocks.indexOf(visible) ?? 0;
+    return '$_selectedIndex:${index < 0 ? 0 : index}';
+  }
+
+  Future<LibrarySpeechItem?> _loadLibrarySpeechItem(String cursor) async {
+    final parts = cursor.split(':');
+    final sectionIndex = int.parse(parts[0]);
+    final startBlock = int.parse(parts[1]);
+    final startSection = _readableSectionIndices.indexOf(sectionIndex);
+    if (startSection < 0) return null;
+    for (
+      var position = startSection;
+      position < _readableSectionIndices.length;
+      position++
+    ) {
+      final index = _readableSectionIndices[position];
+      final section = _contentSectionForIndex(index);
+      if (section == null) continue;
+      for (
+        var blockIndex = position == startSection ? startBlock : 0;
+        blockIndex < section.blocks.length;
+        blockIndex++
+      ) {
+        final block = section.blocks[blockIndex];
+        if (block.kind == 'image' ||
+            block.kind == 'horizontalRule' ||
+            block.text.trim().isEmpty) {
+          continue;
+        }
+        return LibrarySpeechItem(
+          cursor: '$index:$blockIndex',
+          nextCursor: '$index:${blockIndex + 1}',
+          text: block.text,
+        );
+      }
+    }
+    return null;
+  }
+
+  Future<void> _revealLibrarySpeechItem(LibrarySpeechItem item) async {
+    if (!mounted) return;
+    final parts = item.sourceCursor.split(':');
+    final sectionIndex = int.parse(parts[0]);
+    final blockIndex = int.parse(parts[1]);
+    if (item.startOffset > 0) {
+      // Later slices of a long paragraph: keep the spoken part on screen.
+      if (!_steadyAutoScroll.isScrolling) return;
+      final block = _contentSectionForIndex(sectionIndex)?.blocks[blockIndex];
+      final context = block == null
+          ? null
+          : _bodyBlockKeys[_blockTargetKey(block, blockIndex)]?.currentContext;
+      if (context != null) {
+        unawaited(
+          followSpeechInBlock(
+            blockContext: context,
+            progress: librarySpeechProgress(
+              item.startOffset,
+              item.sourceLength,
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    final changedSection = _selectedIndex != sectionIndex;
+    if (changedSection) _selectSection(sectionIndex, forNarration: true);
+    setState(() => _speechCursor = item.sourceCursor);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !_steadyAutoScroll.isScrolling) return;
+    if (changedSection && _itemScrollController.isAttached) {
+      _itemScrollController.jumpTo(
+        index: _readableSectionIndices.indexOf(sectionIndex),
+        alignment: 0,
+      );
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    if (!mounted || !_steadyAutoScroll.isScrolling) return;
+    final block = _contentSectionForIndex(sectionIndex)!.blocks[blockIndex];
+    final target =
+        _bodyBlockKeys[_blockTargetKey(block, blockIndex)]?.currentContext;
+    if (target != null && target.mounted) {
+      await Scrollable.ensureVisible(
+        target,
+        alignment: .1,
+        duration: const Duration(milliseconds: 180),
+      );
+    }
+  }
+
   void _onMacAutoscrollChanged() {
     if (!mounted) return;
     final controller = _steadyAutoScroll;
@@ -342,6 +501,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
           lastNonzeroStep: controller.lastNonzeroStep,
           maximumStep: controller.maximumStep,
           statusBannerMode: controller.statusBannerMode,
+          audioEnabled: controller.audioEnabled,
+          speechRate: controller.speechRate,
+          announceChapter: controller.announceChapter,
+          announceVerseNumbers: controller.announceVerseNumbers,
         ),
       ),
     );
@@ -354,10 +517,14 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   }
 
   void _toggleTiltAutoscroll() {
+    if (_steadyAutoScroll.audioEnabled) {
+      _steadyAutoScroll.setSignedStep(_steadyAutoScroll.isScrolling ? 0 : 1);
+      return;
+    }
     if (_tiltAutoScroll.isActive) {
       _tiltAutoScroll.stop();
     } else {
-      _steadyAutoScroll.stopWithoutNotification();
+      _steadyAutoScroll.stopForManualInteraction();
       _tiltAutoScroll.activate();
     }
   }
@@ -368,10 +535,12 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   }
 
   Future<void> _openTiltSettings() async {
+    _steadyAutoScroll.stopForManualInteraction();
     await _tiltAutoScroll.stop();
     if (!mounted) return;
     await showReaderTiltSettingsSheet(
       context,
+      speechController: _steadyAutoScroll,
       preferences: _tiltAutoScroll.preferences,
       includeChapterTilt: true,
       onChanged: _saveTiltPreferences,
@@ -437,14 +606,16 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
       _tiltAutoScroll.stop();
-      _steadyAutoScroll.stopWithoutNotification();
+      // iOS keeps narrating behind a locked screen; stopping here would end it.
+      if (librarySpeechSurvivesBackground(_steadyAutoScroll)) return;
+      _steadyAutoScroll.stopForManualInteraction();
     }
   }
 
   @override
   void deactivate() {
     _tiltAutoScroll.stop(notify: false);
-    _steadyAutoScroll.stopWithoutNotification();
+    _steadyAutoScroll.stopForManualInteraction();
     super.deactivate();
   }
 
@@ -1004,6 +1175,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
           sectionBlocks: sectionBlocks,
         );
         return;
+      case LibrarySelectionRangeAction.underline:
+        return; // This legacy renderer does not offer underlining.
       case LibrarySelectionRangeAction.highlight:
         final chosenColor = await showElibraryHighlightColorPicker(context);
         if (!mounted || chosenColor == null) return;
@@ -1025,6 +1198,15 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
           section: section,
           sectionBlocks: sectionBlocks,
           selectedText: selectedText,
+        );
+        return;
+      case LibrarySelectionRangeAction.chooseHashTag:
+        await _addElibraryHashTagForSelection(
+          item: item,
+          section: section,
+          sectionBlocks: sectionBlocks,
+          selectedText: selectedText,
+          chooseTag: true,
         );
         return;
       case LibrarySelectionRangeAction.clearMarkup:
@@ -1092,12 +1274,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     required String selectedText,
     String? referenceLabel,
   }) async {
-    final trimmedText = selectedText.trimRight();
-    final payload = referenceLabel == null
-        ? trimmedText
-        : trimmedText.isEmpty
-        ? referenceLabel
-        : '$trimmedText\n— $referenceLabel';
+    final payload = buildLibrarySelectionClipboardText(
+      selectedText,
+      referenceLabel: referenceLabel,
+    );
     if (payload.isEmpty) return;
     await Clipboard.setData(ClipboardData(text: payload));
   }
@@ -1378,6 +1558,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     required LibraryBookSection? section,
     required List<LibraryBookBlock> sectionBlocks,
     required String selectedText,
+    bool chooseTag = false,
   }) async {
     if (section == null) return;
     final selectionRange = _librarySelectionCharRange(
@@ -1402,7 +1583,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       await repository.loadDefaultTag() ?? '',
     );
     if (!mounted) return;
-    if (defaultTag.isNotEmpty) {
+    if (!chooseTag && defaultTag.isNotEmpty) {
       final result = await _applyElibraryHashTagSelectionToTag(
         repository: repository,
         item: item,
@@ -1591,11 +1772,6 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Removed "${widget.item.displayTitle}" from eLibrary.'),
-      ),
-    );
     await _closeToLibrary();
   }
 
@@ -1872,7 +2048,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     return firstBelowProbe;
   }
 
-  void _selectSection(int index) {
+  void _selectSection(int index, {bool forNarration = false}) {
+    if (!forNarration) _steadyAutoScroll.pauseNarrationForInteraction();
     if (index < 0 || index >= _sections.length) return;
     final navIndex = _navigationIndexForSectionIndex(index);
     final generation = ++_chapterGeneration;
@@ -1910,7 +2087,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     _sectionVisibilityHysteresis.reset();
     _publishLiveSectionLocation(generation);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && generation == _chapterGeneration) {
+      if (mounted && !forNarration && generation == _chapterGeneration) {
         _scrollToSectionUnit(_selectedIndex);
       }
     });
@@ -4023,95 +4200,104 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       }
       final targetKey = _blockTargetKey(block, index);
       children.add(
-        _SectionBlockView(
-          key: active
-              ? _keyForBlock(targetKey)
-              : ValueKey('${contentSection.entryName}:block:$index'),
-          block: block,
-          blockIndex: index,
-          geometryRegistry: _geometryRegistry,
-          geometryScopeId:
-              'elibrary:${widget.item.id}:${contentSection.entryName}',
-          geometryRevision: _enableTextRangeGeometry ? _geometryTick : 0,
-          sectionTitle: title,
-          sectionEntryName: contentSection.entryName,
-          paragraphIndex: isParagraph ? paragraphIndex : null,
-          textColor: textColor,
-          subduedColor: subduedColor,
-          bodyFontSize: bodyFontSize,
-          searchQuery: widget.searchQuery,
-          highlightTerms: widget.highlightTerms,
-          topPadding: index == 0 ? 0 : (block.isHeading ? 18 : 6),
-          bottomPadding: block.isHeading ? 12 : 14,
-          isNightMode: isNight,
-          showRefCodes: _showRefCodes,
-          referenceCode: referenceCode,
-          hasUserMarkup: markups.isNotEmpty,
-          selectionHighlightSpec: selectionSpec,
-          rangeSelection: active
-              ? _rangeSelection
-              : const LibraryRangeSelection(),
-          persistedHighlights: markups,
-          onBlockTap:
-              active &&
-                  _rangeSelection.hasCompletedRange &&
-                  _rangeSelection.containsBlock(index)
-              ? () => _showLibrarySelectionActionsMenu(
-                  item: item,
-                  section: contentSection,
-                  sectionBlocks: blocks,
-                )
-              : null,
-          onWordLongPress: active
-              ? (token) => _handleLibraryWordLongPress(
-                  blockIndex: index,
-                  tokenIndex: token,
-                )
-              : (_) {},
-          onWordLongPressMove: active
-              ? (token) => _handleLibraryWordLongPressMove(
-                  blockIndex: index,
-                  tokenIndex: token,
-                )
-              : (_) {},
-          onWordLongPressMoveDetails: active
-              ? (details) {
-                  final hit = _resolveLibraryDragTokenHit(
-                    globalPosition: details.globalPosition,
+        ColoredBox(
+          color: _speechCursor == '$sectionIndex:$index'
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: .16)
+              : Colors.transparent,
+          child: _SectionBlockView(
+            citationRecognizer: _citationResolves != null
+                ? _citationRecognizer
+                : null,
+            citationResolves: _citationResolves,
+            key: active
+                ? _keyForBlock(targetKey)
+                : ValueKey('${contentSection.entryName}:block:$index'),
+            block: block,
+            blockIndex: index,
+            geometryRegistry: _geometryRegistry,
+            geometryScopeId:
+                'elibrary:${widget.item.id}:${contentSection.entryName}',
+            geometryRevision: _enableTextRangeGeometry ? _geometryTick : 0,
+            sectionTitle: title,
+            sectionEntryName: contentSection.entryName,
+            paragraphIndex: isParagraph ? paragraphIndex : null,
+            textColor: textColor,
+            subduedColor: subduedColor,
+            bodyFontSize: bodyFontSize,
+            searchQuery: widget.searchQuery,
+            highlightTerms: widget.highlightTerms,
+            topPadding: index == 0 ? 0 : (block.isHeading ? 18 : 6),
+            bottomPadding: block.isHeading ? 12 : 14,
+            isNightMode: isNight,
+            showRefCodes: _showRefCodes,
+            referenceCode: referenceCode,
+            hasUserMarkup: markups.isNotEmpty,
+            selectionHighlightSpec: selectionSpec,
+            rangeSelection: active
+                ? _rangeSelection
+                : const LibraryRangeSelection(),
+            persistedHighlights: markups,
+            onBlockTap:
+                active &&
+                    _rangeSelection.hasCompletedRange &&
+                    _rangeSelection.containsBlock(index)
+                ? () => _showLibrarySelectionActionsMenu(
+                    item: item,
+                    section: contentSection,
                     sectionBlocks: blocks,
-                    preferredBlockIndex: index,
-                    bodyFontSize: bodyFontSize,
-                    textColor: textColor,
-                    isNightMode: isNight,
-                    highlightQuery: widget.searchQuery,
-                    highlightTerms: widget.highlightTerms,
-                    textDirection: Directionality.of(context),
-                  );
-                  if (hit == null) return;
-                  _handleLibraryWordLongPressMove(
-                    blockIndex: hit.blockIndex,
-                    tokenIndex: hit.tokenIndex,
-                  );
-                }
-              : null,
-          onWordTap: active
-              ? (token) {
-                  if (_rangeSelection.hasCompletedRange &&
-                      _rangeSelection.containsTokenPosition(index, token)) {
-                    _showLibrarySelectionActionsMenu(
-                      item: item,
-                      section: contentSection,
+                  )
+                : null,
+            onWordLongPress: active
+                ? (token) => _handleLibraryWordLongPress(
+                    blockIndex: index,
+                    tokenIndex: token,
+                  )
+                : (_) {},
+            onWordLongPressMove: active
+                ? (token) => _handleLibraryWordLongPressMove(
+                    blockIndex: index,
+                    tokenIndex: token,
+                  )
+                : (_) {},
+            onWordLongPressMoveDetails: active
+                ? (details) {
+                    final hit = _resolveLibraryDragTokenHit(
+                      globalPosition: details.globalPosition,
                       sectionBlocks: blocks,
+                      preferredBlockIndex: index,
+                      bodyFontSize: bodyFontSize,
+                      textColor: textColor,
+                      isNightMode: isNight,
+                      highlightQuery: widget.searchQuery,
+                      highlightTerms: widget.highlightTerms,
+                      textDirection: Directionality.of(context),
                     );
-                  } else if (_rangeSelection.hasCompletedRange) {
-                    _clearLibraryRangeSelection();
+                    if (hit == null) return;
+                    _handleLibraryWordLongPressMove(
+                      blockIndex: hit.blockIndex,
+                      tokenIndex: hit.tokenIndex,
+                    );
                   }
-                }
-              : (_) {},
-          textKey: active
-              ? _textKeyForBlock(targetKey)
-              : ValueKey('${contentSection.entryName}:text:$index'),
-          diagnosticLoggingEnabled: false,
+                : null,
+            onWordTap: active
+                ? (token) {
+                    if (_rangeSelection.hasCompletedRange &&
+                        _rangeSelection.containsTokenPosition(index, token)) {
+                      _showLibrarySelectionActionsMenu(
+                        item: item,
+                        section: contentSection,
+                        sectionBlocks: blocks,
+                      );
+                    } else if (_rangeSelection.hasCompletedRange) {
+                      _clearLibraryRangeSelection();
+                    }
+                  }
+                : (_) {},
+            textKey: active
+                ? _textKeyForBlock(targetKey)
+                : ValueKey('${contentSection.entryName}:text:$index'),
+            diagnosticLoggingEnabled: false,
+          ),
         ),
       );
     }
@@ -4178,6 +4364,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         ),
       );
     }
+    final showElibrarySpeechControls =
+        (defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.iOS) &&
+        _sections.isNotEmpty;
     final theme = Theme.of(context);
     final isNight = theme.brightness == Brightness.dark || _nightMode;
     final background = _readerBackgroundColor(theme, isNight);
@@ -4521,74 +4711,80 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                                         ),
                                       ),
                                     )
-                                  : GestureDetector(
-                                      behavior: HitTestBehavior.translucent,
-                                      onTap: () {
-                                        _readerFocusNode.requestFocus();
-                                        if (_tiltAutoScroll.isActive) {
-                                          _tiltAutoScroll.showStatusBanner();
-                                        }
-                                        if (_rangeSelection.hasCompletedRange) {
-                                          _clearLibraryRangeSelection();
-                                        }
-                                      },
-                                      child: NotificationListener<ScrollMetricsNotification>(
-                                        onNotification:
-                                            _handleReaderScrollMetricsNotification,
-                                        child: NotificationListener<ScrollNotification>(
-                                          onNotification: (notification) {
-                                            final notificationContext =
-                                                notification.context;
-                                            if (notificationContext != null) {
-                                              _bodyScrollPosition =
-                                                  Scrollable.maybeOf(
-                                                    notificationContext,
-                                                  )?.position;
-                                            }
-                                            return _handleReaderScrollNotification(
-                                              notification,
-                                            );
-                                          },
-                                          child: ScrollablePositionedList.builder(
-                                            key: _continuousScrollViewKey,
-                                            itemCount:
-                                                _readableSectionIndices.length,
-                                            initialScrollIndex:
-                                                _readableSectionIndices
-                                                    .indexOf(_selectedIndex)
-                                                    .clamp(
-                                                      0,
-                                                      _readableSectionIndices
-                                                              .length -
-                                                          1,
-                                                    ),
-                                            itemScrollController:
-                                                _itemScrollController,
-                                            itemPositionsListener:
-                                                _itemPositionsListener,
-                                            itemBuilder: (context, itemIndex) {
-                                              _bodyScrollPosition ??=
-                                                  Scrollable.maybeOf(
-                                                    context,
-                                                  )?.position;
-                                              final sectionIndex =
-                                                  _readableSectionIndices[itemIndex];
-                                              return _buildContinuousSectionUnit(
-                                                context: context,
-                                                sectionIndex: sectionIndex,
-                                                previousReadableSectionIndex:
-                                                    itemIndex > 0
-                                                    ? _readableSectionIndices[itemIndex -
-                                                          1]
-                                                    : null,
-                                                textColor: textColor,
-                                                subduedColor: subduedColor,
-                                                cardBackground: cardBackground,
-                                                isNight: isNight,
-                                                bodyFontSize: bodyFontSize,
-                                                titleFontSize: titleFontSize,
+                                  : Listener(
+                                      onPointerDown: (_) => _steadyAutoScroll
+                                          .pauseNarrationForInteraction(),
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.translucent,
+                                        onTap: () {
+                                          _readerFocusNode.requestFocus();
+                                          if (_tiltAutoScroll.isActive) {
+                                            _tiltAutoScroll.showStatusBanner();
+                                          }
+                                          if (_rangeSelection
+                                              .hasCompletedRange) {
+                                            _clearLibraryRangeSelection();
+                                          }
+                                        },
+                                        child: NotificationListener<ScrollMetricsNotification>(
+                                          onNotification:
+                                              _handleReaderScrollMetricsNotification,
+                                          child: NotificationListener<ScrollNotification>(
+                                            onNotification: (notification) {
+                                              final notificationContext =
+                                                  notification.context;
+                                              if (notificationContext != null) {
+                                                _bodyScrollPosition =
+                                                    Scrollable.maybeOf(
+                                                      notificationContext,
+                                                    )?.position;
+                                              }
+                                              return _handleReaderScrollNotification(
+                                                notification,
                                               );
                                             },
+                                            child: ScrollablePositionedList.builder(
+                                              key: _continuousScrollViewKey,
+                                              itemCount: _readableSectionIndices
+                                                  .length,
+                                              initialScrollIndex:
+                                                  _readableSectionIndices
+                                                      .indexOf(_selectedIndex)
+                                                      .clamp(
+                                                        0,
+                                                        _readableSectionIndices
+                                                                .length -
+                                                            1,
+                                                      ),
+                                              itemScrollController:
+                                                  _itemScrollController,
+                                              itemPositionsListener:
+                                                  _itemPositionsListener,
+                                              itemBuilder: (context, itemIndex) {
+                                                _bodyScrollPosition ??=
+                                                    Scrollable.maybeOf(
+                                                      context,
+                                                    )?.position;
+                                                final sectionIndex =
+                                                    _readableSectionIndices[itemIndex];
+                                                return _buildContinuousSectionUnit(
+                                                  context: context,
+                                                  sectionIndex: sectionIndex,
+                                                  previousReadableSectionIndex:
+                                                      itemIndex > 0
+                                                      ? _readableSectionIndices[itemIndex -
+                                                            1]
+                                                      : null,
+                                                  textColor: textColor,
+                                                  subduedColor: subduedColor,
+                                                  cardBackground:
+                                                      cardBackground,
+                                                  isNight: isNight,
+                                                  bodyFontSize: bodyFontSize,
+                                                  titleFontSize: titleFontSize,
+                                                );
+                                              },
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -4597,6 +4793,20 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                           ),
                         ),
                       ),
+                      if (showElibrarySpeechControls)
+                        LibrarySpeechControls(
+                          tiltController: _tiltAutoScroll,
+                          controller: _steadyAutoScroll,
+                          bookId: widget.item.id,
+                          title: widget.item.title,
+                          author: widget.item.author,
+                          initialCursor: _initialSpeechCursor,
+                          load: _loadLibrarySpeechItem,
+                          reveal: _revealLibrarySpeechItem,
+                          onPaused: () {
+                            if (mounted) setState(() => _speechCursor = null);
+                          },
+                        ),
                     ],
                   ),
                 ),
@@ -4762,7 +4972,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         ReaderAutoscrollTapShield(
           listenables: <Listenable>[_tiltAutoScroll, _steadyAutoScroll],
           isScrolling: () =>
-              _tiltAutoScroll.isActive || _steadyAutoScroll.isScrolling,
+              _tiltAutoScroll.isActive || _steadyAutoScroll.isPixelScrolling,
           onStop: () {
             _steadyAutoScroll.stopForManualInteraction();
             _tiltAutoScroll.stopSynchronously(
@@ -4817,75 +5027,4 @@ class _GeneratedPageBreakMarkerOccurrence {
   final int pageNumber;
   final bool isInsideParagraph;
   final String preview;
-}
-
-class _SearchHitNavigator extends StatelessWidget {
-  const _SearchHitNavigator({
-    required this.label,
-    required this.canGoPrevious,
-    required this.canGoNext,
-    required this.onPrevious,
-    required this.onNext,
-    required this.textColor,
-    required this.backgroundColor,
-    required this.borderColor,
-  });
-
-  final String label;
-  final bool canGoPrevious;
-  final bool canGoNext;
-  final VoidCallback onPrevious;
-  final VoidCallback onNext;
-  final Color textColor;
-  final Color backgroundColor;
-  final Color borderColor;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final labelStyle = libraryControlTextStyle(
-      context,
-      theme.textTheme.labelLarge,
-      fontWeight: FontWeight.w800,
-      color: textColor,
-    );
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: borderColor),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              onPressed: canGoPrevious ? onPrevious : null,
-              icon: const Icon(Icons.chevron_left),
-              color: textColor,
-              visualDensity: VisualDensity.compact,
-              constraints: const BoxConstraints.tightFor(width: 30, height: 30),
-              padding: EdgeInsets.zero,
-              tooltip: 'Previous hit',
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(label, style: labelStyle),
-            ),
-            IconButton(
-              onPressed: canGoNext ? onNext : null,
-              icon: const Icon(Icons.chevron_right),
-              color: textColor,
-              visualDensity: VisualDensity.compact,
-              constraints: const BoxConstraints.tightFor(width: 30, height: 30),
-              padding: EdgeInsets.zero,
-              tooltip: 'Next hit',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

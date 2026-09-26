@@ -17,6 +17,10 @@ abstract class TagClipPlayer {
   /// Fires once when the clip started by [play] finishes on its own.
   Stream<void> get completions;
 
+  /// A clip that could not start or stopped making progress. The controller
+  /// must report this instead of advancing past the selected entry.
+  Stream<Object> get failures;
+
   /// Hint that [path] will be played next, so the switch can be gapless.
   Future<void> prepareNext(String path);
 

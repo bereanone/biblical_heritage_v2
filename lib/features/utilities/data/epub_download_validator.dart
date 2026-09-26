@@ -345,7 +345,13 @@ class EpubDownloadValidator {
   }
 
   static String _joinEpubPath(String dir, String href) {
-    final cleanHref = href.split('#').first.trim();
+    final encodedHref = href.split('#').first.trim();
+    String cleanHref;
+    try {
+      cleanHref = Uri.decodeComponent(encodedHref);
+    } on FormatException {
+      cleanHref = encodedHref;
+    }
     if (dir.isEmpty) return _normalizePath(cleanHref);
     if (cleanHref.startsWith('/')) return _normalizePath(cleanHref);
     return _normalizePath('$dir/$cleanHref');

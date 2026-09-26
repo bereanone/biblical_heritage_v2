@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'narration_pronunciation.dart';
+import 'database_pronunciation_cues.dart';
 
 /// Speech-only sidecar. Changed source text never receives stored word offsets.
 class BiblePronunciationMap {
@@ -7,6 +8,7 @@ class BiblePronunciationMap {
     : _verses =
           (jsonDecode(json) as Map<String, dynamic>)['verses']
               as Map<String, dynamic>,
+      _knownPronunciations = _parseLexicon(lexicon),
       _knownWords = lexicon
           .split('\n')
           .where((line) => line.trim().isNotEmpty)
@@ -14,10 +16,25 @@ class BiblePronunciationMap {
           .toSet();
   final Map<String, dynamic> _verses;
   final Set<String> _knownWords;
+  final Map<String, Set<String>> _knownPronunciations;
+  static Map<String, Set<String>> _parseLexicon(String text) {
+    final result = <String, Set<String>>{};
+    for (final line in text.split('\n')) {
+      final parts = line.trim().split(RegExp(r'\s+'));
+      if (parts.length > 1) {
+        (result[parts.first.toLowerCase()] ??= <String>{}).add(
+          parts.skip(1).join(' '),
+        );
+      }
+    }
+    return result;
+  }
 
   String prepare(
     String text, {
     int? blockId,
+    String? databaseText,
+    String? databasePronunciation,
     required Map<String, String> corrections,
     Map<String, String> deferredCorrections = const {},
     bool preferDictionary = true,
@@ -44,7 +61,35 @@ class BiblePronunciationMap {
       );
     }
     var spoken = text;
-    final entry = _verses['$blockId'] as Map<String, dynamic>?;
+    var entry = _verses['$blockId'] as Map<String, dynamic>?;
+    if (databaseText != null && databasePronunciation != null) {
+      final patches = databasePronunciationPatches(
+        databaseText,
+        databasePronunciation,
+        _knownPronunciations,
+      );
+      if (patches != null) {
+        // Merge reviewed database cues with existing context rules at other positions.
+        final combined = <Map<String, dynamic>>[];
+        if (entry != null && entry['text'] == databaseText) {
+          for (final old
+              in (entry['patches'] as List).cast<Map<String, dynamic>>()) {
+            if (!patches.any(
+              (p) =>
+                  (p['start'] as int) < (old['end'] as int) &&
+                  (p['end'] as int) > (old['start'] as int),
+            )) {
+              combined.add(old);
+            }
+          }
+        }
+        combined.addAll(patches);
+        combined.sort(
+          (a, b) => (a['start'] as int).compareTo(b['start'] as int),
+        );
+        entry = {'text': databaseText, 'patches': combined};
+      }
+    }
     if (preferDictionary && entry != null) {
       final original = entry['text'] as String;
       // Optional chapter/verse announcements precede the exact verse.

@@ -49,6 +49,7 @@ class ElibraryMarkupRecord {
 
 class ElibraryMarkupRepository {
   static const String highlightType = 'highlight';
+  static const String underlineType = 'underline';
   static const String defaultHighlightColor = '#F7D87D';
 
   Future<Map<String, List<ElibraryMarkupRecord>>> loadMarkupsBySectionForItem(
@@ -102,64 +103,76 @@ class ElibraryMarkupRepository {
     required String compactRef,
     required String selectedTextSnapshot,
     String color = defaultHighlightColor,
+    String markupType = highlightType,
   }) async {
+    if (markupType != highlightType && markupType != underlineType) {
+      throw ArgumentError.value(markupType, 'markupType');
+    }
     final db = await ELibraryDatabase.instance.database;
     final now = _utcNow();
-    await db.delete(
-      'elibrary_markups',
-      where:
-          'library_item_id = ? AND epub_href = ? AND markup_type = ? AND start_block_index = ? AND start_char_offset = ? AND end_block_index = ? AND end_char_offset = ? AND deleted_at IS NULL',
-      whereArgs: [
-        libraryItemId,
-        epubHref,
-        highlightType,
-        startBlockIndex,
-        startCharOffset,
-        endBlockIndex,
-        endCharOffset,
-      ],
-    );
-    final id = await db.insert('elibrary_markups', {
-      'library_item_id': libraryItemId,
-      'epub_href': epubHref,
-      'start_block_index': startBlockIndex,
-      'start_char_offset': startCharOffset,
-      'end_block_index': endBlockIndex,
-      'end_char_offset': endCharOffset,
-      'start_token_index': startTokenIndex,
-      'end_token_index': endTokenIndex,
-      'ref_start': refStart,
-      'ref_end': refEnd,
-      'compact_ref': compactRef,
-      'selected_text_snapshot': selectedTextSnapshot,
-      'markup_type': highlightType,
-      'color': color,
-      'note_text': null,
-      'created_at': now,
-      'updated_at': now,
-      'deleted_at': null,
+    return db.transaction((txn) async {
+      const identity =
+          'library_item_id = ? AND epub_href = ? AND markup_type = ? '
+          'AND start_block_index = ? AND start_char_offset = ? '
+          'AND end_block_index = ? AND end_char_offset = ? '
+          'AND selected_text_snapshot = ? AND deleted_at IS NULL';
+      final existing = await txn.query(
+        'elibrary_markups',
+        where: identity,
+        whereArgs: [
+          libraryItemId,
+          epubHref,
+          markupType,
+          startBlockIndex,
+          startCharOffset,
+          endBlockIndex,
+          endCharOffset,
+          selectedTextSnapshot,
+        ],
+        orderBy: 'id',
+        limit: 1,
+      );
+      final values = <String, Object?>{
+        'library_item_id': libraryItemId,
+        'epub_href': epubHref,
+        'start_block_index': startBlockIndex,
+        'start_char_offset': startCharOffset,
+        'end_block_index': endBlockIndex,
+        'end_char_offset': endCharOffset,
+        'start_token_index': startTokenIndex,
+        'end_token_index': endTokenIndex,
+        'ref_start': refStart,
+        'ref_end': refEnd,
+        'compact_ref': compactRef,
+        'selected_text_snapshot': selectedTextSnapshot,
+        'markup_type': markupType,
+        'color': color,
+        'updated_at': now,
+      };
+      int id;
+      if (existing.isNotEmpty) {
+        // Recoloring is an update. Keep the note, creation time and stable ID.
+        id = (existing.single['id'] as num).toInt();
+        await txn.update(
+          'elibrary_markups',
+          values,
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      } else {
+        id = await txn.insert('elibrary_markups', {
+          ...values,
+          'created_at': now,
+          'deleted_at': null,
+        });
+      }
+      final rows = await txn.query(
+        'elibrary_markups',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      return _recordFromRow(rows.single);
     });
-    return ElibraryMarkupRecord(
-      id: id.toInt(),
-      libraryItemId: libraryItemId,
-      epubHref: epubHref,
-      startBlockIndex: startBlockIndex,
-      startCharOffset: startCharOffset,
-      endBlockIndex: endBlockIndex,
-      endCharOffset: endCharOffset,
-      startTokenIndex: startTokenIndex,
-      endTokenIndex: endTokenIndex,
-      refStart: refStart,
-      refEnd: refEnd,
-      compactRef: compactRef,
-      selectedTextSnapshot: selectedTextSnapshot,
-      markupType: highlightType,
-      color: color,
-      noteText: null,
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-    );
   }
 
   Future<int> clearHighlightsOverlappingSelection({
@@ -169,6 +182,7 @@ class ElibraryMarkupRepository {
     required int startCharOffset,
     required int endBlockIndex,
     required int endCharOffset,
+    bool includeUnderlines = false,
   }) async {
     final db = await ELibraryDatabase.instance.database;
     final now = _utcNow();
@@ -176,7 +190,7 @@ class ElibraryMarkupRepository {
       'elibrary_markups',
       {'updated_at': now, 'deleted_at': now},
       where:
-          'library_item_id = ? AND epub_href = ? AND markup_type = ? AND deleted_at IS NULL AND NOT ('
+          'library_item_id = ? AND epub_href = ? AND markup_type IN (?, ?) AND deleted_at IS NULL AND NOT ('
           'end_block_index < ? OR '
           '(end_block_index = ? AND end_char_offset <= ?) OR '
           'start_block_index > ? OR '
@@ -186,6 +200,7 @@ class ElibraryMarkupRepository {
         libraryItemId,
         epubHref,
         highlightType,
+        includeUnderlines ? underlineType : highlightType,
         startBlockIndex,
         startBlockIndex,
         startCharOffset,

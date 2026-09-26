@@ -62,7 +62,6 @@ class TagPlaybackController extends ChangeNotifier {
     this.backgroundMaxAhead = 5,
     this.maxConcurrentRenders = 2,
     this.renderTimeout = const Duration(seconds: 90),
-    this.maxConsecutiveFailures = 3,
   }) : _renderer = renderer,
        _player = player,
        _includeNotes = includeNotes,
@@ -70,6 +69,9 @@ class TagPlaybackController extends ChangeNotifier {
        _loop = loop {
     _cursor = _firstAtOrAfter(0);
     _completions = _player.completions.listen((_) => _onClipCompleted());
+    _playerFailures = _player.failures.listen((error) {
+      if (!_disposed && _audioStarted) _fail('Speech stopped: $error');
+    });
   }
 
   final List<TagPlaybackItem> items;
@@ -93,11 +95,11 @@ class TagPlaybackController extends ChangeNotifier {
   /// cancelled for free (rapid skipping never queues stale work).
   final int maxConcurrentRenders;
   final Duration renderTimeout;
-  final int maxConsecutiveFailures;
 
   final TagClipRenderer _renderer;
   final TagClipPlayer _player;
   late final StreamSubscription<void> _completions;
+  late final StreamSubscription<Object> _playerFailures;
 
   bool _includeNotes;
   bool _speakReference;
@@ -112,7 +114,6 @@ class TagPlaybackController extends ChangeNotifier {
   bool _finished = false;
   int _epoch = 0;
   int _inFlight = 0;
-  int _consecutiveFailures = 0;
   String? _error;
 
   _Cursor? _cursor;
@@ -218,7 +219,6 @@ class TagPlaybackController extends ChangeNotifier {
     if (start == null) return; // Empty tag: nothing to speak.
     _finished = false;
     _error = null;
-    _consecutiveFailures = 0;
     _started = true;
     _playRequested = true;
     _cursor = start;
@@ -344,6 +344,7 @@ class TagPlaybackController extends ChangeNotifier {
     _halt();
     _disposed = true;
     unawaited(_completions.cancel());
+    unawaited(_playerFailures.cancel());
     unawaited(_stopThenDisposePlayer());
     super.dispose();
   }
@@ -401,7 +402,6 @@ class TagPlaybackController extends ChangeNotifier {
     _audioStarted = false;
     unawaited(_player.stop());
     _preloadedPath = null;
-    _consecutiveFailures = 0;
     final old = _current;
     _current = null;
     // A prefetched clip that is exactly the target keeps its audio, and the
@@ -427,7 +427,6 @@ class TagPlaybackController extends ChangeNotifier {
   void _onClipCompleted() {
     if (_disposed || !_audioStarted) return;
     _audioStarted = false;
-    _consecutiveFailures = 0;
     _advance();
   }
 
@@ -608,14 +607,9 @@ class TagPlaybackController extends ChangeNotifier {
   }
 
   void _clipFailed(_Slot slot, {Object? error}) {
-    _consecutiveFailures++;
     final cause = error ?? slot.error;
-    if (_consecutiveFailures >= maxConsecutiveFailures) {
-      _fail('Speech stopped: $cause');
-      return;
-    }
-    // One bad clip should not end the playlist; move on.
-    _advance();
+    // A selected verse or note must never be skipped without telling the user.
+    _fail('Speech stopped at ${items[slot.cursor.entry].label}: $cause');
   }
 
   void _notify() {

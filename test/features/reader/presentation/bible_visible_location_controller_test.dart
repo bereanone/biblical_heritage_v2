@@ -185,6 +185,20 @@ void main() {
     expect(live.value!.verse, 12);
   });
 
+  test('narration starts at a selected new chapter, not the stale center', () {
+    final live = BibleLiveReferenceController();
+    addTearDown(live.dispose);
+    live.updateCentered(location(580319, book: 58, chapter: 3, verse: 19));
+    live.updateSelected(location(580401, book: 58, chapter: 4, verse: 1));
+
+    expect(live.value!.chapter, 4);
+    expect(live.narrationStart, live.value);
+    expect(live.narrationStart!.verse, 1);
+
+    live.updateCentered(live.value!);
+    expect(live.narrationStart!.chapter, 4);
+  });
+
   test('manual selection release promotes the centered verse', () {
     final live = BibleLiveReferenceController();
     addTearDown(live.dispose);

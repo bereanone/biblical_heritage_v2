@@ -134,6 +134,8 @@ List<InlineSpan> buildLibraryInteractiveEpubSpans({
   String? geometryScopeId,
   String? geometryContentKey,
   List<TextRangeLayoutSeed>? geometrySeeds,
+  GestureRecognizer Function(String)? citationRecognizer,
+  bool Function(String book, String locator)? citationResolves,
 }) {
   final baseSpans = _buildEpubInlineSpans(
     html: html,
@@ -258,7 +260,43 @@ List<InlineSpan> buildLibraryInteractiveEpubSpans({
   if (spans.isEmpty) {
     return <InlineSpan>[TextSpan(text: fallbackText, style: baseStyle)];
   }
-  return spans;
+  if (citationRecognizer == null) return spans;
+  return linkLibraryReaderSpans(
+    spans,
+    citationRecognizer,
+    resolves: citationResolves,
+  );
+}
+
+/// Project the shared citation detector onto styled reader spans. Text lengths
+/// and selection offsets stay unchanged; existing interactive spans are boundaries.
+List<InlineSpan> linkLibraryReaderSpans(
+  List<InlineSpan> spans,
+  GestureRecognizer Function(String) recognizer, {
+  bool Function(String book, String locator)? resolves,
+}) {
+  final nodes = <Map<String, Object?>>[
+    for (final span in spans)
+      if (span is TextSpan && span.children == null)
+        {'type': 'text', 'text': span.text ?? '', 'span': span,
+          if (span.recognizer != null) 'link': 'existing'}
+      else
+        {'type': 'boundary', 'span': span},
+  ];
+  return linkLibraryCitations(nodes, resolves: resolves).map((node) {
+    final original = node['span'] as InlineSpan;
+    final href = node['link'] as String?;
+    if (original is! TextSpan || href == 'existing' || node['type'] != 'text') {
+      return original;
+    }
+    if (href == null) return TextSpan(text: node['text'] as String, style: original.style);
+    return TextSpan(text: node['text'] as String,
+      style: original.style?.copyWith(decoration: TextDecoration.combine([
+        if (original.style?.decoration != null) original.style!.decoration!,
+        TextDecoration.underline,
+      ])),
+      recognizer: recognizer(href), mouseCursor: SystemMouseCursors.click);
+  }).toList();
 }
 
 int? hitTestLibraryInteractiveEpubTokenIndex({

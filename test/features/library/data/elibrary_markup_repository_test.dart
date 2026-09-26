@@ -143,6 +143,40 @@ void main() {
     );
   });
 
+  test(
+    'recoloring preserves annotation identity, note and creation time',
+    () async {
+      final db = await ELibraryDatabase.instance.database;
+      final repository = ElibraryMarkupRepository();
+      Future<dynamic> save(String color) => repository.saveHighlight(
+        libraryItemId: 'annotated',
+        epubHref: 'canonical:block',
+        startBlockIndex: 0,
+        endBlockIndex: 0,
+        startCharOffset: 0,
+        endCharOffset: 11,
+        refStart: 'A 1.1',
+        refEnd: 'A 1.1',
+        compactRef: 'A 1.1',
+        selectedTextSnapshot: 'sample text',
+        color: color,
+      );
+      final first = await save('#ff0000');
+      await db.update(
+        'elibrary_markups',
+        {'note_text': 'My study note'},
+        where: 'id = ?',
+        whereArgs: [first.id],
+      );
+      final second = await save('#ffff00');
+      expect(second.id, first.id);
+      expect(second.createdAt, first.createdAt);
+      expect(second.noteText, 'My study note');
+      expect(second.color, '#ffff00');
+      expect(await _countMarkups(db, libraryItemId: 'annotated'), 1);
+    },
+  );
+
   test('writes highlights to eLibrary.db and reads them back', () async {
     final userDb = await UserDatabase.instance.database;
     final eLibraryDb = await ELibraryDatabase.instance.database;

@@ -93,6 +93,15 @@ void main() {
       'formatted_content': '{"version":1,"nodes":[]}',
       'content_hash': 'hash',
     });
+    await db.insert('library_document_navigation', <String, Object?>{
+      'id': '$itemId-source-nav',
+      'library_item_id': itemId,
+      'label': 'Chapter One',
+      'depth': 0,
+      'display_order': 0,
+      'source_href': 'ch1.html',
+      'target_block_id': '$itemId-block',
+    });
     await db.insert('library_block_source_map', <String, Object?>{
       'library_item_id': itemId,
       'block_id': '$itemId-block',
@@ -200,6 +209,7 @@ void main() {
     'library_document_conversion',
     'library_document_sections',
     'library_document_blocks',
+    'library_document_navigation',
     'library_block_source_map',
     'library_document_conversion_staging',
     'library_document_sections_staging',
@@ -244,6 +254,17 @@ void main() {
           reason: '$table must own exactly one row under the new visible ID',
         );
       }
+
+      final navigation = await db.rawQuery(
+        '''
+        SELECT n.label, b.plain_text FROM library_document_navigation n
+        JOIN library_document_blocks b ON b.id = n.target_block_id
+          AND b.library_item_id = n.library_item_id
+        WHERE n.library_item_id = ?
+      ''',
+        [newId],
+      );
+      expect(navigation.single['plain_text'], 'Body text.');
 
       final itemRows = await db.query(
         'library_items',

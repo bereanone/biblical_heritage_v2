@@ -634,14 +634,53 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       },
     );
     if (confirmed != true) return;
-    await widget.repository.deleteEntry(
-      entry.id,
-      normalized: entry.isNormalized,
-    );
-    if (!mounted) return;
-    _markChanged();
-    await _notifyParentChanged();
-    await _reload();
+    await _trashEntry(entry);
+  }
+
+  final _trashingEntries = <String>{};
+
+  Future<void> _trashEntry(HashTagEntry entry) async {
+    final key = '${entry.isNormalized}:${entry.id}';
+    if (!_trashingEntries.add(key)) return;
+    try {
+      await widget.repository.deleteEntry(
+        entry.id,
+        normalized: entry.isNormalized,
+      );
+      if (!mounted) return;
+      _markChanged();
+      await _notifyParentChanged();
+      await _reload();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Verse moved to Trash.'),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () async {
+              try {
+                await widget.repository.restoreEntry(
+                  entry.id,
+                  normalized: entry.isNormalized,
+                );
+                if (!mounted) return;
+                _markChanged();
+                await _notifyParentChanged();
+                await _reload();
+              } catch (_) {
+                if (mounted) {
+                  _showSnack(
+                    'Could not restore this entry. Please try from Trash.',
+                  );
+                }
+              }
+            },
+          ),
+        ),
+      );
+    } finally {
+      _trashingEntries.remove(key);
+    }
   }
 
   Future<void> _moveEntry(HashTagEntry entry, int delta) async {
@@ -2426,25 +2465,37 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                               height: 44,
                                             ),
                                       ),
-                                      IconButton(
-                                        tooltip: 'Move to Trash',
-                                        onPressed: () => _deleteEntry(entry),
-                                        icon: Icon(
-                                          Icons.delete,
-                                          color: theme.colorScheme.error,
-                                        ),
-                                        iconSize: presentationScaledSize(
-                                          context,
-                                          22,
-                                          widget.fontScale,
-                                          min: 20,
-                                          max: 26,
-                                        ),
-                                        constraints:
-                                            const BoxConstraints.tightFor(
-                                              width: 44,
-                                              height: 44,
+                                      Tooltip(
+                                        message: 'Move to Trash',
+                                        child: GestureDetector(
+                                          onLongPress:
+                                              widget.tag.startsWith('#') &&
+                                                  entry.bookNumber > 0 &&
+                                                  entry.chapter > 0 &&
+                                                  entry.verse > 0
+                                              ? () => _trashEntry(entry)
+                                              : null,
+                                          child: IconButton(
+                                            onPressed: () =>
+                                                _deleteEntry(entry),
+                                            icon: Icon(
+                                              Icons.delete,
+                                              color: theme.colorScheme.error,
                                             ),
+                                            iconSize: presentationScaledSize(
+                                              context,
+                                              22,
+                                              widget.fontScale,
+                                              min: 20,
+                                              max: 26,
+                                            ),
+                                            constraints:
+                                                const BoxConstraints.tightFor(
+                                                  width: 44,
+                                                  height: 44,
+                                                ),
+                                          ),
+                                        ),
                                       ),
                                     ],
                                   ),

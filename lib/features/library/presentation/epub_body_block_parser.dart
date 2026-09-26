@@ -11,6 +11,8 @@ class _SectionBlockView extends StatelessWidget {
   const _SectionBlockView({
     super.key,
     required this.block,
+    required this.citationRecognizer,
+    this.citationResolves,
     required this.blockIndex,
     required this.geometryRegistry,
     required this.geometryScopeId,
@@ -42,6 +44,8 @@ class _SectionBlockView extends StatelessWidget {
   });
 
   final LibraryBookBlock block;
+  final GestureRecognizer Function(String)? citationRecognizer;
+  final bool Function(String book, String locator)? citationResolves;
   final int blockIndex;
   final TextRangeGeometryRegistry geometryRegistry;
   final String geometryScopeId;
@@ -152,6 +156,8 @@ class _SectionBlockView extends StatelessWidget {
       children: [
         ...buildLibraryInteractiveEpubSpans(
           html: displayHtml,
+          citationRecognizer: rangeSelection.hasSelection ? null : citationRecognizer,
+          citationResolves: citationResolves,
           fallbackText: displayText,
           baseStyle: resolvedStyle,
           selectionHighlightSpec: selectionHighlightSpec,

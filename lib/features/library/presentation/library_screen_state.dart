@@ -501,7 +501,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        duration: Duration(seconds: unindexed > 0 ? 8 : 4),
+        duration: Duration(seconds: unindexed > 0 ? 5 : 4),
       ),
     );
     await _load();

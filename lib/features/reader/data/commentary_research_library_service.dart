@@ -601,20 +601,28 @@ class CommentaryResearchLibraryService
   /// [researchIndexVersion] is treated the same as having no rows at all —
   /// the existing rows predate a parsing-logic fix (e.g.
   /// `EpubInternalAnchorSectionSplitter`) and must be rebuilt, not skipped.
-  /// Never throws: this is auxiliary metadata for the Contents/TOC UI and
-  /// search, not required for the book to be readable, so a parsing failure
-  /// here must never fail the caller's acquisition outcome.
-  Future<void> ensureNavigationIndexed({
+  /// Never throws. Returns whether both searchable text and navigation were
+  /// verified for this exact library item, so acquisition flows can avoid
+  /// reporting Ready while their Contents/search preparation is incomplete.
+  Future<bool> ensureNavigationIndexed({
     required Database db,
     required String libraryItemId,
     required File file,
   }) async {
-    if (p.extension(file.path).toLowerCase() != '.epub') return;
+    if (p.extension(file.path).toLowerCase() != '.epub') return false;
     try {
       final existingNav = await db.query(
         'library_navigation_items',
         columns: const ['id'],
         where: 'library_item_id = ?',
+        whereArgs: [libraryItemId],
+        limit: 1,
+      );
+      final existingText = await db.query(
+        'library_text_blocks',
+        columns: const ['id'],
+        where:
+            'library_item_id = ? AND TRIM(COALESCE(plain_text, \'\')) != \'\'',
         whereArgs: [libraryItemId],
         limit: 1,
       );
@@ -631,8 +639,10 @@ class CommentaryResearchLibraryService
       final isUpToDate =
           storedIndexVersion != null &&
           storedIndexVersion >= researchIndexVersion;
-      if (existingNav.isNotEmpty && isUpToDate) return;
-      if (!await file.exists()) return;
+      if (existingNav.isNotEmpty && existingText.isNotEmpty && isUpToDate) {
+        return true;
+      }
+      if (!await file.exists()) return false;
 
       final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
       final now = DateTime.now().toUtc().toIso8601String();
@@ -650,16 +660,37 @@ class CommentaryResearchLibraryService
         libraryItemId: libraryItemId,
         now: now,
       );
-      await db.insert('library_research_index_conversion', {
-        'library_item_id': libraryItemId,
-        'index_version': researchIndexVersion,
-        'indexed_at': now,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await db.insert(
+        'library_research_index_conversion',
+        {
+          'library_item_id': libraryItemId,
+          'index_version': researchIndexVersion,
+          'indexed_at': now,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      final verifiedNav = await db.query(
+        'library_navigation_items',
+        columns: const ['id'],
+        where: 'library_item_id = ?',
+        whereArgs: [libraryItemId],
+        limit: 1,
+      );
+      final verifiedText = await db.query(
+        'library_text_blocks',
+        columns: const ['id'],
+        where:
+            'library_item_id = ? AND TRIM(COALESCE(plain_text, \'\')) != \'\'',
+        whereArgs: [libraryItemId],
+        limit: 1,
+      );
+      return verifiedNav.isNotEmpty && verifiedText.isNotEmpty;
     } catch (error) {
       debugPrint(
         '[CommentaryResearch] ensureNavigationIndexed failed for '
         '$libraryItemId: $error',
       );
+      return false;
     }
   }
 

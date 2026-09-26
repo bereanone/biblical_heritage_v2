@@ -75,7 +75,7 @@ void main() {
 
     expect(find.text('Download Ellen White Library'), findsOneWidget);
     expect(find.text('Pioneer Library'), findsOneWidget);
-    expect(find.text('Add My Own EPUB'), findsOneWidget);
+    expect(find.text('Import Book'), findsOneWidget);
     expect(find.text('Skip for Now'), findsOneWidget);
 
     // No technical jargon anywhere on the screen.

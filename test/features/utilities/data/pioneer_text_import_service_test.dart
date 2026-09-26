@@ -545,6 +545,23 @@ void main() {
     expect(result.status, PioneerImportWorkStatus.imported);
     expect(result.libraryItemId, work.stableLibraryItemId);
     expect(result.parsedParagraphCount, greaterThan(0));
+    final db = await ELibraryDatabase.instance.database;
+    final stored = (await db.query(
+      'library_items',
+      where: 'id = ?',
+      whereArgs: [result.libraryItemId],
+    )).single;
+    expect(stored['file_format'], 'epub');
+    expect(stored['mime_type'], 'application/epub+zip');
+    expect(
+      await _countRows(
+        db,
+        'library_document_blocks',
+        where: 'library_item_id = ?',
+        whereArgs: [result.libraryItemId],
+      ),
+      greaterThan(0),
+    );
   });
 
   test(

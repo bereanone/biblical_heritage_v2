@@ -9,6 +9,7 @@ LibraryCatalogItem _item({
   required String title,
   required String author,
   String? coverPath,
+  String? collectionName,
 }) {
   return LibraryCatalogItem.fromRow(<String, Object?>{
     'id': id,
@@ -17,6 +18,7 @@ LibraryCatalogItem _item({
     'file_name': '$id.epub',
     'relative_path': 'Pioneer/$id.epub',
     'cover_path': coverPath,
+    'collection_name': collectionName,
     'navigation_count': 1,
   });
 }
@@ -66,12 +68,59 @@ void main() {
     },
   );
 
+  testWidgets(
+    'existing Pioneer book without assigned cover uses approved leather',
+    (tester) async {
+      final item = _item(
+        id: 'existing_pioneer',
+        title: 'Christ Our Righteousness',
+        author: 'A. G. Daniells',
+        collectionName: 'Pioneer Library',
+      );
+      await tester.pumpWidget(_coverHarness(item));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(
+          const ValueKey('library-leather-fallback-cover-existing_pioneer'),
+        ),
+        findsOneWidget,
+      );
+      final image = tester.widget<Image>(find.byType(Image));
+      expect(
+        (image.image as AssetImage).assetName,
+        'assets/library_covers/templates/pioneer_cover_template.png',
+      );
+      expect(find.text('Christ Our Righteousness'), findsOneWidget);
+      expect(find.text('A. G. Daniells'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('missing Pioneer cover file also uses leather', (tester) async {
+    final item = _item(
+      id: 'missing_pioneer',
+      title: 'The Book',
+      author: 'Author',
+      collectionName: 'Pioneer Library',
+      coverPath: '/nonexistent/pioneer-cover.png',
+    );
+    await tester.pumpWidget(_coverHarness(item));
+    expect(
+      find.byKey(
+        const ValueKey('library-leather-fallback-cover-missing_pioneer'),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('real shelf cover artwork takes precedence', (tester) async {
     final item = _item(
       id: 'artwork_book',
       title: 'A Full Catalog Title',
       author: 'Catalog Author',
       coverPath: 'assets/icons/GoldLogo.png',
+      collectionName: 'Pioneer Library',
     );
 
     await tester.pumpWidget(_coverHarness(item));

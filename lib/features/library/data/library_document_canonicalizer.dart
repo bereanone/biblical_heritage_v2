@@ -10,7 +10,12 @@ import '../../utilities/data/epub_download_validator.dart';
 import '../../utilities/data/epub_internal_anchor_section_splitter.dart';
 import '../../utilities/data/pioneer_html_capture_folder_scanner.dart';
 import 'library_document_import_validator.dart';
+import 'library_document_assets.dart';
+import 'library_document_block_identity.dart';
+import 'library_captured_reference_alignment.dart';
 import 'library_document_models.dart';
+import 'library_epub_text_styles.dart';
+import 'library_citation_links.dart';
 import 'library_xml_html_entities.dart';
 
 /// Separator between hash inputs, built via String.fromCharCode to avoid
@@ -22,11 +27,16 @@ class LibraryCanonicalSourceSection {
     required this.href,
     required this.title,
     required this.html,
+    this.textStyles = const EpubTextStyles.empty(),
+    this.numericHeadingTargets = const <EpubAnchorTarget>[],
   });
 
   final String href;
   final String title;
   final String html;
+  final EpubTextStyles textStyles;
+  // Scoped to this exact EPUB file/fragment; these labels never identify works.
+  final List<EpubAnchorTarget> numericHeadingTargets;
 }
 
 class LibraryDocumentCanonicalizationResult {
@@ -59,8 +69,61 @@ class LibraryDocumentCanonicalizer {
   /// canonicalize() produces for existing content MUST bump this constant —
   /// otherwise the version-equality check below silently treats
   /// already-imported books as up to date and the fix never reaches them.
-  static const int version = 12;
+  // v41 links chapter references and distinguishes numbered books from verse lists.
+  static const int version = 42;
   final LibraryCanonicalizationFailureHook? failureHook;
+
+  Future<void> _reconcileStagedBlockIds(
+    Database db,
+    String itemId,
+    String sourceHash,
+  ) async {
+    await db.transaction((txn) async {
+      final previous = await txn.query(
+        'library_document_blocks',
+        where: 'library_item_id = ?',
+        whereArgs: [itemId],
+      );
+      if (previous.isEmpty) return;
+      final candidate = await txn.query(
+        'library_document_blocks_staging',
+        where: 'library_item_id = ?',
+        whereArgs: [itemId],
+      );
+      final identities = reconcileLibraryBlockIds(
+        libraryItemId: itemId,
+        sourceHash: sourceHash,
+        previous: previous,
+        candidate: candidate,
+      );
+      final changes = identities.entries
+          .where((entry) => entry.key != entry.value)
+          .toList();
+      // Two phases permit ID swaps without UNIQUE collisions. Only scratch
+      // staging rows move; active blocks and user locators are untouched.
+      for (var phase = 0; phase < 2; phase++) {
+        final batch = txn.batch();
+        for (final entry in changes) {
+          final temporary = 'identity-staging:${entry.key}';
+          final from = phase == 0 ? entry.key : temporary;
+          final to = phase == 0 ? temporary : entry.value;
+          batch.update(
+            'library_document_blocks_staging',
+            {'id': to},
+            where: 'library_item_id = ? AND id = ?',
+            whereArgs: [itemId, from],
+          );
+          batch.update(
+            'library_block_source_map_staging',
+            {'block_id': to},
+            where: 'library_item_id = ? AND block_id = ?',
+            whereArgs: [itemId, from],
+          );
+        }
+        await batch.commit(noResult: true);
+      }
+    });
+  }
 
   /// Builds a candidate generation of canonical sections/blocks in the
   /// staging tables, validates it, and only then atomically activates it in
@@ -68,6 +131,67 @@ class LibraryDocumentCanonicalizer {
   /// is thrown while staging), the previously-active generation — if any —
   /// is left completely untouched, so the reader and the EPUB storage
   /// policy can keep treating the book as usable.
+  /// A retained row is not preserved markup if its selected words move.
+  /// Reject a candidate before activation when an existing canonical range
+  /// cannot be proven unchanged. The prior readable generation remains active;
+  /// explicit reconciliation can later supply a reviewed relocation.
+  Future<void> _requirePreservedMarkupTargets(
+    DatabaseExecutor txn,
+    String itemId,
+    List<Map<String, Object?>> staged,
+  ) async {
+    final markups = await txn.query(
+      'elibrary_markups',
+      where:
+          "library_item_id = ? AND deleted_at IS NULL AND epub_href LIKE 'canonical:%'",
+      whereArgs: [itemId],
+    );
+    if (markups.isEmpty) return;
+    final byId = {for (final b in staged) b['id'].toString(): b};
+    for (final m in markups) {
+      final id = m['epub_href'].toString().substring('canonical:'.length);
+      final block = byId[id];
+      final text = block?['plain_text']?.toString() ?? '';
+      final start = (m['start_char_offset'] as num).toInt();
+      final end = (m['end_char_offset'] as num).toInt();
+      if (block == null ||
+          m['start_block_index'] != 0 ||
+          m['end_block_index'] != 0 ||
+          start < 0 ||
+          end <= start ||
+          end > text.length ||
+          text.substring(start, end) != m['selected_text_snapshot']) {
+        throw StateError(
+          'Content update retained the previous generation: '
+          'markup ${m['id']} needs an explicit location mapping.',
+        );
+      }
+    }
+  }
+
+  Future<void> _requirePreservedSavedPosition(
+    DatabaseExecutor txn,
+    String itemId,
+    List<Map<String, Object?>> staged,
+  ) async {
+    final rows = await txn.query(
+      'library_items',
+      columns: ['anchor_id'],
+      where: 'id = ?',
+      whereArgs: [itemId],
+      limit: 1,
+    );
+    final anchor = rows.firstOrNull?['anchor_id']?.toString() ?? '';
+    if (!anchor.startsWith('canonical:')) return;
+    final blockId = anchor.substring('canonical:'.length);
+    if (!staged.any((block) => block['id'] == blockId)) {
+      throw StateError(
+        'Content update retained the previous generation: '
+        'saved reading position needs an explicit location mapping.',
+      );
+    }
+  }
+
   Future<LibraryDocumentCanonicalizationResult> canonicalize({
     required Database db,
     required String libraryItemId,
@@ -102,6 +226,12 @@ class LibraryDocumentCanonicalizer {
     }
 
     final isEpub = p.extension(source.path).toLowerCase() == '.epub';
+    final syntheticReferenceDesignator =
+        await _pioneerSyntheticReferenceDesignator(db, libraryItemId);
+    final capturedReferenceAlignment = await CapturedReferenceAlignment.load(
+      db,
+      libraryItemId,
+    );
 
     // Structural validity is a precondition for parsing at all: an EPUB
     // that would be rejected by the downloader (missing OPF/spine, no
@@ -153,14 +283,45 @@ class LibraryDocumentCanonicalizer {
 
     try {
       final sections = _readSections(source.path, bytes, archive);
+      final referenceRows = await db.query(
+        'library_source_reference_map',
+        where: 'source_hash = ?',
+        whereArgs: [sourceHash],
+      );
+      final referenceMap = {
+        for (final row in referenceRows)
+          '${row['source_href']}#${row['source_block_ordinal']}': row,
+      };
+      final pageProfiles = await db.query(
+        'library_source_page_profiles',
+        where: 'source_hash = ?',
+        whereArgs: [sourceHash],
+        limit: 1,
+      );
+      final sourcePageTracker = _SourcePageTracker(
+        spanClass: pageProfiles.firstOrNull?['page_marker_span_class']
+            ?.toString(),
+      );
       final refCodeTracker = _EpubRefCodeTracker.fromSource(
         source.path,
         sections,
       );
-      final ocrHeadingTracker = _needsOcrChapterHeadingRecovery(sections)
+      final syntheticReferenceTracker = syntheticReferenceDesignator == null
+          ? null
+          : _SyntheticPageMarkerReferenceTracker(syntheticReferenceDesignator);
+      final hasAuthoredChapters =
+          archive != null &&
+          EpubInternalAnchorSectionSplitter.readNavigationTargets(
+                archive: archive,
+                fallbackTitle: '',
+              ).length >
+              1;
+      final ocrHeadingTracker =
+          !hasAuthoredChapters && _needsOcrChapterHeadingRecovery(sections)
           ? _OcrChapterHeadingTracker()
           : null;
       var written = 0;
+      var appliedReferences = 0;
       // A single href now split into multiple sections (see _readSections's
       // internal-anchor splitting) still needs a stable-id ordinal that's
       // unique across all of that href's blocks, not just within whichever
@@ -187,10 +348,31 @@ class LibraryDocumentCanonicalizer {
           ]);
           var parsed = _parseHtmlBlocks(
             section.html,
+            textStyles: section.textStyles,
             refCodeTracker: refCodeTracker,
+            sourcePageTracker: sourcePageTracker,
+            numericHeadingTargets: section.numericHeadingTargets,
+            linkCitations: ocrHeadingTracker == null,
           );
           if (ocrHeadingTracker != null) {
-            parsed = ocrHeadingTracker.recoverHeadings(parsed);
+            // Detect structure before generated links split plain OCR nodes.
+            // Relink the resulting nodes without flattening authored formatting.
+            parsed = ocrHeadingTracker
+                .recoverHeadings(parsed)
+                .map(
+                  (block) => _ParsedCanonicalBlock(
+                    type: block.type,
+                    text: block.text,
+                    anchor: block.anchor,
+                    refcode: block.refcode,
+                    formatted: LibraryFormattedContent(
+                      alignment: block.formatted.alignment,
+                      metadata: block.formatted.metadata,
+                      nodes: linkLibraryCitations(block.formatted.nodes),
+                    ),
+                  ),
+                )
+                .toList();
           }
           if (archive != null) {
             parsed = _extractSectionImages(
@@ -199,6 +381,30 @@ class LibraryDocumentCanonicalizer {
               sectionHref: normalizedHref,
               assetDirectory: assetDirectory,
             );
+          }
+          if (syntheticReferenceTracker != null) {
+            parsed = parsed
+                .map(syntheticReferenceTracker.referenceCodeFor)
+                .toList(growable: false);
+          }
+          if (capturedReferenceAlignment != null) {
+            parsed = parsed
+                .map((block) {
+                  if (block.refcode?.trim().isNotEmpty == true ||
+                      !_isCitableBodyBlock(block)) {
+                    return block;
+                  }
+                  final code = capturedReferenceAlignment.nextCodeFor(
+                    block.text,
+                  );
+                  return code == null
+                      ? block
+                      : block.withSyntheticReferenceCode(
+                          code,
+                          origin: capturedReferenceOrigin,
+                        );
+                })
+                .toList(growable: false);
           }
           await txn
               .insert('library_document_sections_staging', <String, Object?>{
@@ -214,12 +420,29 @@ class LibraryDocumentCanonicalizer {
           var paragraphOrdinal = 0;
           for (var blockIndex = 0; blockIndex < parsed.length; blockIndex++) {
             failureHook?.call(written);
-            final block = parsed[blockIndex];
+            var block = parsed[blockIndex];
             if (block.type == LibraryDocumentBlockType.paragraph) {
               paragraphOrdinal++;
             }
             final stableBlockOrdinal = blockOrdinalByHref[normalizedHref] ?? 0;
             blockOrdinalByHref[normalizedHref] = stableBlockOrdinal + 1;
+            final verifiedReference =
+                referenceMap['$normalizedHref#$stableBlockOrdinal'];
+            if (verifiedReference != null) {
+              final textHash = sha256
+                  .convert(utf8.encode(block.text))
+                  .toString();
+              if (verifiedReference['source_text_hash'] != textHash) {
+                throw StateError(
+                  'Verified reference alignment no longer matches source paragraph $normalizedHref#$stableBlockOrdinal',
+                );
+              }
+              final code =
+                  '${verifiedReference['work_prefix']} ${verifiedReference['page_number']}.${verifiedReference['paragraph_number']}';
+              block = block.withVerifiedReferenceCode(code, verifiedReference);
+              appliedReferences++;
+            }
+
             final blockId = stableLibraryDocumentBlockId(
               libraryItemId: libraryItemId,
               sourceHref: normalizedHref,
@@ -244,6 +467,7 @@ class LibraryDocumentCanonicalizer {
                   'plain_text': block.text,
                   'formatted_content': block.formatted.toJson(),
                   'source_refcode': block.refcode,
+                  ...block.referenceColumns,
                   'source_href': normalizedHref,
                   'source_anchor': block.anchor,
                   'content_hash': contentHash,
@@ -264,6 +488,12 @@ class LibraryDocumentCanonicalizer {
         }
       });
 
+      if (appliedReferences != referenceRows.length) {
+        throw StateError(
+          'Verified reference alignment contains missing source paragraphs.',
+        );
+      }
+      await _reconcileStagedBlockIds(db, libraryItemId, sourceHash);
       final stagedSections = await db.query(
         'library_document_sections_staging',
         where: 'library_item_id = ?',
@@ -274,9 +504,15 @@ class LibraryDocumentCanonicalizer {
         where: 'library_item_id = ?',
         whereArgs: <Object?>[libraryItemId],
       );
+      final stagedNavigation = _navigationRows(
+        libraryItemId,
+        archive,
+        stagedBlocks,
+      );
       final validation = const LibraryDocumentImportValidator().validate(
         sections: stagedSections,
         blocks: stagedBlocks,
+        navigation: stagedNavigation,
         imageAssetRoot: assetDirectory,
       );
 
@@ -315,7 +551,45 @@ class LibraryDocumentCanonicalizer {
         );
       }
 
+      // Persistence of image bytes is part of activation, not a later cleanup.
+      // Capture/HTML sources retain their existing adjacent-image contract.
+      final embeddedAssets = isEpub
+          ? await LibraryDocumentAssets.collect(
+              blocks: stagedBlocks,
+              directory: assetDirectory,
+            )
+          : null;
+      final previousAssets = isEpub
+          ? await db.rawQuery(
+              'SELECT a.cover_asset_name FROM library_document_asset_sets a '
+              'JOIN library_document_conversion c ON c.library_item_id=a.library_item_id '
+              'AND c.source_hash=a.source_hash WHERE a.library_item_id=?',
+              [libraryItemId],
+            )
+          : <Map<String, Object?>>[];
+      final previousCover =
+          previousAssets.firstOrNull?['cover_asset_name'] as String?;
+      final retainedCover =
+          embeddedAssets?.any((asset) => asset.name == previousCover) == true
+          ? previousCover
+          : null;
       await db.transaction((txn) async {
+        if (embeddedAssets != null) {
+          await LibraryDocumentAssets.store(
+            txn,
+            itemId: libraryItemId,
+            sourceHash: sourceHash,
+            assets: embeddedAssets,
+            coverAssetName: retainedCover,
+          );
+        }
+        await _requirePreservedMarkupTargets(txn, libraryItemId, stagedBlocks);
+        await _requirePreservedSavedPosition(txn, libraryItemId, stagedBlocks);
+        await txn.delete(
+          'library_document_navigation',
+          where: 'library_item_id = ?',
+          whereArgs: [libraryItemId],
+        );
         await txn.delete(
           'library_block_source_map',
           where: 'library_item_id = ?',
@@ -336,6 +610,9 @@ class LibraryDocumentCanonicalizer {
         }
         for (final row in stagedBlocks) {
           await txn.insert('library_document_blocks', row);
+        }
+        for (final row in stagedNavigation) {
+          await txn.insert('library_document_navigation', row);
         }
         final stagedSourceMap = await txn.query(
           'library_block_source_map_staging',
@@ -526,6 +803,78 @@ class LibraryDocumentCanonicalizer {
     }
   }
 
+  List<Map<String, Object?>> _navigationRows(
+    String itemId,
+    Archive? archive,
+    List<Map<String, Object?>> blocks,
+  ) {
+    if (archive == null) return [];
+    final targets = EpubInternalAnchorSectionSplitter.readNavigationTargets(
+      archive: archive,
+      fallbackTitle: 'Contents',
+    );
+    final byTarget = <String, List<String>>{};
+    final firstByFile = <String, String>{};
+    final ordered = blocks.toList()
+      ..sort(
+        (a, b) =>
+            (a['display_order'] as int).compareTo(b['display_order'] as int),
+      );
+    for (final block in ordered) {
+      final href = block['source_href']?.toString() ?? '';
+      final id = block['id'].toString();
+      firstByFile.putIfAbsent(href, () => id);
+      final anchor = block['source_anchor']?.toString() ?? '';
+      final formatted = LibraryFormattedContent.fromJson(
+        block['formatted_content']?.toString(),
+      );
+      final aliases =
+          formatted.metadata['source_anchor_aliases'] as List? ?? const [];
+      for (final sourceAnchor in {
+        anchor,
+        ...aliases.whereType<String>(),
+      }.where((value) => value.isNotEmpty)) {
+        byTarget.putIfAbsent('$href#$sourceAnchor', () => []).add(id);
+      }
+    }
+    final parents = <({int depth, String id})>[];
+    return [
+      for (var index = 0; index < targets.length; index++)
+        (() {
+          final target = targets[index];
+          final href = normalizeLibrarySourceHref(target.path);
+          final id = _stableId([
+            'navigation',
+            itemId,
+            href,
+            target.anchor,
+            '$index',
+          ]);
+          while (parents.isNotEmpty && parents.last.depth >= target.depth) {
+            parents.removeLast();
+          }
+          final parentId = parents.isEmpty ? null : parents.last.id;
+          final matches = byTarget['$href#${target.anchor}'] ?? [];
+          final blockId = target.anchor.isEmpty
+              ? firstByFile[href]
+              : matches.length == 1
+              ? matches.single
+              : null;
+          final row = <String, Object?>{
+            'id': id, 'library_item_id': itemId, 'parent_id': parentId,
+            'label': target.title,
+            'depth': target.depth,
+            'display_order': index,
+            'source_href': href, 'source_anchor': target.anchor,
+            // Keep unresolved authored destinations visible to import audits.
+            'target_block_id': blockId,
+          };
+          parents.add((depth: target.depth, id: id));
+          return row;
+        })(),
+    ];
+  }
+
   List<LibraryCanonicalSourceSection> _readSections(
     String path,
     List<int> bytes,
@@ -537,6 +886,11 @@ class LibraryDocumentCanonicalizer {
           href: p.basename(path),
           title: p.basenameWithoutExtension(path),
           html: utf8.decode(bytes, allowMalformed: true),
+          textStyles: EpubTextStyles.read(
+            utf8.decode(bytes, allowMalformed: true),
+            p.basename(path),
+            null,
+          ),
         ),
       ];
     }
@@ -568,6 +922,7 @@ class LibraryDocumentCanonicalizer {
           ).firstMatch(html)?.group(1) ??
           p.basenameWithoutExtension(entry.name);
       final wholeFileTitle = _plain(title);
+      final textStyles = EpubTextStyles.read(html, entry.name, archive);
       final targets =
           targetsByPath[EpubInternalAnchorSectionSplitter.normalizedEpubPathKey(
             entry.name,
@@ -581,12 +936,24 @@ class LibraryDocumentCanonicalizer {
               targets: targets,
               wholeFileTitle: wholeFileTitle,
             );
-      for (final split in splitSections) {
+      for (
+        var splitIndex = 0;
+        splitIndex < splitSections.length;
+        splitIndex++
+      ) {
+        final split = splitSections[splitIndex];
         sections.add(
           LibraryCanonicalSourceSection(
             href: entry.name,
             title: split.title,
             html: split.html,
+            textStyles: textStyles,
+            numericHeadingTargets: [
+              for (final target in targets ?? const <EpubAnchorTarget>[])
+                if (RegExp(r'^\d{1,4}$').hasMatch(target.title.trim()) &&
+                    (target.anchor.isNotEmpty || splitIndex == 0))
+                  target,
+            ],
           ),
         );
       }
@@ -654,7 +1021,13 @@ class LibraryDocumentCanonicalizer {
           ).hasMatch(href)) {
         continue;
       }
-      final hrefPath = href.split(RegExp(r'[?#]')).first;
+      final encodedPath = href.split(RegExp(r'[?#]')).first;
+      String hrefPath;
+      try {
+        hrefPath = Uri.decodeComponent(encodedPath);
+      } on FormatException {
+        hrefPath = encodedPath;
+      }
       final resolved = p.posix.normalize(
         p.posix.join(opfDirectory == '.' ? '' : opfDirectory, hrefPath),
       );
@@ -805,6 +1178,23 @@ class _ParsedCanonicalBlock {
   final String? anchor;
   final String? refcode;
 
+  Map<String, Object?> get referenceColumns {
+    final parts = RegExp(
+      r'^([A-Za-z0-9]+)\s+(\d+)\.(\d+)$',
+    ).firstMatch(refcode?.trim() ?? '');
+    return {
+      'reference_prefix': parts?.group(1),
+      'reference_page': parts == null ? null : int.parse(parts.group(2)!),
+      'reference_paragraph': parts == null ? null : int.parse(parts.group(3)!),
+      'reference_origin': refcode == null
+          ? null
+          : formatted.metadata['reference_origin'] ?? 'source_embedded',
+      'reference_witness': formatted.metadata['reference_witness'],
+      'reference_context': formatted.metadata['reference_context'],
+      'content_role': formatted.metadata['content_role'],
+    };
+  }
+
   _ParsedCanonicalBlock withRefcode(String value) => _ParsedCanonicalBlock(
     type: type,
     text: text,
@@ -812,11 +1202,153 @@ class _ParsedCanonicalBlock {
     anchor: anchor,
     refcode: value,
   );
+
+  _ParsedCanonicalBlock withVerifiedReferenceCode(
+    String code,
+    Map<String, Object?> witness,
+  ) => _ParsedCanonicalBlock(
+    type: type,
+    text: text,
+    anchor: anchor,
+    refcode: code,
+    formatted: LibraryFormattedContent(
+      nodes: formatted.nodes,
+      alignment: formatted.alignment,
+      metadata: {
+        ...formatted.metadata,
+        'reference_origin': 'verified_source_alignment',
+        'reference_prefix': witness['work_prefix'],
+        'reference_page': witness['page_number'],
+        'reference_paragraph': witness['paragraph_number'],
+        'reference_witness': witness['witness_uri'],
+        'reference_match_method': witness['match_method'],
+        if (witness['reference_context'] != null)
+          'reference_context': witness['reference_context'],
+      },
+    ),
+  );
+
+  _ParsedCanonicalBlock withPageMarker(String value) => _ParsedCanonicalBlock(
+    type: type,
+    text: text,
+    formatted: LibraryFormattedContent(
+      nodes: formatted.nodes,
+      alignment: formatted.alignment,
+      metadata: <String, Object?>{
+        ...formatted.metadata,
+        // A printed-page boundary that immediately precedes this readable
+        // block. It stays available to a future page-aware reader without
+        // becoming a disruptive line in the reading flow.
+        'source_page_marker': value,
+      },
+    ),
+    anchor: anchor,
+    refcode: refcode,
+  );
+
+  _ParsedCanonicalBlock withSyntheticReferenceCode(
+    String value, {
+    String origin = 'synthetic_source_page_marker',
+  }) => _ParsedCanonicalBlock(
+    type: type,
+    text: text,
+    formatted: LibraryFormattedContent(
+      nodes: formatted.nodes,
+      alignment: formatted.alignment,
+      metadata: <String, Object?>{
+        ...formatted.metadata,
+        'reference_origin': origin,
+      },
+    ),
+    anchor: anchor,
+    refcode: value,
+  );
 }
+
+const Map<String, String>
+_pioneerSyntheticReferenceDesignators = <String, String>{
+  'a tract, showing that the seventh day should be observed as the sabbath, instead of the first day':
+      'TSD',
+  'american sentinel articles (1886-1899)': 'ASA',
+  'christ our righteousness': 'COR',
+  'general conference bulletin articles (1889-1903)': 'GCB',
+  'the advent review and sabbath herald (1879-1880)': 'ARH',
+  'the american sentinel (1887)': 'AS87',
+  'the american sentinel (1894)': 'AS94',
+  'the gospel in the book of galatians': 'GIG',
+  'the signs of the times (1884-1885)': 'ST84',
+  'the signs of the times (1890-1891)': 'ST90',
+  'the signs of the times (1891-1895)': 'ST91',
+  'the southern sentinel and herald of liberty articles (1895-1897)': 'SSHL',
+};
+
+Future<String?> _pioneerSyntheticReferenceDesignator(
+  Database db,
+  String libraryItemId,
+) async {
+  final rows = await db.query(
+    'library_items',
+    columns: const <String>['title', 'source_type'],
+    where: 'id = ?',
+    whereArgs: <Object?>[libraryItemId],
+    limit: 1,
+  );
+  if (rows.isEmpty ||
+      rows.single['source_type']?.toString().trim().toLowerCase() !=
+          'pioneer_epub_import') {
+    return null;
+  }
+  final title = rows.single['title']?.toString().trim().toLowerCase() ?? '';
+  return _pioneerSyntheticReferenceDesignators[title];
+}
+
+/// Synthesizes citations for the approved Pioneer page-marker cohort only.
+///
+/// A marker is metadata on the first following readable block, so it is
+/// applied before that block receives its code. A body block always retains
+/// the page at which it began; a later marker therefore resets the counter
+/// only for following body blocks.
+class _SyntheticPageMarkerReferenceTracker {
+  _SyntheticPageMarkerReferenceTracker(this.designator);
+
+  final String designator;
+  int? _page;
+  int _paragraphOnPage = 0;
+
+  _ParsedCanonicalBlock referenceCodeFor(_ParsedCanonicalBlock block) {
+    final marker = block.formatted.metadata['source_page_marker']?.toString();
+    final markerPage = int.tryParse(marker?.trim() ?? '');
+    if (markerPage != null && markerPage > 0) {
+      _page = markerPage;
+      _paragraphOnPage = 0;
+    }
+    if (block.refcode?.trim().isNotEmpty == true ||
+        !_isCitableBodyBlock(block) ||
+        _page == null) {
+      return block;
+    }
+    _paragraphOnPage++;
+    return block.withSyntheticReferenceCode(
+      '$designator $_page.$_paragraphOnPage',
+    );
+  }
+}
+
+bool _isCitableBodyBlock(_ParsedCanonicalBlock block) => switch (block.type) {
+  LibraryDocumentBlockType.paragraph ||
+  LibraryDocumentBlockType.listItem ||
+  LibraryDocumentBlockType.quotation ||
+  LibraryDocumentBlockType.poem => block.text.trim().isNotEmpty,
+  _ => false,
+};
 
 List<_ParsedCanonicalBlock> _parseHtmlBlocks(
   String html, {
+  EpubTextStyles textStyles = const EpubTextStyles.empty(),
   _EpubRefCodeTracker? refCodeTracker,
+  _SourcePageTracker? sourcePageTracker,
+  List<EpubAnchorTarget> numericHeadingTargets = const [],
+  bool linkCitations = true,
 }) {
   if (RegExp(
     r'''class\s*=\s*["'][^"']*\bclip-text\b''',
@@ -825,7 +1357,14 @@ List<_ParsedCanonicalBlock> _parseHtmlBlocks(
     final captured = _parseCapturedEgwBlocks(html);
     if (captured.isNotEmpty) return captured;
   }
-  return _parseSemanticHtmlBlocks(html, refCodeTracker: refCodeTracker);
+  return _parseSemanticHtmlBlocks(
+    html,
+    textStyles: textStyles,
+    refCodeTracker: refCodeTracker,
+    sourcePageTracker: sourcePageTracker,
+    numericHeadingTargets: numericHeadingTargets,
+    linkCitations: linkCitations,
+  );
 }
 
 List<_ParsedCanonicalBlock> _parseCapturedEgwBlocks(String html) {
@@ -1029,12 +1568,89 @@ int _romanNumeralValue(String source) {
   return result;
 }
 
+/// Older Pioneer exports use a leaf DIV wherever other EPUBs use P.
+/// Normalize only those leaf containers in the parsing copy. A surrounding
+/// layout DIV must never consume its child paragraphs or duplicate their text.
+/// Source bytes, attributes and inline descendants remain unchanged.
+String _normalizeLeafDivBlocks(String html) {
+  final stack = <({RegExpMatch open, bool hasBlockChild})>[];
+  final replacements = <({int start, int end, String value})>[];
+  final tags = RegExp(
+    r'<(/?)(div|h[1-6]|p|blockquote|pre|li|ul|ol|table|section|article|figure|img|hr)\b[^>]*>',
+    caseSensitive: false,
+  );
+  for (final tag in tags.allMatches(html)) {
+    final name = tag.group(2)!.toLowerCase();
+    final closing = tag.group(1) == '/';
+    if (!closing) {
+      if (stack.isNotEmpty) {
+        final parent = stack.removeLast();
+        stack.add((open: parent.open, hasBlockChild: true));
+      }
+      if (name == 'div' && !tag.group(0)!.endsWith('/>')) {
+        stack.add((open: tag, hasBlockChild: false));
+      }
+    } else if (name == 'div' && stack.isNotEmpty) {
+      final frame = stack.removeLast();
+      if (frame.hasBlockChild) continue;
+      final opening = frame.open.group(0)!;
+      replacements.add((
+        start: frame.open.start,
+        end: frame.open.end,
+        value: '<p data-source-tag="div"${opening.substring(4)}',
+      ));
+      replacements.add((start: tag.start, end: tag.end, value: '</p>'));
+    }
+  }
+  // Offsets are source offsets; replacing from the end keeps them valid.
+  replacements.sort((a, b) => b.start.compareTo(a.start));
+  for (final replacement in replacements) {
+    html = html.replaceRange(
+      replacement.start,
+      replacement.end,
+      replacement.value,
+    );
+  }
+  return html;
+}
+
+int _imageRotationDegrees(String attributes) {
+  final raw = _attribute(attributes, 'data-image-rotation');
+  if (raw == null) return 0;
+  final degrees = int.tryParse(raw.trim());
+  if (degrees == null || !const [0, 90, 180, 270].contains(degrees)) {
+    throw StateError(
+      'Unsupported image orientation "$raw". Expected clockwise degrees '
+      '0, 90, 180 or 270; the prior reading generation is retained.',
+    );
+  }
+  return degrees;
+}
+
 List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(
   String html, {
+  EpubTextStyles textStyles = const EpubTextStyles.empty(),
   _EpubRefCodeTracker? refCodeTracker,
+  _SourcePageTracker? sourcePageTracker,
+  List<EpubAnchorTarget> numericHeadingTargets = const [],
+  bool linkCitations = true,
 }) {
+  // A split section can contain only the document head and a page boundary.
+  // Head/style/script text is not book prose, even when it contains HTML-like
+  // strings. Remove it before looking for readable blocks or fallback text.
+  html = html
+      .replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '')
+      .replaceAll(
+        RegExp(
+          r'<(head|style|script|title)\b[^>]*>.*?</\1\s*>',
+          caseSensitive: false,
+          dotAll: true,
+        ),
+        '',
+      );
+  html = _normalizeLeafDivBlocks(html);
   final pattern = RegExp(
-    r'<(h[1-6]|p|blockquote|pre|li|img|hr)\b([^>]*)>(?:(.*?)</\1\s*>)?',
+    r'<(table|h[1-6]|p|blockquote|pre|li|img|hr)\b([^>]*)>(?:(.*?)</\1\s*>)?',
     caseSensitive: false,
     dotAll: true,
   );
@@ -1046,10 +1662,12 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(
   // that block's unrelated `id` (or a generated one).
   var anchorScanOffset = 0;
   String? pendingAnchor;
+  var hasReadableHeading = false;
   for (final match in pattern.allMatches(html)) {
-    final tag = match.group(1)!.toLowerCase();
-    final attrs = match.group(2) ?? '';
-    final inner = match.group(3) ?? '';
+    var tag = match.group(1)!.toLowerCase();
+    var attrs = match.group(2) ?? '';
+    var inner = match.group(3) ?? '';
+    String? wrapperAttrs;
     final prefix = html.substring(anchorScanOffset, match.start);
     final leadingAnchors = RegExp(
       r'''<a\b[^>]*(?:\bid|\bname)\s*=\s*(["'])([^"']+)\1[^>]*>\s*</a\s*>''',
@@ -1061,31 +1679,110 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(
       if (value != null && value.isNotEmpty) pendingAnchor = value;
     }
     anchorScanOffset = match.end;
+    // Image-only paragraphs are layout wrappers, not empty prose. Preserve
+    // the real image through the same extraction path as a standalone IMG.
+    // Keep wrapper attributes for citation/alignment and both source anchors.
+    if (tag == 'p') {
+      final image = RegExp(
+        r'^(?:\s|&(?:nbsp|#160|#xA0);)*<img\b([^>]*)>(?:\s|&(?:nbsp|#160|#xA0);)*$',
+        caseSensitive: false,
+        dotAll: true,
+      ).firstMatch(inner);
+      if (image != null) {
+        wrapperAttrs = attrs;
+        attrs = '${image.group(1)!} $attrs';
+        tag = 'img';
+        inner = '';
+      }
+    }
+    if (tag != 'img' &&
+        RegExp(r'<img\b', caseSensitive: false).hasMatch(inner)) {
+      throw StateError(
+        'Nested image layout is not supported without losing content. '
+        'The source and any previous reading generation are retained for review.',
+      );
+    }
     // Keep `inner` unstripped for the pagebreak refcode tracker below (it
     // needs to see pagebreak markers), but derive prose text/nodes from a
     // copy with any refcode marker span removed.
     final proseInner = _stripRefCodeSpans(inner);
+    final tableRows = tag == 'table'
+        ? _tableRows(proseInner, textStyles)
+        : null;
     final text = tag == 'img'
         ? (_attribute(attrs, 'alt') ?? '')
+        : tableRows != null
+        ? tableRows
+              .map((row) => row.map((cell) => cell['text']).join('\t'))
+              .join('\n')
         : _plain(proseInner);
-    // A bare 1-4 digit heading (post entity-decoding, trimmed) is a printed
-    // page number from the source layout (common in Apple Pages EPUB
-    // exports), not a real chapter/section heading — "Chapter 71" or "71."
-    // still classify as headings since they contain non-digit characters.
+    // A numeric heading can be an authored section, such as a year. Require
+    // the source Contents to name this exact file/fragment and numeric label;
+    // never infer a year from its value or a book's title. Explicit pagebreak
+    // semantics take precedence over that evidence.
     final isStandaloneNumber = RegExp(r'^\d{1,4}$').hasMatch(text);
-    final isBarePageNumber = tag.startsWith('h') && isStandaloneNumber;
+    final explicitPageBreak =
+        _attribute(attrs, 'epub:type') == 'pagebreak' ||
+        _attribute(attrs, 'role') == 'doc-pagebreak';
+    final authoredNumber =
+        !explicitPageBreak &&
+        numericHeadingTargets.any((target) {
+          if (target.title.trim() != text) return false;
+          if (target.anchor.isEmpty) return !hasReadableHeading;
+          if (target.anchor == pendingAnchor ||
+              target.anchor == _attribute(attrs, 'id')) {
+            return true;
+          }
+          return RegExp(r'<(?:span|a)\b[^>]*>', caseSensitive: false)
+              .allMatches(inner)
+              .any(
+                (marker) =>
+                    _attribute(marker.group(0)!, 'id') == target.anchor ||
+                    _attribute(marker.group(0)!, 'name') == target.anchor,
+              );
+        });
+    final isBarePageNumber =
+        tag.startsWith('h') && isStandaloneNumber && !authoredNumber;
     // These elements are print-layout anchors, not reader content. Keeping
     // them as paragraphs made books such as Acts of the Apostles render
     // hundreds of consecutive page numbers, one per line. A real numbered
     // heading remains intact when it has punctuation or descriptive text.
-    if (isBarePageNumber || (tag == 'li' && isStandaloneNumber)) continue;
+    if (isBarePageNumber) {
+      // The old parser discarded these page boundaries outright.
+      sourcePageTracker?.recordPage(text);
+      continue;
+    }
+    if (tag.startsWith('h')) hasReadableHeading = true;
+    // A reviewed source can explicitly mark an unpaginated gap. Do not carry
+    // the preceding page number into that material or guess a replacement.
+    if (_attribute(attrs, 'data-source-page-reset') == 'true') {
+      sourcePageTracker?.reset();
+    }
+    final pageMetadata =
+        sourcePageTracker?.metadataFor(inner) ?? const <String, Object?>{};
+    final className = _attribute(attrs, 'class');
+    final isChapterOutline = RegExp(
+      r'(?:^|\s)chapter[-_]summary(?:\s|$)',
+      caseSensitive: false,
+    ).hasMatch(className ?? '');
+    final headingClass = RegExp(
+      r'(?:^|\s)heading[-_]([1-6])(?:\s|$)',
+      caseSensitive: false,
+    ).firstMatch(className ?? '');
+    final isPartHeading = RegExp(
+      r'(?:^|\s)header-main(?:\s|$)',
+      caseSensitive: false,
+    ).hasMatch(className ?? '');
+    final isClassHeading =
+        tag == 'p' && (headingClass != null || isPartHeading);
     final type = switch (tag) {
       'blockquote' => LibraryDocumentBlockType.quotation,
       'pre' => LibraryDocumentBlockType.poem,
       'li' => LibraryDocumentBlockType.listItem,
       'img' => LibraryDocumentBlockType.image,
       'hr' => LibraryDocumentBlockType.horizontalRule,
-      _ when tag.startsWith('h') => LibraryDocumentBlockType.heading,
+      _ when tag.startsWith('h') || isClassHeading =>
+        LibraryDocumentBlockType.heading,
       _ => LibraryDocumentBlockType.paragraph,
     };
     if (text.isEmpty &&
@@ -1093,25 +1790,106 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(
         type != LibraryDocumentBlockType.horizontalRule) {
       continue;
     }
-    final className = _attribute(attrs, 'class');
-    final alignment = _alignment(attrs, className);
+    final alignment =
+        textStyles.resolveAlignment(tag, attrs) ??
+        _alignment(attrs, className) ??
+        (wrapperAttrs == null
+            ? null
+            : textStyles.resolveAlignment('p', wrapperAttrs) ??
+                  _alignment(wrapperAttrs, _attribute(wrapperAttrs, 'class')));
+    final imageRotation = type == LibraryDocumentBlockType.image
+        ? _imageRotationDegrees(attrs)
+        : 0;
     final nodes = type == LibraryDocumentBlockType.image
         ? <Map<String, Object?>>[
             <String, Object?>{
               'type': 'image',
               'source': _attribute(attrs, 'src') ?? '',
               'alt': text,
+              if (imageRotation != 0) 'rotation_degrees': imageRotation,
             },
           ]
-        : _inlineNodes(proseInner, className: className);
-    final headingRole = switch (tag) {
-      'h1' => 'book_title',
-      'h2' => 'chapter',
-      'h3' => 'section',
-      'h4' || 'h5' || 'h6' => 'minor',
-      _ => null,
-    };
+        : tableRows != null
+        ? <Map<String, Object?>>[
+            for (var r = 0; r < tableRows.length; r++) ...[
+              if (r > 0) {'type': 'line_break'},
+              for (var c = 0; c < tableRows[r].length; c++) ...[
+                if (c > 0) {'type': 'text', 'text': '\t'},
+                ...(tableRows[r][c]['nodes'] as List<Map<String, Object?>>),
+              ],
+            ],
+          ]
+        : _inlineNodes(
+            proseInner,
+            linkCitations: linkCitations,
+            className: className,
+            textStyles: textStyles,
+            blockStyle: textStyles.resolve(
+              _attribute(attrs, 'data-source-tag') ?? tag,
+              attrs,
+            ),
+          );
+    final explicitChapter =
+        type == LibraryDocumentBlockType.heading &&
+        RegExp(
+          r'^chapter\s+(?:\d+|[ivxlcdm]+)\b',
+          caseSensitive: false,
+        ).hasMatch(text.trim());
+    final headingRole = explicitChapter
+        ? 'chapter'
+        : isClassHeading
+        ? (isPartHeading
+              ? 'part'
+              : headingClass?.group(1) == '1'
+              ? 'chapter'
+              : 'section')
+        : switch (tag) {
+            'h1' => 'book_title',
+            'h2' => 'chapter',
+            'h3' => 'section',
+            'h4' || 'h5' || 'h6' => 'minor',
+            _ => null,
+          };
     if (headingRole == 'chapter') refCodeTracker?.beginBody();
+    final embeddedCode = _attribute(attrs, 'data-refcode');
+    final derivedCode =
+        embeddedCode == null && type == LibraryDocumentBlockType.paragraph
+        ? refCodeTracker?.referenceCodeFor(inner)
+        : null;
+    final anchor =
+        pendingAnchor ??
+        (wrapperAttrs == null ? null : _attribute(wrapperAttrs, 'id')) ??
+        _attribute(attrs, 'id') ??
+        _attribute(
+          RegExp(
+                r'<(?:span|a)\b[^>]*>',
+                caseSensitive: false,
+              ).firstMatch(inner)?.group(0) ??
+              '',
+          'id',
+        );
+    // A paragraph can contain several independently linked page/footnote
+    // anchors. Keep them even when their marker text is omitted from prose.
+    // Preserve the existing primary anchor and block identity.
+    final anchorAliases =
+        {
+              if (wrapperAttrs != null) _attribute(wrapperAttrs, 'id'),
+              _attribute(attrs, 'id'),
+              for (final marker in RegExp(
+                r'<[a-z][a-z0-9:_-]*\b[^>]*>',
+                caseSensitive: false,
+              ).allMatches(inner)) ...[
+                _attribute(marker.group(0)!, 'id'),
+                if (RegExp(
+                  r'^<a\b',
+                  caseSensitive: false,
+                ).hasMatch(marker.group(0)!))
+                  _attribute(marker.group(0)!, 'name'),
+              ],
+            }
+            .whereType<String>()
+            .where((value) => value.isNotEmpty && value != anchor)
+            .toList();
     result.add(
       _ParsedCanonicalBlock(
         type: type,
@@ -1120,26 +1898,59 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(
           nodes: nodes,
           alignment: alignment,
           metadata: (<String, Object?>{
-            'source_tag': tag,
+            'source_tag': _attribute(attrs, 'data-source-tag') ?? tag,
+            if (tableRows != null) 'table_rows': tableRows,
+            if (textStyles.resolveFontScale(tag, attrs) case final scale?)
+              'relative_font_scale': scale,
+            if (textStyles.resolveFontScale(tag, attrs) != null)
+              'font_scale_basis': 'body',
             'source_class': className,
+            if (tag == 'p' &&
+                alignment == 'center' &&
+                textStyles.hasCompactVerticalMargins(tag, attrs))
+              'compact_centered_paragraph': true,
+            if (wrapperAttrs != null) 'source_wrapper_tag': 'p',
+            if (wrapperAttrs != null &&
+                _attribute(wrapperAttrs, 'class') != null)
+              'source_wrapper_class': _attribute(wrapperAttrs, 'class'),
+            if (anchorAliases.isNotEmpty)
+              'source_anchor_aliases': anchorAliases,
+            if (_attribute(attrs, 'data-index-entry-group') != null)
+              'source_index_entry_group': _attribute(
+                attrs,
+                'data-index-entry-group',
+              ),
+            if (_attribute(attrs, 'data-index-letter') != null)
+              'source_index_letter': _attribute(attrs, 'data-index-letter'),
+            if (_attribute(attrs, 'data-text-witness') != null)
+              'text_witness': _attribute(attrs, 'data-text-witness'),
+            if (isChapterOutline) 'content_role': 'chapter_outline',
+            if (_attribute(attrs, 'data-reference-context') != null)
+              'reference_context': _attribute(attrs, 'data-reference-context'),
+            if (_attribute(attrs, 'data-reference-witness') != null)
+              'reference_witness': _attribute(attrs, 'data-reference-witness'),
+            if (_attribute(attrs, 'data-reference-origin') != null)
+              'reference_origin': _attribute(attrs, 'data-reference-origin'),
+            if (derivedCode != null)
+              'reference_origin': 'synthetic_epub_pagebreak',
+            ...pageMetadata,
             'classification_reason': tag.startsWith('h')
                 ? 'explicit semantic heading element'
                 : 'semantic HTML block',
             'heading_role': headingRole,
           }..removeWhere((_, value) => value == null)),
         ),
-        anchor: pendingAnchor ?? _attribute(attrs, 'id'),
-        refcode:
-            _attribute(attrs, 'data-refcode') ??
-            (type == LibraryDocumentBlockType.paragraph
-                ? refCodeTracker?.referenceCodeFor(inner)
-                : null),
+        anchor: anchor,
+        refcode: embeddedCode ?? derivedCode,
       ),
     );
     pendingAnchor = null;
   }
   if (result.isEmpty) {
-    final text = _plain(html);
+    // Recognized blocks were intentionally omitted (for example a lone
+    // printed page number). Do not resurrect them as fallback prose. Keep
+    // genuine unwrapped body text that remains outside those elements.
+    final text = _plain(html.replaceAll(pattern, ''));
     if (text.isNotEmpty) {
       result.add(
         _ParsedCanonicalBlock(
@@ -1150,7 +1961,116 @@ List<_ParsedCanonicalBlock> _parseSemanticHtmlBlocks(
       );
     }
   }
-  return result;
+  return _extractStandalonePageMarkers(result);
+}
+
+/// Removes a print-layout page number only when its source shape makes it a
+/// standalone interruption in otherwise readable flow.  List items are never
+/// candidates: a lone number in an `<li>` is ordinary list content.  Likewise
+/// a verse-class paragraph remains content even if it contains only a number.
+///
+/// The marker is retained on the following readable block as
+/// `formatted_content.metadata.source_page_marker`, which represents the page
+/// boundary immediately before that block.
+List<_ParsedCanonicalBlock> _extractStandalonePageMarkers(
+  List<_ParsedCanonicalBlock> blocks,
+) {
+  if (blocks.length < 3) return blocks;
+  final extracted = <_ParsedCanonicalBlock>[];
+  for (var index = 0; index < blocks.length; index++) {
+    final block = blocks[index];
+    final marker = _standalonePageMarker(block);
+    if (marker == null ||
+        index == 0 ||
+        index == blocks.length - 1 ||
+        !_isPageMarkerPredecessor(blocks[index - 1]) ||
+        !_isReadingFlowBlock(blocks[index + 1])) {
+      extracted.add(block);
+      continue;
+    }
+    // The next iteration writes the marker to the following readable block.
+    final next = blocks[index + 1].withPageMarker(marker);
+    blocks[index + 1] = next;
+  }
+  return extracted;
+}
+
+// A print page can begin immediately after a chapter/section heading. The
+// dedicated standalone-number shape remains required, so admitting headings
+// here preserves that real page boundary without treating ordinary numbered
+// prose as a marker.
+bool _isPageMarkerPredecessor(_ParsedCanonicalBlock block) =>
+    _isReadingFlowBlock(block) ||
+    block.type == LibraryDocumentBlockType.heading;
+
+String? _standalonePageMarker(_ParsedCanonicalBlock block) {
+  if (block.type != LibraryDocumentBlockType.paragraph) return null;
+  final tag = block.formatted.metadata['source_tag']?.toString().toLowerCase();
+  if (tag != 'p') return null;
+  final className =
+      block.formatted.metadata['source_class']?.toString().toLowerCase() ?? '';
+  if (RegExp(r'\b(?:verse|scripture|bible)\b').hasMatch(className)) return null;
+  final text = block.text.trim();
+  // Plain digits, optional surrounding brackets, or a conventional `p. 57`
+  // token are the print-page forms encountered in EPUB exports. Keep this
+  // deliberately narrow so numbered prose is not reclassified as metadata.
+  final match = RegExp(
+    r'^(?:\[\s*)?(?:p(?:age)?\.?\s*)?(\d{1,4})(?:\s*\])?$',
+  ).firstMatch(text);
+  return match?.group(1);
+}
+
+bool _isReadingFlowBlock(_ParsedCanonicalBlock block) => switch (block.type) {
+  LibraryDocumentBlockType.paragraph ||
+  LibraryDocumentBlockType.listItem ||
+  LibraryDocumentBlockType.quotation ||
+  LibraryDocumentBlockType.poem => block.text.trim().isNotEmpty,
+  _ => false,
+};
+
+/// Records only source page boundaries. Paragraph numbers are not invented.
+/// Nonsemantic colored markers require a profile tied to the exact source hash.
+class _SourcePageTracker {
+  _SourcePageTracker({this.spanClass});
+  final String? spanClass;
+  int? _page;
+  void reset() => _page = null;
+  void recordPage(String value) {
+    final page = int.tryParse(value);
+    if (page != null && page > 0) _page = page;
+  }
+
+  Map<String, Object?> metadataFor(String html) {
+    var start = _page;
+    for (final marker in RegExp(
+      r'<span\b([^>]*)>(.*?)</span\s*>',
+      caseSensitive: false,
+      dotAll: true,
+    ).allMatches(html)) {
+      final attrs = marker.group(1) ?? '';
+      final classes = (_attribute(attrs, 'class') ?? '').split(RegExp(r'\s+'));
+      final semantic =
+          _attribute(attrs, 'epub:type') == 'pagebreak' ||
+          _attribute(attrs, 'role') == 'doc-pagebreak';
+      final profiled = spanClass != null && classes.contains(spanClass);
+      if (!semantic && !profiled) continue;
+      final raw = semantic
+          ? (_attribute(attrs, 'title') ??
+                _attribute(attrs, 'aria-label') ??
+                _plain(marker.group(2)!))
+          : _plain(marker.group(2)!);
+      final match = RegExp(r'^\[?(\d{1,4})\]?$').firstMatch(raw.trim());
+      if (match == null) continue;
+      recordPage(match.group(1)!);
+      if (_plain(html.substring(0, marker.start)).isEmpty) start = _page;
+    }
+    return {
+      if (start != null) 'source_page_start': start,
+      if (_page != null) 'source_page_end': _page,
+      if (start != null || _page != null)
+        'page_reference_origin': 'source_printed_page',
+    };
+  }
 }
 
 class _EpubRefCodeTracker {
@@ -1282,8 +2202,10 @@ bool _isEpubNavigationDocument(String html) => RegExp(
 /// THE FOUR BEASTS Chronological Connection..."), immediately followed by
 /// unrelated outline/body text with no boundary marker of any kind.
 ///
-/// Recovery requires the number to match the next expected chapter in
-/// strict monotonic sequence — the same technique already used for the
+/// Recovery requires the number to match the next expected chapter within
+/// a source-identified part. Explicit Daniel/Revelation part openers reset
+/// the sequence; an isolated number 1 in body prose never does so.
+/// Within each part, strict monotonic sequence — the same technique already used for the
 /// "CHAPTER (roman numeral)." tracker in [_parseCapturedEgwBlocks] above —
 /// so a "number - CAPS" run that happens to occur elsewhere in body prose
 /// can only be misread as a heading if it lands on the exact next chapter
@@ -1300,6 +2222,15 @@ bool _isEpubNavigationDocument(String html) => RegExp(
 /// see.
 class _OcrChapterHeadingTracker {
   int _expectedChapter = 1;
+  final Set<String> _seenParts = {};
+
+  // These are structural labels present verbatim in this combined work's
+  // source. Require a paragraph-start label, never a title/filename identity
+  // guess or an arbitrary chapter-number decrease in prose.
+  static final _partOpening = RegExp(
+    r'^Response of History to (?:the Prophecy of Daniel|the Revelation)\b',
+    caseSensitive: false,
+  );
 
   List<_ParsedCanonicalBlock> recoverHeadings(
     List<_ParsedCanonicalBlock> blocks,
@@ -1310,6 +2241,37 @@ class _OcrChapterHeadingTracker {
       if (block.type != LibraryDocumentBlockType.paragraph ||
           !_isSimplePlainTextParagraph(block)) {
         result.add(block);
+        continue;
+      }
+      // A printed contents list is evidence, not the chapter body. Its
+      // repeated number/title runs must not advance the recovery sequence.
+      if (RegExp(
+        r'^(?:table of contents|contents)\b',
+        caseSensitive: false,
+      ).hasMatch(block.text.trim())) {
+        result.add(block);
+        continue;
+      }
+      final part = _partOpening.firstMatch(block.text);
+      if (part != null && _seenParts.add(part.group(0)!.toLowerCase())) {
+        _expectedChapter = 1;
+        changed = true;
+        final className = block.formatted.nodes.first['class'] as String?;
+        result.add(
+          _ocrRecoveredHeading(
+            part.group(0)!,
+            className: className,
+            role: 'part',
+          ),
+        );
+        final remaining = block.text.substring(part.end).trim();
+        if (remaining.isNotEmpty) {
+          result.addAll(
+            _splitForHeadings(
+              _ocrPlainParagraph(remaining, className: className),
+            ),
+          );
+        }
         continue;
       }
       final split = _splitForHeadings(block);
@@ -1424,8 +2386,17 @@ int? _consumeOcrUppercaseTitleRun(String text, int from) {
     final word = token.group(0)!;
     final core = word.replaceAll(RegExp(r'^[^A-Za-z0-9]+|[^A-Za-z0-9]+$'), '');
     final isDigits = core.isNotEmpty && RegExp(r'^\d+$').hasMatch(core);
+    final nextCore = i + 1 < tokens.length
+        ? tokens[i + 1]
+              .group(0)!
+              .replaceAll(RegExp(r'^[^A-Za-z]+|[^A-Za-z]+$'), '')
+        : '';
+    final singleLetterInTitle =
+        (core == 'A' || core == 'I') &&
+        nextCore.length >= 2 &&
+        nextCore == nextCore.toUpperCase();
     final isUpperWord =
-        core.length >= 2 &&
+        (core.length >= 2 || singleLetterInTitle) &&
         core == core.toUpperCase() &&
         core.toUpperCase() != core.toLowerCase();
     if (isUpperWord && words > 0 && _ocrTitleRunStopWords.contains(core)) {
@@ -1450,26 +2421,30 @@ _ParsedCanonicalBlock _ocrPlainParagraph(String text, {String? className}) =>
       formatted: LibraryFormattedContent.plain(text, className: className),
     );
 
-_ParsedCanonicalBlock _ocrRecoveredHeading(String text, {String? className}) =>
-    _ParsedCanonicalBlock(
-      type: LibraryDocumentBlockType.heading,
-      text: text,
-      formatted: LibraryFormattedContent(
-        nodes: <Map<String, Object?>>[
-          <String, Object?>{
-            'type': 'text',
-            'text': text,
-            if (className != null && className.isNotEmpty) 'class': className,
-          },
-        ],
-        metadata: const <String, Object?>{
-          'source_tag': 'p',
-          'heading_role': 'chapter',
-          'classification_reason':
-              'recovered from unmarked OCR chapter-number title run',
-        },
-      ),
-    );
+_ParsedCanonicalBlock _ocrRecoveredHeading(
+  String text, {
+  String? className,
+  String role = 'chapter',
+}) => _ParsedCanonicalBlock(
+  type: LibraryDocumentBlockType.heading,
+  text: text,
+  formatted: LibraryFormattedContent(
+    nodes: <Map<String, Object?>>[
+      <String, Object?>{
+        'type': 'text',
+        'text': text,
+        if (className != null && className.isNotEmpty) 'class': className,
+      },
+    ],
+    metadata: <String, Object?>{
+      'source_tag': 'p',
+      'heading_role': role,
+      'classification_reason': role == 'part'
+          ? 'explicit source part opener'
+          : 'recovered from unmarked OCR chapter-number title run',
+    },
+  ),
+);
 
 /// Normalization is intentionally locator-only: backslashes become slashes,
 /// query/fragment parts are removed, dot segments are collapsed, leading
@@ -1484,9 +2459,10 @@ String normalizeLibrarySourceHref(String sourceHref) {
   return value.toLowerCase();
 }
 
-/// Stable identity is SHA-256 over version, work, normalized locator,
+/// Initial identity is SHA-256 over version, work, normalized locator,
 /// optional source anchor, semantic type, and zero-based source ordinal.
 /// Content is deliberately excluded and is tracked by content_hash instead.
+/// Updates reconcile these candidate IDs with proven prior block identities.
 String stableLibraryDocumentBlockId({
   required String libraryItemId,
   required String sourceHref,
@@ -1538,11 +2514,78 @@ String _plain(String html) =>
         .replaceAll(RegExp(r' *\n *'), '\n')
         .trim();
 
-List<Map<String, Object?>> _inlineNodes(String html, {String? className}) {
+List<List<Map<String, Object?>>> _tableRows(
+  String html,
+  EpubTextStyles styles,
+) {
+  if (RegExp(r'<table\b', caseSensitive: false).hasMatch(html)) {
+    throw StateError('Nested tables require review; source retained.');
+  }
+  final rows = <List<Map<String, Object?>>>[];
+  for (final row in RegExp(
+    r'<tr\b[^>]*>(.*?)</tr\s*>',
+    caseSensitive: false,
+    dotAll: true,
+  ).allMatches(html)) {
+    final cells = <Map<String, Object?>>[];
+    for (final cell in RegExp(
+      r'<(td|th)\b([^>]*)>(.*?)</\1\s*>',
+      caseSensitive: false,
+      dotAll: true,
+    ).allMatches(row.group(1)!)) {
+      final attrs = cell.group(2)!;
+      final rowspan = int.tryParse(_attribute(attrs, 'rowspan') ?? '1');
+      if (rowspan != 1) {
+        throw StateError(
+          'Row-spanning table requires review; source retained.',
+        );
+      }
+      final colspan = int.tryParse(_attribute(attrs, 'colspan') ?? '1');
+      if (colspan == null || colspan < 1 || colspan > 24) {
+        throw StateError('Unsupported table column span; source retained.');
+      }
+      final content = cell
+          .group(3)!
+          .replaceAll(
+            RegExp(r'</(?:p|div)>\s*(?=<(?:p|div)\b)', caseSensitive: false),
+            '<br/>',
+          );
+      cells.add({
+        'text': _plain(content),
+        'colspan': colspan,
+        'header': cell.group(1)!.toLowerCase() == 'th',
+        'alignment':
+            styles.resolveAlignment(cell.group(1)!.toLowerCase(), attrs) ??
+            _alignment(attrs, _attribute(attrs, 'class')),
+        'nodes': _inlineNodes(
+          content,
+          textStyles: styles,
+          blockStyle: styles.resolve(cell.group(1)!.toLowerCase(), attrs),
+        ),
+      });
+    }
+    if (cells.isNotEmpty) rows.add(cells);
+  }
+  if (rows.isEmpty)
+    throw StateError('Empty or malformed table requires review.');
+  // Captions are not cells: reject rather than silently dropping their text.
+  if (RegExp(r'<caption\b', caseSensitive: false).hasMatch(html)) {
+    throw StateError('Table caption requires review; source retained.');
+  }
+  return rows;
+}
+
+List<Map<String, Object?>> _inlineNodes(
+  String html, {
+  String? className,
+  EpubTextStyles textStyles = const EpubTextStyles.empty(),
+  Map<String, bool> blockStyle = const {},
+  bool linkCitations = true,
+}) {
   final nodes = <Map<String, Object?>>[];
   final tokens = RegExp(r'(<[^>]+>|[^<]+)', dotAll: true).allMatches(html);
-  final styles = <String>[];
-  String? linkHref;
+  final frames =
+      <({String tag, Map<String, bool> style, String? link, double scale})>[];
   for (final token in tokens) {
     final value = token.group(0)!;
     if (value.startsWith('<')) {
@@ -1551,35 +2594,58 @@ List<Map<String, Object?>> _inlineNodes(String html, {String? className}) {
         nodes.add(<String, Object?>{'type': 'line_break'});
         continue;
       }
-      if (lower.startsWith('</a')) {
-        linkHref = null;
-        continue;
-      }
-      if (lower.startsWith('</')) {
-        if (styles.isNotEmpty) styles.removeLast();
+      final closing = RegExp(r'^</([a-z0-9]+)').firstMatch(lower)?.group(1);
+      if (closing != null) {
+        final index = frames.lastIndexWhere((frame) => frame.tag == closing);
+        if (index >= 0) frames.removeRange(index, frames.length);
         continue;
       }
       final tag = RegExp(r'^<([a-z0-9]+)').firstMatch(lower)?.group(1);
-      if (tag == 'a') {
-        linkHref = _attribute(value, 'href');
+      if (tag == null ||
+          value.endsWith('/>') ||
+          const {'img', 'hr', 'wbr', 'input', 'meta', 'link'}.contains(tag)) {
         continue;
       }
-      final style = switch (tag) {
-        'b' || 'strong' => 'bold',
-        'i' || 'em' => 'italic',
-        'u' => 'underline',
-        'sup' => 'superscript',
-        'sub' => 'subscript',
-        _ => null,
-      };
-      if (style != null) styles.add(style);
+      // Track unstyled elements too: </span> must not close an outer <em>.
+      frames.add((
+        tag: tag,
+        scale:
+            ((frames.isEmpty ? 1.0 : frames.last.scale) *
+                    (textStyles.resolveFontScale(tag, value) ?? 1.0))
+                .clamp(0.7, 2.0)
+                .toDouble(),
+        style: textStyles.resolve(
+          tag,
+          value,
+          inherited: frames.isEmpty ? blockStyle : frames.last.style,
+        ),
+        link: tag == 'a'
+            ? _attribute(value, 'href')
+            : (_attribute(value, 'class') ?? '')
+                  .split(RegExp(r'\s+'))
+                  .contains('cis-inline-bible')
+            ? 'studybible-citation:${Uri.encodeComponent(_inlineElementText(html, token.end, tag))}'
+            : null,
+      ));
       continue;
     }
-    final text = _plain(value);
+    final styles = (frames.isEmpty ? blockStyle : frames.last.style).entries
+        .where((entry) => entry.value)
+        .map((entry) => entry.key)
+        .toSet();
+    final links = frames.map((frame) => frame.link).whereType<String>();
+    final linkHref = links.isEmpty ? null : links.last;
+    // Unlike _plain(), inline text must retain source whitespace at token
+    // boundaries. A styled span commonly divides ordinary prose between the
+    // word and its following space; trimming each token would fuse the words
+    // when the reader concatenates these nodes.
+    final text = _inlineText(value);
     if (text.isEmpty) continue;
     nodes.add(<String, Object?>{
       'type': 'text',
       'text': text,
+      if (frames.isNotEmpty && frames.last.scale != 1.0)
+        'relative_font_scale': frames.last.scale,
       if (styles.isNotEmpty) 'marks': List<String>.of(styles),
       if (className != null && className.isNotEmpty) 'class': className,
       if (linkHref != null && linkHref.isNotEmpty) ...<String, Object?>{
@@ -1594,5 +2660,85 @@ List<Map<String, Object?>> _inlineNodes(String html, {String? className}) {
       },
     });
   }
-  return nodes;
+  final normalized = _normalizeInlineNodeWhitespace(nodes);
+  return linkCitations ? linkLibraryCitations(normalized) : normalized;
+}
+
+String _inlineText(String html) =>
+    decodeXmlHtmlEntities(html).replaceAll(RegExp(r'\s+'), ' ');
+
+String _inlineElementText(String html, int start, String tag) {
+  var depth = 1;
+  for (final match in RegExp(
+    '</?$tag\\b[^>]*>',
+    caseSensitive: false,
+  ).allMatches(html, start)) {
+    final token = match.group(0)!;
+    if (token.startsWith('</')) {
+      depth--;
+      if (depth == 0) return _plain(html.substring(start, match.start)).trim();
+    } else if (!token.endsWith('/>')) {
+      depth++;
+    }
+  }
+  return ''; // Malformed marked citation remains unresolved, never guessed.
+}
+
+List<Map<String, Object?>> _normalizeInlineNodeWhitespace(
+  List<Map<String, Object?>> nodes,
+) {
+  Map<String, Object?>? previousText;
+  var afterLineBreak = true;
+  final normalized = <Map<String, Object?>>[];
+
+  for (final node in nodes) {
+    if (node['type'] == 'line_break') {
+      if (previousText != null) {
+        previousText['text'] = previousText['text']!.toString().trimRight();
+      }
+      normalized.add(node);
+      previousText = null;
+      afterLineBreak = true;
+      continue;
+    }
+    if (node['type'] != 'text') {
+      normalized.add(node);
+      continue;
+    }
+
+    var text = node['text']!.toString();
+    if (afterLineBreak) text = text.trimLeft();
+    if (previousText != null && text.startsWith(' ')) {
+      if (previousText['text']!.toString().endsWith(' ')) {
+        text = text.trimLeft();
+      }
+    }
+    // Whitespace before closing punctuation is never a visible prose
+    // boundary, even if formatting/indentation introduced it in the source.
+    if (RegExp(r'^\s*[,.;:!?)\]\}]').hasMatch(text)) {
+      previousText?['text'] = previousText['text']!.toString().trimRight();
+      text = text.trimLeft();
+    }
+    if (text.isEmpty) continue;
+
+    final normalizedNode = Map<String, Object?>.from(node)..['text'] = text;
+    normalized.add(normalizedNode);
+    previousText = normalizedNode;
+    afterLineBreak = false;
+  }
+
+  for (var index = normalized.length - 1; index >= 0; index--) {
+    final node = normalized[index];
+    if (node['type'] == 'line_break') break;
+    if (node['type'] == 'text') {
+      node['text'] = node['text']!.toString().trimRight();
+      if (node['text']!.toString().isEmpty) normalized.removeAt(index);
+      break;
+    }
+  }
+  return normalized
+      .where(
+        (node) => node['type'] != 'text' || node['text']!.toString().isNotEmpty,
+      )
+      .toList();
 }

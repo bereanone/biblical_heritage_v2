@@ -6,7 +6,7 @@ import 'elibrary_sdp_cleanup.dart';
 class ELibrarySchema {
   ELibrarySchema._();
 
-  static const currentVersion = 6;
+  static const currentVersion = 9;
   static const initialMigrationKey = 'phase_1_initial_schema';
   static const contributorsMigrationKey = 'phase_2_contributors';
   static const packageLineageMigrationKey = 'phase_3_package_lineage';
@@ -15,13 +15,20 @@ class ELibrarySchema {
       'phase_5_pioneer_epub_provenance';
   static const researchIndexVersionMigrationKey =
       'phase_6_research_index_version';
+  static const documentReferencesMigrationKey = 'phase_7_document_references';
+  static const readingCopyReviewsMigrationKey = 'phase_8_reading_copy_reviews';
+
+  static const documentAssetsMigrationKey = 'phase_9_document_assets';
 
   static Future<void> ensure(Database db) async {
     await _retryOnLocked(() async {
       await _createMigrationTable(db);
       await _createCoreTables(db);
+      await _createReadingCopyReviews(db);
       await _createCanonicalDocumentTables(db);
+      await _createDocumentAssets(db);
       await _createCanonicalStagingTables(db);
+      await _ensureDocumentReferenceColumns(db);
       await _createResearchIndexConversionTable(db);
       await _ensurePackageLineageColumns(db);
       await _ensureStoragePolicyColumns(db);
@@ -31,6 +38,63 @@ class ELibrarySchema {
       await ELibraryBogusSdpCleanupService.instance.run(db);
       await ELibraryLegacyItemIdMigrationService.instance.run(db);
     });
+  }
+
+  static Future<void> _createDocumentAssets(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_asset_blobs (
+        sha256 TEXT PRIMARY KEY CHECK(length(sha256)=64),
+        byte_length INTEGER NOT NULL CHECK(byte_length>=0),
+        media_type TEXT NOT NULL,
+        data BLOB NOT NULL CHECK(length(data)=byte_length)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_document_asset_sets (
+        library_item_id TEXT NOT NULL,
+        source_hash TEXT NOT NULL CHECK(length(source_hash)=64),
+        asset_count INTEGER NOT NULL CHECK(asset_count>=0),
+        cover_asset_name TEXT,
+        stored_at TEXT NOT NULL,
+        PRIMARY KEY(library_item_id, source_hash)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_document_assets (
+        library_item_id TEXT NOT NULL,
+        source_hash TEXT NOT NULL,
+        asset_name TEXT NOT NULL,
+        asset_sha256 TEXT NOT NULL REFERENCES library_asset_blobs(sha256),
+        review_status TEXT NOT NULL DEFAULT 'unreviewed'
+          CHECK(review_status IN ('unreviewed','verified_original')),
+        witness_uri TEXT,
+        witness_sha256 TEXT,
+        witness_page INTEGER CHECK(witness_page>0),
+        review_note TEXT,
+        PRIMARY KEY(library_item_id, source_hash, asset_name),
+        FOREIGN KEY(library_item_id, source_hash)
+          REFERENCES library_document_asset_sets(library_item_id, source_hash)
+      )
+    ''');
+  }
+
+  static Future<void> _createReadingCopyReviews(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_reading_copy_reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        library_item_id TEXT NOT NULL REFERENCES library_items(id),
+        source_fingerprint TEXT NOT NULL,
+        preferred_item_id TEXT NOT NULL REFERENCES library_items(id),
+        preferred_fingerprint TEXT NOT NULL,
+        edition_label TEXT NOT NULL,
+        review_note TEXT NOT NULL,
+        reviewed_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_reading_copy_reviews_item
+      ON library_reading_copy_reviews(library_item_id, id)
+    ''');
   }
 
   /// Tracks, per research-pipeline library item, which
@@ -90,6 +154,46 @@ class ELibrarySchema {
         UNIQUE(library_item_id, display_order)
       )
     ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_source_reference_map (
+        source_hash TEXT NOT NULL,
+        source_href TEXT NOT NULL,
+        source_block_ordinal INTEGER NOT NULL,
+        source_text_hash TEXT NOT NULL,
+        work_prefix TEXT NOT NULL,
+        page_number INTEGER NOT NULL CHECK(page_number >= 0),
+        paragraph_number INTEGER NOT NULL CHECK(paragraph_number > 0),
+        witness_uri TEXT NOT NULL,
+        witness_text_hash TEXT NOT NULL,
+        match_method TEXT NOT NULL,
+        PRIMARY KEY(source_hash, source_href, source_block_ordinal)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_source_page_profiles (
+        source_hash TEXT PRIMARY KEY,
+        page_marker_span_class TEXT NOT NULL,
+        evidence TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS library_document_navigation (
+        id TEXT PRIMARY KEY,
+        library_item_id TEXT NOT NULL,
+        parent_id TEXT,
+        label TEXT NOT NULL,
+        depth INTEGER NOT NULL,
+        display_order INTEGER NOT NULL,
+        source_href TEXT NOT NULL,
+        source_anchor TEXT,
+        target_block_id TEXT REFERENCES library_document_blocks(id) ON DELETE SET NULL,
+        UNIQUE(library_item_id, display_order)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_document_navigation_item '
+      'ON library_document_navigation(library_item_id, display_order)',
+    );
     await db.execute('''
       CREATE TABLE IF NOT EXISTS library_block_source_map (
         library_item_id TEXT NOT NULL,
@@ -163,6 +267,47 @@ class ELibrarySchema {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_document_sections_staging_item_order ON library_document_sections_staging(library_item_id, display_order)',
+    );
+  }
+
+  /// Keep citation components queryable without decoding formatted content.
+  /// Old rows retain their original text, IDs, markup and raw reference code.
+  static Future<void> _ensureDocumentReferenceColumns(Database db) async {
+    for (final table in [
+      'library_document_blocks',
+      'library_document_blocks_staging',
+    ]) {
+      final existing = (await db.rawQuery(
+        'PRAGMA table_info($table)',
+      )).map((row) => row['name']).toSet();
+      const fields = {
+        'reference_prefix': 'TEXT',
+        'reference_page': 'INTEGER',
+        'reference_paragraph': 'INTEGER',
+        'reference_origin': 'TEXT',
+        'reference_witness': 'TEXT',
+        'reference_context': 'TEXT',
+        'content_role': 'TEXT',
+      };
+      for (final field in fields.entries) {
+        if (!existing.contains(field.key)) {
+          await db.execute(
+            'ALTER TABLE $table ADD COLUMN ${field.key} ${field.value}',
+          );
+        }
+      }
+    }
+    final mapColumns = (await db.rawQuery(
+      'PRAGMA table_info(library_source_reference_map)',
+    )).map((row) => row['name']).toSet();
+    if (!mapColumns.contains('reference_context')) {
+      await db.execute(
+        'ALTER TABLE library_source_reference_map ADD COLUMN reference_context TEXT',
+      );
+    }
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_document_blocks_reference '
+      'ON library_document_blocks(library_item_id, reference_prefix, reference_page, reference_paragraph)',
     );
   }
 
@@ -605,6 +750,33 @@ class ELibrarySchema {
       'status': 'completed',
       'details':
           'Added library_research_index_conversion to track which research-pipeline indexing logic version built each item\'s library_text_blocks/library_navigation_items rows.',
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.insert('elibrary_schema_migrations', {
+      'migration_key': documentReferencesMigrationKey,
+      'from_version': 6,
+      'to_version': 7,
+      'applied_at': now,
+      'status': 'completed',
+      'details':
+          'Added nullable reference components and provenance to canonical blocks and staging; source-hash-scoped reference alignment and page profiles; authored document navigation.',
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.insert('elibrary_schema_migrations', {
+      'migration_key': readingCopyReviewsMigrationKey,
+      'from_version': 7,
+      'to_version': 8,
+      'applied_at': now,
+      'status': 'completed',
+      'details':
+          'Added append-only, source-scoped preferred reading copy reviews. Source rows and user annotations are retained.',
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    await db.insert('elibrary_schema_migrations', {
+      'migration_key': documentAssetsMigrationKey,
+      'from_version': 8,
+      'to_version': 9,
+      'applied_at': now,
+      'status': 'completed',
+      'details':
+          'Added immutable source-scoped image manifests, content-hashed image bytes, and per-image source review evidence. Existing documents and user data are unchanged.',
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 

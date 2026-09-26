@@ -145,6 +145,61 @@ Future<int> _countRows(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test(
+    'reference migration adds nullable fields without rewriting old blocks',
+    () async {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      final db = await openDatabase(inMemoryDatabasePath);
+      addTearDown(db.close);
+      await db.execute(
+        'CREATE TABLE library_document_blocks ('
+        'id TEXT PRIMARY KEY, library_item_id TEXT NOT NULL, section_id TEXT NOT NULL, '
+        'display_order INTEGER NOT NULL, block_type TEXT NOT NULL, plain_text TEXT, '
+        'formatted_content TEXT, source_refcode TEXT, source_href TEXT, source_anchor TEXT, content_hash TEXT)',
+      );
+      final old = <String, Object?>{
+        'id': 'stable-block',
+        'library_item_id': 'stable-book',
+        'section_id': 'section',
+        'display_order': 0,
+        'block_type': 'paragraph',
+        'plain_text': 'Original text',
+        'formatted_content': '{"version":1,"nodes":[]}',
+        'source_refcode': 'DAR 24.1',
+      };
+      await db.insert('library_document_blocks', old);
+      await ELibrarySchema.ensure(db);
+      await ELibrarySchema.ensure(db);
+      final row = (await db.query('library_document_blocks')).single;
+      for (final field in old.entries) {
+        expect(row[field.key], field.value);
+      }
+      for (final field in [
+        'reference_prefix',
+        'reference_page',
+        'reference_paragraph',
+        'reference_origin',
+        'reference_witness',
+      ]) {
+        expect(row.containsKey(field), true);
+        expect(row[field], isNull);
+      }
+      expect(
+        await ELibrarySchema.currentAppliedVersion(db),
+        ELibrarySchema.currentVersion,
+      );
+      expect(
+        (await db.query(
+          'elibrary_schema_migrations',
+          where: 'migration_key = ?',
+          whereArgs: [ELibrarySchema.documentReferencesMigrationKey],
+        )),
+        hasLength(1),
+      );
+    },
+  );
+
   test('bootstraps the current eLibrary tables and indexes', () async {
     final setup = await _openTestDatabase();
     final db = setup.db;

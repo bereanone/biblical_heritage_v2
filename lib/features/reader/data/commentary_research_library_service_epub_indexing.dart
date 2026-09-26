@@ -84,7 +84,8 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
             'indexed' ||
         (existing.first['index_error']?.toString().trim() ?? '').isNotEmpty ||
         storedIndexVersion == null ||
-        storedIndexVersion < CommentaryResearchLibraryService.researchIndexVersion;
+        storedIndexVersion <
+            CommentaryResearchLibraryService.researchIndexVersion;
     final existingRow = existing.isEmpty
         ? const <String, Object?>{}
         : existing.first;
@@ -319,11 +320,16 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
         where: 'id = ?',
         whereArgs: [itemId],
       );
-      await db.insert('library_research_index_conversion', {
-        'library_item_id': itemId,
-        'index_version': CommentaryResearchLibraryService.researchIndexVersion,
-        'indexed_at': now,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await db.insert(
+        'library_research_index_conversion',
+        {
+          'library_item_id': itemId,
+          'index_version':
+              CommentaryResearchLibraryService.researchIndexVersion,
+          'indexed_at': now,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
 
       final managedEgwAbbreviation = _managedEgwReferenceBookAbbreviation(
         title: title,
@@ -628,6 +634,7 @@ mixin _CommentaryResearchLibraryServiceEpubIndexingSupport {
       file: file,
       libraryItemId: libraryItemId,
       stats: null,
+      includeFrontMatter: true,
     );
     await db.delete(
       'library_text_blocks',

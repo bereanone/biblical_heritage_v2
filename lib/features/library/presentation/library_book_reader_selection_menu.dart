@@ -1,4 +1,5 @@
-part of 'library_book_reader_screen.dart';
+import 'package:flutter/material.dart';
+import '../../reader/presentation/tag_dialog_styles.dart';
 
 enum LibrarySelectionRangeAction {
   copyNoCitation,
@@ -6,7 +7,9 @@ enum LibrarySelectionRangeAction {
   copyWithMarkup,
   copyWithMarkupAndCitation,
   highlight,
+  underline,
   addHashTag,
+  chooseHashTag,
   clearMarkup,
   resetRange,
 }
@@ -27,6 +30,8 @@ Future<LibrarySelectionRangeAction?> showLibrarySelectionRangeActionsSheet(
   BuildContext context, {
   required LibrarySelectionRangeActionsPayload payload,
   required double fontScale,
+  bool showRichCopy = true,
+  bool showUnderline = false,
 }) {
   final theme = Theme.of(context);
   return showModalBottomSheet<LibrarySelectionRangeAction>(
@@ -42,144 +47,170 @@ Future<LibrarySelectionRangeAction?> showLibrarySelectionRangeActionsSheet(
           child: Align(
             alignment: Alignment.bottomCenter,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 920),
+              constraints: BoxConstraints(
+                maxWidth: 920,
+                maxHeight: MediaQuery.sizeOf(sheetContext).height * .9,
+              ),
               child: Material(
                 color: colorScheme.surface,
                 borderRadius: BorderRadius.circular(18),
                 clipBehavior: Clip.antiAlias,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Range Actions',
-                        style: TagDialogStyles.titleTextStyle(
-                          theme,
-                          fontScale,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.15,
+                child: SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Range Actions',
+                          style: TagDialogStyles.titleTextStyle(
+                            theme,
+                            fontScale,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.15,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        payload.referenceLabel,
-                        style: TagDialogStyles.bodyTextStyle(
-                          theme,
-                          fontScale,
-                          color: TagDialogStyles.mutedBody(theme),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 11,
-                        ),
-                        decoration: BoxDecoration(
-                          color: colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          payload.previewText,
+                        const SizedBox(height: 4),
+                        Text(
+                          payload.referenceLabel,
                           style: TagDialogStyles.bodyTextStyle(
                             theme,
                             fontScale,
-                            color: TagDialogStyles.title(theme),
-                            fontWeight: FontWeight.w500,
-                            height: 1.22,
+                            color: TagDialogStyles.mutedBody(theme),
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _SelectionActionButton(
-                            icon: Icons.copy_outlined,
-                            label: 'Copy No Citation',
-                            fontScale: fontScale,
-                            onTap: () => Navigator.of(
-                              sheetContext,
-                            ).pop(LibrarySelectionRangeAction.copyNoCitation),
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 11,
                           ),
-                          _SelectionActionButton(
-                            icon: Icons.assignment_outlined,
-                            label: 'Copy With Citation',
-                            fontScale: fontScale,
-                            onTap: () => Navigator.of(
-                              sheetContext,
-                            ).pop(LibrarySelectionRangeAction.copyWithCitation),
+                          decoration: BoxDecoration(
+                            color: colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          _SelectionActionButton(
-                            icon: Icons.copy_all_outlined,
-                            label: 'Copy With Markup',
-                            fontScale: fontScale,
-                            onTap: () => Navigator.of(
-                              sheetContext,
-                            ).pop(LibrarySelectionRangeAction.copyWithMarkup),
-                          ),
-                          _SelectionActionButton(
-                            icon: Icons.copy_all_outlined,
-                            label: 'Copy Markup + Citation',
-                            fontScale: fontScale,
-                            onTap: () => Navigator.of(sheetContext).pop(
-                              LibrarySelectionRangeAction
-                                  .copyWithMarkupAndCitation,
+                          child: Text(
+                            payload.previewText,
+                            maxLines: 4,
+                            overflow: TextOverflow.ellipsis,
+                            style: TagDialogStyles.bodyTextStyle(
+                              theme,
+                              fontScale,
+                              color: TagDialogStyles.title(theme),
+                              fontWeight: FontWeight.w500,
+                              height: 1.22,
                             ),
                           ),
-                          _SelectionActionButton(
-                            icon: Icons.format_paint_outlined,
-                            label: 'Highlight',
-                            fontScale: fontScale,
-                            onTap: () => Navigator.of(
-                              sheetContext,
-                            ).pop(LibrarySelectionRangeAction.highlight),
-                          ),
-                          _SelectionActionButton(
-                            icon: Icons.layers_clear_outlined,
-                            label: 'Clear Markup',
-                            fontScale: fontScale,
-                            enabled: payload.enableClearMarkup,
-                            onTap: () => Navigator.of(
-                              sheetContext,
-                            ).pop(LibrarySelectionRangeAction.clearMarkup),
-                          ),
-                          _SelectionActionButton(
-                            icon: Icons.tag_outlined,
-                            label: 'Add # Tag',
-                            fontScale: fontScale,
-                            onTap: () => Navigator.of(
-                              sheetContext,
-                            ).pop(LibrarySelectionRangeAction.addHashTag),
-                          ),
-                          _SelectionActionButton(
-                            icon: Icons.menu_book_outlined,
-                            label: 'Add to Memory',
-                            fontScale: fontScale,
-                            enabled: false,
-                          ),
-                          _SelectionActionButton(
-                            icon: Icons.translate_outlined,
-                            label: "Strong's",
-                            fontScale: fontScale,
-                            enabled: false,
-                          ),
-                          _SelectionActionButton(
-                            icon: Icons.close_rounded,
-                            label: 'Reset Range',
-                            fontScale: fontScale,
-                            onTap: () => Navigator.of(
-                              sheetContext,
-                            ).pop(LibrarySelectionRangeAction.resetRange),
-                          ),
-                        ],
-                      ),
-                    ],
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _SelectionActionButton(
+                              icon: Icons.copy_outlined,
+                              label: 'Copy No Citation',
+                              fontScale: fontScale,
+                              onTap: () => Navigator.of(
+                                sheetContext,
+                              ).pop(LibrarySelectionRangeAction.copyNoCitation),
+                            ),
+                            _SelectionActionButton(
+                              icon: Icons.assignment_outlined,
+                              label: 'Copy With Citation',
+                              fontScale: fontScale,
+                              onTap: () => Navigator.of(sheetContext).pop(
+                                LibrarySelectionRangeAction.copyWithCitation,
+                              ),
+                            ),
+                            if (showRichCopy)
+                              _SelectionActionButton(
+                                icon: Icons.copy_all_outlined,
+                                label: 'Copy With Markup',
+                                fontScale: fontScale,
+                                onTap: () => Navigator.of(sheetContext).pop(
+                                  LibrarySelectionRangeAction.copyWithMarkup,
+                                ),
+                              ),
+                            if (showRichCopy)
+                              _SelectionActionButton(
+                                icon: Icons.copy_all_outlined,
+                                label: 'Copy Markup + Citation',
+                                fontScale: fontScale,
+                                onTap: () => Navigator.of(sheetContext).pop(
+                                  LibrarySelectionRangeAction
+                                      .copyWithMarkupAndCitation,
+                                ),
+                              ),
+                            _SelectionActionButton(
+                              icon: Icons.format_paint_outlined,
+                              label: 'Highlight',
+                              fontScale: fontScale,
+                              onTap: () => Navigator.of(
+                                sheetContext,
+                              ).pop(LibrarySelectionRangeAction.highlight),
+                            ),
+                            if (showUnderline)
+                              _SelectionActionButton(
+                                icon: Icons.format_underlined,
+                                label: 'Underline',
+                                fontScale: fontScale,
+                                onTap: () => Navigator.of(
+                                  sheetContext,
+                                ).pop(LibrarySelectionRangeAction.underline),
+                              ),
+                            _SelectionActionButton(
+                              icon: Icons.layers_clear_outlined,
+                              label: 'Clear Markup',
+                              fontScale: fontScale,
+                              enabled: payload.enableClearMarkup,
+                              onTap: () => Navigator.of(
+                                sheetContext,
+                              ).pop(LibrarySelectionRangeAction.clearMarkup),
+                            ),
+                            _SelectionActionButton(
+                              icon: Icons.tag_outlined,
+                              label: 'Add # Tag',
+                              fontScale: fontScale,
+                              onTap: () => Navigator.of(
+                                sheetContext,
+                              ).pop(LibrarySelectionRangeAction.addHashTag),
+                            ),
+                            _SelectionActionButton(
+                              icon: Icons.tag_outlined,
+                              label: 'Choose # Tag',
+                              fontScale: fontScale,
+                              onTap: () => Navigator.of(
+                                sheetContext,
+                              ).pop(LibrarySelectionRangeAction.chooseHashTag),
+                            ),
+                            _SelectionActionButton(
+                              icon: Icons.menu_book_outlined,
+                              label: 'Add to Memory',
+                              fontScale: fontScale,
+                              enabled: false,
+                            ),
+                            _SelectionActionButton(
+                              icon: Icons.translate_outlined,
+                              label: "Strong's",
+                              fontScale: fontScale,
+                              enabled: false,
+                            ),
+                            _SelectionActionButton(
+                              icon: Icons.close_rounded,
+                              label: 'Reset Range',
+                              fontScale: fontScale,
+                              onTap: () => Navigator.of(
+                                sheetContext,
+                              ).pop(LibrarySelectionRangeAction.resetRange),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -238,4 +269,17 @@ class _SelectionActionButton extends StatelessWidget {
       ),
     );
   }
+}
+
+String buildLibrarySelectionClipboardText(
+  String selectedText, {
+  String? referenceLabel,
+}) {
+  final text = selectedText.trimRight();
+  final reference = referenceLabel?.trim() ?? '';
+  return reference.isEmpty
+      ? text
+      : text.isEmpty
+      ? reference
+      : '$text\n— $reference';
 }

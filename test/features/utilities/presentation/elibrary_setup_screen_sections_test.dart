@@ -54,7 +54,6 @@ void main() {
     tester,
   ) async {
     var manageCount = 0;
-    var indexCount = 0;
     var refreshCount = 0;
 
     await tester.pumpWidget(
@@ -66,7 +65,6 @@ void main() {
                 'Downloaded and imported books are stored in the app\'s library.',
             disableActions: false,
             onManageStorage: () => manageCount += 1,
-            onIndexNewChangedBooks: () => indexCount += 1,
             onRefreshStatus: () => refreshCount += 1,
             manualIndexing: false,
             manualIndexStatus: null,
@@ -87,16 +85,14 @@ void main() {
     );
     expect(find.textContaining('/var/mobile/Containers'), findsNothing);
     expect(find.text('Manage Storage'), findsOneWidget);
-    expect(find.text('Index New/Changed Books'), findsOneWidget);
+    expect(find.text('Repair Search and Contents'), findsNothing);
     expect(find.text('Refresh Status'), findsOneWidget);
 
     await tester.tap(find.text('Manage Storage'));
-    await tester.tap(find.text('Index New/Changed Books'));
     await tester.tap(find.text('Refresh Status'));
     await tester.pump();
 
     expect(manageCount, 1);
-    expect(indexCount, 1);
     expect(refreshCount, 1);
   });
 
@@ -295,7 +291,7 @@ void main() {
         ),
       );
 
-      expect(find.text('Install eLibrary Collections'), findsOneWidget);
+      expect(find.text('Choose Collections'), findsOneWidget);
       expect(
         find.text(
           'Books are downloaded directly from the official EGW Writings website into your eLibrary. Please follow the source website\'s terms and do not redistribute downloaded files.',
@@ -535,6 +531,7 @@ void main() {
                 onImportConfiguredFolder: _noop,
                 onResetImportLocation: _noop,
                 onRepairBrokenItems: _noop,
+                onRepairSearchAndContents: _noop,
                 onReviewImports: _noop,
                 onClearImportLocation: _noop,
                 onTestBroadAnyFilePicker: _noop,
@@ -615,6 +612,7 @@ void main() {
     expect(find.text('Import Ready Books'), findsNothing);
     expect(find.text('Reset Import Location'), findsOneWidget);
     expect(find.text('Repair Broken CaptureClipper Items'), findsOneWidget);
+    expect(find.text('Repair Search and Contents'), findsOneWidget);
     expect(find.text('Clear Saved Import Location'), findsOneWidget);
     expect(
       find.text(

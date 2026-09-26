@@ -944,7 +944,10 @@ class _BookCoverCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final title = item.displayTitle;
-    final subtitle = item.displayAuthor;
+    final subtitle = [
+      item.displayAuthor,
+      if (item.editionLabel != null) item.editionLabel!,
+    ].join(' · ');
     final textColor = theme.colorScheme.onSurface;
     final subduedColor = theme.colorScheme.onSurfaceVariant;
 
@@ -1056,7 +1059,10 @@ class _BookListTile extends StatelessWidget {
             ),
           ),
           subtitle: Text(
-            item.displayAuthor,
+            [
+              item.displayAuthor,
+              if (item.editionLabel != null) item.editionLabel!,
+            ].join(' · '),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: libraryCaptionTextStyle(
@@ -1135,14 +1141,14 @@ class _BookThumbnail extends StatelessWidget {
             if (_isLibraryAssetCoverPath(coverPath))
               Image.asset(
                 coverPath,
-                fit: BoxFit.cover,
+                fit: BoxFit.contain,
                 errorBuilder: (context, error, stackTrace) =>
                     _fallbackThumbnail(context),
               )
             else
               Image.file(
                 File(coverPath),
-                fit: BoxFit.cover,
+                fit: BoxFit.contain,
                 errorBuilder: (context, error, stackTrace) =>
                     _fallbackThumbnail(context),
               ),
@@ -1155,6 +1161,75 @@ class _BookThumbnail extends StatelessWidget {
   }
 
   Widget _fallbackThumbnail(BuildContext context) {
+    if (item.collectionGroupKey == 'adventist_pioneer_library') {
+      return ClipRRect(
+        key: ValueKey('library-leather-fallback-cover-${item.id}'),
+        borderRadius: borderRadius,
+        child: Center(
+          child: AspectRatio(
+            aspectRatio: 1,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final side = constraints.maxWidth;
+                // Reuse the approved template without writing or importing data.
+                // Match the title/author areas of the import-time cover generator.
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.asset(
+                      PioneerCoverGeneratorService.templateAssetKey,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) =>
+                          _plainFallbackThumbnail(context),
+                    ),
+                    Positioned(
+                      left: side * .13,
+                      top: side * .22,
+                      width: side * .74,
+                      height: side * .42,
+                      child: _BoundedCoverText(
+                        text: item.displayTitle,
+                        style: const TextStyle(
+                          fontFamily: 'PlayfairDisplay',
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFFF4E0B0),
+                        ),
+                        minFontSize: side * .022,
+                        maxFontSize: side * .088,
+                        maxLines: 6,
+                        alignment: Alignment.center,
+                      ),
+                    ),
+                    Positioned(
+                      left: side * .18,
+                      top: side * .75,
+                      width: side * .64,
+                      height: side * .08,
+                      child: _BoundedCoverText(
+                        text: item.displayAuthor,
+                        style: const TextStyle(
+                          fontFamily: 'PlayfairDisplay',
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFE6D2A0),
+                        ),
+                        minFontSize: side * .016,
+                        maxFontSize: side * .032,
+                        maxLines: 2,
+                        alignment: Alignment.center,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      );
+    }
+    return _plainFallbackThumbnail(context);
+  }
+
+  Widget _plainFallbackThumbnail(BuildContext context) {
     return KeyedSubtree(
       key: ValueKey('library-metadata-fallback-cover-${item.id}'),
       child: _bookCoverFrame(

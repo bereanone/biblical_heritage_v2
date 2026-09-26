@@ -49,7 +49,7 @@ void main() {
     await tester.pump(ReaderTiltAutoScrollIconButton.longPressDuration);
     await hold.up();
     await tester.pumpAndSettle();
-    expect(find.text('Tilt Auto-scroll Settings'), findsOneWidget);
+    expect(find.text('Autoscroll Settings'), findsOneWidget);
     expect(find.byKey(const ValueKey('autoscroll-mode')), findsNothing);
     expect(find.text('Steady'), findsNothing);
     expect(find.text('Tilt Sideways to Change Chapter'), findsOneWidget);

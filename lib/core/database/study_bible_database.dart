@@ -13,8 +13,24 @@ class StudyBibleDatabase {
   static const bibleDbName = 'bible_base.db';
 
   Database? _bibleDb;
+  Future<bool>? _hasPronunciation;
+
+  /// Older installed databases can still be read while the new asset is staged.
+  Future<Map<String, Object?>?> loadVersePronunciation(int blockId) async {
+    final db = await bible;
+    final supported = await (_hasPronunciation ??= db.rawQuery('PRAGMA table_info(bible_blocks)').then(
+      (columns) => columns.any((column) => column['name'] == 'pronunciation'),
+    ));
+    if (!supported) return null;
+    final rows = await db.query('bible_blocks', columns:['plain_text','pronunciation'], where:'id = ?', whereArgs:[blockId], limit:1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
 
   Future<void> initialize() async {
+    // Verse popups can perform many lookups. An open read-only connection has
+    // already been materialized and validated; do not reload the asset per verse.
+    if (_bibleDb?.isOpen == true) return;
     if (Platform.isMacOS || Platform.isLinux || Platform.isWindows) {
       SandboxBootstrap.ensureSqfliteInitializedOnce();
     }
@@ -107,6 +123,22 @@ class StudyBibleDatabase {
     return rows.first['book_name'] as String?;
   }
 
+  /// Original Bible blocks, including preceding chapters for speech-markup
+  /// context. Popups render these blocks directly; no plain-text copy is read.
+  Future<List<Map<String, Object?>>> loadVerseBlocks({
+    required int bookNumber,
+    required int throughChapter,
+  }) async {
+    final db = await bible;
+    return db.query(
+      'bible_blocks',
+      columns: ['id', 'chapter', 'block_index', 'html'],
+      where: 'book_number = ? AND chapter <= ?',
+      whereArgs: [bookNumber, throughChapter],
+      orderBy: 'chapter, block_index',
+    );
+  }
+
   Future<String?> loadVerseText({
     required int bookNumber,
     required int chapter,
@@ -131,6 +163,40 @@ class StudyBibleDatabase {
       [bookNumber],
     );
     return rows.map((row) => row['chapter'] as int).toList();
+  }
+
+  /// bookNumber -> chapter -> highest verse number in that chapter. A chapter
+  /// is included only when every verse from 1 through that maximum exists and
+  /// has non-empty original markup. This keeps the compact resolver cache while avoiding
+  /// the old MAX-only false positive for a missing/empty verse row.
+  Future<Map<int, Map<int, int>>> loadVerseCounts() async {
+    final db = await bible;
+    final rows = await db.rawQuery('''
+      SELECT book_number,
+             chapter,
+             MIN(block_index) AS min_verse,
+             MAX(block_index) AS max_verse,
+             COUNT(*) AS verse_count,
+             SUM(CASE WHEN TRIM(COALESCE(html, '')) <> '' THEN 1 ELSE 0 END)
+               AS text_count
+      FROM bible_blocks
+      WHERE block_index >= 1
+      GROUP BY book_number, chapter
+      ''');
+    final result = <int, Map<int, int>>{};
+    for (final row in rows) {
+      final book = (row['book_number'] as num).toInt();
+      final chapter = (row['chapter'] as num).toInt();
+      final minVerse = (row['min_verse'] as num).toInt();
+      final maxVerse = (row['max_verse'] as num).toInt();
+      final verseCount = (row['verse_count'] as num).toInt();
+      final textCount = (row['text_count'] as num).toInt();
+      if (minVerse != 1 || verseCount != maxVerse || textCount != maxVerse) {
+        continue;
+      }
+      (result[book] ??= <int, int>{})[chapter] = maxVerse;
+    }
+    return result;
   }
 
   Future<List<int>> loadVerses({

@@ -183,6 +183,24 @@ class LibraryAcquisitionOrchestrator {
       );
     }
     final db = await ELibraryDatabase.instance.database;
+    final indexed = await CommentaryResearchLibraryService.instance
+        .ensureNavigationIndexed(
+          db: db,
+          libraryItemId: libraryItemId,
+          file: source,
+        );
+    if (!indexed) {
+      return LibraryAcquisitionOutcome(
+        libraryItemId: libraryItemId,
+        phase: LibraryAcquisitionPhase.failedImport,
+        userSummary: 'This book still needs attention before it is ready.',
+        technicalDetail:
+            'Contents and searchable text could not be verified for this EPUB.',
+        retryable: true,
+        hasReadableCanonicalGeneration: false,
+        sourceFilePresent: true,
+      );
+    }
     final outcome = await CanonicalActivation.activate(
       db: db,
       libraryItemId: libraryItemId,
@@ -190,19 +208,6 @@ class LibraryAcquisitionOrchestrator {
       applyStoragePolicy: true,
       rootPath: rootPath,
     );
-    if (outcome.isReady) {
-      // Every bulk EPUB import (Pioneer folder import, the combined
-      // pioneerthin.zip install) funnels through this one method — this is
-      // the single choke point where the navigation tree the canonicalizer
-      // itself never builds (see library_document_canonicalizer.dart, which
-      // only writes library_document_blocks/sections) gets filled in, so
-      // future imports never again ship with an empty Contents/TOC.
-      await CommentaryResearchLibraryService.instance.ensureNavigationIndexed(
-        db: db,
-        libraryItemId: libraryItemId,
-        file: source,
-      );
-    }
     return outcome;
   }
 

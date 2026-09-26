@@ -508,6 +508,33 @@ alongside the app's other timestamped backups) and the running app was
 quit before any inspection, per established discipline — but **no write
 was made to the live database**; it is byte-identical to that backup.
 
+---
+
+### 16. A handful of single-chapter-file Pioneer EPUBs canonicalize to just 1 block (or lose over half their blocks) under version 12 — separate from entry 12's fix
+
+**Area:** `LibraryDocumentCanonicalizer` (`lib/features/library/data/library_document_canonicalizer.dart`), `pioneer_epub_import` source titles.
+
+**Status:** Open — parsing-defect candidate, not yet diagnosed or fixed.
+
+**Found during:** the 2026-09-06 legacy-folder recovery of 418 `pioneer_epub_import` titles whose app-managed EPUB copy had been removed by the storage-deletion policy and were stuck at canonicalizer version 6. That recovery (copy original from legacy `ImportedPioneerEpubs`, re-canonicalize under version 12, verify `isCurrentComplete`) succeeded for all 418 — this entry is **not** about that recovery failing, it's about content-quality anomalies the per-title verification surfaced along the way, present under version 6 as well (confirmed via the pre-recovery block counts), so they predate and are independent of the recovery batch.
+
+**Problem:** 7 of the 418 titles show a suspicious block count after canonicalization:
+
+| Title | Blocks before (v6) | Blocks after (v12) |
+| --- | ---: | ---: |
+| The Perpetuity of the Royal Law | 1 | 1 |
+| A Review of the Remarks of O.R.L. Crozier on the Institution, Design and Abolition of the Sabbath | 1 | 1 |
+| The Rich Man and Lazarus | 1 | 1 |
+| Sermon on the Two Covenants | 1 | 1 |
+| Samuel and the Witch of Endor | 1 | 1 |
+| The Immaculate Conception of the Blessed Virgin Mary | 1 | 1 |
+| The Ten Commandments | 131 | 22 |
+
+All six "1 block" titles' source EPUBs were checked structurally (archive listing only, not content): each is a single `OPS/chapter-1.xhtml` file ranging 42KB–215KB — a real, substantial document, not a placeholder/teaser (ruling out the corruption bug entry documented under "Pioneer archive.org downloads: every book corrupted" in the Fixed section below). A 42KB–215KB chapter producing exactly one canonical block strongly suggests the canonicalizer is failing to split that file's own paragraphs/headings into multiple blocks at all, for some structural reason specific to these files — distinct from entry 12 above, which was about **section-identity misattribution across multiple TOC-anchored chapters sharing one physical file**. These six read as genuinely single-chapter, standalone short works (by title), so entry 12's anchor-splitter would correctly do nothing for them (fewer than 2 NCX/nav targets land in the file) — the 1-block outcome looks like a different, unexplored failure in the underlying block/paragraph extraction itself. "The Ten Commandments" (131 → 22 blocks, a >50% drop) may be a related but distinct partial version of the same issue, or an unrelated filtering regression — not yet distinguished.
+
+**Not yet done:** no root-cause investigation, no fix, no attempt to determine whether these titles rendered correctly before hitting canonicalizer version 12 (their old version-6 block counts were already this low/this size, so the defect predates the recovery and predates version 12 too). Logged here so it isn't lost; needs its own investigation pass.
+
+---
 
 ### 3. eLibrary search results may return too few matches
 
@@ -571,6 +598,76 @@ Expected behavior:
 * Search-result formatting should not accidentally suppress them.
 
 If current behavior is correct, mark this item fixed.
+
+---
+
+### 17. Canonical EPUB Contents jumps can land on the wrong visual chapter while the reader's virtualized block window is changing
+
+**Area:** Canonical EPUB reader (`canonical_library_reader.dart`, `library_document_controller.dart`).
+
+**Status:** Open — diagnosed read-only 2026-09-07; no code or live-data change made.
+
+**Observed live on:** A. G. Daniells, *Christ Our Righteousness* (`library_item_pioneer_epub_import_id_cf99bdc8_f4ff_44ab_b1b1_ecdc11d48386`). After the v13 data repair, Contents correctly includes restored parent entries for Chapters 1, 3, and 4, but selecting Contents has been observed to land mid-chapter, leave the previous chapter at the top, or leave the requested chapter partly visible. Chapter 1 landed correctly; reported failures include Chapters 4, 8, and 9, with concerns also noted around 6 and 7.
+
+**Data check (read-only):** This is not the v12/v13 anchor-splitter defect returning. The active row is `complete` at canonicalizer version 13 (`2026-09-07T01:24:36.476674Z`) and has 798 canonical blocks / 14 headings. Its chapter headings are unique, ordered, and point to their expected independent spine files: Ch. 1 order 20 (`chapter-3.xhtml`), Ch. 3 order 130 (`chapter-5.xhtml`), Ch. 4 order 199 (`chapter-6.xhtml`), Ch. 6 order 365, Ch. 7 order 402, Ch. 8 order 451, and Ch. 9 order 511. Each is the first block of its section and has a real body range before the next chapter heading. The failures span both former whole-file-parent cases (1/3/4) and unrelated single-file chapters (6–9), so they do not correlate with the splitter fix. Persisted whole-file parent nav rows have empty anchors, so the canonical reader deliberately falls back to the verified canonical heading list; that fallback still chooses the exact heading block.
+
+**Root cause:** `_jumpToBlock()` awaits `LibraryDocumentController.ensureWindow(targetOrder)` and posts a `ScrollablePositionedList.jumpTo(targetOrder)`. But `ensureWindow()` returns immediately if another asynchronous window load is in progress, merely recording `_pending = targetOrder`. The Contents jump can therefore run before the requested range is loaded. The list has an `itemCount` for the full book but returns zero-height `SizedBox.shrink()` placeholders outside its 50-block cache. Jumping into placeholders, followed by real variable-height blocks loading and reflowing, explains the intermittent previous-chapter, mid-chapter, and not-visible outcomes. A quiet reader with an already-loaded target can work; a tap while scrolling or a window refill is pending is unsafe. Existing widget coverage proves only a small, already-loaded exact search target, not a Contents jump during a concurrent window replacement in a long document.
+
+**Proposed fix (not implemented):** provide an awaitable `ensureWindowSettled(targetOrder)` (or equivalent completion future) that does not resolve until the pending target window has loaded and emitted; have `_jumpToBlock()` wait for it, verify `blockAt(targetOrder)` is non-null, then jump on the following frame with explicit top alignment. Add a long-document widget regression that starts a competing window load, selects a Contents target beyond the old cache (for example 451/511), and asserts the target heading is first visible after settlement.
+
+**Reference codes:** Correctly absent for this edition, not a toggle/rendering defect. The active canonical rows contain 0 non-empty `source_refcode` values; `elibrary_ref_index` has 0 rows for the item; and a direct archive scan found 0 `data-refcode`/`refcode` markers across its 16 HTML/XHTML/NCX source files. The toggle simply persists a boolean, and `canonicalInlineReferenceCode()` renders only non-empty block `sourceRefcode`, so either toggle state should render no codes and should not error or imply codes exist. Direct UI toggle interaction was not performed because the locally running app is blocked at its pre-existing Legacy Data migration decision; no migration choice was made during this diagnosis.
+
+---
+
+### 18. Shipped default narration pronunciations never reach a user who has saved anything in the Pronunciations editor
+
+**Area:** Narration pronunciations (`lib/features/reader/presentation/narration_pronunciation.dart`, Pronunciations editor in `bible_explorer_screen.dart`).
+
+**Status:** Open — logged 2026-09-20; deliberately not fixed in the 2.0.5+56 build.
+
+**Root cause:** `decodeNarrationPronunciations(value)` returns `defaultNarrationPronunciations` only when nothing has been saved (`value == null`) or the saved JSON fails to parse. Once a user saves any rule, the stored map is returned as-is and the shipped defaults are never merged in again. Every default rule added in a later release (e.g. new `hast`/`live for ever` style entries) silently fails to reach that user. This affects real App Store users, not just the developer iPad.
+
+**Proposed fix (not implemented):** Merge `defaultNarrationPronunciations` under the user's saved rules on decode, with user rules winning on key conflict (compare keys case-insensitively, trimmed, as `prepareNarrationPronunciation` does). Consider how a user deletes a default rule they dislike (tombstone/empty-value marker, or a "disabled defaults" list) so the merge does not resurrect it. Add a "Reset to defaults" button in the editor. Add tests: saved rules + newly shipped default -> both present; conflict -> user wins; reset -> defaults only.
+
+---
+
+### 19. Tag playback still uses the old flat pacing: no lead-aware catch-up, so a long locked-screen tag session can drain its lead
+
+**Area:** Tag playback (`lib/features/reader/presentation/tag_playback/`), `SynthesisGovernor` (`lib/core/audio/synthesis_governor.dart`), `NarrationLeadRegistry`.
+
+**Status:** Open — logged 2026-09-21; deliberately not built. Follow-up to the lead-aware governor first shipped in the 2.0.5+63 test build.
+
+**Root cause:** The governor reads its lead from `NarrationLeadRegistry`, and the only thing that registers a lead is the Bible reader narrator (`kokoro_mac_test_narrator.dart`, constructor). Tag playback renders through `renderClip` (`tag_playback_kokoro_adapters.dart`) and keeps its own look-ahead in `TagPlaybackController`; it never registers a lead. Whenever tag playback is the only listener, `lead()` is null, `_paced()` returns true for every job while backgrounded, and the governor idles at 50% duty with no catch-up. At the measured 0.56x real-time synthesis speed that is the ~11% net deficit the lead-aware governor was built to remove, so a tag played on a locked screen runs its look-ahead dry at the same 12–15 minute mark the Bible reader used to.
+
+**Why it matters more soon:** Looping a #tag for memorization is exactly the long, continuous locked-screen session that drains the lead. The `loop` flag already exists in `TagPlaybackController`; a user-facing loop feature will make this the common case, not the edge case.
+
+**Proposed fix (not implemented):** Have the tag playback session register a lead with the registry, reporting the seconds of rendered-but-unplayed audio (current clip remainder plus the finished `_ahead` slots), null when not playing and zero while a clip is awaited, as the narrator does. Reuse the governor unchanged. Add a widget/unit test that a backgrounded tag session with a low lead logs `synth catch-up begin`. Note both playback paths share one engine and governor, so the registry needs to report the lead of whichever listener is active (or the minimum when more than one).
+
+---
+
+### 20. Governor has no priority for the awaited clip: jobs queued for the old position run before the clip the listener is waiting for
+
+**Area:** `SynthesisGovernor.run` (strict FIFO `_tail` chain, no cancel or priority); `kokoro_mac_test_narrator.dart` (`_prepared` look-ahead, `prefetchAhead()` = 12 on iOS); `TagPlaybackController` (`_moveTo`, `_resetAhead`, `_discardSlot`).
+
+**Status:** Open — logged 2026-09-21; deliberately not built.
+
+**Root cause:** After a seek, `stop()` or `_moveTo`, the narrator bumps `_generation` and the tag controller bumps `_epoch` and cancels its slots, but that only discards the *results*. A job already handed to `SynthesisGovernor.run` is on a FIFO chain with no way to withdraw it, so every clip queued for the old position still runs, in order, before the clip for the new position. On the Bible reader that can be up to `prefetchAhead()` (12) clips of wasted synthesis at about 0.56x real time each, during which the listener hears silence. In tag playback the exposure is bounded by `maxConcurrentRenders` (2) because only that many slots are inside the governor at once. The pacing idle makes it worse when the governor is not in catch-up.
+
+**Does the loop feature hit this?** As the code stands, a natural loop wrap is *not* a seek: `_after()` wraps to `_firstAtOrAfter(0)` inside the ordinary look-ahead, so verse 1 of the next pass is queued in order behind the tail and nothing is stale. It *would* hit the gap if the loop is implemented as a restart: `stop()` (which calls `_halt()`, dropping every buffered clip) followed by `play()`, or a `_moveTo(first)` that finds no reusable prefetched slot and calls `_resetAhead()`. Those cancel slots whose jobs are already in the governor queue. Decide the loop's restart mechanism with this in mind; the wrap path is safe, the restart path is not. Also note that once a tag is longer than the prefetch window, each pass re-renders every clip (the narrator's `_prepared` cache evicts oldest first), so a loop is sustained synthesis load, which is what item 19 is about.
+
+**Proposed fix (not implemented):** Give `run` a token/priority so a cancelled job is skipped when its turn comes (never started, its future completed with a cancellation), and let the awaited clip (the one whose lead is zero) jump ahead of look-ahead jobs. Add tests with the fake `delay`/`now`: queue N look-ahead jobs, cancel them, submit an awaited job, assert it runs next.
+
+---
+
+### 21. Engine rebuild is limited to a single retry on both paths
+
+**Area:** `KokoroMacTestNarrator._synthesize` (`attempt >= 2` rethrows) and `SynthesisHealthMonitor` (`_rebuilt` / `_saidNoRetry`, one rebuild until `healthyJobsToRearm` healthy jobs).
+
+**Status:** Open — logged 2026-09-21; deliberately not built.
+
+**Root cause:** Two independent single-shot limits. (a) When a synthesis call finds the engine unavailable or hung, `_synthesize` asks the host for a fresh engine and retries exactly once; a second `SpeechEngineUnavailableException` is rethrown, the clip fails, and the listener's playback stops with an error. (b) When synthesis is pathologically slow, the health monitor requests one rebuild, then stays quiet ("still slow after a rebuild ... not rebuilding again until it recovers") until three consecutive jobs come in under 1.0x. That second limit is deliberate, so a device-wide slowdown does not cause a rebuild loop; the first is arbitrary. A long locked-screen session can plausibly hit an engine failure more than once, and one bad rebuild ends the session.
+
+**Proposed fix (not implemented):** For (a), allow a small bounded number of retries with backoff and a cool-down (for example 3 attempts, then fail), logging each attempt, and distinguish "engine dead" (rebuild) from "hung" (rebuild, then treat as device-level if it repeats). For (b), keep the no-loop guarantee but consider re-arming on time as well as on healthy jobs. Add tests for two consecutive unavailable errors and for a rebuild that fails to start.
 
 ---
 
@@ -824,6 +921,216 @@ Both are one tap/unlock away from being verifiable the same way macOS was. Not y
 Windows and Linux desktop builds could not be attempted in this environment at all: both require compiling natively on that OS (no cross-compilation from macOS), and only macOS, iOS, and Android hardware/toolchains are available here.
 
 ---
+
+### Pioneer EPUB standalone print-page blocks split reading flow
+
+**Area:** Canonical EPUB import (`library_document_canonicalizer.dart`)
+
+**Status:** Fixed in code; pending normal future re-canonicalization of existing titles. No live database was opened or changed.
+
+**Reported on:** A. G. Daniells, *Christ Our Righteousness*. The original print page number could be emitted as a bare paragraph between adjacent prose or list content (for example, a list item, then `57`, then the next item), creating an unwanted reader line.
+
+**Fix (2026-09-07):** Canonicalizer version 14 now recognizes only a narrowly defined paragraph-shaped page token (digits, bracketed digits, or `p. 57`) when sandwiched between readable-flow blocks. It removes that block from reading flow and preserves the value as `formatted_content.metadata.source_page_marker` on the following readable block, representing the page boundary before that block. Numeric headings retain their existing print-anchor handling. Lone `<li>` numerals are no longer discarded, and verse/scripture/bible-class paragraphs are excluded from extraction, so numbered list content and numbered Bible verses remain content.
+
+**Regression coverage:** `library_document_canonicalizer_test.dart` covers extraction/preservation of a `57` paragraph between prose, a verse-class `1` paragraph that remains, and a numeric ordered-list item that remains. Focused canonicalizer and canonical-reader tests passed (38 tests total); `git diff --check` passed.
+
+**End-to-end verification (2026-09-07):** The actual active macOS item was read
+only from `.../com.deanbowen.bibleAppMac/.../BiblicalHeritage/v2/eLibrary.db`.
+`library_document_conversion` is `complete`, canonicalizer version **13**,
+completed `2026-09-07T01:24:36.476674Z`, with source hash
+`ab715c7d...eb3036df`; it still has canonical block 303 with `plain_text =
+'57'` and no page-marker metadata. The actual source EPUB at
+`CloudDocs/eBooks/Epub/Daniells/Christ Our Righteousness.epub` has the exact
+same SHA-256 and contains `<p class="s8 c9">57</p>` between list entries 1
+and 2. An isolated current-code canonicalization of that exact EPUB into a
+disposable system-temp database passed: no `plain_text = '57'` block was
+written and the following `2. The loud cry...` block carried
+`source_page_marker = '57'`.
+
+**Conclusion:** this was not a parser-shape failure. The live generation
+predated the page-marker parser change, but its version was also 13. The
+initial implementation therefore would have compared equal and skipped a
+future normal canonicalization despite the changed output. The fix is now
+version 14, forcing a future canonicalization to replace that stale v13
+generation. No production database was changed or re-canonicalized during
+verification.
+
+**v14 scratch rehearsal (2026-09-07; production still untouched):** Created
+and verified a full live backup before any rehearsal work:
+`.../v2/recovery_backups/20260907_v14_page_marker_rehearsal/eLibrary.pre_v14_rehearsal.db`
+(1,806,471,168 bytes; `2026-09-07T11:20:17-0400`; SHA-256
+`a91954bab9510227f3d0ef89d57b31934196052cb675e2a4c93004243b6c3c09`).
+`PRAGMA integrity_check` returned `ok`, establishing a restorable SQLite
+backup before proceeding.
+
+The broad active/complete v13-or-earlier inventory is 532 titles (8 official
+v6, 2 Pioneer v6, 49 archive.org v8, 55 archive.org v12, 271 Pioneer v12,
+147 Pioneer v13). The specifically identifiable print-page cohort is 12
+Pioneer titles, selected by the confirmed legacy signature of a numeric block
+with `source_class = "s8 c9"`: *A Tract, Showing that the Seventh Day Should
+be Observed...*; *American Sentinel Articles (1886-1899)*; *Christ Our
+Righteousness*; *General Conference Bulletin Articles (1889-1903)*; *The
+Advent Review and Sabbath Herald (1879-1880)*; *The American Sentinel*
+(1887, 1894); *The Gospel in the Book of Galatians*; *The Signs of the Times*
+(1884-85, 1890-91, 1891-95); and *The Southern Sentinel and Herald of Liberty
+Articles (1895-1897)*. *Christ Our Righteousness* is also the only title with
+the separately logged Contents-race history.
+
+All 12 completed successfully on scratch only:
+`.../v2/recovery_backups/20260907_v14_page_marker_rehearsal/eLibrary.v14_page_marker_cohort_scratch.db`
+(1,806,471,168 bytes after SQLite checkpoint; SHA-256
+`a3e56987b2f9d6a16088c4a6ac3b63a52ef6552e990cd1984005cff484964fca`).
+The exact command is preserved in
+`tool/v14_canonical_rehearsal/run_v14_canonical_rehearsal.dart`; the two JSON
+reports live beside the scratch DB. The report records 12 selected, 12
+recanonicalized, 0 missing source, 0 failed, integrity `ok`.
+
+A separate broad 532-row scratch attempt was deliberately abandoned and is
+not a rehearsal result: its runner exceeded the execution window and left a
+scratch write lock, producing lock errors only. A fresh copied scratch DB was
+used for the completed 12-title cohort above; no production file was involved.
+
+Before/after: *Christ Our Righteousness* 798 → 690 blocks; raw `57` blocks
+0; the next `2. The loud cry...` block is order 258 and carries
+`source_page_marker = "57"`. Its scratch headings resolve at Chapter 1 order
+17 (`chapter-3.xhtml`), Chapter 4 order 168 (`chapter-6.xhtml`), Chapter 8
+order 391 (`chapter-10.xhtml`), and Chapter 9 order 440
+(`chapter-11.xhtml`), matching the canonical reader's Contents target model;
+the existing long-document Contents-window widget regression also passed.
+Other cohort examples: *American Sentinel (1894)* 2740 → 2635,
+*Gospel in the Book of Galatians* 315 → 249, *Signs of the Times (1884-85)*
+3128 → 3049. No validation failures or database anomalies occurred. Stop here
+pending Dean's explicit approval for any live re-canonicalization.
+
+### Inline formatted-text node boundaries drop spaces and fuse words
+
+**Area:** Canonical EPUB import/rendering (`library_document_canonicalizer.dart`)
+
+**Status:** Fixed in code and rehearsed on scratch only 2026-09-07; full
+implementation and evidence are recorded in entry 17 below. No live database
+or source file was changed.
+
+**Observed on:** A. G. Daniells, *Christ Our Righteousness*, Chapter 1, in
+the Rom. 3:24-25 discussion. The source is the ordinary inline-style pattern:
+`<span class="c7">&quot;By </span><span class="c8">faith</span><span class="c7"> he [the sinner, who has so grievously wronged and offended God] can ...</span>`.
+The scratch canonical block's `plain_text` is correct (`"By faith he [the
+sinner...]`), but its formatted nodes are separately stored as `"By`,
+`faith`, and `he [the sinner...]`. The reader concatenates them directly,
+visibly producing `"Byfaithhe [the sinner...]`.
+
+**Root cause:** `_inlineNodes()` tokenizes every inline HTML element, then
+calls `_plain(value)` for each text token. `_plain()` correctly collapses
+whitespace but also `.trim()`s each individual token, discarding the space at
+the end of `"By ` and the one at the beginning of ` he ...`. The whole-block
+`plain_text` path calls `_plain()` only once and is therefore unaffected.
+
+**Scope:** General, high-visibility rendering defect for formatted EPUB prose,
+not a COR-only markup anomaly. Read-only scratch analysis found likely
+word-fusion boundaries (adjacent text nodes ending/starting alphanumeric) in
+COR: 91 boundaries across 47 blocks; *The American Sentinel* (1894): 2,619
+across 978 blocks; *The Gospel in the Book of Galatians*: 52 across 23 blocks;
+and *The Signs of the Times* (1884-85): 1,022 across 439 blocks. The counts
+are a conservative structural indicator, not a claim that every boundary has
+been visually reviewed, but the confirmed COR sample proves the failure mode.
+
+**Original proposed fix (implemented; see entry 17):** give `_inlineNodes()` an inline-token
+normalizer that preserves/collapses leading and trailing whitespace to a
+single visible boundary space, rather than using the whole-block trimming
+helper. Add rendering regressions for styled adjacent tokens such as
+`"By ` + italic `faith` + ` he [...]`, including a multi-title fixture. Re-run
+the v14 scratch cohort after the parser version is bumped again; do not
+advance the current production v14 rollout until this is reviewed, because it
+would otherwise make existing formatted-text corruption durable in the new
+generation.
+
+### Reference-code rendering verification for a title with source data
+
+**Area:** Canonical EPUB reader (`canonical_library_reader.dart`)
+
+**Status:** Verified; no defect found and no Item 2 code change made.
+
+**Title/data source used (read-only):** *The Acts of the Apostles* (`library_item_research_epubs_egw_egw_books_en_aa_epub`) in `recovery_backups/20260831_ocr_chapter_heading_repair/eLibrary.pre-repair.db`. It has 1,592 non-empty `library_document_blocks.source_refcode` values (`official_download`), unlike *Christ Our Righteousness*, which correctly has none. This backup was queried read-only; no live database was touched.
+
+**Verification:** The canonical reader's actual inline rendering path appends a non-empty `sourceRefcode` only while the toggle is on and removes only that presentation span while off; metadata and prose remain unchanged. The focused reader test exercises both states (`SSP 14.1` visible inline, then absent when hidden), and passed alongside the canonicalizer tests. This is the `canonicalInlineTextSpans` path used by canonical reader blocks. No rendering defect was found.
+
+**Planning-file note:** `PLANNED_TASKS.md` was not present anywhere in this checkout, so there was no existing planning log to update; no replacement file was created.
+
+---
+
+### 17. Inline formatted-text node boundaries drop spaces and fuse words — v15 fix and rehearsal
+
+**Area:** Canonical EPUB import/rendering (`library_document_canonicalizer.dart`)
+
+**Status:** Fixed and production rollout completed 2026-09-07. The v15
+page-marker and inline-whitespace cohort was re-canonicalized live after
+Dean's approval.
+
+**Fix and coverage:** `_inlineNodes()` now uses `_inlineText()` plus a
+boundary-aware normalizer instead of applying `_plain()` to every token. It
+keeps one source word-boundary space across formatted nodes, collapses
+redundant boundary whitespace, removes a gap before closing punctuation, and
+trims only true paragraph/line edges. `_plain()` is unchanged, so `plain_text`
+is source-faithful. Version 14 → 15 forces existing generations to rebuild.
+New regressions cover the exact COR `"By ` + italic `faith` + ` he [...]`
+shape, normal bold/italic word splits, and paragraph edges/punctuation.
+Canonicalizer tests passed 20/20; canonical-reader tests passed 21/21,
+including the long-document Contents-window regression; `git diff --check`
+passed.
+
+**v15 combined scratch rehearsal:** Reused the valid completed v14 cohort
+database, so the live database was not opened for writing. Its verified
+upstream backup is
+`.../v2/recovery_backups/20260907_v14_page_marker_rehearsal/eLibrary.pre_v14_rehearsal.db`
+(SHA-256 `a91954bab9510227f3d0ef89d57b31934196052cb675e2a4c93004243b6c3c09`,
+integrity `ok`). New scratch database:
+`.../v2/recovery_backups/20260907_v15_inline_whitespace_rehearsal/eLibrary.v15_page_marker_cohort_scratch.db`.
+Created with SQLite `.backup`; initial SHA-256
+`655f32937480d9aaecdf93b8f21131e0563fe5b62942b9175a751e5b886e9d44`.
+
+Command: `V15_REHEARSAL_DB=<scratch> V15_REHEARSAL_ROOT=<.../v2>
+V15_REHEARSAL_REPORT=<.../v15_page_marker_cohort_report.json>
+V15_REHEARSAL_IDS=<the 12 prior cohort IDs> flutter test
+tool/v14_canonical_rehearsal/run_v14_canonical_rehearsal.dart`. The runner is
+now v15-aware and records fused boundaries. Result: 12 selected, 12
+re-canonicalized, 0 missing source, 0 failed, integrity `ok`; final SHA-256
+`59403fdc87b54291a08ef885a83f2817538ffc434177bb299801dff4a2fd3279`.
+
+| Title | Blocks v14 → v15 | Structural candidates v14 → v15 |
+| --- | ---: | ---: |
+| *Christ Our Righteousness* | 690 → 690 | 89 → 1 |
+| *The American Sentinel* (1894) | 2635 → 2635 | 2616 → 220 |
+| *The Gospel in the Book of Galatians* | 249 → 249 | 51 → 0 |
+| *The Signs of the Times* (1884-85) | 3049 → 3049 | 1021 → 3 |
+
+The residual structural candidates are intentional: 219 Sentinel cases and
+the single COR case are adjacent numeric source-note/page-marker fragments.
+The alphabetic-only residuals are six Sentinel and three *Signs* cases, all
+spot-checked word-internal style splits with no source whitespace (`t` + `he`,
+`un` + `reasonable`, `in` + `justice`, `over` + `seers`), so they must remain
+concatenated. The confirmed COR phrase now renders `"By faith he [...]`.
+
+**Combined spot checks:** COR is v15 with zero raw `57` blocks and one
+`source_page_marker = "57"`. Contents headings remain at Chapter 1 order 17
+(`chapter-3.xhtml`), Chapter 4 order 168 (`chapter-6.xhtml`), Chapter 8 order
+391 (`chapter-10.xhtml`), and Chapter 9 order 440 (`chapter-11.xhtml`).
+**Production rollout (2026-09-07):** Fresh verified backup:
+`/Users/deanbowen/Library/Containers/com.deanbowen.bibleAppMac/Data/Documents/BiblicalHeritage/v2/recovery_backups/20260907_v15_canonical_production_rollout/eLibrary.pre_v15_production_rollout.db`
+(SHA-256 `00cfee5a2ca6cf1a4380e51eedd9d3a016b100ff2a37345a348f350dd12e4a54`,
+integrity `ok`). Ran the v15 runner against live `.../v2/eLibrary.db` with
+the exact 12 approved IDs, source root `.../v2`, and report
+`.../recovery_backups/20260907_v15_canonical_production_rollout/v15_live_page_marker_cohort_report.json`:
+`V15_REHEARSAL_DB=<live> V15_REHEARSAL_ROOT=<.../v2>
+V15_REHEARSAL_REPORT=<report> V15_REHEARSAL_IDS=<12 approved IDs> flutter
+test tool/v14_canonical_rehearsal/run_v14_canonical_rehearsal.dart`.
+
+All 12 re-canonicalized, every conversion is `complete` at v15, with 0
+failed and 0 missing source; final live `PRAGMA integrity_check` is `ok`.
+Live COR spot checks: the formatted-node reconstruction exactly matches the
+stored `"By faith he [the sinner ...]` passage; no standalone `57` block
+exists; one `source_page_marker = "57"` exists; and the canonical Contents
+heading targets are still Chapter 1 order 17 (`chapter-3.xhtml`), Chapter 4
+order 168 (`chapter-6.xhtml`), Chapter 8 order 391 (`chapter-10.xhtml`), and
+Chapter 9 order 440 (`chapter-11.xhtml`).
 
 ## Maintenance Instructions
 

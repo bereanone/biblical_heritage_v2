@@ -15,6 +15,7 @@ import '../data/presentation/presentation_models.dart';
 import '../data/presentation/presentation_text_format.dart';
 import 'viewer_passage_models.dart';
 import 'viewer_range_selection.dart';
+import 'tag_playback/tag_note_audio_cache.dart';
 
 part 'tag_quick_apply_helper_models.dart';
 
@@ -3063,9 +3064,27 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         where: 'rowid = ?',
         whereArgs: [id],
       );
+      _queueNoteAudio(values, id);
       return;
     }
     await db.update(tableName, values, where: 'id = ?', whereArgs: [id]);
+    _queueNoteAudio(values, id);
+  }
+
+  void _queueNoteAudio(Map<String, Object?> values, int id) {
+    final note = values['note_text']?.toString().trim() ?? '';
+    final html = values['content_html']?.toString() ?? '';
+    final spoken = note.isNotEmpty
+        ? note
+        : _stripHtml(
+            html.replaceAll(RegExp(r'</p>', caseSensitive: false), '\n'),
+          ).trim();
+    if (spoken.isNotEmpty) {
+      TagNoteAudioCache.instance.scheduleNoteText(
+        spoken,
+        entryKey: '$tableName:$id',
+      );
+    }
   }
 
   Future<int> insertNoteItem({
@@ -3124,7 +3143,14 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         'sort_order': nextSortOrder,
       });
     }
-    return db.insert(tableName, values);
+    final insertedId = await db.insert(tableName, values);
+    if (insertedId > 0 && cleanNote.isNotEmpty) {
+      TagNoteAudioCache.instance.scheduleNoteText(
+        cleanNote,
+        entryKey: '$tableName:$insertedId',
+      );
+    }
+    return insertedId;
   }
 
   Future<HashTagResolvedTag?> _resolveSearchResultTag(

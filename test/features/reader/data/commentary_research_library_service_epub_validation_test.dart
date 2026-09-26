@@ -202,26 +202,36 @@ void main() {
   }
 
   test(
+    'exact-item preparation reports false when its EPUB is unavailable',
+    () async {
+      final db = await ELibraryDatabase.instance.database;
+      final ready = await CommentaryResearchLibraryService.instance
+          .ensureNavigationIndexed(
+            db: db,
+            libraryItemId: 'missing_exact_item',
+            file: File(p.join(supportDir.path, 'missing.epub')),
+          );
+      expect(ready, isFalse);
+    },
+  );
+
+  test(
     'an already-indexed item whose stored research index_version is stale '
     'gets rebuilt on the next ensureNavigationIndexed call, not skipped',
     () async {
-      final file = _writeEpub(
-        File(p.join(supportDir.path, 'stale_version_book.epub')),
-        {
-          'META-INF/container.xml': _containerXml,
-          'OEBPS/content.opf': _opfXml(includeSpine: true),
-          'OEBPS/content1.xhtml': _healthyContentXhtml,
-        },
-      );
+      final file =
+          _writeEpub(File(p.join(supportDir.path, 'stale_version_book.epub')), {
+            'META-INF/container.xml': _containerXml,
+            'OEBPS/content.opf': _opfXml(includeSpine: true),
+            'OEBPS/content1.xhtml': _healthyContentXhtml,
+          });
       const itemId = 'stale_version_test_item';
       final db = await ELibraryDatabase.instance.database;
 
       // Build real nav/text-block rows once, under the current version.
-      await CommentaryResearchLibraryService.instance.ensureNavigationIndexed(
-        db: db,
-        libraryItemId: itemId,
-        file: file,
-      );
+      final firstReady = await CommentaryResearchLibraryService.instance
+          .ensureNavigationIndexed(db: db, libraryItemId: itemId, file: file);
+      expect(firstReady, isTrue);
       final freshNav = await db.query(
         'library_navigation_items',
         where: 'library_item_id = ?',
@@ -270,11 +280,9 @@ void main() {
         'device_id': 'test-device',
       });
 
-      await CommentaryResearchLibraryService.instance.ensureNavigationIndexed(
-        db: db,
-        libraryItemId: itemId,
-        file: file,
-      );
+      final rebuiltReady = await CommentaryResearchLibraryService.instance
+          .ensureNavigationIndexed(db: db, libraryItemId: itemId, file: file);
+      expect(rebuiltReady, isTrue);
 
       final navAfterRebuild = await db.query(
         'library_navigation_items',
@@ -284,7 +292,8 @@ void main() {
       expect(
         navAfterRebuild.any((row) => row['label'] == 'STALE PRE-FIX ROW'),
         isFalse,
-        reason: 'a stale index_version must trigger a real rebuild, not a '
+        reason:
+            'a stale index_version must trigger a real rebuild, not a '
             'skip that leaves the pre-fix marker row in place',
       );
       expect(navAfterRebuild, isNotEmpty);

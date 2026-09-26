@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../library/data/library_catalog_service.dart';
+import '../../library/data/library_search_navigation_target.dart';
 import '../../library/presentation/library_book_reader_screen.dart';
 import '../../library/presentation/library_item_open_guard.dart';
 import '../../utilities/presentation/elibrary_setup_screen.dart';
@@ -750,6 +751,11 @@ Future<void> _openEpubSource(
           initialAnchorId: sourceTarget.initialAnchorId,
           initialSpineIndex: sourceTarget.initialSpineIndex,
           initialParagraphIndex: sourceTarget.initialParagraphIndex,
+          // A concordance result is an explicit reading destination. Passing
+          // only the legacy initial fields made the canonical reader treat it
+          // as an ordinary reopen, briefly restoring the saved/default
+          // position before the requested EPUB location was considered.
+          searchTarget: sourceTarget.searchTarget,
         ),
       ),
     );
@@ -818,6 +824,18 @@ Future<_ResolvedSourceEpubTarget?> _resolveSourceEpubTarget(
     initialAnchorId: initialAnchorId,
     initialSpineIndex: initialSpineIndex,
     initialParagraphIndex: initialParagraphIndex,
+    searchTarget: LibrarySearchNavigationTarget(
+      libraryItemId: item.id,
+      textBlockId: 0,
+      href: _trimToNull(initialHref) ?? '',
+      paragraphIndex: initialParagraphIndex ?? 0,
+      spineIndex: initialSpineIndex,
+      paragraphOnSection: initialParagraphIndex,
+      stableSourceReference: match.anchor,
+      matchedText: match.fullParagraph,
+      sourceWorkId: item.sourceWorkId,
+      sourcePackageId: item.sourcePackageId,
+    ),
   );
 }
 
@@ -847,6 +865,7 @@ class _ResolvedSourceEpubTarget {
     required this.initialAnchorId,
     required this.initialSpineIndex,
     required this.initialParagraphIndex,
+    required this.searchTarget,
   });
 
   final LibraryCatalogItem item;
@@ -854,6 +873,7 @@ class _ResolvedSourceEpubTarget {
   final String? initialAnchorId;
   final int? initialSpineIndex;
   final int? initialParagraphIndex;
+  final LibrarySearchNavigationTarget searchTarget;
 }
 
 String _sectionSourceTitle(CommentaryResearchSectionData section) {

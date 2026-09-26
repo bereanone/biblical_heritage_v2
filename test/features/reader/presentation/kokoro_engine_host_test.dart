@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 import 'package:studybible2/core/audio/speech_engine.dart';
+import 'package:studybible2/core/audio/synthesis_health.dart';
 import 'package:studybible2/features/reader/presentation/kokoro_engine_host.dart';
 
 /// Stands in for a loaded model so the host's lifecycle rules can be tested
@@ -237,4 +238,47 @@ void main() {
       expect(restarted, isNot(same(engine)));
     });
   });
+
+  test(
+    'pathologically slow synthesis replaces the engine once and warms the new '
+    'one',
+    () async {
+      final health = SynthesisHealthMonitor(log: log.add);
+      final host = KokoroEngineHost.forTesting(
+        starter: () => starter(),
+        health: health,
+        log: log.add,
+      );
+      final first = await host.acquire() as FakeEngine;
+
+      SynthesisJobStats slow(int engine) => SynthesisJobStats(
+        engineId: engine,
+        engineJob: 1,
+        chars: 100,
+        audioSeconds: 6,
+        wall: const Duration(seconds: 18),
+      );
+      for (var i = 0; i < 3; i++) {
+        health.record(slow(1));
+      }
+      await pumpEventQueue();
+
+      expect(first.disposed, isTrue);
+      expect(
+        started,
+        hasLength(2),
+        reason: 'the new engine is started at once',
+      );
+      expect(host.hasEngine, isTrue);
+      expect(host.leaseCount, 1, reason: 'the lease survives the replacement');
+      expect(log.join('\n'), contains('engine replacing after slow synthesis'));
+
+      // Still slow on the new engine: no second rebuild.
+      for (var i = 0; i < 6; i++) {
+        health.record(slow(2));
+      }
+      await pumpEventQueue();
+      expect(started, hasLength(2));
+    },
+  );
 }

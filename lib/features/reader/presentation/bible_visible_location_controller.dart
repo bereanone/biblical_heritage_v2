@@ -86,6 +86,8 @@ class BibleLiveReferenceController
   BibleVisibleLocation? get selected => _selected;
   BibleVisibleLocation? get centered => _centered;
   BibleVisibleLocation? get firstAvailable => _firstAvailable;
+  BibleVisibleLocation? get narrationStart =>
+      value ?? _centered ?? _firstAvailable;
 
   bool updateSelected(BibleVisibleLocation location) {
     _selected = location;

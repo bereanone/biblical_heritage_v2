@@ -44,6 +44,7 @@ const _itemOwnedTables = <String>[
   'library_document_conversion',
   'library_document_sections',
   'library_document_blocks',
+  'library_document_navigation',
   'library_block_source_map',
   'library_document_conversion_staging',
   'library_document_sections_staging',

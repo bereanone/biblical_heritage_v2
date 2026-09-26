@@ -121,6 +121,79 @@ void main() {
     expect(result.passed, isTrue);
   });
 
+  test('fails closed when formatted nodes fuse source word boundaries', () {
+    final result = validator.validate(
+      sections: <Map<String, Object?>>[_section(id: 's1')],
+      blocks: <Map<String, Object?>>[
+        _block(
+          displayOrder: 0,
+          plainText: 'consequences of which [163] it is difficult',
+          formattedContent:
+              '{"version":1,"nodes":['
+              '{"type":"text","text":"consequences of which"},'
+              '{"type":"text","text":"[163]"},'
+              '{"type":"text","text":"it is difficult"}]}',
+        ),
+      ],
+    );
+
+    expect(result.passed, isFalse);
+    expect(
+      result.summary,
+      contains('does not preserve the source word boundaries'),
+    );
+  });
+
+  test('accepts intentional zero-space styling and punctuation cleanup', () {
+    final result = validator.validate(
+      sections: <Map<String, Object?>>[_section(id: 's1')],
+      blocks: <Map<String, Object?>>[
+        _block(
+          displayOrder: 0,
+          plainText: 'unreasonable Greek, τὰ ἅγια , the holy places',
+          formattedContent:
+              '{"version":1,"nodes":['
+              '{"type":"text","text":"un"},'
+              '{"type":"text","text":"reasonable Greek, τὰ ἅγια"},'
+              '{"type":"text","text":", the holy places"}]}',
+        ),
+      ],
+    );
+
+    expect(result.passed, isTrue);
+  });
+
+  test('fails closed when an authored Contents destination is unresolved', () {
+    final result = validator.validate(
+      sections: <Map<String, Object?>>[_section(id: 's1')],
+      blocks: <Map<String, Object?>>[_block(displayOrder: 0)],
+      navigation: const <Map<String, Object?>>[
+        <String, Object?>{
+          'label': 'Chapter 1',
+          'source_href': 'ch1.xhtml',
+          'target_block_id': null,
+        },
+      ],
+    );
+    expect(result.passed, isFalse);
+    expect(result.summary, contains('Chapter 1'));
+  });
+
+  test('passes when every authored Contents destination resolves', () {
+    final result = validator.validate(
+      sections: <Map<String, Object?>>[_section(id: 's1')],
+      blocks: <Map<String, Object?>>[_block(displayOrder: 0)],
+      navigation: const <Map<String, Object?>>[
+        <String, Object?>{
+          'label': 'Chapter 1',
+          'source_href': 'ch1.xhtml',
+          'target_block_id': 'b0',
+        },
+      ],
+    );
+    expect(result.passed, isTrue);
+  });
+
   test('fails when a referenced image asset is missing', () async {
     final directory = await Directory.systemTemp.createTemp(
       'validator_images_',

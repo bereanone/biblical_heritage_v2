@@ -20,6 +20,7 @@ class BibleNarrationMediaControls {
     required this.location,
     required this.bookNames,
     required this.skip,
+    this.chapterOnly = false,
     NarrationMediaSession? session,
   }) : _session = session ?? NarrationMediaSession.instance {
     autoscroll.addListener(_sync);
@@ -35,6 +36,7 @@ class BibleNarrationMediaControls {
 
   /// Moves narration by whole verses (+1 next, -1 previous).
   final void Function(int delta) skip;
+  final bool chapterOnly;
   final NarrationMediaSession _session;
   NarrationMediaLease? _lease;
 
@@ -71,7 +73,9 @@ class BibleNarrationMediaControls {
   String? _reference(BibleVisibleLocation? spoken) {
     if (spoken == null) return null;
     final book = bookNames[spoken.bookNumber] ?? 'Book ${spoken.bookNumber}';
-    return '$book ${spoken.chapter}:${spoken.verse}';
+    return chapterOnly
+        ? '$book ${spoken.chapter}'
+        : '$book ${spoken.chapter}:${spoken.verse}';
   }
 
   void _release() {

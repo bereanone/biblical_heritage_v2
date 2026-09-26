@@ -7,6 +7,8 @@ import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/elibrary_database.dart';
 import '../../utilities/data/elibrary_folder_policy.dart';
+import '../../utilities/data/epub_download_validator.dart';
+import 'library_epub_metadata.dart';
 import 'library_item_identity.dart';
 
 class UserEpubImportResult {
@@ -14,11 +16,31 @@ class UserEpubImportResult {
     required this.libraryItemId,
     required this.relativePath,
     required this.title,
+    required this.creator,
+    required this.sourceSha256,
   });
 
   final String libraryItemId;
   final String relativePath;
   final String title;
+  final String? creator;
+  final String sourceSha256;
+}
+
+class UserEpubInspection {
+  const UserEpubInspection({
+    required this.sourcePath,
+    required this.title,
+    required this.creator,
+    required this.sourceSha256,
+    required this.spineItemCount,
+  });
+
+  final String sourcePath;
+  final String title;
+  final String? creator;
+  final String sourceSha256;
+  final int spineItemCount;
 }
 
 /// Copies a user-selected individual EPUB into the dedicated
@@ -32,7 +54,47 @@ class UserEpubImportService {
 
   static final UserEpubImportService instance = UserEpubImportService._();
 
-  Future<UserEpubImportResult> copyIntoLibrary(String sourcePath) async {
+  /// Reads and validates a local EPUB before the user confirms its metadata.
+  /// This does not copy the file or write a library row.
+  Future<UserEpubInspection> inspect(String sourcePath) async {
+    final sourceFile = File(sourcePath);
+    if (!await sourceFile.exists()) {
+      throw StateError('The selected file is no longer available.');
+    }
+    if (p.extension(sourceFile.path).toLowerCase() != '.epub') {
+      throw const FormatException('Choose an EPUB file.');
+    }
+    final sourceBytes = await sourceFile.readAsBytes();
+    final validation = EpubDownloadValidator.validate(sourceBytes);
+    if (!validation.isValid) {
+      throw FormatException(
+        validation.detail ?? 'The selected file is not a readable EPUB.',
+      );
+    }
+    final metadata = await readLibraryEpubMetadata(sourceFile);
+    final rawBaseName = p.basenameWithoutExtension(sourcePath).trim();
+    final title = metadata?.title?.trim().isNotEmpty == true
+        ? metadata!.title!.trim()
+        : validation.opfTitle?.trim().isNotEmpty == true
+        ? validation.opfTitle!.trim()
+        : rawBaseName.isEmpty
+        ? 'Untitled Book'
+        : rawBaseName;
+    return UserEpubInspection(
+      sourcePath: sourceFile.path,
+      title: title,
+      creator: metadata?.creator?.trim().isNotEmpty == true
+          ? metadata!.creator!.trim()
+          : null,
+      sourceSha256: sha256.convert(sourceBytes).toString(),
+      spineItemCount: validation.spineItemCount,
+    );
+  }
+
+  Future<UserEpubImportResult> copyIntoLibrary(
+    String sourcePath, {
+    UserEpubInspection? confirmedInspection,
+  }) async {
     final sourceFile = File(sourcePath);
     if (!await sourceFile.exists()) {
       throw StateError('The selected file no longer exists at $sourcePath.');
@@ -48,13 +110,20 @@ class UserEpubImportService {
     );
     await destinationDir.create(recursive: true);
 
-    final sourceBytes = await sourceFile.readAsBytes();
-    final shortHash = sha256.convert(sourceBytes).toString().substring(0, 10);
+    final inspection = await inspect(sourcePath);
+    if (confirmedInspection != null &&
+        (confirmedInspection.sourcePath != inspection.sourcePath ||
+            confirmedInspection.sourceSha256 != inspection.sourceSha256)) {
+      throw StateError(
+        'The selected EPUB changed after it was checked. Choose it again.',
+      );
+    }
+    final shortHash = inspection.sourceSha256.substring(0, 10);
     final rawBaseName = p.basenameWithoutExtension(sourcePath).trim();
     final sanitizedBase = rawBaseName
         .replaceAll(RegExp(r'[\\/:*?"<>|]+'), '_')
         .trim();
-    final displayTitle = sanitizedBase.isEmpty ? 'Untitled Book' : rawBaseName;
+    final displayTitle = inspection.title;
     final fileName =
         '${sanitizedBase.isEmpty ? 'book' : sanitizedBase}_$shortHash.epub';
     final destination = File(p.join(destinationDir.path, fileName));
@@ -84,6 +153,7 @@ class UserEpubImportService {
     );
     final sharedPayload = <String, Object?>{
       'title': displayTitle,
+      'author': inspection.creator,
       'file_name': fileName,
       'relative_path': relativePath,
       'file_hash': '${stat.size}:${stat.modified.millisecondsSinceEpoch}',
@@ -95,6 +165,7 @@ class UserEpubImportService {
       'library_role': 'user_import',
       'collection_name': 'My Books',
       'source_type': 'user_import',
+      'source_work_id': 'user_epub_sha256_${inspection.sourceSha256}',
       'updated_at': now,
       'deleted_at': null,
     };
@@ -102,7 +173,6 @@ class UserEpubImportService {
       await db.insert('library_items', <String, Object?>{
         'id': libraryItemId,
         ...sharedPayload,
-        'author': null,
         'source_site': null,
         'source_url': null,
         'cover_path': null,
@@ -136,6 +206,8 @@ class UserEpubImportService {
       libraryItemId: libraryItemId,
       relativePath: relativePath,
       title: displayTitle,
+      creator: inspection.creator,
+      sourceSha256: inspection.sourceSha256,
     );
   }
 }

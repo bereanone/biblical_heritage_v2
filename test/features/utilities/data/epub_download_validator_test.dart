@@ -96,6 +96,21 @@ void main() {
       expect(result.readableContentCount, 1);
     });
 
+    test('resolves encoded parentheses and spaces in package links', () {
+      final bytes = _zip({
+        'mimetype': 'application/epub+zip',
+        'META-INF/container.xml': _containerXml,
+        'OEBPS/content.opf': _validOpf(
+          title: 'Encoded book',
+        ).replaceAll('chap0.xhtml', 'chapter%20%28one%29.xhtml'),
+        'OEBPS/chapter (one).xhtml':
+            '<html><body><p>The whole chapter is readable.</p></body></html>',
+      });
+      final result = EpubDownloadValidator.validate(bytes);
+      expect(result.isValid, true);
+      expect(result.readableContentCount, 1);
+    });
+
     test('rejects an empty response body', () {
       final result = EpubDownloadValidator.validate(Uint8List(0));
       expect(result.isValid, isFalse);

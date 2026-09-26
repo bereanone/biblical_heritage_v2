@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../core/database/elibrary_database.dart';
+import '../../../core/database/study_bible_database.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/theme/app_theme_mode.dart';
@@ -15,13 +17,15 @@ import '../data/canonical_activation.dart';
 import '../data/library_catalog_service.dart';
 import '../data/library_document_canonicalizer.dart';
 import '../data/library_document_models.dart';
+import '../data/library_citation_links.dart';
+import '../data/library_document_assets.dart';
 import '../data/library_document_repository.dart';
-import '../data/library_item_identity.dart';
 import '../data/elibrary_markup_repository.dart';
 import '../data/library_reader_state_writer.dart';
 import '../data/library_search_navigation_target.dart';
 import '../../search/search_highlight_helper.dart';
 import 'canonical_local_image.dart';
+import 'canonical_reader_image.dart';
 import 'canonical_scroll_diagnostics.dart';
 import 'elibrary_highlight_color_picker.dart';
 import 'library_document_controller.dart';
@@ -31,7 +35,17 @@ import 'reader_tilt_motion_source.dart';
 import 'reader_tilt_preferences.dart';
 import 'mac_reader_autoscroll_controller.dart';
 import 'mac_reader_autoscroll_controls.dart';
+import 'library_narration_media_controls.dart';
+import 'library_speech_controls.dart';
+import 'library_speech_scroll_follower.dart';
 import 'library_navigation_tree.dart';
+import 'library_verse_popup.dart';
+import 'library_book_reader_selection_menu.dart';
+import 'canonical_selection_tools.dart';
+import '../../reader/presentation/tag_quick_apply_helper.dart';
+import '../../reader/presentation/tag_screen_launcher.dart';
+import '../../reader/presentation/viewer_passage_models.dart';
+import '../../reader/presentation/viewer_range_selection.dart';
 
 /// Legacy developer override retained for proof-harness compatibility.
 ///
@@ -94,6 +108,10 @@ bool shouldUseSteadyReaderAutoscroll({
   bool? override,
 }) => override ?? (!isIOS && !isAndroid && !isProofHarness);
 
+bool canonicalReaderSupportsLink(String sourceHref, String href) =>
+    href.startsWith('studybible-citation:') ||
+    resolveLibrarySourceLinkPath(sourceHref, href) != null;
+
 String? canonicalVisibleReaderSubtitle(LibraryDocumentLocation? location) {
   final heading = location?.heading?.plainText.trim() ?? '';
   if (heading.isNotEmpty) return heading;
@@ -144,6 +162,27 @@ String? canonicalInlineReferenceCode(
   return code;
 }
 
+// Search emphasis creates child spans; attach the link to every text leaf so
+// taps keep working across search and annotation formatting boundaries.
+TextSpan _linkedCanonicalSpan(
+  TextSpan span,
+  GestureRecognizer recognizer,
+) => TextSpan(
+  text: span.text,
+  style: span.style,
+  recognizer: recognizer,
+  mouseCursor: SystemMouseCursors.click,
+  semanticsLabel: span.semanticsLabel,
+  locale: span.locale,
+  spellOut: span.spellOut,
+  children: span.children
+      ?.map(
+        (child) =>
+            child is TextSpan ? _linkedCanonicalSpan(child, recognizer) : child,
+      )
+      .toList(),
+);
+
 List<InlineSpan> canonicalInlineTextSpans({
   required LibraryDocumentBlock block,
   required LibraryFormattedContent formatted,
@@ -151,36 +190,114 @@ List<InlineSpan> canonicalInlineTextSpans({
   required TextStyle referenceStyle,
   required bool showReferenceCode,
   List<String> highlightTerms = const <String>[],
-}) => <InlineSpan>[
-  ...formatted.nodes.map((node) {
-    if (node['type'] == 'line_break') return const TextSpan(text: '\n');
+  List<ElibraryMarkupRecord> markups = const [],
+  GestureRecognizer? Function(String href)? linkRecognizer,
+  bool Function(String book, String locator)? citationResolves,
+}) {
+  final spans = <InlineSpan>[];
+  var offset = 0;
+  final validMarkups = markups
+      .where(
+        (m) =>
+            m.deletedAt == null &&
+            m.startBlockIndex == 0 &&
+            m.endBlockIndex == 0 &&
+            m.startCharOffset >= 0 &&
+            m.endCharOffset <= block.plainText.length &&
+            m.endCharOffset > m.startCharOffset &&
+            block.plainText.substring(m.startCharOffset, m.endCharOffset) ==
+                m.selectedTextSnapshot,
+      )
+      .toList();
+  // Older accepted generations can gain new citation support without a
+  // content migration. Existing authored links and all text stay intact.
+  for (final node in linkLibraryCitations(
+    restoreLibraryInlineBoundaryWhitespace(
+      plainText: block.plainText,
+      nodes: formatted.nodes,
+    ),
+    resolves: citationResolves,
+  )) {
+    final text = node['type'] == 'line_break'
+        ? '\n'
+        : node['text']?.toString() ?? '';
     final marks = (node['marks'] as List<Object?>? ?? const <Object?>[])
         .map((value) => value.toString())
         .toSet();
+    final href = node['link']?.toString();
+    final recognizer = href == null ? null : linkRecognizer?.call(href);
+    final inlineScale = node['relative_font_scale'];
     final nodeStyle = bodyStyle.copyWith(
+      fontSize:
+          inlineScale is num &&
+              inlineScale.isFinite &&
+              bodyStyle.fontSize != null
+          ? bodyStyle.fontSize! * inlineScale.clamp(0.7, 2.0)
+          : null,
       fontWeight: marks.contains('bold') ? FontWeight.w700 : null,
       fontStyle: marks.contains('italic') ? FontStyle.italic : null,
-      decoration: marks.contains('underline') ? TextDecoration.underline : null,
+      decoration: marks.contains('underline') || recognizer != null
+          ? TextDecoration.underline
+          : null,
       fontFeatures: marks.contains('superscript')
           ? const <FontFeature>[FontFeature.superscripts()]
           : marks.contains('subscript')
           ? const <FontFeature>[FontFeature.subscripts()]
           : null,
     );
-    final text = node['text']?.toString() ?? '';
-    if (highlightTerms.isEmpty) return TextSpan(text: text, style: nodeStyle);
-    return TextSpan(
-      children: buildHighlightedSearchSpans(
-        text,
-        highlightTerms,
-        baseStyle: nodeStyle,
-      ),
-    );
-  }),
-  if (canonicalInlineReferenceCode(block, visible: showReferenceCode)
-      case final code?)
-    TextSpan(text: ' $code', style: referenceStyle),
-];
+    final boundaries = <int>{0, text.length};
+    for (final markup in validMarkups) {
+      boundaries.add((markup.startCharOffset - offset).clamp(0, text.length));
+      boundaries.add((markup.endCharOffset - offset).clamp(0, text.length));
+    }
+    final sorted = boundaries.toList()..sort();
+    for (var i = 1; i < sorted.length; i++) {
+      final first = sorted[i - 1], last = sorted[i];
+      if (first == last) continue;
+      var style = nodeStyle;
+      for (final markup in validMarkups) {
+        if (markup.startCharOffset >= offset + last ||
+            markup.endCharOffset <= offset + first) {
+          continue;
+        }
+        if (markup.markupType == ElibraryMarkupRepository.underlineType) {
+          style = style.copyWith(
+            decoration: TextDecoration.combine([
+              if (style.decoration != null) style.decoration!,
+              TextDecoration.underline,
+            ]),
+          );
+        } else if (markup.isHighlight) {
+          final hex = markup.color.replaceFirst('#', '');
+          final value = int.tryParse(
+            hex.length == 6 ? 'FF$hex' : hex,
+            radix: 16,
+          );
+          if (value != null) {
+            style = style.copyWith(backgroundColor: Color(value));
+          }
+        }
+      }
+      final slice = text.substring(first, last);
+      final part = highlightTerms.isEmpty
+          ? TextSpan(text: slice, style: style)
+          : TextSpan(
+              children: buildHighlightedSearchSpans(
+                slice,
+                highlightTerms,
+                baseStyle: style,
+              ),
+            );
+      spans.add(
+        recognizer == null ? part : _linkedCanonicalSpan(part, recognizer),
+      );
+    }
+    offset += text.length;
+  }
+  final code = canonicalInlineReferenceCode(block, visible: showReferenceCode);
+  if (code != null) spans.add(TextSpan(text: ' $code', style: referenceStyle));
+  return spans;
+}
 
 /// The heading the reader is currently inside of: the last heading in
 /// document order at or before [currentOrder]. Returns `null` if
@@ -318,9 +435,15 @@ Future<CanonicalReaderPreparation?> prepareCanonicalCaptureClipperReader(
     rootPath: rootPath,
   );
   final source = File(resolvedPath);
-  if (!await source.exists()) return null;
-
   final db = await ELibraryDatabase.instance.database;
+  final repository = LibraryDocumentRepository(db);
+  if (await repository.isComplete(item.id)) {
+    return CanonicalReaderPreparation(
+      repository: repository,
+      sourceRoot: source.parent,
+    );
+  }
+  if (!await source.exists()) return null;
   final outcome = await CanonicalActivation.activate(
     db: db,
     libraryItemId: item.id,
@@ -354,8 +477,8 @@ const bool useCanonicalEpubReader = bool.fromEnvironment(
 bool supportsCanonicalEpubReader(LibraryCatalogItem item) {
   if ((item.fileFormat ?? '').trim().toLowerCase() != 'epub') return false;
   // The canonical reader is the EPUB reader. Provenance must not choose a
-  // second rendering/navigation model: if canonical preparation cannot read
-  // this item it returns null and the existing legacy fallback remains safe.
+  // second rendering/navigation model. Failed EPUB preparation is reported
+  // explicitly, while the source and prior accepted content remain intact.
   return item.relativePath.trim().isNotEmpty;
 }
 
@@ -383,10 +506,9 @@ Future<CanonicalReaderPreparation?> prepareCanonicalEpubReader(
 
   final db = await ELibraryDatabase.instance.database;
   final repository = LibraryDocumentRepository(db);
-  final alreadyComplete = await repository.isCurrentComplete(
-    item.id,
-    canonicalizerVersion: LibraryDocumentCanonicalizer.version,
-  );
+  // Version upgrades are explicit maintenance. A read must not replace
+  // accepted content or move saved selections simply because code changed.
+  final alreadyComplete = await repository.isComplete(item.id);
   if (!alreadyComplete) {
     if (!await source.exists()) return null;
     final outcome = await CanonicalActivation.activate(
@@ -399,20 +521,19 @@ Future<CanonicalReaderPreparation?> prepareCanonicalEpubReader(
     if (!outcome.isReady) return null;
   }
 
-  if (await repository.hasPathologicalNumericTocMarkers(item.id)) {
-    debugPrint(
-      'canonical_reader_fallback workId=${item.id} '
-      'reason=pathological_numeric_toc_markers',
-    );
-    return null;
-  }
-
+  final embeddedRoot = await LibraryDocumentAssets.restore(
+    db: db,
+    itemId: item.id,
+    libraryRoot: Directory(rootPath),
+  );
   final assetDirectory = Directory(
     p.join(source.parent.path, '_canonical_assets', item.id),
   );
   return CanonicalReaderPreparation(
     repository: repository,
-    sourceRoot: await assetDirectory.exists() ? assetDirectory : source.parent,
+    sourceRoot:
+        embeddedRoot ??
+        (await assetDirectory.exists() ? assetDirectory : source.parent),
   );
 }
 
@@ -495,14 +616,41 @@ class _CanonicalLibraryReaderGateState
             // its historical fallback while EPUB reports preparation failure
             // explicitly, preserving correctness over a misleading route.
             if (supportsCanonicalEpubReader(widget.item)) {
+              final goBack = widget.onBack ?? () => Navigator.of(context).pop();
               return Scaffold(
+                appBar: AppBar(
+                  leading: BackButton(onPressed: goBack),
+                  title: const Text('Unable to Open Book'),
+                ),
                 body: Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Text(
-                      'This EPUB could not be prepared for canonical reading. '
-                      'It was not opened with a fallback reader.',
-                      textAlign: TextAlign.center,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'This book could not be prepared for reading. Its '
+                          'source file may need to be re-downloaded.',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 20),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            if (widget.onLibrary != null)
+                              OutlinedButton(
+                                onPressed: widget.onLibrary,
+                                child: const Text('Back to Library'),
+                              ),
+                            FilledButton(
+                              onPressed: goBack,
+                              child: const Text('Go Back'),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -615,11 +763,17 @@ class _CanonicalLibraryReaderScreenState
   int _lastMacStatusRevision = 0;
   LibraryDocumentLocation? _location;
   Timer? _visibleThrottle;
+  Timer? _positionSaveTimer;
+  Future<void> _positionSave = Future<void>.value();
   int _latestVisibleOrder = 0;
+  String? _spokenBlockId;
   double _fontScale = 1;
   bool _showRefCodes = false;
+  bool Function(String book, String locator)? _citationResolves;
   int? _initialSearchOrder;
+  int? _contentsJumpOrder;
   bool _searchTargetPositioned = false;
+  int _explicitTargetMountRevision = 0;
   LibraryDocumentBlock? _selectedMarkupBlock;
   TextSelection? _selectedMarkupRange;
   Map<String, List<ElibraryMarkupRecord>> _canonicalHighlights =
@@ -632,6 +786,12 @@ class _CanonicalLibraryReaderScreenState
     _controller = LibraryDocumentController(
       libraryItemId: widget.item.id,
       repository: widget.repository,
+      // ScrollablePositionedList lays unloaded rows out at zero height. If a
+      // previously measured variable-height row is evicted while the reader
+      // remains mounted, the sliver geometry collapses behind the viewport
+      // and the page visibly jumps/flashes. Keep blocks once measured for
+      // this reader session; disposal still releases the complete cache.
+      preserveLoadedGeometry: true,
     );
     _autoScroll = ReaderTiltAutoScrollController(
       motionSource: widget.motionSource ?? PlatformReaderTiltMotionSource(),
@@ -646,9 +806,16 @@ class _CanonicalLibraryReaderScreenState
       isProofHarness: widget.proofLabel != null,
       override: widget.macosAutoscroll,
     );
-    if (_usesMacAutoscroll) {
+    // iOS never gets continuous pixel autoscroll (shouldUseSteadyReaderAuto-
+    // scroll deliberately excludes it, see its test coverage), but it can
+    // still host narration-only mode: narrationControlsPacing forces
+    // isPixelScrolling false, so this controller only tracks play/pause,
+    // speed, and speech-driven block advancement — no scroll-motion UI.
+    final usesNarrationOnly = !_usesMacAutoscroll && Platform.isIOS;
+    if (_usesMacAutoscroll || usesNarrationOnly) {
       _macAutoScroll = MacReaderAutoScrollController(
         scrollTarget: _scrollTarget,
+        narrationControlsPacing: Platform.isMacOS || usesNarrationOnly,
       )..addListener(_macAutoscrollChanged);
       AppSettingsService.instance.loadMacAutoscrollPreferences().then((value) {
         if (mounted) _macAutoScroll?.updatePreferences(value);
@@ -665,6 +832,28 @@ class _CanonicalLibraryReaderScreenState
     AppSettingsService.instance.loadViewerFontScale().then((value) {
       if (mounted) setState(() => _fontScale = value.clamp(.75, 2.0));
     });
+    unawaited(_loadCitationResolver());
+  }
+
+  // Loaded once per reader session, app-wide: every detected reference is
+  // checked against this before it is ever underlined, so a reference that
+  // cannot resolve in the popup is never shown as if it could.
+  Future<void> _loadCitationResolver() async {
+    try {
+      final db = StudyBibleDatabase.instance;
+      final books = await db.loadBooks();
+      final verseCounts = await db.loadVerseCounts();
+      if (!mounted) return;
+      setState(() {
+        _citationResolves = (book, locator) =>
+            libraryCitationResolves(book, locator, books, verseCounts);
+      });
+    } catch (error) {
+      // Fail closed: keep the book readable without underlining citations
+      // that cannot be proven resolvable in the installed Bible.
+      debugPrint('Canonical citation resolver unavailable: $error');
+      if (mounted) setState(() => _citationResolves = (_, _) => false);
+    }
   }
 
   // The list only reports `_latestVisibleOrder` reactively, once its scroll
@@ -685,9 +874,15 @@ class _CanonicalLibraryReaderScreenState
         'default_open_resolution_started workId=${widget.item.id} '
         'sourceEditionId=${widget.item.sourceWorkId ?? widget.item.id}',
       );
-      final savedOrder = widget.item.lastOpened != null
-          ? widget.item.paragraphIndex
-          : null;
+      final savedAnchor = widget.item.anchorId ?? '';
+      final savedOrder = widget.item.lastOpened == null
+          ? null
+          : savedAnchor.startsWith('canonical:')
+          ? await widget.repository.displayOrderForBlockId(
+              widget.item.id,
+              savedAnchor.substring('canonical:'.length),
+            )
+          : widget.item.paragraphIndex;
       final openingOrder = await widget.repository.openingDisplayOrder(
         widget.item.id,
         bookTitle: widget.item.displayTitle,
@@ -708,6 +903,11 @@ class _CanonicalLibraryReaderScreenState
         );
         _setInitialSearchOrder(savedOrder);
         await _controller.initialize(centerOrder: savedOrder);
+        // `_controller.initialize` only settles once the window around
+        // `savedOrder` is loaded, so the placeholder-free mount trick below
+        // (see the opening-order branch) is safe to apply here too.
+        if (!mounted) return;
+        setState(() => _contentsJumpOrder = savedOrder);
         return;
       }
       // Leave `_initialSearchOrder` null when there's no substantive
@@ -745,6 +945,24 @@ class _CanonicalLibraryReaderScreenState
         );
       }
       await _controller.initialize(centerOrder: openingOrder ?? 0);
+      // The list's very first build happens before this async resolution
+      // completes, so it mounts at index 0 with itemCount 0. By the time
+      // `openingOrder` is known and its window is loaded, that same
+      // `ScrollablePositionedList` instance is already live with every
+      // front-matter block between index 0 and `openingOrder` still an
+      // unmeasured zero-height placeholder — a live `jumpTo()` through that
+      // long placeholder run cannot derive a stable absolute offset and
+      // lands short, inside Chapter 1 rather than at its heading (the same
+      // failure `_jumpToBlock`'s Contents-navigation fix addresses below).
+      // Forcing a fresh mount via a new key, with the target window already
+      // loaded, lets `ScrollablePositionedList`'s own `initialScrollIndex`
+      // position it directly instead.
+      if (openingOrder != null && mounted) {
+        setState(() => _contentsJumpOrder = openingOrder);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _commands.jumpToOrder(openingOrder);
+        });
+      }
       return;
     }
     debugPrint('search_target_received ${target.diagnosticSummary}');
@@ -754,7 +972,6 @@ class _CanonicalLibraryReaderScreenState
         'search_target_resolution_failed ${target.diagnosticSummary} '
         'reason=canonical source map did not resolve',
       );
-      await _controller.initialize();
       if (!mounted) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -766,16 +983,35 @@ class _CanonicalLibraryReaderScreenState
       });
       return;
     }
-    _setInitialSearchOrder(order);
     debugPrint(
       'search_target_section_loaded ${target.diagnosticSummary} order=$order',
     );
     await _controller.initialize(centerOrder: order);
+    if (!mounted) return;
+    // The body initially mounts while the async source-map lookup/controller
+    // load is still empty. Recreate that list once, after the exact target
+    // window exists, so its initialScrollIndex is applied to measured rows.
+    // This mirrors the proven default-open remount without converting an
+    // explicit target into a cover/first-chapter/saved-position fallback.
+    setState(() {
+      _setInitialSearchOrder(order);
+      _explicitTargetMountRevision += 1;
+    });
   }
 
   void _visible(int order) {
+    if (_macAutoScroll?.isNarrationMode == true &&
+        _macAutoScroll!.isScrolling) {
+      return;
+    }
     _latestVisibleOrder = order;
     _controller.ensureWindow(order);
+    // Desktop termination does not guarantee widget disposal. Save progress
+    // during reading as well as on exit, using the stable canonical block ID.
+    _positionSaveTimer ??= Timer(const Duration(seconds: 1), () {
+      _positionSaveTimer = null;
+      unawaited(_saveCurrentLocation());
+    });
     if (_visibleThrottle != null) return;
     _visibleThrottle = Timer(const Duration(milliseconds: 400), () async {
       _visibleThrottle = null;
@@ -796,6 +1032,7 @@ class _CanonicalLibraryReaderScreenState
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_saveCurrentLocation());
     _visibleThrottle?.cancel();
+    _positionSaveTimer?.cancel();
     _macAutoScroll
       ?..removeListener(_macAutoscrollChanged)
       ..dispose();
@@ -812,14 +1049,17 @@ class _CanonicalLibraryReaderScreenState
     // which is debounced by 400ms and can lag behind on quick exits.
     final block = _controller.blockAt(_latestVisibleOrder) ?? _location?.block;
     if (block == null) return;
-    await LibraryReaderStateWriter.instance.saveCurrentLocation(
-      libraryItemId: widget.item.id,
-      currentSectionEntryName: block.sourceHref ?? block.sectionId,
-      currentSectionSpineIndex: null,
-      savedHref: block.sourceHref,
-      savedAnchorId: block.sourceAnchor,
-      savedParagraphIndex: block.displayOrder,
+    _positionSave = _positionSave.then(
+      (_) => LibraryReaderStateWriter.instance.saveCurrentLocation(
+        libraryItemId: widget.item.id,
+        currentSectionEntryName: block.sourceHref ?? block.sectionId,
+        currentSectionSpineIndex: null,
+        savedHref: block.sourceHref,
+        savedAnchorId: 'canonical:${block.id}',
+        savedParagraphIndex: block.displayOrder,
+      ),
     );
+    await _positionSave;
   }
 
   @override
@@ -875,6 +1115,10 @@ class _CanonicalLibraryReaderScreenState
                 child: ListenableBuilder(
                   listenable: _controller,
                   builder: (context, child) => CanonicalLibraryDocumentBody(
+                    key: ValueKey<String>(
+                      'canonical-body-$_explicitTargetMountRevision-'
+                      '${_contentsJumpOrder ?? 'initial'}',
+                    ),
                     controller: _controller,
                     autoScrollTarget: _scrollTarget,
                     onVisibleOrderChanged: _visible,
@@ -885,14 +1129,23 @@ class _CanonicalLibraryReaderScreenState
                             _autoScroll.stopForManualInteraction();
                           }
                         : _autoScroll.stopForManualInteraction,
-                    onReaderInteraction: _readerFocusNode.requestFocus,
+                    onReaderInteraction: () {
+                      _readerFocusNode.requestFocus();
+                      _macAutoScroll?.pauseNarrationForInteraction();
+                    },
+                    narrationBlockId: _spokenBlockId,
                     sourceRoot: widget.sourceRoot,
                     diagnostics: widget.diagnostics,
                     proofCommands: _commands,
+                    speechFollow: _speechFollow,
                     fontScale: _fontScale,
                     showRefCodes: _showRefCodes,
+                    referenceLinkingEnabled: _citationResolves != null,
+                    citationResolves: _citationResolves,
                     highlightTerms: widget.highlightTerms,
-                    initialScrollOrder: _initialSearchOrder,
+                    initialScrollOrder:
+                        _contentsJumpOrder ?? _initialSearchOrder,
+                    alignFlush: _contentsJumpOrder != null,
                     onInitialScrollCompleted: () {
                       _searchTargetPositioned = true;
                       final target = widget.searchTarget;
@@ -903,9 +1156,10 @@ class _CanonicalLibraryReaderScreenState
                         );
                       }
                     },
-                    highlightedBlockIds: _canonicalHighlights.keys
-                        .map((key) => key.substring('canonical:'.length))
-                        .toSet(),
+                    markupsByBlockId: {
+                      for (final entry in _canonicalHighlights.entries)
+                        entry.key.substring('canonical:'.length): entry.value,
+                    },
                     onSelectionChanged: (block, selection) {
                       if (!selection.isCollapsed) {
                         _selectedMarkupBlock = block;
@@ -913,9 +1167,26 @@ class _CanonicalLibraryReaderScreenState
                       }
                     },
                     onOpenSelectionMenu: _openCanonicalSelectionMenu,
+                    onFollowLink: (block, href) =>
+                        unawaited(_followSourceLink(block, href)),
                   ),
                 ),
               ),
+              if ((Platform.isMacOS || Platform.isIOS) &&
+                  _macAutoScroll != null)
+                LibrarySpeechControls(
+                  tiltController: _autoScroll,
+                  controller: _macAutoScroll!,
+                  bookId: widget.item.id,
+                  title: widget.item.title,
+                  author: widget.item.author,
+                  initialCursor: () => '$_latestVisibleOrder',
+                  load: _loadSpeechItem,
+                  reveal: _revealSpeechItem,
+                  onPaused: () {
+                    if (mounted) setState(() => _spokenBlockId = null);
+                  },
+                ),
               if (widget.proofLabel == null)
                 SafeArea(
                   top: false,
@@ -1044,7 +1315,8 @@ class _CanonicalLibraryReaderScreenState
         ReaderAutoscrollTapShield(
           listenables: <Listenable>[_autoScroll, ?_macAutoScroll],
           isScrolling: () =>
-              _autoScroll.isActive || (_macAutoScroll?.isScrolling ?? false),
+              _autoScroll.isActive ||
+              (_macAutoScroll?.isPixelScrolling ?? false),
           onStop: () {
             _macAutoScroll?.stopForManualInteraction();
             _autoScroll.stopSynchronously(
@@ -1070,6 +1342,60 @@ class _CanonicalLibraryReaderScreenState
     );
   }
 
+  Future<LibrarySpeechItem?> _loadSpeechItem(String cursor) async {
+    for (
+      var order = int.parse(cursor);
+      order < _controller.blockCount;
+      order++
+    ) {
+      await _controller.ensureNavigationWindow(order);
+      if (!mounted) return null;
+      final block = _controller.blockAt(order);
+      if (block == null) {
+        throw StateError('A book text block could not be loaded.');
+      }
+      if (block.blockType == LibraryDocumentBlockType.image ||
+          block.blockType == LibraryDocumentBlockType.horizontalRule ||
+          block.blockType == LibraryDocumentBlockType.unsupported ||
+          block.plainText.trim().isEmpty) {
+        continue;
+      }
+      return LibrarySpeechItem(
+        cursor: '$order',
+        nextCursor: '${order + 1}',
+        text: block.plainText,
+      );
+    }
+    return null;
+  }
+
+  Future<void> _revealSpeechItem(LibrarySpeechItem item) async {
+    if (!mounted) return;
+    final order = int.parse(item.sourceCursor);
+    if (item.startOffset > 0) {
+      // Later slices of a long paragraph: keep the spoken part on screen.
+      if (_macAutoScroll?.isScrolling == true) {
+        unawaited(
+          _speechFollow.follow(
+            order,
+            librarySpeechProgress(item.startOffset, item.sourceLength),
+          ),
+        );
+      }
+      return;
+    }
+    final block = _controller.blockAt(order);
+    setState(() {
+      _spokenBlockId = block?.id;
+      _latestVisibleOrder = order;
+    });
+    unawaited(_saveCurrentLocation());
+    await WidgetsBinding.instance.endOfFrame;
+    if (mounted && _macAutoScroll?.isScrolling == true) {
+      _commands.jumpToOrder(order);
+    }
+  }
+
   void _macAutoscrollChanged() {
     final controller = _macAutoScroll;
     if (!mounted || controller == null) return;
@@ -1082,6 +1408,10 @@ class _CanonicalLibraryReaderScreenState
           lastNonzeroStep: controller.lastNonzeroStep,
           maximumStep: controller.maximumStep,
           statusBannerMode: controller.statusBannerMode,
+          audioEnabled: controller.audioEnabled,
+          speechRate: controller.speechRate,
+          announceChapter: controller.announceChapter,
+          announceVerseNumbers: controller.announceVerseNumbers,
         ),
       ),
     );
@@ -1099,6 +1429,10 @@ class _CanonicalLibraryReaderScreenState
       lastNonzeroStep: controller.lastNonzeroStep,
       maximumStep: controller.maximumStep,
       statusBannerMode: controller.statusBannerMode,
+      audioEnabled: controller.audioEnabled,
+      speechRate: controller.speechRate,
+      announceChapter: controller.announceChapter,
+      announceVerseNumbers: controller.announceVerseNumbers,
     );
     final dialog = Platform.isMacOS
         ? showMacAutoscrollSettingsDialog(context: context, initial: initial)
@@ -1123,19 +1457,25 @@ class _CanonicalLibraryReaderScreenState
   }
 
   void _toggleTiltAutoscroll() {
+    if (_macAutoScroll?.audioEnabled == true) {
+      _macAutoScroll!.setSignedStep(_macAutoScroll!.isScrolling ? 0 : 1);
+      return;
+    }
     if (_autoScroll.isActive) {
       _autoScroll.stop();
     } else {
-      _macAutoScroll?.stopWithoutNotification();
+      _macAutoScroll?.stopForManualInteraction();
       _autoScroll.activate();
     }
   }
 
   Future<void> _openTiltAutoscrollSettings() async {
+    _macAutoScroll?.stopForManualInteraction();
     await _autoScroll.stop();
     if (!mounted) return;
     await showReaderTiltSettingsSheet(
       context,
+      speechController: _macAutoScroll,
       preferences: _autoScroll.preferences,
       includeChapterTilt: false,
       onChanged: (preferences) async {
@@ -1154,8 +1494,12 @@ class _CanonicalLibraryReaderScreenState
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) return;
+    unawaited(_saveCurrentLocation());
     _autoScroll.stop(notify: false);
-    _macAutoScroll?.stopWithoutNotification();
+    final narration = _macAutoScroll;
+    // iOS keeps narrating behind a locked screen; stopping here would end it.
+    if (narration != null && librarySpeechSurvivesBackground(narration)) return;
+    narration?.stopForManualInteraction();
   }
 
   void _setFontScale(double value) {
@@ -1251,13 +1595,88 @@ class _CanonicalLibraryReaderScreenState
 
   final CanonicalLibraryProofCommands _commands =
       CanonicalLibraryProofCommands();
+  final LibrarySpeechFollowHandle _speechFollow = LibrarySpeechFollowHandle();
 
   Future<void> _jumpToBlock(LibraryDocumentBlock block) async {
-    await _controller.ensureWindow(block.displayOrder);
-    if (!mounted) return;
+    await _controller.ensureNavigationWindow(block.displayOrder);
+    // `ensureWindow` settles only after any coalesced pending request has
+    // loaded, so this check prevents a virtualized-list jump into a
+    // zero-height placeholder while its real row is still arriving.
+    if (!mounted || _controller.blockAt(block.displayOrder) == null) return;
+    // Decode an image destination before positioning its virtualized row.
+    // Otherwise its initial zero-height layout can move the saved reading
+    // location to the following paragraph before the illustration arrives.
+    if (block.blockType == LibraryDocumentBlockType.image &&
+        widget.sourceRoot != null) {
+      final formatted = LibraryFormattedContent.fromJson(
+        block.formattedContent,
+      );
+      for (final node in formatted.nodes) {
+        if (node['type'] != 'image') continue;
+        final resolved = resolveCanonicalLocalImage(
+          sourceRoot: widget.sourceRoot!,
+          source: node['source']?.toString() ?? '',
+        );
+        if (resolved.status == CanonicalLocalImageStatus.resolved) {
+          try {
+            final image = await loadCanonicalReaderImage(resolved.file!);
+            if (!mounted) return;
+            await precacheImage(image.provider, context, onError: (_, _) {});
+          } on FormatException {
+            // Still navigate to the row so its visible fallback explains the failure.
+          } on FileSystemException {
+            // The image widget supplies the missing-file fallback.
+          }
+        }
+        break;
+      }
+      if (!mounted) return;
+    }
+    // Recreate the virtualized list with the loaded target as its initial
+    // index. `ScrollablePositionedList` cannot derive a stable absolute
+    // offset through a long run of zero-height cache placeholders, even once
+    // a later imperative jump is issued.
+    setState(() => _contentsJumpOrder = block.displayOrder);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _commands.jumpToOrder(block.displayOrder);
     });
+  }
+
+  Future<void> _followSourceLink(
+    LibraryDocumentBlock origin,
+    String href,
+  ) async {
+    if (href.startsWith('studybible-citation:')) {
+      final citation = Uri.tryParse(href);
+      if (citation == null) return;
+      _autoScroll.stopForManualInteraction();
+      _macAutoScroll?.stopForManualInteraction();
+      await showLibraryVersePopup(
+        context,
+        Uri.decodeComponent(citation.path),
+        _fontScale,
+      );
+      return;
+    }
+    final target = await widget.repository.resolveSourceLink(
+      widget.item.id,
+      fromHref: origin.sourceHref ?? '',
+      href: href,
+    );
+    if (!mounted) return;
+    if (target == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "This link’s destination isn’t available in this copy.",
+          ),
+        ),
+      );
+      return;
+    }
+    _selectedMarkupBlock = null;
+    _selectedMarkupRange = null;
+    await _jumpToBlock(target);
   }
 
   Future<void> _jumpHeading(bool forward) async {
@@ -1291,14 +1710,16 @@ class _CanonicalLibraryReaderScreenState
     });
   }
 
-  Future<void> _highlightCanonicalSelection() async {
+  Future<void> _highlightCanonicalSelection({bool underline = false}) async {
     final block = _selectedMarkupBlock;
     final range = _selectedMarkupRange;
     if (block == null || range == null || range.isCollapsed) return;
     final start = range.start.clamp(0, block.plainText.length);
     final end = range.end.clamp(start, block.plainText.length);
     if (end <= start) return;
-    final color = await showElibraryHighlightColorPicker(context);
+    final color = underline
+        ? '#F7D87D'
+        : await showElibraryHighlightColorPicker(context);
     if (!mounted || color == null) return;
     await ElibraryMarkupRepository().saveHighlight(
       libraryItemId: widget.item.id,
@@ -1312,6 +1733,9 @@ class _CanonicalLibraryReaderScreenState
       compactRef: block.sourceRefcode ?? widget.item.displayTitle,
       selectedTextSnapshot: block.plainText.substring(start, end),
       color: color,
+      markupType: underline
+          ? ElibraryMarkupRepository.underlineType
+          : ElibraryMarkupRepository.highlightType,
     );
     await _loadCanonicalHighlights();
   }
@@ -1324,69 +1748,99 @@ class _CanonicalLibraryReaderScreenState
     final end = range.end.clamp(start, block.plainText.length);
     if (end <= start) return;
     final selectedText = block.plainText.substring(start, end);
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                'Range Actions',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              Text(block.sourceRefcode ?? widget.item.displayTitle),
-              const SizedBox(height: 8),
-              Text(selectedText),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  FilledButton.tonalIcon(
-                    onPressed: () => Navigator.of(context).pop('copy'),
-                    icon: const Icon(Icons.copy_outlined),
-                    label: const Text('Copy No Citation'),
-                  ),
-                  FilledButton.tonalIcon(
-                    onPressed: () => Navigator.of(context).pop('highlight'),
-                    icon: const Icon(Icons.format_paint_outlined),
-                    label: const Text('Highlight'),
-                  ),
-                  FilledButton.tonalIcon(
-                    onPressed:
-                        _canonicalHighlights['canonical:${block.id}']
-                                ?.isNotEmpty ==
-                            true
-                        ? () => Navigator.of(context).pop('clear')
-                        : null,
-                    icon: const Icon(Icons.layers_clear_outlined),
-                    label: const Text('Clear Markup'),
-                  ),
-                  FilledButton.tonalIcon(
-                    onPressed: () => Navigator.of(context).pop('reset'),
-                    icon: const Icon(Icons.close_rounded),
-                    label: const Text('Reset Range'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+    final reference = canonicalSelectionReference(widget.item, block);
+    final action = await showLibrarySelectionRangeActionsSheet(
+      context,
+      payload: LibrarySelectionRangeActionsPayload(
+        referenceLabel: reference,
+        previewText: selectedText,
+        enableClearMarkup:
+            _canonicalHighlights['canonical:${block.id}']?.any(
+              (m) => m.startCharOffset < end && m.endCharOffset > start,
+            ) ??
+            false,
       ),
+      fontScale: _fontScale,
+      showRichCopy: false,
+      showUnderline: true,
     );
     if (!mounted || action == null) return;
     switch (action) {
-      case 'copy':
-        await Clipboard.setData(ClipboardData(text: selectedText));
+      case LibrarySelectionRangeAction.copyNoCitation:
+      case LibrarySelectionRangeAction.copyWithMarkup:
+        await Clipboard.setData(
+          ClipboardData(text: buildLibrarySelectionClipboardText(selectedText)),
+        );
         return;
-      case 'highlight':
+      case LibrarySelectionRangeAction.copyWithCitation:
+      case LibrarySelectionRangeAction.copyWithMarkupAndCitation:
+        await Clipboard.setData(
+          ClipboardData(
+            text: buildLibrarySelectionClipboardText(
+              selectedText,
+              referenceLabel: reference,
+            ),
+          ),
+        );
+        return;
+      case LibrarySelectionRangeAction.addHashTag:
+      case LibrarySelectionRangeAction.chooseHashTag:
+        final tags = HashTagRepository();
+        Future<HashTagQuickApplyResult> apply(String tag) =>
+            saveCanonicalSelectionToTag(
+              repository: widget.repository,
+              tags: tags,
+              item: widget.item,
+              block: block,
+              start: start,
+              end: end,
+              tag: tag,
+            );
+        if (action == LibrarySelectionRangeAction.addHashTag) {
+          final defaultTag = tags.normalizeTagName(
+            await tags.loadDefaultTag() ?? '',
+          );
+          if (!mounted) return;
+          if (defaultTag.isNotEmpty) {
+            final result = await apply(defaultTag);
+            if (!mounted) return;
+            if (result.tag != null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    result.inserted > 0
+                        ? 'Added selected range to ${result.tag}.'
+                        : 'This range is already in ${result.tag}.',
+                  ),
+                ),
+              );
+              return;
+            }
+          }
+        }
+        if (!mounted) return;
+        await showHashTagScreen(
+          Navigator.of(context),
+          passage: PassageData(
+            bookNumber: null,
+            bookName: widget.item.displayTitle,
+            chapter: 0,
+            lines: const <VerseLine>[],
+          ),
+          selection: const ViewerRangeSelection(),
+          selectionTargets: const <HashTagTarget>[],
+          fontScale: _fontScale,
+          selectionLabelOverride: reference,
+          onApplySelectionOverride: apply,
+        );
+        return;
+      case LibrarySelectionRangeAction.highlight:
         await _highlightCanonicalSelection();
         return;
-      case 'clear':
+      case LibrarySelectionRangeAction.underline:
+        await _highlightCanonicalSelection(underline: true);
+        return;
+      case LibrarySelectionRangeAction.clearMarkup:
         await ElibraryMarkupRepository().clearHighlightsOverlappingSelection(
           libraryItemId: widget.item.id,
           epubHref: 'canonical:${block.id}',
@@ -1394,10 +1848,11 @@ class _CanonicalLibraryReaderScreenState
           startCharOffset: start,
           endBlockIndex: 0,
           endCharOffset: end,
+          includeUnderlines: true,
         );
         await _loadCanonicalHighlights();
         return;
-      case 'reset':
+      case LibrarySelectionRangeAction.resetRange:
         _selectedMarkupBlock = null;
         _selectedMarkupRange = null;
         return;
@@ -1460,12 +1915,11 @@ class _CanonicalProductionHeader extends StatelessWidget {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Row(
-                        children: <Widget>[
-                          back,
-                          const SizedBox(width: 12),
-                          title,
-                        ],
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: <Widget>[back, title],
                       ),
                       const SizedBox(height: 8),
                       Wrap(spacing: 10, runSpacing: 10, children: actions),
@@ -1631,15 +2085,22 @@ class CanonicalLibraryDocumentBody extends StatefulWidget {
     this.sourceRoot,
     this.diagnostics,
     this.proofCommands,
+    this.speechFollow,
     this.fontScale = 1,
     this.onReaderInteraction,
     this.showRefCodes = false,
+    this.referenceLinkingEnabled = false,
+    this.citationResolves,
     this.highlightTerms = const <String>[],
     this.initialScrollOrder,
+    this.alignFlush = false,
     this.onInitialScrollCompleted,
     this.highlightedBlockIds = const <String>{},
+    this.narrationBlockId,
+    this.markupsByBlockId = const <String, List<ElibraryMarkupRecord>>{},
     this.onSelectionChanged,
     this.onOpenSelectionMenu,
+    this.onFollowLink,
   });
   final LibraryDocumentController controller;
   final CallbackReaderAutoScrollTarget autoScrollTarget;
@@ -1649,16 +2110,29 @@ class CanonicalLibraryDocumentBody extends StatefulWidget {
   final Directory? sourceRoot;
   final CanonicalScrollDiagnostics? diagnostics;
   final CanonicalLibraryProofCommands? proofCommands;
+  final LibrarySpeechFollowHandle? speechFollow;
   final double fontScale;
   final VoidCallback? onReaderInteraction;
   final bool showRefCodes;
+  // True once the citation resolver has finished loading for this reader
+  // session; false only during that brief startup window.
+  final bool referenceLinkingEnabled;
+  final bool Function(String book, String locator)? citationResolves;
   final List<String> highlightTerms;
   final int? initialScrollOrder;
+  // Contents-jump, saved-position resume, and the front-matter-skip first
+  // open all want the target heading flush against the top of the list
+  // (alignment 0); an explicit search-target open instead wants a little
+  // context visible above the match (alignment 0.08).
+  final bool alignFlush;
   final VoidCallback? onInitialScrollCompleted;
   final Set<String> highlightedBlockIds;
+  final String? narrationBlockId;
+  final Map<String, List<ElibraryMarkupRecord>> markupsByBlockId;
   final void Function(LibraryDocumentBlock block, TextSelection selection)?
   onSelectionChanged;
   final VoidCallback? onOpenSelectionMenu;
+  final void Function(LibraryDocumentBlock block, String href)? onFollowLink;
 
   @override
   State<CanonicalLibraryDocumentBody> createState() =>
@@ -1703,6 +2177,7 @@ class _CanonicalLibraryDocumentBodyState
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.autoScrollTarget.attach(_scrollByPixels);
       widget.proofCommands?._attach(_jumpToOrder);
+      widget.speechFollow?.attach(_followSpeech);
       _applyInitialScroll();
     });
     _captureVisiblePosition();
@@ -1714,7 +2189,10 @@ class _CanonicalLibraryDocumentBodyState
     if (order == null || !_itemController.isAttached) return;
     _initialScrollApplied = true;
     debugPrint('search_target_widget_found order=$order');
-    _itemController.jumpTo(index: order, alignment: 0.08);
+    _itemController.jumpTo(
+      index: order,
+      alignment: widget.alignFlush ? 0 : 0.08,
+    );
     widget.onInitialScrollCompleted?.call();
   }
 
@@ -1735,7 +2213,25 @@ class _CanonicalLibraryDocumentBodyState
     }
     _itemController.jumpTo(
       index: order.clamp(0, widget.controller.blockCount - 1),
+      alignment: 0,
     );
+  }
+
+  Future<bool> _followSpeech(int order, double progress) async {
+    final position = _position;
+    if (position == null || !position.hasPixels) return false;
+    for (final item in _positions.itemPositions.value) {
+      if (item.index != order) continue;
+      final delta = librarySpeechFollowDelta(
+        sliceTop:
+            (item.itemLeadingEdge +
+                progress * (item.itemTrailingEdge - item.itemLeadingEdge)) *
+            position.viewportDimension,
+        viewportHeight: position.viewportDimension,
+      );
+      return delta != null && await animateSpeechFollow(position, delta);
+    }
+    return false;
   }
 
   bool _scrollByPixels(double delta) {
@@ -1835,6 +2331,7 @@ class _CanonicalLibraryDocumentBodyState
     widget.controller.endAutoScroll(_firstVisibleOrder);
     widget.autoScrollTarget.detach();
     widget.proofCommands?._detach();
+    widget.speechFollow?.detach();
     _positions.itemPositions.removeListener(_onPositions);
     super.dispose();
   }
@@ -1872,7 +2369,10 @@ class _CanonicalLibraryDocumentBodyState
                       ? widget.controller.blockCount - 1
                       : 0,
                 ),
-                initialAlignment: widget.initialScrollOrder == null ? 0 : 0.08,
+                initialAlignment:
+                    widget.initialScrollOrder == null || widget.alignFlush
+                    ? 0
+                    : 0.08,
                 padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
                 itemBuilder: (context, order) {
                   _position ??= Scrollable.maybeOf(context)?.position;
@@ -1887,21 +2387,29 @@ class _CanonicalLibraryDocumentBodyState
                     // it changes the sliver geometry when real content arrives.
                     return const SizedBox.shrink();
                   }
-                  return KeyedSubtree(
+                  return Container(
                     key: ValueKey(block.id),
+                    color: widget.narrationBlockId == block.id
+                        ? Theme.of(
+                            context,
+                          ).colorScheme.primary.withValues(alpha: .16)
+                        : null,
                     child: _CanonicalBlockView(
                       block: block,
                       color: widget.textColor,
                       sourceRoot: widget.sourceRoot,
                       fontScale: widget.fontScale,
                       showRefCode: widget.showRefCodes,
+                      referenceLinkingEnabled: widget.referenceLinkingEnabled,
+                      citationResolves: widget.citationResolves,
                       highlightTerms: widget.highlightTerms,
-                      highlighted: widget.highlightedBlockIds.contains(
-                        block.id,
-                      ),
+                      markups: widget.markupsByBlockId[block.id] ?? const [],
                       onSelectionChanged: (selection) =>
                           widget.onSelectionChanged?.call(block, selection),
                       onOpenSelectionMenu: widget.onOpenSelectionMenu,
+                      onFollowLink: widget.onFollowLink == null
+                          ? null
+                          : (href) => widget.onFollowLink!(block, href),
                     ),
                   );
                 },
@@ -1912,30 +2420,86 @@ class _CanonicalLibraryDocumentBodyState
       );
 }
 
-class _CanonicalBlockView extends StatelessWidget {
+class _CanonicalBlockView extends StatefulWidget {
   const _CanonicalBlockView({
     required this.block,
     required this.color,
     required this.sourceRoot,
     required this.fontScale,
     required this.showRefCode,
+    this.referenceLinkingEnabled = false,
+    this.citationResolves,
     this.highlightTerms = const <String>[],
-    required this.highlighted,
+    this.markups = const [],
     required this.onSelectionChanged,
     required this.onOpenSelectionMenu,
+    this.onFollowLink,
   });
   final LibraryDocumentBlock block;
   final Color color;
   final Directory? sourceRoot;
   final double fontScale;
   final bool showRefCode;
+  final bool referenceLinkingEnabled;
+  final bool Function(String book, String locator)? citationResolves;
   final List<String> highlightTerms;
-  final bool highlighted;
+  final List<ElibraryMarkupRecord> markups;
   final ValueChanged<TextSelection>? onSelectionChanged;
   final VoidCallback? onOpenSelectionMenu;
+  final ValueChanged<String>? onFollowLink;
+
+  @override
+  State<_CanonicalBlockView> createState() => _CanonicalBlockViewState();
+}
+
+class _CanonicalBlockViewState extends State<_CanonicalBlockView> {
+  final _linkRecognizers = <String, TapGestureRecognizer>{};
+  var _hasSelection = false;
+
+  GestureRecognizer? _recognizer(String href) {
+    if (widget.onFollowLink == null ||
+        !canonicalReaderSupportsLink(widget.block.sourceHref ?? '', href)) {
+      return null;
+    }
+    return _linkRecognizers.putIfAbsent(
+      href,
+      () => TapGestureRecognizer()
+        ..onTap = () {
+          // A selected range belongs to the annotation flow; dragging or a long
+          // press on a linked number must not unexpectedly navigate away.
+          if (!_hasSelection) widget.onFollowLink?.call(href);
+        },
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _CanonicalBlockView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.block.id != widget.block.id ||
+        oldWidget.block.formattedContent != widget.block.formattedContent) {
+      for (final recognizer in _linkRecognizers.values) {
+        recognizer.dispose();
+      }
+      _linkRecognizers.clear();
+      _hasSelection = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final recognizer in _linkRecognizers.values) {
+      recognizer.dispose();
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final block = widget.block, color = widget.color;
+    final sourceRoot = widget.sourceRoot, fontScale = widget.fontScale;
+    final showRefCode = widget.showRefCode,
+        highlightTerms = widget.highlightTerms;
+    final markups = widget.markups;
     // Hide page markers already stored by canonicalizer v5. New imports omit
     // them at ingestion, while this compatibility guard cleans existing
     // libraries without requiring the original EPUB archive to still exist.
@@ -1962,14 +2526,23 @@ class _CanonicalBlockView extends StatelessWidget {
           ? const CanonicalLocalImageResolution(
               status: CanonicalLocalImageStatus.rejected,
             )
-          : resolveCanonicalLocalImage(sourceRoot: sourceRoot!, source: source);
+          : resolveCanonicalLocalImage(sourceRoot: sourceRoot, source: source);
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: resolution.status == CanonicalLocalImageStatus.resolved
-            ? Image.file(
-                resolution.file!,
-                key: const ValueKey('canonical-local-image'),
-                fit: BoxFit.contain,
+            ? CanonicalReaderImage(
+                file: resolution.file!,
+                rotationDegrees:
+                    imageNode?['rotation_degrees'] is int &&
+                        const [
+                          0,
+                          90,
+                          180,
+                          270,
+                        ].contains(imageNode?['rotation_degrees'])
+                    ? imageNode!['rotation_degrees'] as int
+                    : 0,
+                semanticLabel: block.plainText.isEmpty ? null : block.plainText,
                 errorBuilder: (_, _, _) =>
                     _CanonicalImageFallback(color: color, alt: block.plainText),
               )
@@ -1977,11 +2550,25 @@ class _CanonicalBlockView extends StatelessWidget {
       );
     }
     final heading = block.blockType == LibraryDocumentBlockType.heading;
+    final outline = formatted.metadata['content_role'] == 'chapter_outline';
     final quotation = block.blockType == LibraryDocumentBlockType.quotation;
     final poem = block.blockType == LibraryDocumentBlockType.poem;
+    final relativeSize = formatted.metadata['relative_font_scale'];
+    final blockFontScale = relativeSize is num && relativeSize.isFinite
+        ? relativeSize.clamp(0.7, 2.0).toDouble()
+        : 1.0;
     final base = TextStyle(
       color: color,
-      fontSize: (heading ? 24 : 18) * fontScale,
+      fontSize:
+          (formatted.metadata['font_scale_basis'] == 'body'
+              ? 18
+              : heading
+              ? 24
+              : outline
+              ? 16
+              : 18) *
+          fontScale *
+          blockFontScale,
       height: heading ? 1.3 : 1.6,
       fontWeight: heading ? FontWeight.w800 : FontWeight.w400,
       fontStyle: quotation ? FontStyle.italic : null,
@@ -1990,19 +2577,133 @@ class _CanonicalBlockView extends StatelessWidget {
       'center' => TextAlign.center,
       'right' => TextAlign.right,
       'justify' => TextAlign.justify,
+      'end' => TextAlign.end,
       _ => TextAlign.start,
     };
+    final tableRows = formatted.metadata['table_rows'];
+    if (tableRows is List && tableRows.isNotEmpty) {
+      final rows = tableRows
+          .map(
+            (row) => (row as List)
+                .map((cell) => Map<String, Object?>.from(cell as Map))
+                .toList(),
+          )
+          .toList();
+      final columns = rows
+          .map(
+            (row) => row.fold<int>(
+              0,
+              (sum, cell) => sum + (cell['colspan'] as int? ?? 1),
+            ),
+          )
+          .reduce((a, b) => a > b ? a : b);
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final minWidth = columns > 2 ? columns * 150.0 * fontScale : 0.0;
+            final width = constraints.maxWidth < minWidth
+                ? minWidth
+                : constraints.maxWidth;
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(
+                width: width,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: rows
+                      .map(
+                        (row) => IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              for (final cell in row)
+                                SizedBox(
+                                  width:
+                                      width *
+                                      (cell['colspan'] as int? ?? 1) /
+                                      columns,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: color.withValues(alpha: .45),
+                                      ),
+                                    ),
+                                    child: SelectableText.rich(
+                                      TextSpan(
+                                        style: base,
+                                        children: canonicalInlineTextSpans(
+                                          block: block,
+                                          formatted: LibraryFormattedContent(
+                                            nodes: (cell['nodes'] as List)
+                                                .map(
+                                                  (node) =>
+                                                      Map<String, Object?>.from(
+                                                        node as Map,
+                                                      ),
+                                                )
+                                                .toList(),
+                                          ),
+                                          bodyStyle: cell['header'] == true
+                                              ? base.copyWith(
+                                                  fontWeight: FontWeight.bold,
+                                                )
+                                              : base,
+                                          referenceStyle: base,
+                                          showReferenceCode: false,
+                                          highlightTerms: highlightTerms,
+                                          linkRecognizer:
+                                              widget.referenceLinkingEnabled
+                                              ? _recognizer
+                                              : null,
+                                          citationResolves:
+                                              widget.citationResolves,
+                                        ),
+                                      ),
+                                      textAlign: switch (cell['alignment']) {
+                                        'center' => TextAlign.center,
+                                        'right' => TextAlign.right,
+                                        'justify' => TextAlign.justify,
+                                        'end' => TextAlign.end,
+                                        'left' || 'start' => TextAlign.start,
+                                        _ =>
+                                          cell['header'] == true
+                                              ? TextAlign.center
+                                              : TextAlign.start,
+                                      },
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    }
     return Padding(
       padding: EdgeInsets.only(
-        top: heading ? 20 : 6,
-        bottom: heading ? 12 : 14,
+        top: formatted.metadata['compact_centered_paragraph'] == true
+            ? 0
+            : heading
+            ? 20
+            : 6,
+        bottom: formatted.metadata['compact_centered_paragraph'] == true
+            ? 0
+            : heading
+            ? 12
+            : 14,
         left: quotation ? 12 : 0,
       ),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: highlighted
-              ? Colors.amber.withValues(alpha: .35)
-              : Colors.transparent,
+          color: Colors.transparent,
           borderRadius: BorderRadius.circular(6),
         ),
         child: Column(
@@ -2016,19 +2717,26 @@ class _CanonicalBlockView extends StatelessWidget {
                   formatted: formatted,
                   bodyStyle: base,
                   referenceStyle: base.copyWith(
-                    fontSize: (heading ? 24 : 18) * fontScale * .72,
+                    fontSize: base.fontSize! * .72,
                     color: color.withValues(alpha: .65),
                     fontWeight: FontWeight.w500,
                   ),
                   showReferenceCode: showRefCode,
                   highlightTerms: highlightTerms,
+                  markups: markups,
+                  linkRecognizer: widget.referenceLinkingEnabled
+                      ? _recognizer
+                      : null,
+                  citationResolves: widget.citationResolves,
                 ),
               ),
               textAlign: align,
               style: poem ? base.copyWith(fontFamily: 'monospace') : base,
-              onSelectionChanged: (selection, _) =>
-                  onSelectionChanged?.call(selection),
-              onTap: onOpenSelectionMenu,
+              onSelectionChanged: (selection, _) {
+                _hasSelection = !selection.isCollapsed;
+                widget.onSelectionChanged?.call(selection);
+              },
+              onTap: widget.onOpenSelectionMenu,
             ),
           ],
         ),

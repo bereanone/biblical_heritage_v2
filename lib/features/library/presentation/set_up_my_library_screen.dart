@@ -63,8 +63,9 @@ class SetUpMyLibraryScreen extends StatelessWidget {
               ),
               _SetupChoice(
                 icon: Icons.menu_book_outlined,
-                title: 'Add My Own EPUB',
-                subtitle: 'Choose a single EPUB file from this device.',
+                title: 'Import Book',
+                subtitle:
+                    'Choose a supported EPUB. PDF reading is not available yet.',
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const AddMyOwnEpubScreen(),

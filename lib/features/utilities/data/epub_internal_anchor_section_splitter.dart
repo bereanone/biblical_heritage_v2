@@ -46,9 +46,32 @@ class EpubInternalAnchorSectionSplitter {
   /// Reads every authored navigation target in [archive], grouped by the
   /// normalized package-relative path it targets, in authored document
   /// order. Prefers an NCX (`.ncx`) navMap when present; falls back to an
-  /// EPUB3 `<nav>` document otherwise. Targets with no fragment (whole-file
-  /// destinations) are dropped, since they carry nothing to split by.
+  /// EPUB3 `<nav>` document otherwise. A whole-file destination is retained:
+  /// when it is the authored parent immediately before two or more anchored
+  /// children, it owns the file's leading slice up to the first child anchor.
   static Map<String, List<EpubAnchorTarget>> readTargetsByPath({
+    required Archive archive,
+    required String fallbackTitle,
+  }) {
+    final targets = readNavigationTargets(
+      archive: archive,
+      fallbackTitle: fallbackTitle,
+    );
+
+    final byPath = <String, List<EpubAnchorTarget>>{};
+    for (final target in targets) {
+      byPath
+          .putIfAbsent(
+            normalizedEpubPathKey(target.path),
+            () => <EpubAnchorTarget>[],
+          )
+          .add(EpubAnchorTarget(title: target.title, anchor: target.anchor));
+    }
+    return byPath;
+  }
+
+  /// The source-authored Contents, distinct from inferred headings/page labels.
+  static List<PioneerEpubNavigationTarget> readNavigationTargets({
     required Archive archive,
     required String fallbackTitle,
   }) {
@@ -56,18 +79,12 @@ class EpubInternalAnchorSectionSplitter {
       archive: archive,
       fallbackTitle: fallbackTitle,
     );
-    final targets = ncxTargets.isNotEmpty
+    return ncxTargets.isNotEmpty
         ? ncxTargets
-        : _readNavDocumentTargets(archive: archive, fallbackTitle: fallbackTitle);
-
-    final byPath = <String, List<EpubAnchorTarget>>{};
-    for (final target in targets) {
-      if (target.anchor.isEmpty) continue;
-      byPath
-          .putIfAbsent(normalizedEpubPathKey(target.path), () => <EpubAnchorTarget>[])
-          .add(EpubAnchorTarget(title: target.title, anchor: target.anchor));
-    }
-    return byPath;
+        : _readNavDocumentTargets(
+            archive: archive,
+            fallbackTitle: fallbackTitle,
+          );
   }
 
   /// Normalizes an EPUB package-relative path the same way for both the
@@ -139,69 +156,79 @@ class EpubInternalAnchorSectionSplitter {
     return List<PioneerEpubNavigationTarget>.unmodifiable(targets);
   }
 
-  /// Slices [rawHtml] (one EPUB body file's full markup) into one section
-  /// per entry of [targets], each running from its own anchor (an
-  /// `id="..."`/`name="..."` attribute anywhere in the markup) up to the
-  /// next target's anchor, or to the end of the file for the last target.
-  /// Consecutive targets that share the exact same anchor collapse onto the
-  /// last one, so an identical anchor's earlier target doesn't spawn an
-  /// empty, duplicate section; a target whose anchor never actually appears
-  /// in [rawHtml] is skipped rather than guessed at. Returns one section
-  /// covering the whole file, titled [wholeFileTitle], when fewer than 2
-  /// targets survive that resolution -- a single destination is not a
-  /// split, and this keeps existing one-section-per-file behavior for
-  /// ordinary EPUBs untouched.
+  /// Split only at resolved, distinct text-block boundaries in source order.
+  /// Concatenating the slices reproduces the original markup byte for byte.
+  /// A broken navigation target keeps the whole file intact for inspection.
   static List<EpubAnchorSplitSection> splitByAnchors({
     required String rawHtml,
     required List<EpubAnchorTarget> targets,
     required String wholeFileTitle,
   }) {
-    if (targets.length < 2) {
-      return <EpubAnchorSplitSection>[
-        EpubAnchorSplitSection(title: wholeFileTitle, html: rawHtml),
-      ];
+    List<EpubAnchorSplitSection> wholeFile() => [
+      EpubAnchorSplitSection(title: wholeFileTitle, html: rawHtml),
+    ];
+    final boundaries = <int, EpubAnchorTarget>{};
+    for (final target in targets.where((target) => target.anchor.isNotEmpty)) {
+      final matches = _anchorPattern(
+        target.anchor,
+      ).allMatches(rawHtml).toList();
+      if (matches.length != 1) return wholeFile();
+      boundaries[_containingBlockStart(rawHtml, matches.single.start)] = target;
     }
-
+    if (boundaries.length < 2) return wholeFile();
+    final starts = boundaries.keys.toList()..sort();
+    final prefix = rawHtml.substring(0, starts.first);
+    final visiblePrefix = prefix
+        .replaceAll(
+          RegExp(r'<head\b.*?</head\s*>', caseSensitive: false, dotAll: true),
+          '',
+        )
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll(RegExp(r'&(?:nbsp|#160|#xA0);', caseSensitive: false), '')
+        .trim();
     final sections = <EpubAnchorSplitSection>[];
-    for (var index = 0; index < targets.length; index++) {
-      final target = targets[index];
-      final startMatch = _anchorPattern(target.anchor).firstMatch(rawHtml);
-      if (startMatch == null) continue;
-
-      var end = rawHtml.length;
-      for (
-        var nextIndex = index + 1;
-        nextIndex < targets.length;
-        nextIndex++
-      ) {
-        final next = targets[nextIndex];
-        if (next.anchor == target.anchor) {
-          end = startMatch.start;
-          break;
-        }
-        final nextMatches = _anchorPattern(
-          next.anchor,
-        ).allMatches(rawHtml, startMatch.end);
-        if (nextMatches.isNotEmpty) {
-          end = nextMatches.first.start;
-          break;
-        }
-      }
-
-      if (end <= startMatch.start) continue;
+    if (visiblePrefix.isNotEmpty) {
+      final parents = targets.where((target) => target.anchor.isEmpty);
       sections.add(
         EpubAnchorSplitSection(
-          title: target.title,
-          html: rawHtml.substring(startMatch.start, end),
+          title: parents.isEmpty ? wholeFileTitle : parents.first.title,
+          html: prefix,
         ),
       );
     }
+    for (var index = 0; index < starts.length; index++) {
+      final start = index == 0 && sections.isEmpty ? 0 : starts[index];
+      final end = index + 1 < starts.length
+          ? starts[index + 1]
+          : rawHtml.length;
+      sections.add(
+        EpubAnchorSplitSection(
+          title: boundaries[starts[index]]!.title,
+          html: rawHtml.substring(start, end),
+        ),
+      );
+    }
+    return sections;
+  }
 
-    return sections.isEmpty
-        ? <EpubAnchorSplitSection>[
-            EpubAnchorSplitSection(title: wholeFileTitle, html: rawHtml),
-          ]
-        : sections;
+  /// Producers often put an empty span inside H2 rather than its id on H2.
+  /// Starting at that span severs the heading and silently loses its text.
+  static int _containingBlockStart(String html, int anchorStart) {
+    final stack = <({String tag, int start})>[];
+    final tags = RegExp(
+      r'<(/?)(h[1-6]|p|li|blockquote|pre|div)\b[^>]*>',
+      caseSensitive: false,
+    );
+    for (final tag in tags.allMatches(html.substring(0, anchorStart))) {
+      final name = tag.group(2)!.toLowerCase();
+      if (tag.group(1) == '/') {
+        final index = stack.lastIndexWhere((entry) => entry.tag == name);
+        if (index >= 0) stack.removeRange(index, stack.length);
+      } else if (!tag.group(0)!.endsWith('/>')) {
+        stack.add((tag: name, start: tag.start));
+      }
+    }
+    return stack.isEmpty ? anchorStart : stack.last.start;
   }
 
   static RegExp _anchorPattern(String anchor) => RegExp(

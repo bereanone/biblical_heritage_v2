@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -35,6 +36,229 @@ void main() {
     await db.close();
     await directory.delete(recursive: true);
   });
+
+  test('explicit chapter title supersedes a preceding poem heading', () async {
+    await source.writeAsString(
+      '<h2>The Perfect Sacrifice</h2>'
+      '<p>Poem line.</p><h1>Chapter 18 - The Burnt-Offering</h1>'
+      '<p id="body">The whole burnt-offering had its origin.</p>',
+    );
+    await const LibraryDocumentCanonicalizer().canonicalize(
+      db: db,
+      libraryItemId: 'chapter-title',
+      source: source,
+    );
+    final body = (await db.query(
+      'library_document_blocks',
+      where: "library_item_id=? AND source_anchor='body'",
+      whereArgs: ['chapter-title'],
+    )).single;
+    final location = await LibraryDocumentRepository(
+      db,
+    ).resolveLocation('chapter-title', body['display_order'] as int);
+    expect(location?.heading?.plainText, 'Chapter 18 - The Burnt-Offering');
+  });
+
+  test(
+    'inline relative sizes survive nested emphasis without changing text',
+    () async {
+      await source.writeAsString(
+        '<style>.ref {font-size:85%;}</style>'
+        '<p>Text <span class="ref">(John <em>3:16</em>)</span> after.</p>',
+      );
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'inline-size',
+        source: source,
+      );
+      final row = (await db.query(
+        'library_document_blocks',
+        where: 'library_item_id=?',
+        whereArgs: ['inline-size'],
+      )).single;
+      final formatted = jsonDecode(row['formatted_content'] as String) as Map;
+      final nodes = formatted['nodes'] as List;
+      expect(nodes.map((n) => n['text']).join(), 'Text (John 3:16) after.');
+      expect(
+        nodes
+            .where((n) => n['relative_font_scale'] == .85)
+            .map((n) => n['text'])
+            .join(),
+        '(John 3:16)',
+      );
+      expect(nodes.first['relative_font_scale'], isNull);
+      expect(nodes.last['relative_font_scale'], isNull);
+    },
+  );
+
+  test(
+    'marked citation keeps its whole lookup across nested emphasis',
+    () async {
+      await source.writeAsString(
+        '<p>Read <span class="cis-inline-bible">'
+        '(John <em>3:16</em>,18)</span> now.</p>',
+      );
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'nested-citation',
+        source: source,
+      );
+      final row = (await db.query(
+        'library_document_blocks',
+        where: 'library_item_id=?',
+        whereArgs: ['nested-citation'],
+      )).single;
+      final nodes =
+          (jsonDecode(row['formatted_content'] as String) as Map)['nodes']
+              as List;
+      final links = nodes
+          .where((n) => n['link'] != null)
+          .map((n) => n['link'])
+          .toSet();
+      expect(links, {
+        'studybible-citation:${Uri.encodeComponent('(John 3:16,18)')}',
+      });
+    },
+  );
+
+  test(
+    'relative note sizes remain scalable and bounded, fixed sizes ignored',
+    () async {
+      await source.writeAsString(
+        '<p style="font-size:0.8em">Note one.</p>'
+        '<p style="font-size:85%">Note two.</p>'
+        '<p style="font-size:2px">Fixed print size.</p>'
+        '<p style="font-size:0.1em">Tiny source size.</p>',
+      );
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'note-sizes',
+        source: source,
+      );
+      final rows = await db.query(
+        'library_document_blocks',
+        where: 'library_item_id=?',
+        whereArgs: ['note-sizes'],
+        orderBy: 'display_order',
+      );
+      final scales = rows
+          .map(
+            (row) => LibraryFormattedContent.fromJson(
+              row['formatted_content'] as String,
+            ).metadata['relative_font_scale'],
+          )
+          .toList();
+      expect(scales, [0.8, 0.85, null, 0.7]);
+    },
+  );
+
+  test(
+    'marked inline citation preserves prose and gets a Bible popup target',
+    () async {
+      await source.writeAsString(
+        '<p>Before <span class="cis-inline-bible"> (John 3:16)<span id="note1"></span></span> after.</p>',
+      );
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'citation-book',
+        source: source,
+      );
+      final rows = await db.query(
+        'library_document_blocks',
+        where: 'library_item_id=?',
+        whereArgs: ['citation-book'],
+      );
+      final content = LibraryFormattedContent.fromJson(
+        rows.single['formatted_content'] as String,
+      );
+      expect(rows.single['plain_text'], 'Before (John 3:16) after.');
+      final citation = content.nodes.firstWhere(
+        (n) => n['text'].toString().contains('John 3:16'),
+      );
+      expect(
+        Uri.decodeComponent(citation['link'] as String),
+        'studybible-citation:(John 3:16)',
+      );
+    },
+  );
+
+  test(
+    'tables preserve cell text, merged headings, emphasis and anchors',
+    () async {
+      await source.writeAsString(
+        '<h1>Chapter</h1><table id="comparison">'
+        '<tr><th>Type</th><th>Antitype</th></tr>'
+        '<tr><td colspan="2">One shared heading</td></tr>'
+        '<tr><td id="cell-a"><p>First <em>cell</em></p><p>Second line</p></td>'
+        '<td>Matching cell</td></tr></table><p>After table.</p>',
+      );
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'table-book',
+        source: source,
+      );
+      final rows = await db.query(
+        'library_document_blocks',
+        where: 'library_item_id=?',
+        whereArgs: ['table-book'],
+        orderBy: 'display_order',
+      );
+      expect(rows.length, 3);
+      final table = LibraryFormattedContent.fromJson(
+        rows[1]['formatted_content'] as String,
+      );
+      final cells = table.metadata['table_rows'] as List;
+      expect(cells.length, 3);
+      expect(cells[1][0]['colspan'], 2);
+      expect(cells[2][0]['text'], 'First cell\nSecond line');
+      expect(rows[1]['plain_text'], contains('Matching cell'));
+      expect(table.metadata['source_anchor_aliases'], contains('cell-a'));
+      expect(
+        (cells[2][0]['nodes'] as List).any(
+          (n) => n['text'] == 'cell' && (n['marks'] as List).contains('italic'),
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'explicit unpaginated gap stops inherited source pages until a new marker',
+    () async {
+      await source.writeAsString(
+        '''<p><span epub:type="pagebreak" title="6"></span>End of Preface.</p>
+      <h1 data-source-page-reset="true">Contents</h1>
+      <p data-refcode="DAR 7.4">Original outline.</p>
+      <p>Unpaginated continuation.</p>
+      <p><span epub:type="pagebreak" title="18"></span>Introduction.</p>
+      <p>Continues on the known page.</p>''',
+      );
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'page-gap',
+        source: source,
+      );
+      final rows = await db.query(
+        'library_document_blocks',
+        where: 'library_item_id=?',
+        whereArgs: ['page-gap'],
+        orderBy: 'display_order',
+      );
+      Map metadata(int i) =>
+          (jsonDecode(rows[i]['formatted_content'] as String)
+                  as Map)['metadata']
+              as Map;
+      expect(rows.length, 6);
+      expect(metadata(0)['source_page_end'], 6);
+      for (final i in [1, 2, 3]) {
+        expect(metadata(i).containsKey('source_page_start'), false);
+        expect(metadata(i).containsKey('source_page_end'), false);
+      }
+      expect(rows[2]['source_refcode'], 'DAR 7.4');
+      expect(metadata(4)['source_page_start'], 18);
+      expect(metadata(5)['source_page_start'], 18);
+    },
+  );
 
   test('schema is additive and retains legacy tables', () async {
     final names = (await db.rawQuery(
@@ -79,7 +303,11 @@ void main() {
       );
       final rows = await db.query(
         'library_document_blocks',
-        columns: const <String>['plain_text', 'source_refcode'],
+        columns: const <String>[
+          'plain_text',
+          'source_refcode',
+          'reference_origin',
+        ],
         where: 'library_item_id = ? AND block_type = ?',
         whereArgs: <Object?>['AA', LibraryDocumentBlockType.paragraph.name],
         orderBy: 'display_order',
@@ -89,6 +317,121 @@ void main() {
       expect(rows[1]['source_refcode'], 'AA 9.1');
       expect(rows[2]['source_refcode'], 'AA 9.2');
       expect(rows[3]['source_refcode'], 'AA 10.1');
+      expect(rows[3]['reference_origin'], 'synthetic_epub_pagebreak');
+    },
+  );
+
+  test(
+    'approved Pioneer page markers synthesize stable per-page citations',
+    () async {
+      const itemId = 'cor-synthetic';
+      final now = DateTime.now().toUtc().toIso8601String();
+      await db.insert('library_items', <String, Object?>{
+        'id': itemId,
+        'title': 'Christ Our Righteousness',
+        'file_name': 'christ_our_righteousness.epub',
+        'relative_path': 'ImportedPioneerEpubs/christ_our_righteousness.epub',
+        'source_type': 'pioneer_epub_import',
+        'created_at': now,
+        'updated_at': now,
+        'device_id': 'test',
+      });
+      await source.writeAsString('''
+        <p>Unnumbered front matter.</p>
+        <p>57</p>
+        <p>First paragraph beginning on page 57.</p>
+        <h2>A heading on page 57</h2>
+        <img alt="A non-body image" />
+        <p>Second paragraph which began on page 57.</p>
+        <p>58</p>
+        <p>First paragraph beginning on page 58.</p>
+      ''');
+
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: itemId,
+        source: source,
+      );
+      final rows = await db.query(
+        'library_document_blocks',
+        columns: const <String>[
+          'block_type',
+          'plain_text',
+          'source_refcode',
+          'formatted_content',
+        ],
+        where: 'library_item_id = ?',
+        whereArgs: const <Object?>[itemId],
+        orderBy: 'display_order',
+      );
+      final byText = <String, Map<String, Object?>>{
+        for (final row in rows) row['plain_text']!.toString(): row,
+      };
+
+      expect(byText['Unnumbered front matter.']!['source_refcode'], isNull);
+      expect(
+        byText['First paragraph beginning on page 57.']!['source_refcode'],
+        'COR 57.1',
+      );
+      expect(
+        byText['Second paragraph which began on page 57.']!['source_refcode'],
+        'COR 57.2',
+      );
+      expect(
+        byText['First paragraph beginning on page 58.']!['source_refcode'],
+        'COR 58.1',
+      );
+      expect(byText['A heading on page 57']!['source_refcode'], isNull);
+      expect(byText['A non-body image']!['source_refcode'], isNull);
+      final firstMetadata =
+          jsonDecode(
+                byText['First paragraph beginning on page 57.']!['formatted_content']!
+                    .toString(),
+              )
+              as Map<String, dynamic>;
+      expect(
+        firstMetadata['metadata']['reference_origin'],
+        'synthetic_source_page_marker',
+      );
+    },
+  );
+
+  test(
+    'native Acts refcodes are never replaced by Pioneer synthesis',
+    () async {
+      const itemId = 'acts-native';
+      final now = DateTime.now().toUtc().toIso8601String();
+      await db.insert('library_items', <String, Object?>{
+        'id': itemId,
+        'title': 'The Acts of the Apostles',
+        'file_name': 'AA.epub',
+        'relative_path': 'ePubs/EGW/EGW_Books/en_AA.epub',
+        'source_type': 'official_download',
+        'created_at': now,
+        'updated_at': now,
+        'device_id': 'test',
+      });
+      await source.writeAsString('''
+      <h2>Chapter 1</h2>
+      <p data-refcode="AA 10.1">Native citation remains authoritative.</p>
+    ''');
+
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: itemId,
+        source: source,
+      );
+      final row = (await db.query(
+        'library_document_blocks',
+        columns: const <String>['source_refcode', 'formatted_content'],
+        where: 'library_item_id = ? AND block_type = ?',
+        whereArgs: const <Object?>[itemId, 'paragraph'],
+      )).single;
+      expect(row['source_refcode'], 'AA 10.1');
+      expect(
+        row['formatted_content'].toString(),
+        isNot(contains('synthetic_source_page_marker')),
+      );
     },
   );
 
@@ -124,6 +467,99 @@ void main() {
       isNot(contains('iii.1')),
     );
   });
+
+  test(
+    'inline styled spans preserve the Christ Our Righteousness word boundaries',
+    () async {
+      await source.writeAsString('''
+      <p><span class="c7">&quot;By </span><span class="c8"><i>faith</i></span><span class="c7"> he [the sinner, who has so grievously wronged and offended God] can ...</span></p>
+    ''');
+
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'COR-INLINE',
+        source: source,
+      );
+      final row = (await db.query(
+        'library_document_blocks',
+        columns: const <String>['plain_text', 'formatted_content'],
+        where: 'library_item_id = ?',
+        whereArgs: const <Object?>['COR-INLINE'],
+      )).single;
+      final nodes =
+          (jsonDecode(row['formatted_content']!.toString())
+                  as Map<String, dynamic>)['nodes']
+              as List<dynamic>;
+
+      expect(
+        row['plain_text'],
+        '"By faith he [the sinner, who has so grievously wronged and offended God] can ...',
+      );
+      expect(nodes.map((node) => node['text']).join(), row['plain_text']);
+      expect(nodes[1]['marks'], contains('italic'));
+    },
+  );
+
+  test(
+    'inline bold and italic spans retain one ordinary word-boundary space',
+    () async {
+      await source.writeAsString(
+        '<p>Normal <b>bold</b> and <i>italic</i> prose.</p>',
+      );
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'INLINE-MARKS',
+        source: source,
+      );
+      final row = (await db.query(
+        'library_document_blocks',
+        columns: const <String>['plain_text', 'formatted_content'],
+        where: 'library_item_id = ?',
+        whereArgs: const <Object?>['INLINE-MARKS'],
+      )).single;
+      final nodes =
+          (jsonDecode(row['formatted_content']!.toString())
+                  as Map<String, dynamic>)['nodes']
+              as List<dynamic>;
+
+      expect(row['plain_text'], 'Normal bold and italic prose.');
+      expect(
+        nodes.map((node) => node['text']).join(),
+        'Normal bold and italic prose.',
+      );
+      expect(nodes[1]['marks'], contains('bold'));
+      expect(nodes[3]['marks'], contains('italic'));
+    },
+  );
+
+  test(
+    'inline whitespace has no true-edge padding or punctuation gap',
+    () async {
+      await source.writeAsString(
+        '<p>  <b>Hello </b><i>,</i><span> world! </span>  </p>',
+      );
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'INLINE-PUNCTUATION',
+        source: source,
+      );
+      final row = (await db.query(
+        'library_document_blocks',
+        columns: const <String>['plain_text', 'formatted_content'],
+        where: 'library_item_id = ?',
+        whereArgs: const <Object?>['INLINE-PUNCTUATION'],
+      )).single;
+      final nodes =
+          (jsonDecode(row['formatted_content']!.toString())
+                  as Map<String, dynamic>)['nodes']
+              as List<dynamic>;
+
+      // The plain-text path intentionally remains source-faithful; only
+      // formatted inline rendering removes the meaningless punctuation gap.
+      expect(row['plain_text'], 'Hello , world!');
+      expect(nodes.map((node) => node['text']).join(), 'Hello, world!');
+    },
+  );
 
   test(
     'canonicalization preserves source heading text without corrections',
@@ -227,8 +663,15 @@ void main() {
   });
 
   test(
-    'text correction changes content hash but keeps locator-based IDs',
+    'text correction changes content hash but keeps source-anchored IDs',
     () async {
+      // A source anchor establishes paragraph identity across a text edit;
+      // a bare ordinal alone cannot distinguish a correction from replacement.
+      final anchored = String.fromCharCodes(fixtureBytes).replaceFirst(
+        '<p>The first paragraph',
+        '<p id="paragraph-one">The first paragraph',
+      );
+      await source.writeAsString(anchored, flush: true);
       const canonicalizer = LibraryDocumentCanonicalizer();
       await canonicalizer.canonicalize(
         db: db,
@@ -239,9 +682,10 @@ void main() {
         'library_document_blocks',
         orderBy: 'display_order',
       );
-      final corrected = String.fromCharCodes(
-        fixtureBytes,
-      ).replaceFirst('first paragraph', 'corrected paragraph');
+      final corrected = anchored.replaceFirst(
+        'first paragraph',
+        'corrected paragraph',
+      );
       await source.writeAsString(corrected, flush: true);
       await canonicalizer.canonicalize(
         db: db,
@@ -328,11 +772,79 @@ void main() {
       paragraphOnSection: (sourceMap.single['legacy_paragraph_index'] as num)
           .toInt(),
     );
-    final targetOrder = await repository.displayOrderForSearchTarget(target);
+    // This fixture has multiple non-heading blocks sharing one legacy
+    // paragraph locator. Refuse to guess; exact canonical identity still works.
+    expect(await repository.displayOrderForSearchTarget(target), isNull);
+    final exactTarget = LibrarySearchNavigationTarget(
+      libraryItemId: target.libraryItemId,
+      textBlockId: target.textBlockId,
+      href: target.href,
+      paragraphIndex: target.paragraphIndex,
+      canonicalBlockId: sourceMap.single['block_id']!.toString(),
+    );
+    final targetOrder = await repository.displayOrderForSearchTarget(
+      exactTarget,
+    );
     expect(targetOrder, isNotNull);
     expect(controller.blockAt(targetOrder!), isNull);
     await controller.ensureWindow(targetOrder);
     expect(controller.blockAt(targetOrder), isNotNull);
+  });
+
+  test('explicit target prefers the linked paragraph over an adjacent heading '
+      'sharing its legacy paragraph index', () async {
+    await const LibraryDocumentCanonicalizer().canonicalize(
+      db: db,
+      libraryItemId: 'SSP',
+      source: source,
+    );
+    final repository = LibraryDocumentRepository(db);
+    final paragraph = (await db.query(
+      'library_document_blocks',
+      where: 'library_item_id = ? AND block_type = ?',
+      whereArgs: <Object?>['SSP', LibraryDocumentBlockType.paragraph.name],
+      orderBy: 'display_order',
+      limit: 1,
+    )).single;
+    final sourceMap = (await db.query(
+      'library_block_source_map',
+      where: 'library_item_id = ? AND block_id = ?',
+      whereArgs: <Object?>['SSP', paragraph['id']],
+      limit: 1,
+    )).single;
+    await db.insert('library_document_blocks', <String, Object?>{
+      'id': 'adjacent-heading',
+      'library_item_id': 'SSP',
+      'section_id': paragraph['section_id'],
+      'display_order': 99,
+      'block_type': LibraryDocumentBlockType.heading.name,
+      'plain_text': 'Adjacent heading',
+      'formatted_content': LibraryFormattedContent.plain(
+        'Adjacent heading',
+      ).toJson(),
+      'source_href': paragraph['source_href'],
+      'content_hash': 'adjacent-heading-hash',
+    });
+    await db.insert('library_block_source_map', <String, Object?>{
+      'library_item_id': 'SSP',
+      'block_id': 'adjacent-heading',
+      'source_href': sourceMap['source_href'],
+      'legacy_paragraph_index': sourceMap['legacy_paragraph_index'],
+    });
+
+    final target = LibrarySearchNavigationTarget(
+      libraryItemId: 'SSP',
+      textBlockId: 42,
+      href: sourceMap['source_href']!.toString(),
+      paragraphIndex: (sourceMap['legacy_paragraph_index'] as num).toInt(),
+      paragraphOnSection: (sourceMap['legacy_paragraph_index'] as num).toInt(),
+      stableSourceReference: paragraph['plain_text']!.toString(),
+    );
+
+    expect(
+      await repository.displayOrderForSearchTarget(target),
+      paragraph['display_order'],
+    );
   });
 
   test(
@@ -380,6 +892,42 @@ void main() {
     },
   );
 
+  test(
+    'reader session cache never collapses measured rows behind viewport',
+    () async {
+      final html = StringBuffer('<html><body><h1>Chapter 1</h1>');
+      for (var index = 0; index < 180; index++) {
+        html.write('<p>Variable-height readable paragraph $index.</p>');
+      }
+      html.write('</body></html>');
+      await source.writeAsString(html.toString(), flush: true);
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'stable-reader',
+        source: source,
+      );
+      final controller = LibraryDocumentController(
+        libraryItemId: 'stable-reader',
+        repository: LibraryDocumentRepository(db),
+        windowRadius: 12,
+        preserveLoadedGeometry: true,
+      );
+
+      await controller.initialize(centerOrder: 12);
+      final firstMeasuredId = controller.blockAt(1)!.id;
+      await controller.ensureWindow(90);
+
+      expect(
+        controller.blockAt(1)?.id,
+        firstMeasuredId,
+        reason:
+            'an already measured row must not become a zero-height placeholder',
+      );
+      expect(controller.blockAt(90), isNotNull);
+      controller.dispose();
+    },
+  );
+
   test('canonical ordinary opening skips front matter for Chapter 1', () async {
     await source.writeAsString('''
       <html><body>
@@ -402,6 +950,36 @@ void main() {
     );
     expect(location!.block.plainText, 'Chapter I — The Beginning');
   });
+
+  test(
+    'explicit Chapter 1 wins over an earlier inferred poem chapter',
+    () async {
+      await source.writeAsString('''
+        <html><body>
+          <h2 class="chapterhead">The Cross of Christ</h2>
+          <p class="center">Poem line before the first numbered chapter.</p>
+          <h1>Chapter 1 - Light in the Darkness</h1>
+          <p>The first chapter body.</p>
+        </body></html>
+      ''');
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'poem-before-chapter-one',
+        source: source,
+      );
+
+      final repository = LibraryDocumentRepository(db);
+      final order = await repository.openingDisplayOrder(
+        'poem-before-chapter-one',
+      );
+      expect(order, isNotNull);
+      final location = await repository.resolveLocation(
+        'poem-before-chapter-one',
+        order!,
+      );
+      expect(location!.block.plainText, 'Chapter 1 - Light in the Darkness');
+    },
+  );
 
   test('canonical opening uses first structural chapter when it has no '
       'chapter number', () async {
@@ -502,7 +1080,9 @@ void main() {
       );
       expect(blocks.where((row) => row['plain_text'] == '71'), isEmpty);
       expect(blocks.where((row) => row['plain_text'] == '1'), isEmpty);
-      expect(blocks.where((row) => row['plain_text'] == '2'), isEmpty);
+      // A lone list item is reader content, not evidence of a print-layout
+      // page marker.
+      expect(blocks.where((row) => row['plain_text'] == '2'), hasLength(1));
       expect(
         blocks.where(
           (row) => row['plain_text'] == 'A legitimate descriptive list item',
@@ -511,6 +1091,57 @@ void main() {
       );
       final punctuated = blocks.firstWhere((row) => row['plain_text'] == '71.');
       expect(punctuated['block_type'], 'heading');
+    },
+  );
+
+  test(
+    'extracts sandwiched paragraph page markers while retaining real numbered content',
+    () async {
+      await source.writeAsString('''
+<p>The preceding paragraph continues the reader's flow.</p>
+<p>57</p>
+<p>The following paragraph starts on the printed page.</p>
+<h2>Genesis 1</h2>
+<p class="verse">1</p>
+<p>In the beginning God created the heaven and the earth.</p>
+<ol><li>1</li><li>A real numbered-list entry.</li></ol>
+''', flush: true);
+
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'PAGE-MARKERS',
+        source: source,
+      );
+      final blocks = await db.query(
+        'library_document_blocks',
+        columns: const <String>[
+          'plain_text',
+          'block_type',
+          'formatted_content',
+        ],
+        where: 'library_item_id = ?',
+        whereArgs: const <Object?>['PAGE-MARKERS'],
+        orderBy: 'display_order ASC',
+      );
+
+      expect(blocks.where((row) => row['plain_text'] == '57'), isEmpty);
+      final following = blocks.firstWhere(
+        (row) =>
+            row['plain_text'] ==
+            'The following paragraph starts on the printed page.',
+      );
+      expect(
+        following['formatted_content'],
+        contains('"source_page_marker":"57"'),
+      );
+
+      // A Bible verse and an ordered-list numeral are real content, even
+      // though both are short numeric blocks.
+      expect(blocks.where((row) => row['plain_text'] == '1'), hasLength(2));
+      expect(
+        blocks.where((row) => row['block_type'] == 'listItem'),
+        hasLength(2),
+      );
     },
   );
 

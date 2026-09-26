@@ -8,6 +8,8 @@ import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 import '../../../core/audio/narration_diagnostics.dart';
 import '../../../core/audio/speech_engine.dart';
 import '../../../core/audio/synthesis_governor.dart';
+import '../../../core/audio/synthesis_health.dart';
+import '../../../core/audio/synthesis_job_probe.dart';
 
 /// A single native engine owned by a background isolate. The reader stays
 /// responsive while the next verse is synthesized.
@@ -23,6 +25,8 @@ class KokoroSpeechWorker implements SpeechEngine {
     this._governor,
     this._requestTimeout,
     this._log,
+    this._probe,
+    this._onJob,
   );
 
   final SendPort _port;
@@ -30,6 +34,8 @@ class KokoroSpeechWorker implements SpeechEngine {
   final SynthesisGovernor _governor;
   final Duration Function(String text) _requestTimeout;
   final void Function(String message) _log;
+  final SynthesisJobProbe _probe;
+  final void Function(SynthesisJobStats job)? _onJob;
   final Map<int, Completer<sherpa.GeneratedAudio>> _pending = {};
   final Map<int, Completer<void>> _pings = {};
   final Completer<void> _exited = Completer<void>();
@@ -43,12 +49,19 @@ class KokoroSpeechWorker implements SpeechEngine {
   static Duration defaultRequestTimeout(String text) =>
       Duration(seconds: 15, milliseconds: 120 * text.length);
 
+  /// Numbers engines from 1 since the app started, so the log can say which
+  /// one ran a job and how old it was.
+  static int _engines = 0;
+
   static Future<KokoroSpeechWorker> start(
     String root, {
     SynthesisGovernor? governor,
     Duration Function(String text) requestTimeout = defaultRequestTimeout,
     Duration startTimeout = const Duration(seconds: 90),
     void Function(String message) log = NarrationDiagnostics.log,
+    void Function(SynthesisJobStats job)? onJob,
+    String Function()? jobContext,
+    NarrationDeviceProbe? device,
     @visibleForTesting void Function(List<Object>) entry = _run,
   }) async {
     final messages = ReceivePort();
@@ -71,6 +84,13 @@ class KokoroSpeechWorker implements SpeechEngine {
           governor ?? SynthesisGovernor(isThrottled: () => false),
           requestTimeout,
           log,
+          SynthesisJobProbe(
+            engineId: ++_engines,
+            log: log,
+            device: device,
+            context: jobContext,
+          ),
+          onJob,
         );
         ready.complete(worker);
       } else if (response is List && response.first == 'initError') {
@@ -163,7 +183,21 @@ class KokoroSpeechWorker implements SpeechEngine {
   /// where a backgrounded app is paced (see [SynthesisGovernor]).
   @override
   Future<sherpa.GeneratedAudio> generate(String text, double speed) =>
-      _governor.run(() => _generate(text, speed));
+      _governor.run(() => _measured(text, speed));
+
+  /// One governed job, timed and logged; see [SynthesisJobProbe].
+  Future<sherpa.GeneratedAudio> _measured(String text, double speed) async {
+    final run = _probe.begin(chars: text.length);
+    try {
+      final audio = await _generate(text, speed);
+      final stats = run.finish(audio.samples.length / audio.sampleRate);
+      _onJob?.call(stats);
+      return audio;
+    } catch (_) {
+      run.abandon();
+      rethrow;
+    }
+  }
 
   Future<sherpa.GeneratedAudio> _generate(String text, double speed) {
     if (_closed) {

@@ -13,13 +13,8 @@ import 'package:studybible2/core/database/user_database.dart';
 import 'package:studybible2/features/library/data/library_catalog_service.dart';
 import 'package:studybible2/features/library/data/library_item_identity.dart';
 
-/// Covers the Pioneer identity-preservation half of the ID-migration repair:
-/// `LibraryCatalogService._repairManagedItemIds` (catalog hydration's
-/// path-based ID rewrite) must never touch a `pioneer_epub_import` row, even
-/// though its relative path lives under a folder that
-/// `isManagedEgwRelativePath` otherwise treats as rewritable. This is what
-/// stops the historical defect (419 Pioneer generations orphaned by
-/// hydration silently renaming visible IDs) from recurring.
+/// Existing works keep their identity during catalog reads, regardless of
+/// source type. Explicit managed refresh is tested separately below.
 Future<void> _installPathProviderMocks({
   required Directory supportDir,
   required Directory documentsDir,
@@ -139,6 +134,7 @@ void main() {
   Future<void> seedPioneerRow({
     required String id,
     required String relativePath,
+    String sourceType = 'pioneer_epub_import',
   }) async {
     final db = await ELibraryDatabase.instance.database;
     final now = DateTime.now().toUtc().toIso8601String();
@@ -151,7 +147,7 @@ void main() {
       'folder_type': 'pioneer_epub_import',
       'library_role': 'pioneer_epub_import',
       'collection_name': 'Pioneer Library',
-      'source_type': 'pioneer_epub_import',
+      'source_type': sourceType,
       'index_status': 'indexed',
       'is_missing': 0,
       'created_at': now,
@@ -188,6 +184,35 @@ void main() {
 
   Future<int> refresh() => LibraryCatalogService.instance
       .refreshManagedItemsFromDisk(rootPathOverride: libraryRootDir.path);
+
+  for (final sourceType in [
+    'user_epub',
+    'pioneer_epub_import',
+    'official_download',
+  ]) {
+    test(
+      'opening a $sourceType item preserves its registered identity',
+      () async {
+        final id = 'registered-$sourceType';
+        final relativePath = 'ImportedPioneerEpubs/$sourceType.epub';
+        _writeHealthyEpub(File(p.join(libraryRootDir.path, relativePath)));
+        await seedPioneerRow(
+          id: id,
+          relativePath: relativePath,
+          sourceType: sourceType,
+        );
+        final item = await LibraryCatalogService.instance.loadItemById(id);
+        expect(item?.id, id);
+        expect(await fetchItem(id), isNotNull);
+        expect(await conversionOwnedBy(id), isTrue);
+        final pathId = canonicalLibraryItemId(
+          folderType: 'pioneer_epub_import',
+          relativePath: relativePath,
+        );
+        expect(await fetchItem(pathId), isNull);
+      },
+    );
+  }
 
   // The four production legacy IDs the migration must preserve exactly,
   // paired with a plausible relative path for each.

@@ -75,6 +75,7 @@ class FakeRenderer implements TagClipRenderer {
 
 class FakePlayer implements TagClipPlayer {
   final StreamController<void> _completions = StreamController.broadcast();
+  final StreamController<Object> _failures = StreamController.broadcast();
   final List<String> played = [];
   final List<String> preloaded = [];
   String? current;
@@ -85,6 +86,9 @@ class FakePlayer implements TagClipPlayer {
 
   @override
   Stream<void> get completions => _completions.stream;
+
+  @override
+  Stream<Object> get failures => _failures.stream;
 
   /// Text of every clip started, in order.
   List<String> get playedTexts => [for (final p in played) textOf(p)];
@@ -121,10 +125,13 @@ class FakePlayer implements TagClipPlayer {
   Future<void> dispose() async {
     disposed = true;
     await _completions.close();
+    await _failures.close();
   }
 
   /// The clip that is playing ends by itself.
   void finishCurrent() => _completions.add(null);
+
+  void failCurrent(Object error) => _failures.add(error);
 }
 
 TagPlaybackItem fakeItem(

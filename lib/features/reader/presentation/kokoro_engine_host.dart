@@ -6,9 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../core/audio/narration_diagnostics.dart';
+import '../../../core/audio/narration_lead.dart';
 import '../../../core/audio/narration_media_session.dart';
 import '../../../core/audio/speech_engine.dart';
 import '../../../core/audio/synthesis_governor.dart';
+import '../../../core/audio/synthesis_health.dart';
 import 'kokoro_speech_worker.dart';
 
 typedef SpeechEngineStarter = Future<SpeechEngine> Function();
@@ -29,8 +31,12 @@ class KokoroEngineHost {
     this.idleRelease,
     this.pingTimeout = const Duration(seconds: 2),
     this.exitWait = const Duration(seconds: 10),
+    SynthesisHealthMonitor? health,
     void Function(String message)? log,
-  }) : _log = log ?? NarrationDiagnostics.log;
+  }) : _log = log ?? NarrationDiagnostics.log {
+    // A pathologically slow engine is replaced once; see the monitor.
+    health?.onRebuild = _replaceSlowEngine;
+  }
 
   @visibleForTesting
   factory KokoroEngineHost.forTesting({
@@ -38,16 +44,25 @@ class KokoroEngineHost {
     Duration? idleRelease,
     Duration pingTimeout = const Duration(milliseconds: 200),
     Duration exitWait = const Duration(milliseconds: 500),
+    SynthesisHealthMonitor? health,
     void Function(String message)? log,
   }) => KokoroEngineHost._(
     starter,
     idleRelease: idleRelease,
     pingTimeout: pingTimeout,
     exitWait: exitWait,
+    health: health,
     log: log ?? (_) {},
   );
 
-  static final KokoroEngineHost instance = KokoroEngineHost._(_startKokoro);
+  static final SynthesisHealthMonitor _health = SynthesisHealthMonitor(
+    log: NarrationDiagnostics.log,
+  );
+
+  static final KokoroEngineHost instance = KokoroEngineHost._(
+    () => _startKokoro(_health),
+    health: _health,
+  );
 
   static const _assetPrefix =
       'assets/audio/kokoro/sherpa/kokoro-multi-lang-v1_0/';
@@ -136,6 +151,25 @@ class KokoroEngineHost {
     });
   }
 
+  /// The health monitor found synthesis pathologically slow. Frees the
+  /// engine and starts a fresh one right away, so the next clip does not wait
+  /// for the load and the monitor can judge the fresh engine at once. Pending
+  /// jobs retry on the new engine (see the narrator's `_synthesize`).
+  void _replaceSlowEngine(String reason) {
+    final current = _worker;
+    if (current == null) return;
+    _log('engine replacing after slow synthesis: $reason');
+    _discard(current);
+    if (_leases > 0) {
+      unawaited(
+        _startShared().then<void>(
+          (_) {},
+          onError: (Object error) => _log('engine replacement FAILED: $error'),
+        ),
+      );
+    }
+  }
+
   void _discardCurrent() {
     final worker = _worker;
     if (worker != null) _discard(worker);
@@ -181,6 +215,13 @@ class KokoroEngineHost {
     }
   }
 
+  static String _leadNote() {
+    final lead = NarrationLeadRegistry.instance.lead();
+    return lead == null
+        ? 'lead=none'
+        : 'lead=${(lead.inMilliseconds / 1000).toStringAsFixed(1)}s';
+  }
+
   static int _rssMb() {
     try {
       return ProcessInfo.currentRss ~/ (1024 * 1024);
@@ -189,7 +230,9 @@ class KokoroEngineHost {
     }
   }
 
-  static Future<SpeechEngine> _startKokoro() async {
+  static Future<SpeechEngine> _startKokoro(
+    SynthesisHealthMonitor health,
+  ) async {
     final root = await _stage('stage-assets', _stageAssets);
     await _stage('write-lexicon', () async {
       final contextLexicon = File('${root.path}/context-lexicon-v1.txt');
@@ -208,10 +251,15 @@ class KokoroEngineHost {
         // A locked iPhone is killed above ~80% CPU, and synthesis runs two
         // threads flat out. Pace it while backgrounded; clips rendered ahead
         // in the foreground cover the difference.
+        // Pacing gives way when the listener's lead runs low; see the
+        // governor.
         governor: SynthesisGovernor(
           isThrottled: () => NarrationMediaSession.instance.backgrounded.value,
+          lead: NarrationLeadRegistry.instance.lead,
           log: NarrationDiagnostics.log,
         ),
+        onJob: health.record,
+        jobContext: _leadNote,
       ),
     );
   }

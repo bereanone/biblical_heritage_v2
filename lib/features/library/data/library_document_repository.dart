@@ -1,8 +1,44 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:path/path.dart' as p;
 
 import 'library_document_models.dart';
 import 'library_search_navigation_target.dart';
 import 'library_section_heuristics.dart';
+
+/// Resolve an EPUB-relative link inside the archive, never a URL or disk path.
+/// Fragment names are case-sensitive; stored source file paths are normalized.
+({String path, String fragment})? resolveLibrarySourceLinkPath(
+  String fromHref,
+  String href,
+) {
+  try {
+    final link = Uri.parse(href.trim());
+    if (href.trim().isEmpty || link.hasScheme || link.hasAuthority) return null;
+    final base = Uri.decodeComponent(
+      Uri.parse(fromHref).path,
+    ).replaceAll('\\', '/');
+    final relative = Uri.decodeComponent(link.path).replaceAll('\\', '/');
+    final path = p.posix.normalize(
+      relative.isEmpty
+          ? base
+          : relative.startsWith('/')
+          ? relative.substring(1)
+          : p.posix.join(p.posix.dirname(base), relative),
+    );
+    if (path == '.' ||
+        path == '..' ||
+        path.startsWith('../') ||
+        path.startsWith('/')) {
+      return null;
+    }
+    return (
+      path: path.toLowerCase(),
+      fragment: Uri.decodeComponent(link.fragment),
+    );
+  } on FormatException {
+    return null;
+  }
+}
 
 /// A Contents node whose target has been resolved directly to one canonical
 /// heading block.  Unlike the legacy EPUB navigation rows, this object cannot
@@ -26,6 +62,33 @@ class LibraryCanonicalNavigationDestination {
 class LibraryDocumentRepository {
   const LibraryDocumentRepository(this.db);
   final Database db;
+
+  /// Select by explicit work and source location, never a title or ref prefix.
+  /// Duplicate anchors are ambiguous and must not silently choose a paragraph.
+  Future<LibraryDocumentBlock?> resolveSourceLink(
+    String libraryItemId, {
+    required String fromHref,
+    required String href,
+  }) async {
+    final link = resolveLibrarySourceLinkPath(fromHref, href);
+    if (link == null) return null;
+    final rows = await db.query(
+      'library_document_blocks',
+      where: "library_item_id = ? AND LOWER(COALESCE(source_href, '')) = ?",
+      whereArgs: [libraryItemId, link.path],
+      orderBy: 'display_order',
+    );
+    final blocks = rows.map(LibraryDocumentBlock.fromRow).toList();
+    if (link.fragment.isEmpty) return blocks.firstOrNull;
+    final matches = blocks.where((block) {
+      if (block.sourceAnchor == link.fragment) return true;
+      final aliases = LibraryFormattedContent.fromJson(
+        block.formattedContent,
+      ).metadata['source_anchor_aliases'];
+      return aliases is List && aliases.contains(link.fragment);
+    }).toList();
+    return matches.length == 1 ? matches.single : null;
+  }
 
   Future<bool> isComplete(String libraryItemId) async {
     final rows = await db.query(
@@ -149,6 +212,42 @@ class LibraryDocumentRepository {
   /// is omitted rather than navigating the reader to the wrong content.
   Future<List<LibraryCanonicalNavigationDestination>>
   loadCanonicalNavigationDestinations(String libraryItemId) async {
+    final authoredTable = await db.rawQuery(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'library_document_navigation'",
+    );
+    if (authoredTable.isNotEmpty) {
+      final authored = await db.rawQuery(
+        '''
+        SELECT b.*, n.id AS nav_id, n.parent_id AS nav_parent_id,
+               n.label AS nav_label, n.depth AS nav_depth, n.source_anchor AS nav_anchor
+        FROM library_document_navigation n
+        JOIN library_document_blocks b ON b.id = n.target_block_id
+          AND b.library_item_id = n.library_item_id
+        WHERE n.library_item_id = ?
+        ORDER BY n.display_order
+      ''',
+        [libraryItemId],
+      );
+      if (authored.isNotEmpty &&
+          (authored.length > 1 ||
+              (authored.single['nav_anchor']?.toString() ?? '').isNotEmpty)) {
+        final ids = authored.map((row) => row['nav_id'].toString()).toSet();
+        return authored
+            .map((row) {
+              final parent = row['nav_parent_id']?.toString();
+              return LibraryCanonicalNavigationDestination(
+                id: row['nav_id'].toString(),
+                parentId: ids.contains(parent) ? parent : null,
+                label: row['nav_label'].toString(),
+                depth: parent != null && !ids.contains(parent)
+                    ? 0
+                    : (row['nav_depth'] as num).toInt(),
+                block: LibraryDocumentBlock.fromRow(row),
+              );
+            })
+            .toList(growable: false);
+      }
+    }
     final rows = await db.query(
       'library_navigation_items',
       columns: const <String>[
@@ -278,6 +377,9 @@ class LibraryDocumentRepository {
       ],
       orderBy: 'display_order ASC',
     );
+    // First inspect the complete heading sequence for an authored body start.
+    // Do not let an earlier poem/subtitle whose CSS happened to infer a
+    // chapter role hide a later explicit "Chapter 1" heading.
     for (final heading in headingRows) {
       final label = heading['plain_text']?.toString() ?? '';
       final href = heading['source_href']?.toString() ?? '';
@@ -287,6 +389,17 @@ class LibraryDocumentRepository {
       }
       if (_isFirstCanonicalBodyLabel(label)) {
         return (heading['display_order'] as num?)?.toInt();
+      }
+    }
+    // Only after every explicit body-start heading has been considered may
+    // an inferred chapter role act as the fallback for books without a
+    // conventional Chapter 1 label.
+    for (final heading in headingRows) {
+      final label = heading['plain_text']?.toString() ?? '';
+      final href = heading['source_href']?.toString() ?? '';
+      if (libraryIsFrontMatterOpeningLabel(label) ||
+          libraryIsFrontMatterOpeningLabel(href)) {
+        continue;
       }
       final formatted = LibraryFormattedContent.fromJson(
         heading['formatted_content']?.toString(),
@@ -383,12 +496,39 @@ class LibraryDocumentRepository {
     return rows.isNotEmpty;
   }
 
+  Future<int?> displayOrderForBlockId(String itemId, String blockId) async {
+    final rows = await db.query(
+      'library_document_blocks',
+      columns: const ['display_order'],
+      where: 'library_item_id = ? AND id = ?',
+      whereArgs: [itemId, blockId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : (rows.single['display_order'] as num).toInt();
+  }
+
   Future<int?> displayOrderForSearchTarget(
     LibrarySearchNavigationTarget target,
   ) async {
+    final canonicalId = target.canonicalBlockId;
+    if (canonicalId != null) {
+      final rows = await db.query(
+        'library_document_blocks',
+        columns: const ['display_order', 'content_hash'],
+        where: 'library_item_id = ? AND id = ?',
+        whereArgs: [target.libraryItemId, canonicalId],
+        limit: 1,
+      );
+      if (rows.isEmpty ||
+          (target.canonicalContentHash != null &&
+              rows.single['content_hash'] != target.canonicalContentHash)) {
+        return null;
+      }
+      return (rows.single['display_order'] as num).toInt();
+    }
     final rows = await db.rawQuery(
       '''
-      SELECT b.display_order
+      SELECT b.display_order, b.block_type, b.plain_text
       FROM library_block_source_map sm
       INNER JOIN library_document_blocks b
         ON b.library_item_id = sm.library_item_id
@@ -396,7 +536,6 @@ class LibraryDocumentRepository {
       WHERE sm.library_item_id = ?
         AND LOWER(COALESCE(sm.source_href, '')) = LOWER(?)
         AND sm.legacy_paragraph_index = ?
-      LIMIT 1
       ''',
       <Object?>[
         target.libraryItemId,
@@ -404,8 +543,47 @@ class LibraryDocumentRepository {
         target.paragraphOnSection ?? target.paragraphIndex,
       ],
     );
-    return rows.isEmpty ? null : (rows.first['display_order'] as num?)?.toInt();
+    if (rows.isEmpty) return null;
+    if (rows.length == 1) {
+      return (rows.single['display_order'] as num?)?.toInt();
+    }
+
+    // Some generated source maps assign the same legacy paragraph index to
+    // the paragraph and to the heading immediately following it. A Bible
+    // commentary hit refers to the paragraph, never that adjacent heading.
+    // Prefer unique textual evidence first, then the unique non-heading row;
+    // remain unresolved rather than opening unrelated front matter.
+    final evidence = _normalizedSearchEvidence(
+      target.matchedText ?? target.stableSourceReference ?? '',
+    );
+    if (evidence.length >= 24) {
+      final textMatches = rows.where((row) {
+        final text = _normalizedSearchEvidence(
+          row['plain_text']?.toString() ?? '',
+        );
+        return text == evidence ||
+            text.contains(evidence) ||
+            evidence.contains(text);
+      }).toList();
+      if (textMatches.length == 1) {
+        return (textMatches.single['display_order'] as num?)?.toInt();
+      }
+    }
+    final paragraphs = rows
+        .where(
+          (row) => row['block_type'] != LibraryDocumentBlockType.heading.name,
+        )
+        .toList();
+    return paragraphs.length == 1
+        ? (paragraphs.single['display_order'] as num?)?.toInt()
+        : null;
   }
+
+  static String _normalizedSearchEvidence(String value) => value
+      .toLowerCase()
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .replaceAll(RegExp(r'[^a-z0-9 ]+'), '')
+      .trim();
 
   Future<LibraryDocumentLocation?> resolveLocation(
     String libraryItemId,

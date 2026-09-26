@@ -10,6 +10,7 @@ import '../../../core/navigation/app_route_observer.dart';
 import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/app_theme_mode.dart';
 import '../data/library_catalog_service.dart';
+import '../data/pioneer_cover_generator_service.dart';
 import '../data/library_book_display_title.dart';
 import '../data/library_item_availability.dart';
 import '../data/library_item_retry_download_service.dart';

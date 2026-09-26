@@ -1,17 +1,21 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:studybible2/core/database/elibrary_database.dart';
 import 'package:studybible2/core/database/elibrary_schema.dart';
+import 'package:studybible2/core/database/user_database.dart';
 import 'package:studybible2/core/theme/app_theme.dart';
 import 'package:studybible2/core/theme/app_theme_mode.dart';
 import 'package:studybible2/features/library/data/library_document_canonicalizer.dart';
 import 'package:studybible2/features/library/data/library_document_models.dart';
 import 'package:studybible2/features/library/data/library_document_repository.dart';
 import 'package:studybible2/features/library/data/library_catalog_service.dart';
+import 'package:studybible2/features/library/data/library_search_navigation_target.dart';
 import 'package:studybible2/features/library/presentation/canonical_library_reader.dart';
 import 'package:studybible2/features/library/presentation/library_book_reader_screen.dart';
 import 'package:studybible2/features/library/presentation/library_document_controller.dart';
@@ -21,10 +25,78 @@ import 'package:studybible2/features/library/presentation/mac_reader_autoscroll_
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  testWidgets(
+    'outline and body retain their real citation without an added label',
+    (tester) async {
+      final setup = await tester.runAsync(() async {
+        sqfliteFfiInit();
+        final dir = await Directory.systemTemp.createTemp('outline_reader_');
+        final db = await databaseFactoryFfi.openDatabase(
+          p.join(dir.path, 'library.db'),
+        );
+        await ELibrarySchema.ensure(db);
+        final source = File(p.join(dir.path, 'source.html'));
+        await source.writeAsString(
+          '<h2>Chapter 6</h2>'
+          '<p class="Chapter-summary" data-refcode="DAR 13.3" data-reference-context="contents">Symbols explained.</p>'
+          '<p data-refcode="DAR 402.1">And I saw the first seal.</p>',
+        );
+        await const LibraryDocumentCanonicalizer().canonicalize(
+          db: db,
+          libraryItemId: 'outline-book',
+          source: source,
+        );
+        final rows = await db.query(
+          'library_document_blocks',
+          orderBy: 'display_order',
+        );
+        expect(rows[1]['content_role'], 'chapter_outline');
+        expect(rows[1]['reference_context'], 'contents');
+        expect(rows[1]['reference_page'], 13);
+        expect(rows[2]['reference_page'], 402);
+        final controller = LibraryDocumentController(
+          libraryItemId: 'outline-book',
+          repository: LibraryDocumentRepository(db),
+        );
+        await controller.initialize();
+        return (db: db, dir: dir, controller: controller);
+      });
+      final target = CallbackReaderAutoScrollTarget();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CanonicalLibraryDocumentBody(
+              controller: setup!.controller,
+              autoScrollTarget: target,
+              onVisibleOrderChanged: (_) {},
+              textColor: Colors.black,
+              showRefCodes: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Chapter outline'), findsNothing);
+      expect(find.textContaining('From Contents'), findsNothing);
+      final paragraphs = tester
+          .widgetList<SelectableText>(find.byType(SelectableText))
+          .map((w) => w.textSpan?.toPlainText())
+          .toList();
+      expect(paragraphs, contains('Symbols explained. DAR 13.3'));
+      expect(paragraphs, contains('And I saw the first seal. DAR 402.1'));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(() async {
+        await setup.db.close();
+        await setup.dir.delete(recursive: true);
+      });
+    },
+  );
+
   LibraryDocumentBlock block({
     String text = 'Visible heading',
     String? sourceRefcode = 'SSP 1.2',
     LibraryDocumentBlockType blockType = LibraryDocumentBlockType.paragraph,
+    LibraryFormattedContent? formatted,
   }) => LibraryDocumentBlock(
     id: 'stable-block',
     libraryItemId: 'item',
@@ -32,7 +104,8 @@ void main() {
     displayOrder: 3,
     blockType: blockType,
     plainText: text,
-    formattedContent: LibraryFormattedContent.plain(text).toJson(),
+    formattedContent: (formatted ?? LibraryFormattedContent.plain(text))
+        .toJson(),
     sourceRefcode: sourceRefcode,
     sourceHref: 'capture.html',
     contentHash: 'hash',
@@ -203,6 +276,77 @@ void main() {
       );
 
       expect(plainText(spansFor(sourceBlock)), 'Body text. SSP 14.1');
+    });
+
+    test('restores exact COL 162.4 page and citation boundary spaces', () {
+      const text =
+          'The work of redemption involves consequences of which [163] '
+          'it is difficult for man to have any conception. “Eye hath not '
+          'seen, nor ear heard, neither have entered into the heart of man, '
+          'the things which God hath prepared for them that love Him.” '
+          '1 Corinthians 2:9.';
+      final sourceBlock = block(
+        text: text,
+        sourceRefcode: null,
+        formatted: const LibraryFormattedContent(
+          nodes: <Map<String, Object?>>[
+            <String, Object?>{
+              'type': 'text',
+              'text': 'The work of redemption involves consequences of which',
+            },
+            <String, Object?>{'type': 'text', 'text': '[163]'},
+            <String, Object?>{
+              'type': 'text',
+              'text':
+                  'it is difficult for man to have any conception. “Eye hath '
+                  'not seen, nor ear heard, neither have entered into the heart '
+                  'of man, the things which God hath prepared for them that '
+                  'love Him.”',
+            },
+            <String, Object?>{'type': 'text', 'text': '1 Corinthians 2:9'},
+            <String, Object?>{'type': 'text', 'text': '.'},
+          ],
+        ),
+      );
+
+      expect(plainText(spansFor(sourceBlock)), text);
+    });
+
+    test('does not invent a space at a source-confirmed emphasis split', () {
+      final sourceBlock = block(
+        text: 'unreasonable',
+        sourceRefcode: null,
+        formatted: const LibraryFormattedContent(
+          nodes: <Map<String, Object?>>[
+            <String, Object?>{'type': 'text', 'text': 'un'},
+            <String, Object?>{
+              'type': 'text',
+              'text': 'reasonable',
+              'marks': <String>['italic'],
+            },
+          ],
+        ),
+      );
+
+      expect(plainText(spansFor(sourceBlock)), 'unreasonable');
+    });
+
+    test('keeps the existing no-gap-before-punctuation normalization', () {
+      final sourceBlock = block(
+        text: 'Greek, τὰ ἅγια , the holy places',
+        sourceRefcode: null,
+        formatted: const LibraryFormattedContent(
+          nodes: <Map<String, Object?>>[
+            <String, Object?>{'type': 'text', 'text': 'Greek, τὰ ἅγια'},
+            <String, Object?>{'type': 'text', 'text': ', the holy places'},
+          ],
+        ),
+      );
+
+      expect(
+        plainText(spansFor(sourceBlock)),
+        'Greek, τὰ ἅγια, the holy places',
+      );
     });
 
     test('does not append codes to headings, images, or rules', () {
@@ -585,6 +729,310 @@ void main() {
     });
   });
 
+  testWidgets(
+    'async explicit target remounts at the requested paragraph instead of '
+    'saved cover front matter',
+    (tester) async {
+      final setup = await tester.runAsync(() async {
+        sqfliteFfiInit();
+        databaseFactory = databaseFactoryFfi;
+        final dir = await Directory.systemTemp.createTemp(
+          'canonical_async_explicit_target_',
+        );
+        final db = await openDatabase(p.join(dir.path, 'test.db'));
+        await ELibrarySchema.ensure(db);
+        final source = File(p.join(dir.path, 'book.html'));
+        final frontMatter = List<String>.generate(
+          130,
+          (index) => '<p>Front matter paragraph $index.</p>',
+        ).join();
+        await source.writeAsString(
+          '<img alt="Cover">$frontMatter<h1>Chapter 1</h1>'
+          '<p>The requested commentary paragraph is visibly mounted.</p>'
+          '<h1>Chapter 2</h1><p>Later paragraph.</p>',
+        );
+        await const LibraryDocumentCanonicalizer().canonicalize(
+          db: db,
+          libraryItemId: 'item',
+          source: source,
+        );
+        final targetRow = (await db.rawQuery(
+          '''
+          SELECT b.*, sm.source_href AS mapped_href,
+                 sm.legacy_paragraph_index
+          FROM library_document_blocks b
+          JOIN library_block_source_map sm
+            ON sm.library_item_id = b.library_item_id
+            AND sm.block_id = b.id
+          WHERE b.library_item_id = ? AND b.plain_text = ?
+          ''',
+          <Object?>[
+            'item',
+            'The requested commentary paragraph is visibly mounted.',
+          ],
+        )).single;
+        final cover = (await db.query(
+          'library_document_blocks',
+          where: 'library_item_id = ?',
+          whereArgs: const <Object?>['item'],
+          orderBy: 'display_order',
+          limit: 1,
+        )).single;
+        const pathProviderChannel = MethodChannel(
+          'plugins.flutter.io/path_provider',
+        );
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              pathProviderChannel,
+              (call) async => dir.path,
+            );
+        return (
+          db: db,
+          dir: dir,
+          target: LibrarySearchNavigationTarget(
+            libraryItemId: 'item',
+            textBlockId: 0,
+            href: targetRow['mapped_href']!.toString(),
+            paragraphIndex: (targetRow['legacy_paragraph_index'] as num)
+                .toInt(),
+            paragraphOnSection: (targetRow['legacy_paragraph_index'] as num)
+                .toInt(),
+            stableSourceReference: targetRow['plain_text']!.toString(),
+          ),
+          coverId: cover['id']!.toString(),
+        );
+      });
+      final completedSetup = setup!;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CanonicalLibraryReaderScreen(
+            item: _item(
+              fileFormat: 'html',
+              sourceType: 'egw_html_capture',
+              lastOpened: DateTime.utc(2026, 1, 1),
+              anchorId: 'canonical:${completedSetup.coverId}',
+              paragraphIndex: 0,
+              epubHref: 'book.html',
+            ),
+            repository: LibraryDocumentRepository(completedSetup.db),
+            searchTarget: completedSetup.target,
+          ),
+        ),
+      );
+      for (var i = 0; i < 40; i++) {
+        await tester.runAsync(() async => Future<void>.delayed(Duration.zero));
+        await tester.pump(const Duration(milliseconds: 100));
+        if (find
+            .text('The requested commentary paragraph is visibly mounted.')
+            .evaluate()
+            .isNotEmpty) {
+          break;
+        }
+      }
+
+      expect(
+        find.text('The requested commentary paragraph is visibly mounted.'),
+        findsOneWidget,
+      );
+      expect(find.text('Front matter paragraph 0.'), findsNothing);
+      final listState = tester.state(
+        find.byType(ScrollablePositionedList).first,
+      );
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(
+        identical(
+          listState,
+          tester.state(find.byType(ScrollablePositionedList).first),
+        ),
+        isTrue,
+        reason: 'the explicit target remount must happen once, not loop',
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(
+        () async => Future<void>.delayed(const Duration(milliseconds: 600)),
+      );
+      await tester.runAsync(() async {
+        await UserDatabase.instance.close();
+        await ELibraryDatabase.instance.close();
+        await completedSetup.db.close();
+        await completedSetup.dir.delete(recursive: true);
+      });
+    },
+  );
+
+  testWidgets(
+    'first-time book open lands at the Chapter 1 heading, not partway '
+    'through its body',
+    (tester) async {
+      final setup = await tester.runAsync(() async {
+        sqfliteFfiInit();
+        databaseFactory = databaseFactoryFfi;
+        final dir = await Directory.systemTemp.createTemp(
+          'canonical_first_open_landing_',
+        );
+        final db = await openDatabase(p.join(dir.path, 'test.db'));
+        await ELibrarySchema.ensure(db);
+        final source = File(p.join(dir.path, 'book.html'));
+        // More front matter than the controller's default window radius (50)
+        // so the loaded window around the Chapter 1 heading leaves a run of
+        // unmeasured placeholder blocks between it and the top of the list —
+        // the exact shape that broke a live `jumpTo()` on first open.
+        final frontMatter = List<String>.generate(
+          120,
+          (index) => '<p>Front matter paragraph $index.</p>',
+        ).join();
+        final chapterOneBody = List<String>.generate(
+          60,
+          (index) => '<p>Chapter 1 body paragraph $index.</p>',
+        ).join();
+        await source.writeAsString(
+          '$frontMatter<h1>Chapter 1</h1>$chapterOneBody<h1>Chapter 2</h1>'
+          '<p>Chapter 2 body paragraph 0.</p>',
+        );
+        await const LibraryDocumentCanonicalizer().canonicalize(
+          db: db,
+          libraryItemId: 'item',
+          source: source,
+        );
+        // `_CanonicalLibraryReaderScreenState.initState` also kicks off
+        // unrelated settings/font-scale loads that reach path_provider —
+        // mock it so those fire-and-forget calls resolve instead of
+        // throwing MissingPluginException mid-test.
+        const pathProviderChannel = MethodChannel(
+          'plugins.flutter.io/path_provider',
+        );
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              pathProviderChannel,
+              (call) async => dir.path,
+            );
+        return (db: db, dir: dir);
+      });
+      final completedSetup = setup!;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CanonicalLibraryReaderScreen(
+            item: _item(fileFormat: 'html', sourceType: 'egw_html_capture'),
+            repository: LibraryDocumentRepository(completedSetup.db),
+          ),
+        ),
+      );
+      await tester.pump();
+      // `_initializeAtSearchTarget` issues its own real sqflite ffi queries
+      // from initState, after the widget has already mounted. Those calls
+      // run on a background isolate and only make progress on a real event
+      // loop tick, which plain `pump()` (fake-async) does not provide —
+      // interleave a real-zone tick so they can actually settle.
+      for (var i = 0; i < 40; i++) {
+        await tester.runAsync(() async => Future<void>.delayed(Duration.zero));
+        await tester.pump(const Duration(milliseconds: 100));
+        if (find.text('Chapter 1').evaluate().isNotEmpty) break;
+      }
+
+      expect(find.text('Chapter 1'), findsOneWidget);
+      expect(find.text('Front matter paragraph 0.'), findsNothing);
+      final headingTop = tester.getTopLeft(find.text('Chapter 1')).dy;
+      final bodyTop = tester
+          .getTopLeft(find.text('Chapter 1 body paragraph 0.'))
+          .dy;
+      expect(headingTop, lessThan(bodyTop));
+      final listTop = tester
+          .getTopLeft(find.byKey(const ValueKey('canonical-flat-list')))
+          .dy;
+      // Flush (alignment 0) landing puts the heading right at the list's own
+      // top edge, modulo its list padding; the pre-fix 0.08 alignment would
+      // have offset it by roughly 8% of the viewport height (~47px here)
+      // instead.
+      expect(headingTop - listTop, lessThan(30));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      const pathProviderChannel = MethodChannel(
+        'plugins.flutter.io/path_provider',
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(pathProviderChannel, null);
+      await tester.runAsync(() async {
+        // The screen's own settings/font-scale loads opened the
+        // UserDatabase/ELibraryDatabase singletons against this test's temp
+        // directory (via the path_provider mock above). Close them before
+        // deleting that directory, or the live connection outlives its
+        // backing file and the next test to touch either singleton hits a
+        // spurious disk I/O error.
+        await UserDatabase.instance.close();
+        await ELibraryDatabase.instance.close();
+        await completedSetup.db.close();
+        await completedSetup.dir.delete(recursive: true);
+      });
+    },
+  );
+
+  testWidgets('Contents target waits for its coalesced long-document window', (
+    tester,
+  ) async {
+    final setup = await tester.runAsync(() async {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      final dir = await Directory.systemTemp.createTemp(
+        'canonical_contents_window_race_',
+      );
+      final db = await openDatabase(p.join(dir.path, 'test.db'));
+      await ELibrarySchema.ensure(db);
+      final source = File(p.join(dir.path, 'long.html'));
+      String chapter(String title, int count) =>
+          '<h1>$title</h1>' +
+          List<String>.generate(
+            count,
+            (index) => '<p>$title body paragraph $index.</p>',
+          ).join();
+      await source.writeAsString(
+        chapter('Chapter 1', 260) +
+            chapter('Chapter 8', 260) +
+            chapter('Chapter 9', 260),
+      );
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'item',
+        source: source,
+      );
+      final repository = LibraryDocumentRepository(db);
+      final controller = LibraryDocumentController(
+        libraryItemId: 'item',
+        repository: repository,
+        windowRadius: 25,
+      );
+      await controller.initialize();
+      final headings = await repository.loadHeadings('item');
+      final chapterEight = headings.firstWhere(
+        (heading) => heading.plainText == 'Chapter 8',
+      );
+      final chapterNine = headings.firstWhere(
+        (heading) => heading.plainText == 'Chapter 9',
+      );
+      // Mimics selecting Contents while a previous distant chapter window
+      // is still being requested. The second Future must not complete until
+      // its own target has replaced the earlier request.
+      final firstRequest = controller.ensureWindow(chapterEight.displayOrder);
+      final targetRequest = controller.ensureWindow(chapterNine.displayOrder);
+      await targetRequest;
+      expect(controller.blockAt(chapterNine.displayOrder), isNotNull);
+      await firstRequest;
+      return (
+        controller: controller,
+        chapterNine: chapterNine,
+        db: db,
+        dir: dir,
+      );
+    });
+    final completedSetup = setup!;
+    await tester.runAsync(() async {
+      await completedSetup.db.close();
+      await completedSetup.dir.delete(recursive: true);
+    });
+  });
+
   group('canonicalContentsCurrentHeading', () {
     LibraryDocumentBlock headingAt(int order, String text) =>
         LibraryDocumentBlock(
@@ -648,6 +1096,10 @@ LibraryCatalogItem _item({
   required String sourceType,
   String? relativePath,
   String collectionName = 'Pioneer Authors',
+  DateTime? lastOpened,
+  String? anchorId,
+  String? epubHref,
+  int? paragraphIndex,
 }) => LibraryCatalogItem(
   id: 'item',
   title: 'Test Book',
@@ -668,13 +1120,13 @@ LibraryCatalogItem _item({
   sourceType: sourceType,
   coverPath: null,
   dateAdded: null,
-  lastOpened: null,
+  lastOpened: lastOpened,
   indexStatus: 'indexed',
   fileSize: null,
   mimeType: null,
   spineIndex: null,
-  anchorId: null,
-  epubHref: null,
-  paragraphIndex: null,
+  anchorId: anchorId,
+  epubHref: epubHref,
+  paragraphIndex: paragraphIndex,
   navigationCount: 0,
 );

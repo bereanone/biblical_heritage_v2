@@ -197,15 +197,18 @@ void main() {
   );
 
   test(
-    'an EPUB outside official managed storage is never routed through the canonical EPUB reader',
+    'a valid user EPUB outside managed storage uses the same canonical reader and retains its source',
     () async {
       final relativePath = p.join('Imports', 'user_uploaded.epub');
       final epubFile = File(p.join(rootDir.path, relativePath));
       epubFile.parent.createSync(recursive: true);
       epubFile.writeAsBytesSync(
-        _epubBytes(<String, List<int>>{
-          'OEBPS/ch1.xhtml': '<h2>Chapter 1</h2><p>Body text.</p>'.codeUnits,
-        }),
+        _wellFormedEpubBytes(
+          chapters: {
+            'ch1.xhtml':
+                '<h2>Chapter 1</h2><p>User-provided source text remains readable and searchable without depending on a managed download folder.</p>',
+          },
+        ),
       );
       final item = _managedEpubItem(
         id: 'UNMANAGED_EPUB',
@@ -213,9 +216,10 @@ void main() {
         sourceType: 'user_import',
       );
 
-      expect(supportsCanonicalEpubReader(item), isFalse);
+      expect(supportsCanonicalEpubReader(item), isTrue);
       final preparation = await prepareCanonicalEpubReader(item);
-      expect(preparation, isNull);
+      expect(preparation, isNotNull);
+      expect(epubFile.existsSync(), isTrue);
     },
   );
 
@@ -236,8 +240,7 @@ void main() {
   );
 
   test(
-    'a pioneer_archive_org_download EPUB outside ImportedPioneerEpubs is '
-    'still ineligible — the folder-path check still applies',
+    'an archive download outside ImportedPioneerEpubs uses the same reader',
     () async {
       final relativePath = p.join('Imports', 'archive_org_download.epub');
       final item = _managedEpubItem(
@@ -246,7 +249,7 @@ void main() {
         sourceType: 'pioneer_archive_org_download',
       );
 
-      expect(supportsCanonicalEpubReader(item), isFalse);
+      expect(supportsCanonicalEpubReader(item), isTrue);
     },
   );
 

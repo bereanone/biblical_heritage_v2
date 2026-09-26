@@ -69,6 +69,99 @@ class LibraryFormattedContent {
       );
 }
 
+String libraryFormattedVisibleText(List<Map<String, Object?>> nodes) => nodes
+    .map(
+      (node) => node['type'] == 'line_break'
+          ? '\n'
+          : node['type'] == 'text'
+          ? node['text']?.toString() ?? ''
+          : '',
+    )
+    .join();
+
+String normalizeLibraryInlineFidelityText(String value) => value
+    .replaceAll(RegExp(r'\s+'), ' ')
+    .trim()
+    .replaceAllMapped(
+      RegExp(r'\s+([,.;:!?)\]\}])'),
+      (match) => match.group(1)!,
+    );
+
+bool libraryFormattedTextMatchesPlain({
+  required String plainText,
+  required List<Map<String, Object?>> nodes,
+}) {
+  if (nodes.any(
+    (node) => node['type'] != 'text' && node['type'] != 'line_break',
+  )) {
+    return true;
+  }
+  return normalizeLibraryInlineFidelityText(plainText) ==
+      normalizeLibraryInlineFidelityText(libraryFormattedVisibleText(nodes));
+}
+
+/// Restores source-confirmed whitespace omitted by legacy formatted nodes.
+///
+/// The whole-block [plainText] is the fidelity witness. No space is invented
+/// when its non-whitespace characters differ from the formatted nodes, and a
+/// source gap before closing punctuation remains suppressed. This preserves
+/// intentional zero-space emphasis splits while making old generations read
+/// like their intact searchable text.
+List<Map<String, Object?>> restoreLibraryInlineBoundaryWhitespace({
+  required String plainText,
+  required List<Map<String, Object?>> nodes,
+}) {
+  if (nodes.isEmpty ||
+      nodes.any(
+        (node) => node['type'] != 'text' && node['type'] != 'line_break',
+      )) {
+    return nodes;
+  }
+  final plain = plainText.replaceAll(RegExp(r'\s+'), ' ').trim();
+  final visible = libraryFormattedVisibleText(
+    nodes,
+  ).replaceAll(RegExp(r'\s+'), ' ').trim();
+  final plainSkeleton = plain.replaceAll(' ', '');
+  if (plainSkeleton != visible.replaceAll(' ', '')) return nodes;
+
+  final gaps = List<int>.filled(plainSkeleton.length + 1, 0);
+  var skeletonOffset = 0;
+  for (final codeUnit in plain.codeUnits) {
+    final value = String.fromCharCode(codeUnit);
+    if (value == ' ') {
+      gaps[skeletonOffset] += 1;
+    } else {
+      skeletonOffset += 1;
+    }
+  }
+
+  final restored = <Map<String, Object?>>[];
+  var consumed = 0;
+  for (var index = 0; index < nodes.length; index++) {
+    final node = nodes[index];
+    restored.add(node);
+    if (node['type'] != 'text') continue;
+    final text = node['text']?.toString() ?? '';
+    consumed += text.replaceAll(RegExp(r'\s+'), '').length;
+    if (index + 1 >= nodes.length) continue;
+    final next = nodes[index + 1];
+    if (next['type'] != 'text') continue;
+    final nextText = next['text']?.toString() ?? '';
+    if (text.isEmpty ||
+        nextText.isEmpty ||
+        RegExp(r'\s$').hasMatch(text) ||
+        RegExp(r'^\s').hasMatch(nextText) ||
+        consumed >= gaps.length ||
+        gaps[consumed] == 0) {
+      continue;
+    }
+    final nextCharacter = nextText.replaceFirst(RegExp(r'^\s+'), '')[0];
+    if (RegExp(r'[,.;:!?)\]\}]').hasMatch(nextCharacter)) continue;
+    restored.add(const <String, Object?>{'type': 'text', 'text': ' '});
+  }
+  return restored;
+}
+
 class LibraryDocumentBlock {
   const LibraryDocumentBlock({
     required this.id,
@@ -99,6 +192,20 @@ class LibraryDocumentBlock {
   bool get isHeading => blockType == LibraryDocumentBlockType.heading;
   LibraryFormattedContent get formatted =>
       LibraryFormattedContent.fromJson(formattedContent);
+
+  /// Printed source pages are a fallback when the edition has no ref codes.
+  /// A paragraph spanning a page break retains both endpoints.
+  String? get pageReference {
+    final metadata = formatted.metadata;
+    final start = metadata['source_page_start'];
+    final end = metadata['source_page_end'];
+    if (start == null) return end == null ? null : 'p. $end (continued)';
+    return end == null || start == end ? 'p. $start' : 'pp. $start–$end';
+  }
+
+  String? get visibleReference =>
+      sourceRefcode?.trim().isNotEmpty == true ? sourceRefcode : pageReference;
+
   String? get headingRole =>
       isHeading ? formatted.metadata['heading_role']?.toString() : null;
   bool get isPrimaryChapterHeading => headingRole == 'chapter';

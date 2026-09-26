@@ -11,6 +11,7 @@ import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/elibrary_database.dart';
 import '../../../core/database/elibrary_read_resolver.dart';
 import 'library_citation_display_helper.dart';
+import 'library_document_assets.dart';
 import '../../search/search_highlight_helper.dart';
 import 'library_author_resolver.dart';
 import 'library_book_display_title.dart';
@@ -19,6 +20,7 @@ import 'library_epub_cover_extractor.dart';
 import 'library_epub_metadata.dart';
 import 'library_item_availability.dart';
 import 'library_item_identity.dart';
+import 'library_reading_copy_review.dart';
 import 'library_search_navigation_target.dart';
 import '../../utilities/data/pioneer_capture_folder_metadata.dart';
 import '../../utilities/data/elibrary_folder_policy.dart';
@@ -156,8 +158,21 @@ class LibraryCatalogService {
 
     final rootPath = await LibraryRootService.instance
         .accessibleLibraryRootPath();
+    final readingChoices = await LibraryReadingCopyReview.loadActive(
+      rowResult.database,
+    );
     final items = normalizedRows
-        .map((row) => LibraryCatalogItem.fromRow(row, rootPath: rootPath))
+        .where(
+          (row) =>
+              includeAlternateEditions ||
+              !(readingChoices[row['id']]?.isAlternate ?? false),
+        )
+        .map(
+          (row) => LibraryCatalogItem.fromRow({
+            ...row,
+            'reading_copy_label': readingChoices[row['id']]?.label,
+          }, rootPath: rootPath),
+        )
         .toList();
     final projected = includeAlternateEditions
         ? items
@@ -188,24 +203,26 @@ class LibraryCatalogService {
       rows,
       database: database,
     );
-    final repairedManagedPaths = await _repairMissingManagedPaths(
-      rows,
-      database: database,
-    );
+    final rootPath = await LibraryRootService.instance
+        .accessibleLibraryRootPath();
+    final embeddedCovers = rootPath == null
+        ? <String, String>{}
+        : await LibraryDocumentAssets.restoreCovers(
+            db: database,
+            itemIds: rows.map((row) => row['id'] as String).toSet(),
+            libraryRoot: Directory(rootPath),
+          );
     final hydratedRows = rows
         .map((row) {
           final id = row['id']?.toString() ?? '';
           final warmedAuthor = warmedAuthorValues[id];
-          final warmedCoverPath = warmedCoverPaths[id];
+          final warmedCoverPath = embeddedCovers[id] ?? warmedCoverPaths[id];
           final repairedCaptureCoverPath = repairedCaptureCoverPaths[id];
           final warmedTitle = warmedTitleValues[id];
-          final repairedPathValues = repairedManagedPaths[id];
           if ((warmedAuthor == null || warmedAuthor.trim().isEmpty) &&
               (warmedCoverPath == null || warmedCoverPath.trim().isEmpty)) {
             if (warmedTitle == null || warmedTitle.trim().isEmpty) {
-              if (repairedPathValues == null) {
-                return row;
-              }
+              return row;
             }
           }
           return <String, Object?>{
@@ -219,22 +236,13 @@ class LibraryCatalogService {
               'cover_path': repairedCaptureCoverPath,
             if (warmedTitle != null && warmedTitle.trim().isNotEmpty)
               'title': warmedTitle,
-            if (repairedPathValues != null) ...repairedPathValues,
           };
         })
         .toList(growable: false);
-    final repairedManagedIds = await _repairManagedItemIds(
-      hydratedRows,
-      database: database,
-    );
-    return hydratedRows
-        .map((row) {
-          final id = row['id']?.toString() ?? '';
-          final repairedIdValues = repairedManagedIds[id];
-          if (repairedIdValues == null) return row;
-          return <String, Object?>{...row, ...repairedIdValues};
-        })
-        .toList(growable: false);
+    // Reading metadata must not rename an existing work or replace its source
+    // using a title/filename guess. Imports and explicit maintenance own those
+    // operations; Contents, citations, and annotations depend on stable IDs.
+    return hydratedRows;
   }
 
   Future<int> refreshManagedItemsFromDisk({String? rootPathOverride}) async {
@@ -518,11 +526,81 @@ class LibraryCatalogService {
     return selectPreferredLibraryEditions(rows);
   }
 
+  /// Search the same accepted representation used for reading each item.
+  /// This does not choose between editions or reconcile separate catalog rows.
+  /// Legacy user databases may not contain canonical tables yet.
+  Future<String> _searchTextCte(Database db) async {
+    final hasCanonical =
+        await _readResolver.tableExists(db, 'library_document_conversion') &&
+        await _readResolver.tableExists(db, 'library_document_blocks');
+    if (!hasCanonical) {
+      return '''search_text AS (
+        SELECT ltb.*, NULL AS canonical_block_id,
+          NULL AS canonical_content_hash, NULL AS source_refcode
+        FROM library_text_blocks ltb
+      )''';
+    }
+    return '''
+      readable_canonical AS (
+        SELECT c.library_item_id
+        FROM library_document_conversion c
+        WHERE c.status = 'complete'
+          AND EXISTS (SELECT 1 FROM library_document_blocks b
+            WHERE b.library_item_id = c.library_item_id)
+      ),
+      search_text AS (
+        SELECT -b.rowid AS id, b.library_item_id,
+          COALESCE(b.source_href, s.source_href, '') AS epub_href,
+          s.display_order AS spine_index,
+          b.display_order AS paragraph_index,
+          sm.legacy_paragraph_index AS paragraph_on_section,
+          s.title AS section_title, b.plain_text,
+          b.id AS canonical_block_id,
+          b.content_hash AS canonical_content_hash, b.source_refcode
+        FROM library_document_blocks b
+        JOIN readable_canonical c ON c.library_item_id = b.library_item_id
+        JOIN library_document_sections s
+          ON s.id = b.section_id AND s.library_item_id = b.library_item_id
+        LEFT JOIN library_block_source_map sm
+          ON sm.block_id = b.id AND sm.library_item_id = b.library_item_id
+        WHERE LENGTH(TRIM(COALESCE(b.plain_text, ''))) > 0
+        UNION ALL
+        SELECT ltb.id, ltb.library_item_id, ltb.epub_href, ltb.spine_index,
+          ltb.paragraph_index, ltb.paragraph_on_section, ltb.section_title,
+          ltb.plain_text, NULL, NULL, NULL
+        FROM library_text_blocks ltb
+        WHERE NOT EXISTS (SELECT 1 FROM readable_canonical c
+          WHERE c.library_item_id = ltb.library_item_id)
+      )
+    ''';
+  }
+
+  Future<void> _excludeReviewedAlternates(
+    List<String> where,
+    List<Object?> args,
+  ) async {
+    // Apply the primary library's choice to fallback reads too, so an empty
+    // preferred-copy search cannot resurrect an obsolete legacy copy.
+    final reviews = await LibraryReadingCopyReview.loadActive(
+      await _readResolver.primaryDatabase(),
+    );
+    final ids = reviews.values
+        .where((r) => r.isAlternate)
+        .map((r) => r.itemId)
+        .toList();
+    if (ids.isEmpty) return;
+    where.add('li.id NOT IN (${List.filled(ids.length, '?').join(',')})');
+    args.addAll(ids);
+  }
+
   Future<int> countIndexedSearchableItems({String? collectionFilter}) async {
     final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
       collectionFilter ?? '',
     );
-    final where = <String>['li.deleted_at IS NULL'];
+    final where = <String>[
+      'li.deleted_at IS NULL',
+      "LOWER(COALESCE(li.index_status, '')) != 'needs_attention'",
+    ];
     final args = <Object?>[];
     if (normalizedCollectionFilter.isNotEmpty &&
         normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
@@ -530,12 +608,15 @@ class LibraryCatalogService {
       args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
     }
 
+    await _excludeReviewedAlternates(where, args);
     final result = await _readResolver.readWithFallback<int>(
       read: (db) async {
+        final source = await _searchTextCte(db);
         final rows = await db.rawQuery('''
+      WITH $source
       SELECT COUNT(DISTINCT li.id) AS cnt
       FROM library_items li
-      INNER JOIN library_text_blocks ltb ON ltb.library_item_id = li.id
+      INNER JOIN search_text ltb ON ltb.library_item_id = li.id
       WHERE ${where.join(' AND ')}
       ''', args);
         return (rows.first['cnt'] as num?)?.toInt() ?? 0;
@@ -549,7 +630,10 @@ class LibraryCatalogService {
     final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
       collectionFilter ?? '',
     );
-    final where = <String>['li.deleted_at IS NULL'];
+    final where = <String>[
+      'li.deleted_at IS NULL',
+      "LOWER(COALESCE(li.index_status, '')) != 'needs_attention'",
+    ];
     final args = <Object?>[];
     if (normalizedCollectionFilter.isNotEmpty &&
         normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
@@ -557,6 +641,7 @@ class LibraryCatalogService {
       args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
     }
 
+    await _excludeReviewedAlternates(where, args);
     final result = await _readResolver.readWithFallback<int>(
       read: (db) async {
         final rows = await db.rawQuery('''
@@ -580,7 +665,10 @@ class LibraryCatalogService {
       return 0;
     }
 
-    final where = <String>['li.deleted_at IS NULL'];
+    final where = <String>[
+      'li.deleted_at IS NULL',
+      "LOWER(COALESCE(li.index_status, '')) != 'needs_attention'",
+    ];
     final args = <Object?>[];
     final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
       collectionFilter ?? '',
@@ -607,15 +695,19 @@ class LibraryCatalogService {
       return 0;
     }
 
+    _addLibrarySearchBodyCandidateFilter(where, args, normalizedTerms);
+    await _excludeReviewedAlternates(where, args);
     final result = await _readResolver.readWithFallback<int>(
       read: (db) async {
+        final source = await _searchTextCte(db);
         final rows = await db.rawQuery('''
+      WITH $source
       -- Search results are paragraph-level navigation targets. Counting only
       -- distinct books truncates broad searches to one result per matching
       -- book even though searchContent intentionally returns every matching
       -- paragraph.
       SELECT COUNT(*) AS cnt
-      FROM library_text_blocks ltb
+      FROM search_text ltb
       INNER JOIN library_items li ON li.id = ltb.library_item_id
       WHERE ${where.join(' AND ')}
       ''', args);
@@ -741,6 +833,8 @@ class LibraryCatalogService {
       return const [];
     }
 
+    _addLibrarySearchBodyCandidateFilter(where, args, normalizedTerms);
+    await _excludeReviewedAlternates(where, args);
     final cteWhere = where.join(' AND ');
     // A single-collection search already narrows the CTE's candidate rows
     // via the collection WHERE clause, so 8x headroom above the requested
@@ -758,11 +852,13 @@ class LibraryCatalogService {
 
     final rowResult = await _readResolver
         .readWithFallback<List<Map<String, Object?>>>(
-          read: (db) => db.rawQuery(
-            '''
-      WITH matching_hits AS (
-        SELECT ltb.rowid AS hit_rowid
-        FROM library_text_blocks ltb
+          read: (db) async {
+            final source = await _searchTextCte(db);
+            return db.rawQuery(
+              '''
+      WITH $source, matching_hits AS (
+        SELECT ltb.*
+        FROM search_text ltb
         INNER JOIN library_items li ON li.id = ltb.library_item_id
         WHERE $cteWhere
         ORDER BY ltb.library_item_id COLLATE NOCASE, ltb.epub_href, ltb.paragraph_index
@@ -801,21 +897,24 @@ class LibraryCatalogService {
         ltb.section_title,
         ltb.paragraph_on_section,
         ltb.plain_text,
-        eri.ref_code AS hit_ref_code,
+        COALESCE(ltb.source_refcode, eri.ref_code) AS hit_ref_code,
+        ltb.canonical_block_id,
+        ltb.canonical_content_hash,
         eri.stable_ref AS hit_stable_ref,
         eri.page_number AS hit_page_number,
         eri.paragraph_on_page AS hit_paragraph_on_page
-      FROM matching_hits mh
-      INNER JOIN library_text_blocks ltb ON ltb.rowid = mh.hit_rowid
+      FROM matching_hits ltb
       INNER JOIN library_items li ON li.id = ltb.library_item_id
       LEFT JOIN elibrary_ref_index eri
         ON eri.library_item_id = ltb.library_item_id
+        AND ltb.canonical_block_id IS NULL
         AND LOWER(COALESCE(eri.href, '')) = LOWER(COALESCE(ltb.epub_href, ''))
         AND eri.paragraph_index = ltb.paragraph_index
       ORDER BY li.title COLLATE NOCASE ASC
       ''',
-            [...args, fetchLimit],
-          ),
+              [...args, fetchLimit],
+            );
+          },
           hasData: (rows) => rows.isNotEmpty,
         );
     final rows = rowResult.value;
@@ -901,6 +1000,8 @@ class LibraryCatalogService {
             score: score,
             target: LibrarySearchNavigationTarget(
               libraryItemId: item.id,
+              canonicalBlockId: row['canonical_block_id']?.toString(),
+              canonicalContentHash: row['canonical_content_hash']?.toString(),
               textBlockId: (row['hit_text_block_id'] as num?)?.toInt() ?? 0,
               href: row['hit_epub_href']?.toString() ?? '',
               paragraphIndex:
@@ -1668,191 +1769,6 @@ class LibraryCatalogService {
     return compact.toLowerCase();
   }
 
-  Future<Map<String, Map<String, Object?>>> _repairMissingManagedPaths(
-    List<Map<String, Object?>> rows, {
-    required Database database,
-  }) async {
-    final results = <String, Map<String, Object?>>{};
-    final candidates = <Map<String, Object?>>[];
-
-    for (final row in rows) {
-      final id = row['id']?.toString().trim() ?? '';
-      if (id.isEmpty) continue;
-
-      final relativePath = row['relative_path']?.toString().trim() ?? '';
-      if (relativePath.isEmpty) continue;
-
-      final format = row['file_format']?.toString().trim().toLowerCase();
-      if (format != 'epub') continue;
-
-      final title = row['title']?.toString().trim() ?? '';
-      final fileName = row['file_name']?.toString().trim() ?? '';
-      if (title.isEmpty || fileName.isEmpty) continue;
-
-      candidates.add(row);
-    }
-
-    if (candidates.isEmpty) return results;
-
-    final selection = await LibraryRootService.instance.loadSelection();
-    final rootPath =
-        (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
-        selection.path;
-    if (rootPath == null || rootPath.trim().isEmpty) {
-      return results;
-    }
-    if (!Directory(rootPath).existsSync()) {
-      return results;
-    }
-
-    final managedFolders = ELibraryFolderPolicy.allManagedEgwFolderDefinitions
-        .where((folder) => folder.relativeFolder.startsWith('ePubs/'))
-        .map(
-          (folder) => (
-            collectionName: folder.collectionName,
-            relativeFolder: folder.relativeFolder,
-          ),
-        )
-        .toList(growable: false);
-
-    for (final row in candidates) {
-      final id = row['id']?.toString().trim() ?? '';
-      final fileName = row['file_name']?.toString().trim() ?? '';
-      final expectedTitle = _normalizedLibraryText(
-        row['title']?.toString() ?? '',
-      );
-      if (id.isEmpty || fileName.isEmpty || expectedTitle.isEmpty) continue;
-
-      final currentRelativePath = row['relative_path']?.toString().trim() ?? '';
-      final currentFile = await LibraryRootService.instance
-          .resolveExistingAssetFile(
-            relativePath: currentRelativePath,
-            rootPath: rootPath,
-          );
-      if (currentFile != null) {
-        continue;
-      }
-
-      for (final managedFolder in managedFolders) {
-        final candidatePath = p.join(
-          rootPath,
-          managedFolder.relativeFolder,
-          fileName,
-        );
-        final candidateFile = File(candidatePath);
-        if (!candidateFile.existsSync()) continue;
-
-        final metadata = await readLibraryEpubMetadata(candidateFile);
-        final candidateTitle = _normalizedLibraryText(
-          metadata?.title?.toString() ?? '',
-        );
-        if (candidateTitle.isNotEmpty && candidateTitle != expectedTitle) {
-          continue;
-        }
-
-        final stat = await candidateFile.stat();
-        final now = DateTime.now().toUtc().toIso8601String();
-        final fingerprint =
-            'epub_nav_v3:${stat.size}:${stat.modified.millisecondsSinceEpoch}';
-        final folderType =
-            row['folder_type']?.toString().trim().isNotEmpty == true
-            ? row['folder_type']?.toString().trim() ?? ''
-            : row['library_role']?.toString().trim() ?? '';
-        final canonicalId = canonicalLibraryItemId(
-          folderType: folderType,
-          relativePath: p.relative(candidatePath, from: rootPath),
-        );
-        results[id] = <String, Object?>{
-          'id': canonicalId,
-          'relative_path': p.relative(candidatePath, from: rootPath),
-          'collection_name': managedFolder.collectionName,
-          'source_type': 'official_download',
-          'file_size': stat.size,
-          'file_hash': fingerprint,
-          'index_status': 'indexed',
-          'updated_at': now,
-        };
-
-        await database.update(
-          'library_items',
-          results[id]!,
-          where: 'id = ?',
-          whereArgs: [id],
-        );
-        if (canonicalId != id) {
-          await migrateManagedLibraryItemId(
-            db: database,
-            oldId: id,
-            newId: canonicalId,
-          );
-        }
-        break;
-      }
-    }
-
-    return results;
-  }
-
-  Future<Map<String, Map<String, Object?>>> _repairManagedItemIds(
-    List<Map<String, Object?>> rows, {
-    required Database database,
-  }) async {
-    final results = <String, Map<String, Object?>>{};
-    if (rows.isEmpty) return results;
-
-    final selection = await LibraryRootService.instance.loadSelection();
-    final rootPath =
-        (await LibraryRootService.instance.accessibleLibraryRootPath()) ??
-        selection.path;
-    if (rootPath == null || rootPath.trim().isEmpty) {
-      return results;
-    }
-    if (!Directory(rootPath).existsSync()) {
-      return results;
-    }
-
-    for (final row in rows) {
-      final id = row['id']?.toString().trim() ?? '';
-      final relativePath = row['relative_path']?.toString().trim() ?? '';
-      if (id.isEmpty || relativePath.isEmpty) continue;
-      final sourceType =
-          row['source_type']?.toString().trim().toLowerCase() ?? '';
-      if (sourceType == 'pioneer_epub_import') continue;
-      if (!isManagedEgwRelativePath(relativePath)) continue;
-
-      final folderType =
-          row['folder_type']?.toString().trim().isNotEmpty == true
-          ? row['folder_type']?.toString().trim() ?? ''
-          : row['library_role']?.toString().trim() ?? '';
-      if (folderType.isEmpty) continue;
-
-      final existingFile = await LibraryRootService.instance
-          .resolveExistingAssetFile(
-            relativePath: relativePath,
-            rootPath: rootPath,
-          );
-      if (existingFile == null) continue;
-
-      final canonicalId = canonicalLibraryItemId(
-        folderType: folderType,
-        relativePath: relativePath,
-      );
-      if (canonicalId == id) continue;
-
-      await migrateManagedLibraryItemId(
-        db: database,
-        oldId: id,
-        newId: canonicalId,
-      );
-      results[id] = <String, Object?>{
-        'id': canonicalId,
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
-      };
-    }
-
-    return results;
-  }
-
   Future<String?> _ensureEpubCoverPath({
     required Database database,
     required Map<String, Object?> row,
@@ -2089,6 +2005,7 @@ class LibraryCatalogItem {
     required this.navigationCount,
     this.sourceWorkId,
     this.sourcePackageId,
+    this.readingCopyLabel,
     this.readableBlockCount = 0,
     this.extractedTextLength = 0,
     this.navigationMaxDepth = 0,
@@ -2132,6 +2049,7 @@ class LibraryCatalogItem {
       navigationCount: (row['navigation_count'] as num?)?.toInt() ?? 0,
       sourceWorkId: row['source_work_id']?.toString(),
       sourcePackageId: row['source_package_id']?.toString(),
+      readingCopyLabel: row['reading_copy_label']?.toString(),
       readableBlockCount: (row['readable_block_count'] as num?)?.toInt() ?? 0,
       extractedTextLength: (row['extracted_text_length'] as num?)?.toInt() ?? 0,
       navigationMaxDepth: (row['navigation_max_depth'] as num?)?.toInt() ?? 0,
@@ -2165,6 +2083,7 @@ class LibraryCatalogItem {
   final int navigationCount;
   final String? sourceWorkId;
   final String? sourcePackageId;
+  final String? readingCopyLabel;
   final int readableBlockCount;
   final int extractedTextLength;
   final int navigationMaxDepth;
@@ -2255,6 +2174,12 @@ class LibraryCatalogItem {
       epubHref: epubHref ?? this.epubHref,
       paragraphIndex: paragraphIndex ?? this.paragraphIndex,
       navigationCount: navigationCount ?? this.navigationCount,
+      sourceWorkId: sourceWorkId,
+      sourcePackageId: sourcePackageId,
+      readingCopyLabel: readingCopyLabel,
+      readableBlockCount: readableBlockCount,
+      extractedTextLength: extractedTextLength,
+      navigationMaxDepth: navigationMaxDepth,
       contributors: contributors ?? this.contributors,
     );
   }
@@ -2325,6 +2250,7 @@ class LibraryCatalogItem {
 
   /// Human-readable provenance for editions that otherwise look identical.
   String? get editionLabel {
+    if ((readingCopyLabel ?? '').isNotEmpty) return readingCopyLabel;
     if (!_isWaggonerOnRomansEdition(this)) return null;
     if (id == 'library_item_research_pioneer_e_j_waggoner_WOR') {
       return 'CaptureClipper edition';
@@ -2716,6 +2642,33 @@ const List<String> _librarySearchClauseFields = <String>[
 
 String _librarySearchTermClause() {
   return _librarySearchClauseFields.join(' OR ');
+}
+
+void _addLibrarySearchBodyCandidateFilter(
+  List<String> where,
+  List<Object?> args,
+  List<String> terms,
+) {
+  // Snippets require at least one complete term in the paragraph. Apply a
+  // compatible boundary filter before LIMIT so incidental substrings such as
+  // "evening" cannot exhaust the candidate window for "Veni". Padding includes
+  // start/end-of-paragraph matches; underscore is a word character in Dart's
+  // snippet regex. Query normalization leaves only ASCII letters/digits/spaces.
+  // For phrases, GLOB is deliberately a superset of the final snippet regex:
+  // punctuation and line breaks remain eligible, while snippet construction
+  // still verifies that the words are adjacent. No database extension is needed.
+  final patterns = terms
+      .map(_normalizedLibrarySearchText)
+      .where((term) => term.isNotEmpty)
+      .map(
+        (term) => '*[^a-z0-9_]${term.split(' ').join('[^a-z0-9]*')}[^a-z0-9_]*',
+      )
+      .toList(growable: false);
+  if (patterns.isEmpty) return;
+  where.add(
+    '(${List.filled(patterns.length, "(' ' || LOWER(COALESCE(ltb.plain_text, '')) || ' ') GLOB ?").join(' OR ')})',
+  );
+  args.addAll(patterns);
 }
 
 // For multi-word phrases, join with % so punctuation between words is

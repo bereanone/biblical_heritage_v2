@@ -1296,7 +1296,7 @@ class PioneerTextImportService {
       contentType: 'application/epub+zip',
       resolvedUri: sourceFile.uri,
     );
-    return _writeImportedWork(
+    final result = await _writeImportedWork(
       db: db,
       deviceId: deviceId,
       work: epubWork,
@@ -1315,6 +1315,29 @@ class PioneerTextImportService {
       coverPath: coverPath,
       qualityValidation: qualityValidation,
     );
+    if (result.status == PioneerImportWorkStatus.imported) {
+      // The selected-file UI must preserve the same full EPUB generation as
+      // catalog downloads, not leave the reader on the text-only index.
+      await _persistEpubSourceAndCanonicalize(
+        db: db,
+        itemId: result.libraryItemId,
+        epubBytes: bytes,
+      );
+      final stored = await db.query(
+        'library_items',
+        columns: const ['file_format'],
+        where: 'id = ?',
+        whereArgs: [result.libraryItemId],
+      );
+      if (stored.length != 1 || stored.single['file_format'] != 'epub') {
+        throw StateError(
+          'The text index was imported, but the complete EPUB could not be '
+          'prepared. Artwork and original navigation are not ready; retry '
+          'the import after resolving the storage or document error.',
+        );
+      }
+    }
+    return result;
   }
 
   Future<PioneerImportBatchResult> importFromCapturedText(

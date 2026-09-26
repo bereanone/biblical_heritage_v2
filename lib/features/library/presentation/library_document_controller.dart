@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -10,7 +11,8 @@ class LibraryDocumentController extends ChangeNotifier {
     required this.libraryItemId,
     required this.repository,
     this.windowRadius = 50,
-  });
+    bool preserveLoadedGeometry = false,
+  }) : _preserveExpandedCache = preserveLoadedGeometry;
   final String libraryItemId;
   final LibraryDocumentRepository repository;
   final int windowRadius;
@@ -24,8 +26,9 @@ class LibraryDocumentController extends ChangeNotifier {
   bool _loading = false;
   bool _disposed = false;
   int? _pending;
+  Completer<void>? _windowSettled;
   bool _autoScrolling = false;
-  bool _preserveExpandedCache = false;
+  bool _preserveExpandedCache;
   int _autoScrollDirection = 1;
 
   static const int autoScrollAhead = 200;
@@ -58,11 +61,43 @@ class LibraryDocumentController extends ChangeNotifier {
     await ensureWindow(centerOrder);
   }
 
-  Future<void> ensureWindow(int centerOrder) async {
-    if (_loading) {
-      _pending = centerOrder;
-      return;
+  /// Ensures the window for the last requested [centerOrder] is loaded.
+  ///
+  /// Calls made while a query is in flight are coalesced, but do not complete
+  /// until the final pending request has been applied. Contents navigation
+  /// relies on that contract before it jumps the virtualized list: a completed
+  /// Future means the destination is no longer a zero-height placeholder.
+  Future<void> ensureWindow(int centerOrder) {
+    _pending = centerOrder;
+    if (_loading) return _windowSettled?.future ?? Future<void>.value();
+    return _drainWindowRequests();
+  }
+
+  /// A distant jump must not shrink the still-mounted source rows to zero
+  /// while its destination is loading. Retain loaded text blocks for this
+  /// reader session, just as autoscroll does; disposal releases the cache.
+  Future<void> ensureNavigationWindow(int centerOrder) {
+    _preserveExpandedCache = true;
+    return ensureWindow(centerOrder);
+  }
+
+  Future<void> _drainWindowRequests() async {
+    _loading = true;
+    final settled = _windowSettled ??= Completer<void>();
+    try {
+      while (_pending != null) {
+        final requestedCenter = _pending!;
+        _pending = null;
+        await _loadWindow(requestedCenter);
+      }
+    } finally {
+      _loading = false;
+      if (!settled.isCompleted) settled.complete();
+      if (identical(_windowSettled, settled)) _windowSettled = null;
     }
+  }
+
+  Future<void> _loadWindow(int centerOrder) async {
     if (_count == 0) {
       _count = await repository.blockCount(libraryItemId);
     }
@@ -97,38 +132,30 @@ class LibraryDocumentController extends ChangeNotifier {
     if (_blocks.containsKey(desiredFirst) && _blocks.containsKey(desiredLast)) {
       return;
     }
-    _loading = true;
-    try {
-      final rows = await repository.loadWindow(
-        libraryItemId,
-        centerOrder: target,
-        radius: radius,
-      );
-      for (final block in rows) {
-        _blocks[block.displayOrder] = block;
-        if (block.isPrimaryChapterHeading) {
-          _primaryHeadings[block.displayOrder] = block;
-        }
+    final rows = await repository.loadWindow(
+      libraryItemId,
+      centerOrder: target,
+      radius: radius,
+    );
+    for (final block in rows) {
+      _blocks[block.displayOrder] = block;
+      if (block.isPrimaryChapterHeading) {
+        _primaryHeadings[block.displayOrder] = block;
       }
-      if (rows.isNotEmpty) {
-        _loadedFirst = math.min(
-          _loadedFirst ?? rows.first.displayOrder,
-          rows.first.displayOrder,
-        );
-        _loadedLast = math.max(
-          _loadedLast ?? rows.last.displayOrder,
-          rows.last.displayOrder,
-        );
-      }
-      if (!_preserveExpandedCache) _trimAround(visibleTarget);
-      _center = visibleTarget;
-      if (!_disposed) notifyListeners();
-    } finally {
-      _loading = false;
-      final pending = _pending;
-      _pending = null;
-      if (pending != null) await ensureWindow(pending);
     }
+    if (rows.isNotEmpty) {
+      _loadedFirst = math.min(
+        _loadedFirst ?? rows.first.displayOrder,
+        rows.first.displayOrder,
+      );
+      _loadedLast = math.max(
+        _loadedLast ?? rows.last.displayOrder,
+        rows.last.displayOrder,
+      );
+    }
+    if (!_preserveExpandedCache) _trimAround(visibleTarget);
+    _center = visibleTarget;
+    if (!_disposed) notifyListeners();
   }
 
   /// Expands the cache ahead of a frame-driven scroll and retains everything

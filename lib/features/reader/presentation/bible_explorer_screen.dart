@@ -8,6 +8,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../../../core/audio/narration_diagnostics.dart';
 import '../../../core/audio/narration_media_session.dart';
+import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/app_theme_mode.dart';
@@ -25,6 +26,7 @@ import '../data/navigation_history_service.dart';
 import '../data/bible_memory_repository.dart';
 import 'bible_memory_screen.dart';
 import 'bible_narration_media_controls.dart';
+import 'bundled_bible_audio_narrator.dart';
 import 'bible_visible_location_controller.dart';
 import 'kokoro_mac_test_narrator.dart';
 import 'pronunciation_editor.dart';
@@ -70,6 +72,10 @@ part 'bible_explorer_range_actions.dart';
 const double _minFontScale = 0.8;
 const double _maxFontScale = 2.4;
 const double _fontStep = 0.1;
+const String _iphoneForwardTiltDefaultKey =
+    'bible_iphone_forward_tilt_default_v1';
+
+enum _BibleLoopMode { off, verse, chapter, book }
 
 class BibleExplorerScreen extends StatefulWidget {
   const BibleExplorerScreen({
@@ -129,6 +135,11 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   final BibleLiveReferenceController _liveVisibleLocation =
       BibleLiveReferenceController();
   late final KokoroMacTestNarrator _kokoroNarrator;
+  BundledBibleAudioNarrator? _bundledNarrator;
+  BibleVisibleLocation? _spokenBundledLocation;
+  bool _showBundledSpeed = false;
+  _BibleLoopMode _bibleLoopMode = _BibleLoopMode.off;
+  BibleVisibleLocation? _bibleLoopTarget;
   int _narrationSession = 0;
   int? _narrationBlockId;
   bool _narrationRunning = false;
@@ -148,6 +159,13 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       onPlaybackComplete: _advanceNarration,
       onError: _narrationFailed,
     );
+    if (Platform.isIOS) {
+      _bundledNarrator = BundledBibleAudioNarrator(
+        onSegmentStart: _followBundledSegment,
+        onChapterComplete: _advanceBundledChapter,
+        onError: _narrationFailed,
+      );
+    }
     _pronunciationsReady = AppSettingsService.instance
         .loadRawSetting('narration_pronunciations_v1')
         .then((value) async {
@@ -194,12 +212,13 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       _speechTilt = SpeechTiltBinding(
         _macAutoScroll!,
         _tiltAutoScroll,
-        (rate) => unawaited(_kokoroNarrator.setLiveRate(rate)),
+        (rate) => unawaited(_bundledNarrator!.setRate(rate)),
       );
       _narrationMedia = BibleNarrationMediaControls(
         autoscroll: _macAutoScroll!,
         location: _liveVisibleLocation,
         bookNames: _bookNames,
+        chapterOnly: true,
         skip: (delta) => unawaited(_skipNarration(delta)),
       );
     }
@@ -315,7 +334,9 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                     valueListenable: _liveVisibleLocation,
                     builder: (context, liveLocation, _) {
                       final displayLocation = resolveBibleReaderLocation(
-                        visibleLocation: liveLocation,
+                        visibleLocation: _narrationRunning && Platform.isIOS
+                            ? (_spokenBundledLocation ?? liveLocation)
+                            : liveLocation,
                         fallbackLocation: BibleVisibleLocation(
                           blockId: _anchorBlockId!,
                           bookNumber: _bookNumber,
@@ -557,6 +578,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     _readerFocusNode.dispose();
     _liveVisibleLocation.dispose();
     _kokoroNarrator.dispose();
+    _bundledNarrator?.dispose();
     _locationPersistence.dispose();
     super.dispose();
   }
@@ -583,7 +605,12 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       setState(() => _lastAudioEnabled = controller.audioEnabled);
     }
     _updateAutoscrollPersistenceSuspension();
-    _syncKokoroNarration();
+    if (Platform.isIOS) {
+      unawaited(_bundledNarrator!.setRate(controller.speechRate));
+      unawaited(_syncBundledNarration());
+    } else {
+      _syncKokoroNarration();
+    }
     if (controller.statusRevision == _lastMacAutoscrollStatusRevision) return;
     _lastMacAutoscrollStatusRevision = controller.statusRevision;
     unawaited(
@@ -603,7 +630,13 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   }
 
   void _onLiveVerseChanged() {
-    if (!_narrationRunning) unawaited(_syncKokoroNarration());
+    if (!_narrationRunning) {
+      if (Platform.isIOS) {
+        unawaited(_syncBundledNarration());
+      } else {
+        unawaited(_syncKokoroNarration());
+      }
+    }
   }
 
   bool _narrationIsCurrent(int session) =>
@@ -619,6 +652,184 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('Speech stopped: $message')));
+  }
+
+  Future<void> _syncBundledNarration() async {
+    final controller = _macAutoScroll;
+    final narrator = _bundledNarrator;
+    if (controller == null || narrator == null) return;
+    debugPrint(
+      'Qwen reader sync mode=${controller.isNarrationMode} scrolling=${controller.isScrolling} running=$_narrationRunning location=${_liveVisibleLocation.value?.bookNumber}:${_liveVisibleLocation.value?.chapter}:${_liveVisibleLocation.value?.verse}',
+    );
+    if (!controller.isNarrationMode || !controller.isScrolling) {
+      if (_narrationRunning) {
+        _narrationRunning = false;
+        ++_narrationSession;
+        await narrator.pause();
+      }
+      return;
+    }
+    if (_narrationRunning) return;
+    // The header's resolved verse gives a pending explicit navigation priority
+    // until the viewport reaches it. Using the old centered verse first can
+    // start audio in the previous chapter while the header shows the new one.
+    final location =
+        _liveVisibleLocation.narrationStart ??
+        (_anchorBlockId == null
+            ? null
+            : BibleVisibleLocation(
+                blockId: _anchorBlockId!,
+                bookNumber: _bookNumber,
+                chapter: _chapter,
+                verse: _verse,
+              ));
+    if (location == null) {
+      debugPrint('Qwen reader has no visible verse; playback not started');
+      return;
+    }
+    _narrationRunning = true;
+    final session = ++_narrationSession;
+    _spokenBundledLocation = location;
+    try {
+      await narrator.setRate(controller.speechRate);
+      debugPrint(
+        'Qwen reader rate set; current=${_narrationIsCurrent(session)} session=$session',
+      );
+      if (!_narrationIsCurrent(session)) return;
+      final target = _bibleLoopTarget;
+      if (_bibleLoopMode != _BibleLoopMode.off &&
+          (target == null ||
+              target.bookNumber != location.bookNumber ||
+              (_bibleLoopMode != _BibleLoopMode.book &&
+                  target.chapter != location.chapter) ||
+              (_bibleLoopMode == _BibleLoopMode.verse &&
+                  target.verse != location.verse))) {
+        _bibleLoopTarget = location;
+      }
+      final current = narrator.current;
+      if (current?.book == location.bookNumber &&
+          current?.chapter == location.chapter) {
+        if (_bibleLoopMode == _BibleLoopMode.verse) {
+          await narrator.setLoopForCurrent(verse: _bibleLoopTarget!.verse);
+        } else if (_bibleLoopMode == _BibleLoopMode.chapter) {
+          await narrator.setLoopForCurrent(chapter: true);
+        }
+
+        if (current!.verseForPosition(narrator.position) != location.verse) {
+          await narrator.seekToVerse(location.verse);
+        }
+        await narrator.resume();
+      } else {
+        await narrator.playChapter(
+          location.bookNumber,
+          location.chapter,
+          startVerse: location.verse,
+          repeatVerse: _bibleLoopMode == _BibleLoopMode.verse
+              ? _bibleLoopTarget?.verse
+              : null,
+          repeatChapter: _bibleLoopMode == _BibleLoopMode.chapter,
+        );
+        debugPrint(
+          'Qwen reader started chapter ${location.bookNumber}:${location.chapter}',
+        );
+      }
+    } catch (error) {
+      debugPrint('Qwen reader failed: $error');
+      if (_narrationIsCurrent(session)) _narrationFailed(error.toString());
+    }
+  }
+
+  void _followBundledSegment(BundledChapter chapter, int firstVerse) {
+    final session = _narrationSession;
+    if (!_narrationRunning || !_narrationIsCurrent(session)) return;
+    if (_bookNumber == chapter.book &&
+        _chapter == chapter.chapter &&
+        _verse == firstVerse) {
+      return;
+    }
+    unawaited(() async {
+      final id = await StudyBibleDatabase.instance.loadBlockIdForVerse(
+        bookNumber: chapter.book,
+        chapter: chapter.chapter,
+        verse: firstVerse,
+      );
+      if (id != null && _narrationRunning && _narrationIsCurrent(session)) {
+        _spokenBundledLocation = BibleVisibleLocation(
+          blockId: id,
+          bookNumber: chapter.book,
+          chapter: chapter.chapter,
+          verse: firstVerse,
+        );
+        await _navigateToBlockId(id, recordHistory: false);
+      }
+    }());
+  }
+
+  void _advanceBundledChapter() {
+    if (!_narrationRunning || !mounted) return;
+    final narrator = _bundledNarrator;
+    final current = narrator?.current;
+    final target = _bibleLoopTarget;
+    if (narrator != null &&
+        current != null &&
+        target != null &&
+        current.book == target.bookNumber &&
+        current.chapter == target.chapter &&
+        (_bibleLoopMode == _BibleLoopMode.verse ||
+            _bibleLoopMode == _BibleLoopMode.chapter)) {
+      unawaited(
+        narrator.playChapter(
+          current.book,
+          current.chapter,
+          startVerse: _bibleLoopMode == _BibleLoopMode.verse ? target.verse : 1,
+          repeatVerse: _bibleLoopMode == _BibleLoopMode.verse
+              ? target.verse
+              : null,
+          repeatChapter: _bibleLoopMode == _BibleLoopMode.chapter,
+        ),
+      );
+      return;
+    }
+    unawaited(_moveBundledChapter(1));
+  }
+
+  Future<void> _moveBundledChapter(int direction) async {
+    final narrator = _bundledNarrator;
+    if (narrator == null) return;
+    final current = narrator.current;
+    final book = current?.book ?? _bookNumber;
+    final chapter = current?.chapter ?? _chapter;
+    try {
+      var next = await narrator.adjacentChapter(book, chapter, direction);
+      if (direction > 0 &&
+          _bibleLoopMode == _BibleLoopMode.book &&
+          _bibleLoopTarget?.bookNumber == book &&
+          next?.book != book) {
+        next = await narrator.chapter(book, 1);
+      }
+      if (next == null) {
+        _macAutoScroll?.stopForManualInteraction();
+        return;
+      }
+      final block = await StudyBibleDatabase.instance.loadBlockIdForVerse(
+        bookNumber: next.book,
+        chapter: next.chapter,
+        verse: 1,
+      );
+      if (block == null || !mounted) return;
+      await _navigateToBlockId(block, recordHistory: false);
+      if (!mounted) return;
+      await narrator.playChapter(
+        next.book,
+        next.chapter,
+        repeatChapter:
+            _bibleLoopMode == _BibleLoopMode.chapter &&
+            _bibleLoopTarget?.bookNumber == next.book &&
+            _bibleLoopTarget?.chapter == next.chapter,
+      );
+    } catch (error) {
+      _narrationFailed(error.toString());
+    }
   }
 
   Future<void> _syncKokoroNarration() async {
@@ -780,6 +991,10 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
 
   /// Lock screen next/previous: jumps narration by whole verses.
   Future<void> _skipNarration(int delta) async {
+    if (Platform.isIOS) {
+      await _moveBundledChapter(delta < 0 ? -1 : 1);
+      return;
+    }
     final current = _narrationBlockId;
     if (!_narrationRunning || current == null) return;
     final target = current + delta;
@@ -841,6 +1056,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     listenable: _macAutoScroll!,
     builder: (context, _) {
       final controller = _macAutoScroll!;
+      if (Platform.isIOS) return _bundledSpeechControls(controller);
       if (!controller.audioEnabled) {
         // The toolbar's autoscroll button prefers tilt settings on any
         // platform with a motion sensor (including iOS), so its long-press
@@ -908,6 +1124,188 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     },
   );
 
+  BibleVisibleLocation? _bundledHeaderLocation() {
+    final visible = _narrationRunning && Platform.isIOS
+        ? (_spokenBundledLocation ?? _liveVisibleLocation.value)
+        : _liveVisibleLocation.value;
+    if (visible != null) return visible;
+    final blockId = _anchorBlockId;
+    if (blockId == null) return null;
+    return BibleVisibleLocation(
+      blockId: blockId,
+      bookNumber: _bookNumber,
+      chapter: _chapter,
+      verse: _verse,
+    );
+  }
+
+  Future<void> _toggleBundledLoop() async {
+    final narrator = _bundledNarrator;
+    if (narrator == null) return;
+    if (_bibleLoopMode != _BibleLoopMode.off) {
+      setState(() {
+        _bibleLoopMode = _BibleLoopMode.off;
+        _bibleLoopTarget = null;
+      });
+      try {
+        await narrator.setLoopForCurrent();
+      } catch (error) {
+        _narrationFailed(error.toString());
+      }
+      return;
+    }
+    final target = _bundledHeaderLocation();
+    if (target == null) return;
+    final bookName =
+        _bookNames[target.bookNumber] ?? 'Book ${target.bookNumber}';
+    final choice = await showModalBottomSheet<_BibleLoopMode>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('Loop'),
+              subtitle: Text('$bookName ${target.chapter}:${target.verse}'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.repeat_one_rounded),
+              title: const Text('Verse'),
+              subtitle: Text('$bookName ${target.chapter}:${target.verse}'),
+              onTap: () => Navigator.of(sheetContext).pop(_BibleLoopMode.verse),
+            ),
+            ListTile(
+              leading: const Icon(Icons.repeat_rounded),
+              title: const Text('Chapter'),
+              subtitle: Text('$bookName ${target.chapter}'),
+              onTap: () =>
+                  Navigator.of(sheetContext).pop(_BibleLoopMode.chapter),
+            ),
+            ListTile(
+              leading: const Icon(Icons.menu_book_outlined),
+              title: const Text('Book'),
+              subtitle: Text(bookName),
+              onTap: () => Navigator.of(sheetContext).pop(_BibleLoopMode.book),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    setState(() {
+      _bibleLoopMode = choice;
+      _bibleLoopTarget = target;
+    });
+    final current = narrator.current;
+    if (current?.book != target.bookNumber ||
+        current?.chapter != target.chapter) {
+      return;
+    }
+    try {
+      await narrator.setLoopForCurrent(
+        verse: choice == _BibleLoopMode.verse ? target.verse : null,
+        chapter: choice == _BibleLoopMode.chapter,
+        restart: choice == _BibleLoopMode.verse,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _bibleLoopMode = _BibleLoopMode.off;
+        _bibleLoopTarget = null;
+      });
+      _narrationFailed(error.toString());
+    }
+  }
+
+  Widget _bundledSpeechControls(MacReaderAutoScrollController controller) {
+    if (!controller.audioEnabled) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          icon: const Icon(Icons.play_arrow),
+          label: const Text('Play recorded Bible'),
+          onPressed: () {
+            controller.updatePreferences(
+              MacAutoscrollPreferences(
+                baseSpeed: controller.baseSpeed,
+                lastNonzeroStep: controller.lastNonzeroStep,
+                maximumStep: controller.maximumStep,
+                statusBannerMode: controller.statusBannerMode,
+                audioEnabled: true,
+                announceChapter: controller.announceChapter,
+                announceVerseNumbers: controller.announceVerseNumbers,
+                speechRate: controller.speechRate,
+              ),
+            );
+            controller.setSignedStep(1);
+          },
+        ),
+      );
+    }
+    final narrator = _bundledNarrator!;
+    return ListenableBuilder(
+      listenable: narrator,
+      builder: (context, _) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                TextButton.icon(
+                  icon: Icon(
+                    controller.isScrolling ? Icons.pause : Icons.play_arrow,
+                  ),
+                  label: Text(controller.isScrolling ? 'Pause' : 'Play Bible'),
+                  onPressed: () =>
+                      controller.setSignedStep(controller.isScrolling ? 0 : 1),
+                  onLongPress: () =>
+                      setState(() => _showBundledSpeed = !_showBundledSpeed),
+                ),
+                const Spacer(),
+                IconButton(
+                  key: const ValueKey('bible-audio-loop'),
+                  tooltip: _bibleLoopMode == _BibleLoopMode.off
+                      ? 'Choose what to loop'
+                      : 'Turn off Bible loop',
+                  isSelected: _bibleLoopMode != _BibleLoopMode.off,
+                  style: IconButton.styleFrom(
+                    backgroundColor: _bibleLoopMode == _BibleLoopMode.off
+                        ? Theme.of(context).colorScheme.surfaceContainerHighest
+                        : Theme.of(context).colorScheme.primaryContainer,
+                    foregroundColor: _bibleLoopMode == _BibleLoopMode.off
+                        ? Theme.of(context).colorScheme.onSurface
+                        : Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                  icon: const Icon(Icons.repeat_rounded),
+                  selectedIcon: const Icon(Icons.repeat_on_rounded),
+                  onPressed: () => unawaited(_toggleBundledLoop()),
+                ),
+              ],
+            ),
+            if (_showBundledSpeed)
+              Row(
+                children: [
+                  const Text('Speed'),
+                  Expanded(
+                    child: Slider(
+                      key: const ValueKey('narration-speed'),
+                      value: controller.speechRate,
+                      min: 0.75,
+                      max: 1.5,
+                      divisions: 15,
+                      label: '${controller.speechRate.toStringAsFixed(2)}×',
+                      onChanged: controller.setSpeechRate,
+                    ),
+                  ),
+                  Text('${controller.speechRate.toStringAsFixed(2)}×'),
+                ],
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   void _toggleMacAutoscroll() {
     if (!_macAutoScroll!.isActive) {
       _tiltAutoScroll.stop(notify: false);
@@ -964,7 +1362,19 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   }
 
   Future<void> _loadTiltPreferences() async {
-    final preferences = await _tiltPreferencesStore.load();
+    var preferences = await _tiltPreferencesStore.load();
+    if (!mounted) return;
+    // Change the existing iPhone default once, without changing iPad or Mac
+    // behavior. A later explicit direction choice remains saved.
+    if (Platform.isIOS && MediaQuery.sizeOf(context).shortestSide < 600) {
+      final settings = await LocalSettingsStore.instance.load();
+      if (settings[_iphoneForwardTiltDefaultKey] != true) {
+        preferences = preferences.copyWith(reverseVerticalDirection: true);
+        settings[ReaderTiltPreferencesStore.storageKey] = preferences.toJson();
+        settings[_iphoneForwardTiltDefaultKey] = true;
+        await LocalSettingsStore.instance.save(settings);
+      }
+    }
     if (mounted) {
       _tiltAutoScroll.updatePreferences(preferences, showBanner: false);
     }

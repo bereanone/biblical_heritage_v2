@@ -8,9 +8,11 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 
 import '../../../core/audio/narration_diagnostics.dart';
+import '../../../core/audio/narration_lead.dart';
 import '../../../core/audio/narration_media_session.dart';
 import '../../../core/audio/speech_engine.dart';
 import 'bible_pronunciation_map.dart';
+import '../../../core/database/study_bible_database.dart';
 import 'kokoro_engine_host.dart';
 
 /// App-owned offline Kokoro reader. Its model is staged once from bundled
@@ -35,10 +37,17 @@ class KokoroMacTestNarrator {
   var _isPlaying = false;
   double _clipSpeed = 1;
   double? _liveRate;
+  double _rate = 1;
+
+  /// Synthesized speech not yet spoken. The synthesis governor reads it, via
+  /// the registry, to stop pacing before playback runs dry.
+  late final ClipLead _lead = ClipLead(playbackRate: () => _rate);
+  VoidCallback? _unregisterLead;
 
   Future<void> setLiveRate(double speed) async {
     if (_disposed || !Platform.isIOS) return;
     _liveRate = speed;
+    _rate = speed;
     if (_isPlaying) {
       await _players[_playerIndex].setPlaybackRate(speed / _clipSpeed);
     }
@@ -49,6 +58,11 @@ class KokoroMacTestNarrator {
     this.onPlaybackComplete,
     this.onError,
   }) {
+    // Null while nothing is playing, so an idle narrator never holds the
+    // governor open. While a clip is awaited its lead is zero.
+    _unregisterLead = NarrationLeadRegistry.instance.register(
+      () => _isPlaying ? _lead.duration : null,
+    );
     for (var index = 0; index < _players.length; index++) {
       _completionSubscriptions.add(
         _players[index].onPlayerComplete.listen((_) {
@@ -65,6 +79,7 @@ class KokoroMacTestNarrator {
   void _handlePlaybackComplete() {
     if (_disposed || !_isPlaying) return;
     unawaited(recordDiagnostic('complete $_activeVerseKey'));
+    _lead.stopped();
     _isPlaying = false;
     _activeVerseKey = null;
     onPlaybackComplete?.call();
@@ -135,7 +150,10 @@ class KokoroMacTestNarrator {
         'after ${_slowSpeakAfter.inSeconds} s',
       ),
     );
-    NarrationDiagnostics.log('speak begin key=$verseKey');
+    _rate = Platform.isIOS ? (_liveRate ?? speed) : 1;
+    NarrationDiagnostics.log(
+      'speak begin key=$verseKey lead=${_lead.describe()}',
+    );
     try {
       debugPrint('Native Kokoro speak $verseKey');
       if (voice != 'am_michael') throw ArgumentError.value(voice);
@@ -170,6 +188,7 @@ class KokoroMacTestNarrator {
         await player.setPlaybackRate(Platform.isIOS ? (_liveRate ?? speed) : 1);
         await player.play(DeviceFileSource(output.path));
       });
+      _lead.started(output.path);
       unawaited(recordDiagnostic('play $verseKey speed=$speed'));
       if (_disposed || generation != _generation) return;
       clock.enter('duration');
@@ -282,6 +301,15 @@ class KokoroMacTestNarrator {
   /// Current clip plus [prefetchAhead], with spares.
   int get _preparedCapacity => Platform.isIOS ? 16 : 3;
 
+  Future<void> _evict(Future<File> clip) async {
+    try {
+      _lead.forget((await clip).path);
+    } catch (_) {
+      /* The clip never rendered, so it was never lead. */
+    }
+    await _deleteQuietly(clip);
+  }
+
   static Future<void> _deleteQuietly(Future<File> file) async {
     try {
       // Unlinking a file the player still has open is safe on iOS and macOS.
@@ -307,8 +335,18 @@ class KokoroMacTestNarrator {
     final corrections = Map<String, String>.of(pronunciationCorrections);
     final deferred = Map<String, String>.of(deferredPronunciationCorrections);
     final map = await (_pronunciationMap ??= _loadPronunciationMap());
+    Map<String, Object?>? databaseEntry;
+    if (blockId != null && preferDictionary) {
+      try {
+        databaseEntry = await StudyBibleDatabase.instance.loadVersePronunciation(blockId);
+      } catch (error) {
+        debugPrint('Database pronunciation unavailable: $error');
+      }
+    }
     return map.prepare(
       text,
+      databaseText: databaseEntry?['plain_text'] as String?,
+      databasePronunciation: databaseEntry?['pronunciation'] as String?,
       blockId: blockId,
       corrections: corrections,
       deferredCorrections: deferred,
@@ -332,7 +370,7 @@ class KokoroMacTestNarrator {
       blockId: blockId,
       preferDictionary: preferDictionary,
     );
-    return _generateClip(spoken, synthesisSpeedFor(speed));
+    return _generateClip(spoken, synthesisSpeedFor(speed), trackLead: false);
   }
 
   Future<File> prepare({
@@ -365,7 +403,7 @@ class KokoroMacTestNarrator {
     // so its file goes too, or a long locked-screen session would fill the
     // temp directory at about 170 MB per hour of speech.
     if (_prepared.length >= _preparedCapacity) {
-      unawaited(_deleteQuietly(_prepared.remove(_prepared.keys.first)!));
+      unawaited(_evict(_prepared.remove(_prepared.keys.first)!));
     }
     final result = _generateClip(spoken, synthesisSpeed);
     _prepared[key] = result;
@@ -383,7 +421,11 @@ class KokoroMacTestNarrator {
     return result;
   }
 
-  Future<File> _generateClip(String text, double speed) async {
+  Future<File> _generateClip(
+    String text,
+    double speed, {
+    bool trackLead = true,
+  }) async {
     // While something is audible iOS keeps the app running; otherwise this is
     // the silent stretch that needs borrowed background time.
     final releaseBackgroundTime = _isPlaying
@@ -399,6 +441,11 @@ class KokoroMacTestNarrator {
         await _writeWave(output, audio);
       } catch (error) {
         throw SpeechEngineException('Could not write the audio file: $error');
+      }
+      // Clips rendered for someone else to play (see [renderClip]) are not
+      // this narrator's lead.
+      if (trackLead) {
+        _lead.ready(output.path, audio.samples.length / audio.sampleRate);
       }
       return output;
     } finally {
@@ -427,11 +474,14 @@ class KokoroMacTestNarrator {
     ++_generation;
     _activeVerseKey = null;
     _isPlaying = false;
+    _lead.stopped();
     await Future.wait(_players.map((player) => player.stop()));
   }
 
   void dispose() {
     _disposed = true;
+    _unregisterLead?.call();
+    _unregisterLead = null;
     ++_generation;
     if (_holdsLease) {
       _holdsLease = false;

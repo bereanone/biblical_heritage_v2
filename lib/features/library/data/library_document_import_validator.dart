@@ -29,6 +29,7 @@ class LibraryDocumentImportValidator {
   LibraryDocumentValidationResult validate({
     required List<Map<String, Object?>> sections,
     required List<Map<String, Object?>> blocks,
+    List<Map<String, Object?>> navigation = const <Map<String, Object?>>[],
     Directory? imageAssetRoot,
   }) {
     final reasons = <String>[];
@@ -90,6 +91,22 @@ class LibraryDocumentImportValidator {
       );
     }
 
+    for (final row in ordered) {
+      final formatted = LibraryFormattedContent.fromJson(
+        row['formatted_content']?.toString(),
+      );
+      if (!libraryFormattedTextMatchesPlain(
+        plainText: row['plain_text']?.toString() ?? '',
+        nodes: formatted.nodes,
+      )) {
+        reasons.add(
+          'Formatted reading text does not preserve the source word boundaries '
+          'at block ${row['display_order']}.',
+        );
+        break;
+      }
+    }
+
     if (imageAssetRoot != null) {
       for (final row in ordered) {
         final type = libraryDocumentBlockTypeFromStorage(
@@ -113,6 +130,17 @@ class LibraryDocumentImportValidator {
           reasons.add('Referenced image asset is unavailable: $source');
         }
       }
+    }
+
+    final unresolvedNavigation = navigation.where(
+      (row) => (row['target_block_id']?.toString().trim() ?? '').isEmpty,
+    );
+    if (unresolvedNavigation.isNotEmpty) {
+      final first = unresolvedNavigation.first;
+      reasons.add(
+        'Authored Contents destination is unavailable: '
+        '${first['label'] ?? first['source_href'] ?? 'unknown destination'}',
+      );
     }
 
     return LibraryDocumentValidationResult(

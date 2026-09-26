@@ -12,6 +12,9 @@ import UIKit
 /// mirrors what Dart tells it ("updateNowPlaying", "setBuffering").
 final class NarrationMediaBridge: NSObject {
   private let channel: FlutterMethodChannel
+  /// Read-only telemetry for the Dart synthesis probe (`NarrationTelemetry`).
+  private var recordedAudio: RecordedBibleAudioBridge?
+  private let probeChannel: FlutterMethodChannel
   private var active = false
   private var commandTargets: [(MPRemoteCommand, Any)] = []
   private var observers: [NSObjectProtocol] = []
@@ -22,7 +25,20 @@ final class NarrationMediaBridge: NSObject {
       name: "studybible/narration_media",
       binaryMessenger: registrar.messenger()
     )
+    probeChannel = FlutterMethodChannel(
+      name: "studybible/narration_probe",
+      binaryMessenger: registrar.messenger()
+    )
     super.init()
+    recordedAudio = RecordedBibleAudioBridge(registrar: registrar)
+    probeChannel.setMethodCallHandler { call, result in
+      guard call.method == "sample" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let threads = (call.arguments as? [String: Any])?["threads"] as? Bool ?? false
+      result(NarrationTelemetry.snapshot(threads: threads))
+    }
     // Playback ignores the ringer switch and (with the "audio" background
     // mode) survives screen lock. spokenAudio lets other spoken audio, such as
     // a navigation prompt, pause us instead of talking over us. No
@@ -261,6 +277,7 @@ final class NarrationMediaBridge: NSObject {
 
   private func startCPUSampling() {
     stopCPUSampling()
+    NarrationTelemetry.startMonitoring { [weak self] in self?.report($0) }
     cpuSamples = [(Date(), processCPUSeconds())]
     cpuTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
       self?.sampleCPU()
@@ -271,6 +288,7 @@ final class NarrationMediaBridge: NSObject {
     cpuTimer?.invalidate()
     cpuTimer = nil
     cpuSamples.removeAll()
+    NarrationTelemetry.stopMonitoring()
   }
 
   private func sampleCPU() {
@@ -292,17 +310,10 @@ final class NarrationMediaBridge: NSObject {
     report(
       "cpu \(percent(since: cpuSamples[cpuSamples.count - 2]))% last 15s, "
         + "\(percent(since: cpuSamples[0]))% over \(Int(now.wall.timeIntervalSince(cpuSamples[0].wall)))s, "
-        + "app=\(state) thermal=\(ProcessInfo.processInfo.thermalState.rawValue)")
+        + "app=\(state) \(NarrationTelemetry.stateSummary())")
   }
 
-  private func processCPUSeconds() -> Double {
-    var usage = rusage()
-    getrusage(RUSAGE_SELF, &usage)
-    func seconds(_ value: timeval) -> Double {
-      Double(value.tv_sec) + Double(value.tv_usec) / 1_000_000
-    }
-    return seconds(usage.ru_utime) + seconds(usage.ru_stime)
-  }
+  private func processCPUSeconds() -> Double { NarrationTelemetry.processCPUSeconds() }
 
   // MARK: Background time
 
@@ -319,13 +330,24 @@ final class NarrationMediaBridge: NSObject {
       backgroundTask = UIApplication.shared.beginBackgroundTask(
         withName: "narration-synthesis"
       ) { [weak self] in
-        self?.report("background task expired")
+        self?.report("background task expired remaining=\(Self.remainingText())")
         self?.endBackgroundTask()
       }
-      if backgroundTask == .invalid { report("beginBackgroundTask refused") }
+      if backgroundTask == .invalid {
+        report("beginBackgroundTask refused")
+      } else {
+        report("background task started remaining=\(Self.remainingText())")
+      }
     } else {
       endBackgroundTask()
     }
+  }
+
+  /// Seconds iOS says are left before it suspends the app, or "unlimited"
+  /// while the app is in the foreground.
+  private static func remainingText() -> String {
+    let remaining = UIApplication.shared.backgroundTimeRemaining
+    return remaining > 1_000_000 ? "unlimited" : String(format: "%.1fs", remaining)
   }
 
   private func holdForCommand() {
@@ -341,5 +363,416 @@ final class NarrationMediaBridge: NSObject {
     guard backgroundTask != .invalid else { return }
     UIApplication.shared.endBackgroundTask(backgroundTask)
     backgroundTask = .invalid
+  }
+}
+
+
+final class RecordedBibleAudioBridge: NSObject {
+  private let channel: FlutterMethodChannel
+  private let engine: AVAudioEngine
+  private let playerNode: AVAudioPlayerNode
+  private let timePitch: AVAudioUnitTimePitch
+  private var audioFile: AVAudioFile?
+  private var savedFrame: Int64 = 0
+  private var lastReportedFrame: Int64 = 0
+  private var playing = false
+  private var generation = 0
+  private var rate: Double = 1.0
+  private var pitchSemitones: Double = 0.0
+  private var loopStartFrame: Int64?
+  private var loopEndFrame: Int64?
+  private var mixerTapInstalled = false
+  private var mixerTapBuffers = 0
+  private var mixerRmsDb: Double = -999
+  private var routeObservers: [NSObjectProtocol] = []
+  private var pendingRouteRebuild: DispatchWorkItem?
+  private var connectedRoute = ""
+  private var needsGraphRebuild = false
+  private var interrupted = false
+
+  init(registrar: FlutterPluginRegistrar) {
+    channel = FlutterMethodChannel(name: "studybible/recorded_audio", binaryMessenger: registrar.messenger())
+    engine = AVAudioEngine()
+    playerNode = AVAudioPlayerNode()
+    timePitch = AVAudioUnitTimePitch()
+    super.init()
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else { result(nil); return }
+      self.onMethodCall(call, result: result)
+    }
+    engine.attach(playerNode)
+    engine.attach(timePitch)
+    let center = NotificationCenter.default
+    routeObservers.append(center.addObserver(
+      forName: AVAudioSession.routeChangeNotification,
+      object: AVAudioSession.sharedInstance(), queue: .main
+    ) { [weak self] note in self?.handleRouteChange(note) })
+    routeObservers.append(center.addObserver(
+      forName: .AVAudioEngineConfigurationChange,
+      object: engine, queue: .main
+    ) { [weak self] _ in self?.handleEngineConfigurationChange() })
+    routeObservers.append(center.addObserver(
+      forName: AVAudioSession.interruptionNotification,
+      object: AVAudioSession.sharedInstance(), queue: .main
+    ) { [weak self] note in self?.handleInterruption(note) })
+  }
+
+  deinit {
+    pendingRouteRebuild?.cancel()
+    for observer in routeObservers { NotificationCenter.default.removeObserver(observer) }
+    engine.stop()
+  }
+
+  private func routeSignature() -> String {
+    let session = AVAudioSession.sharedInstance()
+    let outputs = session.currentRoute.outputs.map { "\($0.portType.rawValue):\($0.uid)" }
+      .joined(separator: ",")
+    return "\(outputs):\(session.sampleRate)"
+  }
+
+  private func handleRouteChange(_ note: Notification) {
+    guard let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt else { return }
+    let reason = AVAudioSession.RouteChangeReason(rawValue: raw)
+    if reason != .oldDeviceUnavailable &&
+       routeSignature() == connectedRoute && engine.isRunning {
+      return
+    }
+    needsGraphRebuild = true
+    if reason == .oldDeviceUnavailable {
+      // A disconnected headset must not make narration burst from the speaker.
+      if playing { try? handlePause(result: { _ in }) }
+      return
+    }
+    scheduleRouteRebuild()
+  }
+
+  private func handleEngineConfigurationChange() {
+    guard playing else {
+      needsGraphRebuild = true
+      return
+    }
+    if connectedRoute != routeSignature() || !engine.isRunning {
+      needsGraphRebuild = true
+      scheduleRouteRebuild()
+    }
+  }
+
+  private func handleInterruption(_ note: Notification) {
+    guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+          let kind = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+    if kind == .began {
+      interrupted = true
+      needsGraphRebuild = true
+      if playing { try? handlePause(result: { _ in }) }
+    } else if kind == .ended {
+      interrupted = false
+      needsGraphRebuild = true
+      // The Dart media lease decides whether interruption playback resumes.
+    }
+  }
+
+  private func scheduleRouteRebuild() {
+    pendingRouteRebuild?.cancel()
+    let work = DispatchWorkItem { [weak self] in self?.restoreAfterRouteChange() }
+    pendingRouteRebuild = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+  }
+
+  private func restoreAfterRouteChange() {
+    pendingRouteRebuild = nil
+    guard let file = audioFile, needsGraphRebuild else { return }
+    let wasPlaying = playing
+    let frame = max(lastReportedFrame, currentFrame())
+    generation += 1
+    playing = false
+    playerNode.stop()
+    savedFrame = min(frame, file.length)
+    lastReportedFrame = savedFrame
+    connectGraph(file)
+    if wasPlaying && !interrupted {
+      do {
+        try handlePlay(result: { _ in })
+      } catch {
+        channel.invokeMethod("error", arguments: "Audio route restart failed: \(error.localizedDescription)")
+      }
+    }
+  }
+
+  private func onMethodCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      do {
+        switch call.method {
+        case "load":
+          try self.handleLoad(call: call, result: result)
+        case "play":
+          try self.handlePlay(result: result)
+        case "pause":
+          try self.handlePause(result: result)
+        case "seek":
+          try self.handleSeek(call: call, result: result)
+        case "stop":
+          self.handleStop(result: result)
+        case "setRate":
+          try self.handleSetRate(call: call, result: result)
+        case "setPitch":
+          try self.handleSetPitch(call: call, result: result)
+        case "setLoopRange":
+          try self.handleSetLoopRange(call: call, result: result)
+        case "state":
+          result(self.handleState())
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      } catch {
+        result(FlutterError(code: "ERROR", message: error.localizedDescription, details: nil))
+      }
+    }
+  }
+
+  private func handleLoad(call: FlutterMethodCall, result: FlutterResult) throws {
+    guard let args = call.arguments as? [String: Any],
+          let path = args["path"] as? String
+    else { throw NSError(domain: "InvalidArgs", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid path"]) }
+
+    let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
+    guard file.length > 0 else { throw NSError(domain:"RecordedAudio",code:3,userInfo:[NSLocalizedDescriptionKey:"Empty recording"]) }
+    pendingRouteRebuild?.cancel()
+    pendingRouteRebuild = nil
+    stopPrior()
+    connectGraph(file)
+    audioFile = file
+    savedFrame = 0
+    lastReportedFrame = 0
+    loopStartFrame = nil
+    loopEndFrame = nil
+    result(nil)
+  }
+
+  private func connectGraph(_ file: AVAudioFile) {
+    engine.stop()
+    if mixerTapInstalled {
+      engine.mainMixerNode.removeTap(onBus: 0)
+      mixerTapInstalled = false
+    }
+    engine.disconnectNodeOutput(playerNode)
+    engine.disconnectNodeOutput(timePitch)
+    engine.connect(playerNode, to: timePitch, format: file.processingFormat)
+    engine.connect(timePitch, to: engine.mainMixerNode, format: file.processingFormat)
+    mixerRmsDb = -999
+    mixerTapBuffers = 0
+    engine.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
+      guard let self = self, let channels = buffer.floatChannelData else { return }
+      self.mixerTapBuffers += 1
+      guard self.mixerTapBuffers % 50 == 0 else { return }
+      let frames = Int(buffer.frameLength)
+      let channelCount = Int(buffer.format.channelCount)
+      guard frames > 0 && channelCount > 0 else { return }
+      var power = 0.0
+      for channel in 0..<channelCount {
+        for index in 0..<frames {
+          let sample = Double(channels[channel][index])
+          power += sample * sample
+        }
+      }
+      let rms = sqrt(power / Double(frames * channelCount))
+      let decibels = 20 * log10(max(rms, 1e-9))
+      DispatchQueue.main.async { [weak self] in self?.mixerRmsDb = decibels }
+    }
+    mixerTapInstalled = true
+    connectedRoute = routeSignature()
+    needsGraphRebuild = false
+  }
+
+  private func handlePlay(result: FlutterResult) throws {
+    if playing { result(nil); return }
+    guard let file = audioFile else { throw NSError(domain: "NoFile", code: 2, userInfo: [NSLocalizedDescriptionKey: "No file loaded"]) }
+    let endFrame = min(loopEndFrame ?? file.length, file.length)
+    if savedFrame >= endFrame { savedFrame = loopStartFrame ?? 0 }
+    let remaining = endFrame - savedFrame
+    guard remaining > 0 && remaining <= Int64(UInt32.max) else { throw NSError(domain:"RecordedAudio",code:4,userInfo:[NSLocalizedDescriptionKey:"Invalid recording length"]) }
+    let session = AVAudioSession.sharedInstance()
+    try session.setCategory(.playback, mode: .spokenAudio, options: [])
+    try session.setActive(true)
+    if needsGraphRebuild || connectedRoute != routeSignature() {
+      connectGraph(file)
+    }
+    generation += 1
+    playerNode.stop()
+
+    let gen = generation
+    playerNode.scheduleSegment(file, startingFrame: AVAudioFramePosition(savedFrame), frameCount: AVAudioFrameCount(remaining), at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+      DispatchQueue.main.async { [weak self] in
+        guard let self = self, self.generation == gen, self.playing else { return }
+        self.savedFrame = endFrame
+        self.lastReportedFrame = endFrame
+        self.playing = false
+        self.engine.pause()
+        if let loopStart = self.loopStartFrame, self.loopEndFrame != nil {
+          self.savedFrame = loopStart
+          self.lastReportedFrame = loopStart
+          do {
+            try self.handlePlay(result: { _ in })
+            self.channel.invokeMethod("looped", arguments: nil)
+          } catch {
+            self.channel.invokeMethod("error", arguments: "Repeat failed: \(error.localizedDescription)")
+          }
+        } else {
+          self.channel.invokeMethod("complete", arguments: nil)
+        }
+      }
+    }
+
+    engine.prepare()
+    try engine.start()
+    playerNode.play()
+    playing = true
+    result(nil)
+  }
+
+  private func handlePause(result: FlutterResult) throws {
+    guard playing else { result(nil); return }
+    savedFrame = currentFrame()
+    lastReportedFrame = savedFrame
+    generation += 1
+    playerNode.stop()
+    engine.pause()
+    playing = false
+    result(nil)
+  }
+
+  private func handleSeek(call: FlutterMethodCall, result: FlutterResult) throws {
+    guard let args = call.arguments as? [String: Any],
+          let seconds = args["seconds"] as? Double,
+          seconds.isFinite, seconds >= 0,
+          let file = audioFile
+    else { throw NSError(domain: "InvalidArgs", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid seconds"]) }
+
+    let wasPlaying = playing
+    if wasPlaying { try handlePause(result: { _ in }) }
+
+    let duration = Double(file.length) / file.processingFormat.sampleRate
+    let targetFrame = Int64(min(seconds, duration) * file.processingFormat.sampleRate)
+    savedFrame = max(0, targetFrame)
+    lastReportedFrame = savedFrame
+
+    if wasPlaying && savedFrame < file.length { try handlePlay(result: { _ in }) }
+    result(nil)
+  }
+
+  private func handleStop(result: FlutterResult) {
+    pendingRouteRebuild?.cancel()
+    pendingRouteRebuild = nil
+    generation += 1
+    playerNode.stop()
+    engine.stop()
+    audioFile = nil
+    savedFrame = 0
+    lastReportedFrame = 0
+    playing = false
+    loopStartFrame = nil
+    loopEndFrame = nil
+    result(nil)
+  }
+
+  private func handleSetRate(call: FlutterMethodCall, result: FlutterResult) throws {
+    guard let args = call.arguments as? [String: Any],
+          let r = args["rate"] as? Double,
+          r.isFinite, r >= 0.5, r <= 2.0
+    else { throw NSError(domain: "InvalidArgs", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid rate"]) }
+
+    rate = r
+    timePitch.rate = Float(r)
+    result(nil)
+  }
+
+  private func handleSetPitch(call: FlutterMethodCall, result: FlutterResult) throws {
+    guard let args = call.arguments as? [String: Any],
+          let p = args["pitch"] as? Double,
+          p.isFinite, p >= -6, p <= 6
+    else { throw NSError(domain: "InvalidArgs", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid pitch"]) }
+
+    pitchSemitones = p
+    timePitch.pitch = Float(p * 100)
+    result(nil)
+  }
+
+  private func handleSetLoopRange(call: FlutterMethodCall, result: FlutterResult) throws {
+    guard let file = audioFile else {
+      throw NSError(domain: "NoFile", code: 2, userInfo: [NSLocalizedDescriptionKey: "No file loaded"])
+    }
+    let args = call.arguments as? [String: Any] ?? [:]
+    let restart = args["restart"] as? Bool ?? false
+    let sampleRate = file.processingFormat.sampleRate
+    let oldEnd = loopEndFrame ?? file.length
+    var newStart: Int64?
+    var newEnd: Int64?
+    if let start = args["startSeconds"] as? Double,
+       let end = args["endSeconds"] as? Double {
+      guard start.isFinite, end.isFinite, start >= 0, end > start,
+            end <= Double(file.length) / sampleRate + 0.05 else {
+        throw NSError(domain: "InvalidArgs", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid repeat range"])
+      }
+      newStart = max(0, Int64(start * sampleRate))
+      newEnd = min(file.length, Int64(end * sampleRate))
+      guard newEnd! > newStart! else {
+        throw NSError(domain: "InvalidArgs", code: 1, userInfo: [NSLocalizedDescriptionKey: "Empty repeat range"])
+      }
+    }
+    let wasPlaying = playing
+    let position = currentFrame()
+    let mustReschedule = wasPlaying && (restart || oldEnd != (newEnd ?? file.length))
+    if mustReschedule { try handlePause(result: { _ in }) }
+    loopStartFrame = newStart
+    loopEndFrame = newEnd
+    if restart, let start = newStart {
+      savedFrame = start
+    } else if mustReschedule {
+      savedFrame = position
+    }
+    if let end = newEnd, savedFrame >= end {
+      savedFrame = newStart ?? 0
+    }
+    lastReportedFrame = savedFrame
+    if mustReschedule { try handlePlay(result: { _ in }) }
+    result(nil)
+  }
+
+  private func handleState() -> [String: Any] {
+    let file = audioFile
+    let duration = file.map { Double($0.length) / $0.processingFormat.sampleRate } ?? 0
+    let frame = currentFrame()
+    if playing { lastReportedFrame = frame }
+    let position = Double(frame) / (file?.processingFormat.sampleRate ?? 1)
+    let session = AVAudioSession.sharedInstance()
+    return [
+      "duration": duration,
+      "position": position,
+      "playing": playing,
+      "rate": rate,
+      "pitchSemitones": pitchSemitones,
+      "engineRunning": engine.isRunning,
+      "nodePlaying": playerNode.isPlaying,
+      "nodeVolume": playerNode.volume,
+      "mixerVolume": engine.mainMixerNode.outputVolume,
+      "systemOutputVolume": session.outputVolume,
+      "audioCategory": session.category.rawValue,
+      "audioRoute": session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","),
+      "mixerRmsDb": mixerRmsDb
+    ]
+  }
+
+  private func currentFrame() -> Int64 {
+    guard let file = audioFile else { return 0 }
+    guard playing, let time = playerNode.lastRenderTime,
+      let played = playerNode.playerTime(forNodeTime: time) else { return savedFrame }
+    return min(file.length, savedFrame + max(0, played.sampleTime))
+  }
+
+  private func stopPrior() {
+    generation += 1
+    playing = false
+    playerNode.stop()
+    engine.stop()
   }
 }

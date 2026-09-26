@@ -213,7 +213,6 @@ class _TagPlaybackPanelState extends State<TagPlaybackPanel> {
   }
 
   Widget _toggles(ThemeData theme) {
-    final style = TagDialogStyles.bodyTextStyle(theme, widget.fontScale);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Wrap(
@@ -221,12 +220,21 @@ class _TagPlaybackPanelState extends State<TagPlaybackPanel> {
         crossAxisAlignment: WrapCrossAlignment.center,
         spacing: 8,
         children: [
-          FilterChip(
+          IconButton(
             key: const Key('tag_playback_loop'),
-            avatar: const Icon(Icons.repeat_rounded, size: 18),
-            label: Text('Loop', style: style),
-            selected: _c.loop,
-            onSelected: _c.setLoop,
+            tooltip: _c.loop ? 'Loop on: repeat the tag' : 'Loop off: play once',
+            isSelected: _c.loop,
+            style: IconButton.styleFrom(
+              backgroundColor: _c.loop
+                  ? theme.colorScheme.primaryContainer
+                  : theme.colorScheme.surfaceContainerHighest,
+              foregroundColor: _c.loop
+                  ? theme.colorScheme.onPrimaryContainer
+                  : theme.colorScheme.onSurface,
+            ),
+            icon: const Icon(Icons.repeat_rounded),
+            selectedIcon: const Icon(Icons.repeat_on_rounded),
+            onPressed: () => _c.setLoop(!_c.loop),
           ),
           IconButton(
             key: const Key('tag_playback_settings'),

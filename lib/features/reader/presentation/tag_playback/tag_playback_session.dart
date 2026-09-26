@@ -10,6 +10,7 @@ import 'tag_playback_kokoro_adapters.dart';
 import 'tag_playback_media_binding.dart';
 import 'tag_playback_planner.dart';
 import 'tag_playback_settings.dart';
+import 'tag_note_audio_cache.dart';
 
 /// Everything one open playback popup owns: the controller and, behind it,
 /// the narrator (and its lease on the shared Kokoro engine) and the players.
@@ -56,6 +57,15 @@ class TagPlaybackSession {
         verse: verse,
       ),
     ).plan(entries);
+    // Older notes may predate the persistent cache. Prepare a bounded lead
+    // from this tag only; opening the popup never waits for local synthesis.
+    for (final item in items.take(6)) {
+      if (item.noteClips.isEmpty) continue;
+      TagNoteAudioCache.instance.scheduleNoteText(
+        item.noteClips.map((clip) => clip.body).join('\n'),
+        entryKey: 'existing:$tag:${item.entryId}',
+      );
+    }
 
     final store = settingsStore ?? AppTagPlaybackSettingsStore();
     final playback = await store.load();

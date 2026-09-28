@@ -80,6 +80,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
           verse: targetVerse,
         ),
       );
+      unawaited(_adoptNativeWatchPlayback());
     } catch (error) {
       if (!mounted) return;
       setState(() {

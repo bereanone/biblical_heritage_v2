@@ -28,6 +28,8 @@ import 'bible_memory_screen.dart';
 import 'bible_narration_media_controls.dart';
 import 'bible_loop_announcement_settings.dart';
 import 'bible_loop_picker.dart';
+import 'bible_playback_skip.dart';
+import 'bible_watch_remote.dart';
 import 'bundled_bible_audio_narrator.dart';
 import 'bible_visible_location_controller.dart';
 import 'kokoro_mac_test_narrator.dart';
@@ -143,6 +145,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   BundledBibleAudioNarrator? _bundledNarrator;
   BibleVisibleLocation? _spokenBundledLocation;
   bool _showBundledSpeed = false;
+  bool _bundledSkipInProgress = false;
   _BibleLoopMode _bibleLoopMode = _BibleLoopMode.off;
   _BibleLoopMode _lastBibleLoopMode = _BibleLoopMode.chapter;
   BibleVisibleLocation? _bibleLoopTarget;
@@ -154,6 +157,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   int _narrationSession = 0;
   int? _narrationBlockId;
   bool _narrationRunning = false;
+  bool _watchPlaybackReady = false;
   bool _narrationPrimed = false;
   bool _lastAudioEnabled = false;
   late final Future<void> _pronunciationsReady;
@@ -162,6 +166,9 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   bool _wasTiltAutoScrollActive = false;
   SpeechTiltBinding? _speechTilt;
   BibleNarrationMediaControls? _narrationMedia;
+  final BibleWatchRemote _watchRemote = BibleWatchRemote.instance;
+  Map<String, Object?>? _nativeWatchPlayback;
+  bool _watchHandoffInProgress = false;
 
   @override
   void initState() {
@@ -240,6 +247,19 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         bookNames: _bookNames,
         chapterOnly: true,
         skip: (delta) => unawaited(_skipNarration(delta)),
+      );
+    }
+    if (Platform.isIOS) {
+      unawaited(
+        _watchRemote.attach(_handleWatchCommand).then((state) {
+          if (!mounted) return;
+          if (state?['nativePlayback'] == true) {
+            _nativeWatchPlayback = state;
+            unawaited(_adoptNativeWatchPlayback());
+          } else {
+            _publishWatchState();
+          }
+        }),
       );
     }
     _loadTiltPreferences();
@@ -588,6 +608,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
 
   @override
   void dispose() {
+    unawaited(_watchRemote.detach());
     WidgetsBinding.instance.removeObserver(this);
     _speechTilt?.dispose();
     _narrationMedia?.dispose();
@@ -623,6 +644,8 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   void _onMacAutoscrollChanged() {
     final controller = _macAutoScroll;
     if (!mounted || controller == null) return;
+    if (!controller.isScrolling) _watchPlaybackReady = false;
+    _publishWatchState();
     if (_lastAudioEnabled != controller.audioEnabled) {
       setState(() => _lastAudioEnabled = controller.audioEnabled);
     }
@@ -652,6 +675,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   }
 
   void _onLiveVerseChanged() {
+    _publishWatchState();
     if (!_narrationRunning) {
       if (_usesBundledBibleAudio) {
         unawaited(_syncBundledNarration());
@@ -677,6 +701,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   }
 
   Future<void> _syncBundledNarration() async {
+    if (_bundledSkipInProgress) return;
     final controller = _macAutoScroll;
     final narrator = _bundledNarrator;
     if (controller == null || narrator == null) return;
@@ -684,6 +709,8 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       'Qwen reader sync mode=${controller.isNarrationMode} scrolling=${controller.isScrolling} running=$_narrationRunning location=${_liveVisibleLocation.value?.bookNumber}:${_liveVisibleLocation.value?.chapter}:${_liveVisibleLocation.value?.verse}',
     );
     if (!controller.isNarrationMode || !controller.isScrolling) {
+      _watchPlaybackReady = false;
+      _publishWatchState();
       if (_narrationRunning) {
         _narrationRunning = false;
         ++_narrationSession;
@@ -692,6 +719,8 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       return;
     }
     if (_narrationRunning) return;
+    _watchPlaybackReady = false;
+    _publishWatchState();
     // The header's resolved verse gives a pending explicit navigation priority
     // until the viewport reaches it. Using the old centered verse first can
     // start audio in the previous chapter while the header shows the new one.
@@ -760,13 +789,20 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
           'Qwen reader started chapter ${location.bookNumber}:${location.chapter}',
         );
       }
+      if (_narrationIsCurrent(session)) {
+        _watchPlaybackReady = true;
+        _publishWatchState();
+      }
     } catch (error) {
+      _watchPlaybackReady = false;
+      _publishWatchState();
       debugPrint('Qwen reader failed: $error');
       if (_narrationIsCurrent(session)) _narrationFailed(error.toString());
     }
   }
 
   void _followBundledSegment(BundledChapter chapter, int firstVerse) {
+    if (_bundledSkipInProgress) return;
     final session = _narrationSession;
     if (!_narrationRunning || !_narrationIsCurrent(session)) return;
     if (_bookNumber == chapter.book &&
@@ -780,7 +816,10 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         chapter: chapter.chapter,
         verse: firstVerse,
       );
-      if (id != null && _narrationRunning && _narrationIsCurrent(session)) {
+      if (id != null &&
+          !_bundledSkipInProgress &&
+          _narrationRunning &&
+          _narrationIsCurrent(session)) {
         _spokenBundledLocation = BibleVisibleLocation(
           blockId: id,
           bookNumber: chapter.book,
@@ -793,6 +832,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   }
 
   void _advanceBundledChapter() {
+    if (_bundledSkipInProgress) return;
     if (!_narrationRunning || !mounted) return;
     final narrator = _bundledNarrator;
     final current = narrator?.current;
@@ -822,6 +862,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   }
 
   Future<void> _moveBundledChapter(int direction) async {
+    final session = _narrationSession;
     final narrator = _bundledNarrator;
     if (narrator == null) return;
     final current = narrator.current;
@@ -847,9 +888,16 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         chapter: next.chapter,
         verse: 1,
       );
-      if (block == null || !mounted) return;
+      if (block == null ||
+          !mounted ||
+          _bundledSkipInProgress ||
+          session != _narrationSession) {
+        return;
+      }
       await _navigateToBlockId(block, recordHistory: false);
-      if (!mounted) return;
+      if (!mounted || _bundledSkipInProgress || session != _narrationSession) {
+        return;
+      }
       await narrator.playChapter(
         next.book,
         next.chapter,
@@ -1171,6 +1219,211 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     );
   }
 
+  Future<void> _publishWatchState() async {
+    if (!Platform.isIOS || !mounted) return;
+    final location = _bundledHeaderLocation();
+    if (location == null) return;
+    final book =
+        _bookNames[location.bookNumber] ?? 'Book ${location.bookNumber}';
+    await _watchRemote.publish(
+      book: location.bookNumber,
+      chapter: location.chapter,
+      verse: location.verse,
+      title: '$book ${location.chapter}:${location.verse}',
+      loop: _bibleLoopMode.name,
+      lastLoop: _lastBibleLoopMode.name,
+      playing: (_macAutoScroll?.isScrolling ?? false) && _watchPlaybackReady,
+      pending: (_macAutoScroll?.isScrolling ?? false) && !_watchPlaybackReady,
+      loopTargetBook: (_bibleLoopTarget ?? location).bookNumber,
+      loopTargetChapter: (_bibleLoopTarget ?? location).chapter,
+      loopTargetVerse: (_bibleLoopTarget ?? location).verse,
+    );
+  }
+
+  /// The native Watch fallback owns the recording until the reader is ready
+  /// at the same verse. Stop that player before starting Dart playback so the
+  /// two engines never speak over each other.
+  Future<void> _adoptNativeWatchPlayback() async {
+    final snapshot = _nativeWatchPlayback;
+    if (!mounted ||
+        !_viewerReady ||
+        snapshot == null ||
+        _watchHandoffInProgress) {
+      return;
+    }
+    _watchHandoffInProgress = true;
+    try {
+      final book = snapshot['book'] as int?;
+      final chapter = snapshot['chapter'] as int?;
+      final verse = snapshot['verse'] as int?;
+      if (book == null || chapter == null || verse == null) return;
+      final db = StudyBibleDatabase.instance;
+      final blockId = await db.loadBlockIdForVerse(
+        bookNumber: book,
+        chapter: chapter,
+        verse: verse,
+      );
+      if (blockId == null || !mounted) return;
+      await _navigateToBlockId(blockId, recordHistory: false);
+      if (!mounted ||
+          _bookNumber != book ||
+          _chapter != chapter ||
+          _verse != verse) {
+        return;
+      }
+      // The fallback may have advanced a verse while the reader loaded.
+      final finalState = await _watchRemote.handoffNative();
+      if (finalState == null || !mounted) return;
+      final finalBook = finalState['book'] as int? ?? book;
+      final finalChapter = finalState['chapter'] as int? ?? chapter;
+      final finalVerse = finalState['verse'] as int? ?? verse;
+      if (finalBook != book || finalChapter != chapter || finalVerse != verse) {
+        final currentBlock = await db.loadBlockIdForVerse(
+          bookNumber: finalBook,
+          chapter: finalChapter,
+          verse: finalVerse,
+        );
+        if (currentBlock == null || !mounted) {
+          throw StateError(
+            'Watch playback position is unavailable in the Bible text',
+          );
+        }
+        await _navigateToBlockId(currentBlock, recordHistory: false);
+      }
+      final mode = switch (finalState['loop']) {
+        'verse' => _BibleLoopMode.verse,
+        'chapter' => _BibleLoopMode.chapter,
+        'book' => _BibleLoopMode.book,
+        _ => _BibleLoopMode.off,
+      };
+      BibleVisibleLocation? target;
+      if (mode != _BibleLoopMode.off) {
+        final targetBook = finalState['loopTargetBook'] as int? ?? finalBook;
+        final targetChapter =
+            finalState['loopTargetChapter'] as int? ?? finalChapter;
+        final targetVerse = finalState['loopTargetVerse'] as int? ?? finalVerse;
+        final targetId = await db.loadBlockIdForVerse(
+          bookNumber: targetBook,
+          chapter: targetChapter,
+          verse: targetVerse,
+        );
+        if (targetId != null) {
+          target = BibleVisibleLocation(
+            blockId: targetId,
+            bookNumber: targetBook,
+            chapter: targetChapter,
+            verse: targetVerse,
+          );
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _bibleLoopMode = target == null ? _BibleLoopMode.off : mode;
+        _bibleLoopTarget = target;
+        _lastBibleLoopMode = switch (finalState['lastLoop']) {
+          'verse' => _BibleLoopMode.verse,
+          'book' => _BibleLoopMode.book,
+          _ => _BibleLoopMode.chapter,
+        };
+      });
+      _nativeWatchPlayback = null;
+      if (finalState['resumePlayback'] == true) {
+        await _handleWatchCommand('start');
+      } else {
+        await _publishWatchState();
+      }
+    } catch (error) {
+      debugPrint('Watch playback handoff failed: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Watch playback handoff stopped: $error')),
+        );
+      }
+    } finally {
+      _watchHandoffInProgress = false;
+    }
+  }
+
+  Future<void> _handleWatchCommand(String command) async {
+    if (!mounted || !Platform.isIOS) throw StateError('Reader unavailable');
+    final controller = _macAutoScroll;
+    if (controller == null) throw StateError('Reader audio unavailable');
+    switch (command) {
+      case 'start':
+        if (!controller.audioEnabled) {
+          controller.updatePreferences(
+            MacAutoscrollPreferences(
+              baseSpeed: controller.baseSpeed,
+              lastNonzeroStep: controller.lastNonzeroStep,
+              maximumStep: controller.maximumStep,
+              statusBannerMode: controller.statusBannerMode,
+              audioEnabled: true,
+              announceChapter: controller.announceChapter,
+              announceVerseNumbers: controller.announceVerseNumbers,
+              speechRate: controller.speechRate,
+            ),
+          );
+        }
+        controller.setSignedStep(1);
+      case 'stop':
+      case 'pause':
+        controller.setSignedStep(0); // Keep the current verse and audio position.
+      case 'toggle':
+        if (controller.isScrolling) {
+          controller.setSignedStep(0);
+        } else {
+          await _handleWatchCommand('start');
+        }
+      case 'next':
+        await _skipBundledBible(true);
+      case 'previous':
+        await _skipBundledBible(false);
+      case 'loop:off':
+        await _setWatchLoop(_BibleLoopMode.off);
+      case 'loop:book':
+        await _setWatchLoop(_BibleLoopMode.book);
+      case 'loop:chapter':
+        await _setWatchLoop(_BibleLoopMode.chapter);
+      case 'loop:verse':
+        await _setWatchLoop(_BibleLoopMode.verse);
+      default:
+        throw StateError('Unsupported Watch command');
+    }
+    await _publishWatchState();
+  }
+
+  /// Changing a Watch loop setting does not start or stop the recording.
+  /// Selection is anchored to the same visible reference as the phone picker.
+  Future<void> _setWatchLoop(_BibleLoopMode mode) async {
+    final narrator = _bundledNarrator;
+    if (narrator == null) throw StateError('Bible recording is unavailable');
+    if (mode == _BibleLoopMode.off) {
+      await narrator.setLoopForCurrent();
+      if (!mounted) throw StateError('Reader closed before loop changed');
+      setState(() {
+        _bibleLoopMode = _BibleLoopMode.off;
+        _bibleLoopTarget = null;
+      });
+      return;
+    }
+    final target = _bundledHeaderLocation();
+    if (target == null) throw StateError('Open a Bible verse first');
+    final current = narrator.current;
+    if (current?.book == target.bookNumber &&
+        current?.chapter == target.chapter) {
+      await narrator.setLoopForCurrent(
+        verse: mode == _BibleLoopMode.verse ? target.verse : null,
+        chapter: mode == _BibleLoopMode.chapter,
+      );
+    }
+    if (!mounted) throw StateError('Reader closed before loop changed');
+    setState(() {
+      _lastBibleLoopMode = mode;
+      _bibleLoopMode = mode;
+      _bibleLoopTarget = target;
+    });
+  }
+
   Future<void> _toggleBundledLoop() async {
     final narrator = _bundledNarrator;
     if (narrator == null) return;
@@ -1179,6 +1432,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         _bibleLoopMode = _BibleLoopMode.off;
         _bibleLoopTarget = null;
       });
+      _publishWatchState();
       try {
         await narrator.setLoopForCurrent();
       } catch (error) {
@@ -1273,6 +1527,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       _bibleLoopMode = choice;
       _bibleLoopTarget = target;
     });
+    _publishWatchState();
     final current = narrator.current;
     if (current?.book != target.bookNumber ||
         current?.chapter != target.chapter) {
@@ -1294,6 +1549,61 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     }
   }
 
+  Future<void> _skipBundledBible(bool forward) async {
+    final controller = _macAutoScroll;
+    final narrator = _bundledNarrator;
+    if (_bundledSkipInProgress || controller == null || narrator == null) {
+      return;
+    }
+    final current = _bibleLoopMode == _BibleLoopMode.off
+        ? _bundledHeaderLocation()
+        : (_bibleLoopTarget ?? _bundledHeaderLocation());
+    if (current == null) return;
+    final wasPlaying = controller.isScrolling;
+    setState(() => _bundledSkipInProgress = true);
+    try {
+      final target = await loadBiblePlaybackSkipTarget(
+        await StudyBibleDatabase.instance.bible,
+        current: current,
+        loop: switch (_bibleLoopMode) {
+          _BibleLoopMode.off => null,
+          _BibleLoopMode.verse => BibleLoopUnit.verse,
+          _BibleLoopMode.chapter => BibleLoopUnit.chapter,
+          _BibleLoopMode.book => BibleLoopUnit.book,
+        },
+        forward: forward,
+      );
+      if (target == null || !mounted) return;
+      controller.stopWithoutNotification();
+      _narrationRunning = false;
+      ++_narrationSession;
+      await narrator.pause();
+      if (!mounted) return;
+      setState(() {
+        _spokenBundledLocation = target;
+        if (_bibleLoopMode != _BibleLoopMode.off) _bibleLoopTarget = target;
+      });
+      await _navigateToBlockId(target.blockId, recordHistory: true);
+      if (!mounted) return;
+      // Restore the transport state only after the destination and loop agree.
+      _bundledSkipInProgress = false;
+      if (wasPlaying) controller.setSignedStep(1);
+    } catch (error) {
+      if (mounted) _narrationFailed(error.toString());
+    } finally {
+      if (mounted) setState(() => _bundledSkipInProgress = false);
+    }
+  }
+
+  String _bundledSkipLabel(bool forward) {
+    final unit = switch (_bibleLoopMode) {
+      _BibleLoopMode.book => 'book',
+      _BibleLoopMode.chapter => 'chapter',
+      _BibleLoopMode.verse || _BibleLoopMode.off => 'verse',
+    };
+    return '${forward ? 'Next' : 'Previous'} $unit';
+  }
+
   Widget _bundledSpeechControls(MacReaderAutoScrollController controller) {
     final narrator = _bundledNarrator!;
     return ListenableBuilder(
@@ -1304,32 +1614,53 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
           children: [
             Row(
               children: [
+                IconButton(
+                  key: const ValueKey('bible-skip-previous'),
+                  tooltip: _bundledSkipLabel(false),
+                  icon: const Icon(Icons.skip_previous),
+                  onPressed: _bundledSkipInProgress
+                      ? null
+                      : () => _skipBundledBible(false),
+                ),
                 TextButton.icon(
                   icon: Icon(
                     controller.isScrolling ? Icons.pause : Icons.play_arrow,
                   ),
                   label: Text(controller.isScrolling ? 'Pause' : 'Play Bible'),
-                  onPressed: () {
-                    if (!controller.audioEnabled) {
-                      controller.updatePreferences(
-                        MacAutoscrollPreferences(
-                          baseSpeed: controller.baseSpeed,
-                          lastNonzeroStep: controller.lastNonzeroStep,
-                          maximumStep: controller.maximumStep,
-                          statusBannerMode: controller.statusBannerMode,
-                          audioEnabled: true,
-                          announceChapter: controller.announceChapter,
-                          announceVerseNumbers: controller.announceVerseNumbers,
-                          speechRate: controller.speechRate,
-                        ),
-                      );
-                      controller.setSignedStep(1);
-                    } else {
-                      controller.setSignedStep(controller.isScrolling ? 0 : 1);
-                    }
-                  },
+                  onPressed: _bundledSkipInProgress
+                      ? null
+                      : () {
+                          if (!controller.audioEnabled) {
+                            controller.updatePreferences(
+                              MacAutoscrollPreferences(
+                                baseSpeed: controller.baseSpeed,
+                                lastNonzeroStep: controller.lastNonzeroStep,
+                                maximumStep: controller.maximumStep,
+                                statusBannerMode: controller.statusBannerMode,
+                                audioEnabled: true,
+                                announceChapter: controller.announceChapter,
+                                announceVerseNumbers:
+                                    controller.announceVerseNumbers,
+                                speechRate: controller.speechRate,
+                              ),
+                            );
+                            controller.setSignedStep(1);
+                          } else {
+                            controller.setSignedStep(
+                              controller.isScrolling ? 0 : 1,
+                            );
+                          }
+                        },
                   onLongPress: () =>
                       setState(() => _showBundledSpeed = !_showBundledSpeed),
+                ),
+                IconButton(
+                  key: const ValueKey('bible-skip-next'),
+                  tooltip: _bundledSkipLabel(true),
+                  icon: const Icon(Icons.skip_next),
+                  onPressed: _bundledSkipInProgress
+                      ? null
+                      : () => _skipBundledBible(true),
                 ),
                 const SizedBox(width: 8),
                 Expanded(

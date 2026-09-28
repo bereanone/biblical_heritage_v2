@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
   private var libraryRootBridge: LibraryRootFolderBridge?
   private var readerTiltMotionBridge: ReaderTiltMotionBridge?
   private var narrationMediaBridge: NarrationMediaBridge?
+  private let watchRemoteBridge = WatchRemoteBridge()
 
   override func application(
     _ application: UIApplication,
@@ -29,6 +30,7 @@ import UniformTypeIdentifiers
     // After plugin registration, so its audio session wins over audioplayers'.
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NarrationMediaBridge") {
       narrationMediaBridge = NarrationMediaBridge(registrar: registrar)
+      watchRemoteBridge.attach(messenger: registrar.messenger())
     }
   }
 }

@@ -1008,7 +1008,47 @@ class _HashTagDialogState extends State<HashTagDialog>
     controller.dispose();
 
     if (imported == null || !mounted) return;
-    final result = await _repository.importSharedListFromText(imported);
+    final preview = await _repository.previewSharedListFromText(imported);
+    if (!mounted) return;
+    if (preview == null) {
+      _showSnack('No usable $_tagLabel list found.');
+      return;
+    }
+    var mode = SharedListImportMode.separate;
+    if (preview.hasExistingList) {
+      final choice = await showDialog<SharedListImportMode>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('${preview.tag} already exists'),
+          content: Text(
+            'This list has ${preview.itemCount} cards. For now, open it as '
+            'a separate test copy or cancel. Your existing list stays as it is.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(
+                dialogContext,
+              ).pop(SharedListImportMode.separate),
+              child: const Text('Open as test copy'),
+            ),
+            FilledButton(
+              onPressed: null,
+              child: const Text('Merge into existing (coming soon)'),
+            ),
+          ],
+        ),
+      );
+      if (choice == null || !mounted) return;
+      mode = choice;
+    }
+    final result = await _repository.importSharedListFromText(
+      imported,
+      mode: mode,
+    );
     if (result == null) {
       _showSnack(
         'No usable $_tagLabel list found. Bible and eLibrary cards import best, and note text is preserved.',

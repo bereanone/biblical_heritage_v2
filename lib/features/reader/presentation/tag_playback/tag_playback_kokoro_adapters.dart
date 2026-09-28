@@ -11,11 +11,10 @@ import 'tag_playback_models.dart';
 import 'tag_playback_ports.dart';
 import 'tag_note_audio_cache.dart';
 import 'tag_verse_audio_cache.dart';
+import 'tag_qwen_audio_cache.dart';
 
-/// Renders clips with the app's existing [KokoroMacTestNarrator], so notes
-/// and verses go through the same pronunciation rules, voice and engine as
-/// the Bible reader. The narrator's shared engine lease is what keeps a
-/// second 325 MB model out of memory.
+/// Prefers existing Qwen recordings for exact Bible verses. Text without a
+/// matching recording uses the shared local Kokoro engine.
 class KokoroTagClipRenderer implements TagClipRenderer {
   KokoroTagClipRenderer(this._narrator, {required this.speed});
 
@@ -26,6 +25,8 @@ class KokoroTagClipRenderer implements TagClipRenderer {
 
   @override
   Future<String> render(TagSpeechClip clip) async {
+    final recorded = await TagQwenAudioCache.instance.renderIfAvailable(clip);
+    if (recorded != null) return recorded;
     if (clip.kind == TagClipKind.note) {
       return TagNoteAudioCache.instance.renderOrGet(
         clip.text,
@@ -69,6 +70,7 @@ class KokoroTagClipRenderer implements TagClipRenderer {
 
   @override
   Future<void> discard(String path) async {
+    if (TagQwenAudioCache.isCachedPath(path)) return;
     if (TagNoteAudioCache.instance.isCachedPath(path)) return;
     if (TagVerseAudioCache.instance.isCachedPath(path)) return;
     try {
@@ -86,7 +88,8 @@ class KokoroTagClipRenderer implements TagClipRenderer {
 /// play call and could leave a clip selected but silent.
 class AudioplayersTagClipPlayer implements TagClipPlayer {
   AudioplayersTagClipPlayer({required double speed})
-    : _playbackRate = KokoroMacTestNarrator.playbackRateFor(speed) {
+    : _recordedRate = speed,
+      _playbackRate = KokoroMacTestNarrator.playbackRateFor(speed) {
     for (var index = 0; index < _players.length; index++) {
       _subscriptions.add(
         _players[index].onPlayerComplete.listen((_) {
@@ -102,7 +105,9 @@ class AudioplayersTagClipPlayer implements TagClipPlayer {
     }
   }
 
+  final double _recordedRate;
   final double _playbackRate;
+  double _activeRate = 1;
   final List<AudioPlayer> _players = [AudioPlayer(), AudioPlayer()];
   final List<StreamSubscription<void>> _subscriptions = [];
   final StreamController<void> _completions =
@@ -159,10 +164,13 @@ class AudioplayersTagClipPlayer implements TagClipPlayer {
     _playing = true;
     _paused = false;
     _currentPath = path;
+    _activeRate = TagQwenAudioCache.isCachedPath(path)
+        ? _recordedRate
+        : _playbackRate;
     final player = _players[_active];
     try {
       await _start('play', () async {
-        await player.setPlaybackRate(_playbackRate);
+        await player.setPlaybackRate(_activeRate);
         await player.play(DeviceFileSource(path));
       });
       if (_playing && serial == _serial) {
@@ -212,7 +220,7 @@ class AudioplayersTagClipPlayer implements TagClipPlayer {
       if (!_playing || _paused || serial != _serial) return;
       final remainingMs =
           duration.inMilliseconds - (position?.inMilliseconds ?? 0);
-      final delayMs = (remainingMs / _playbackRate).ceil() + 8000;
+      final delayMs = (remainingMs / _activeRate).ceil() + 8000;
       _watchdog?.cancel();
       _watchdog = Timer(
         Duration(milliseconds: delayMs.clamp(8000, 360000)),

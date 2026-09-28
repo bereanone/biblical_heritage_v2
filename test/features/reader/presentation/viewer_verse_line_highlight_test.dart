@@ -63,4 +63,67 @@ void main() {
       );
     }
   });
+  for (final brightness in Brightness.values) {
+    testWidgets('selected red-letter verse stays readable in $brightness', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(brightness: brightness),
+          home: Scaffold(
+            body: ViewerVerseLine(
+              line: const VerseLine(
+                blockId: 1,
+                bookNumber: 66,
+                chapter: 1,
+                verse: 11,
+                html: '<w>I am Alpha</w>',
+                text: 'I am Alpha',
+              ),
+              style: const TextStyle(fontSize: 20),
+              isSelected: true,
+              startsInRedLetter: true,
+              highlight: const VerseHighlightRecord(
+                id: 1,
+                groupId: 1,
+                verseRef: 'Revelation 1:11',
+                colorHex: '#FFE34D',
+              ),
+              onTap: () {},
+            ),
+          ),
+        ),
+      );
+      final container = tester.widget<AnimatedContainer>(
+        find.byType(AnimatedContainer),
+      );
+      final background = (container.decoration! as BoxDecoration).color!;
+      final rich = tester
+          .widgetList<RichText>(find.byType(RichText))
+          .firstWhere((w) => w.text.toPlainText().contains('I am Alpha'));
+      final colors = <Color>[];
+      void collect(InlineSpan span) {
+        if (span.style?.color case final Color color) colors.add(color);
+        if (span is TextSpan)
+          for (final child in span.children ?? <InlineSpan>[]) {
+            collect(child);
+          }
+      }
+
+      collect(rich.text);
+      expect(colors, isNotEmpty);
+      expect(colors.any((c) => c.r > c.g && c.r > c.b), isTrue);
+      for (final color in colors) {
+        expect(
+          highlightContrastRatio(background, color),
+          greaterThanOrEqualTo(4.5),
+        );
+      }
+      final number = tester.widget<Text>(find.text('11'));
+      expect(
+        highlightContrastRatio(background, number.style!.color!),
+        greaterThanOrEqualTo(4.5),
+      );
+    });
+  }
 }

@@ -64,6 +64,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
     private var pendingLibraryTreeResult: MethodChannel.Result? = null
     private var pendingLibraryTreeRequiresExisting = false
     private val storageExecutor = Executors.newSingleThreadExecutor()
+    private var recordedAudioBridge: RecordedBibleAudioBridge? = null
 
     override fun onFlutterSurfaceViewCreated(flutterSurfaceView: FlutterSurfaceView) {
         super.onFlutterSurfaceViewCreated(flutterSurfaceView)
@@ -72,6 +73,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        recordedAudioBridge = RecordedBibleAudioBridge(flutterEngine)
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         EventChannel(

@@ -755,7 +755,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   Future<void> _exportToClipboard() async {
     if (_entries.isEmpty) return;
     final lines = <String>[
-      '*The following is a formatted sharing list for use in the Biblical Heritage #StudyBible app. Learn more at BiblicalHeritage.net for tutorials, downloads, shared lists, and related links.*',
+      'Shared from the Biblical Heritage #StudyBible app. BiblicalHeritage.net',
       '',
       '${widget.tag} (${_entries.length} item${_entries.length == 1 ? '' : 's'})',
       '',
@@ -825,16 +825,21 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       }
       final verseText = (entry.displayTextOverride?.trim().isNotEmpty == true)
           ? entry.displayTextOverride!.trim()
-          : entry.verseText.trim();
+          : entry.numberedVerseText;
       if (verseText.isNotEmpty) {
         lines.add(verseText);
       } else {
-        final fallback = await StudyBibleDatabase.instance.loadVerseText(
+        final fallback = await loadBibleRangeText(
           bookNumber: entry.bookNumber,
           chapter: entry.chapter,
-          verse: entry.verse,
+          verseStart: entry.verse,
+          verseEnd: entry.verseEnd,
         );
-        final resolvedText = fallback?.trim() ?? '';
+        final resolvedText = formatBibleRangeForDisplay(
+          fallback,
+          verseStart: entry.verse,
+          verseEnd: entry.verseEnd,
+        );
         if (resolvedText.isNotEmpty) {
           lines.add(resolvedText);
         }
@@ -895,7 +900,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       }
       return displayOverride;
     }
-    final verseText = entry.verseText.trim();
+    final verseText = entry.numberedVerseText;
     if (verseText.isNotEmpty) {
       if (entry.hasMedia) {
         return '$verseText\nImage attached';
@@ -1907,7 +1912,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                               ),
                               const SizedBox(height: 4),
                               SelectableText(
-                                focusedEntry.verseText.trim(),
+                                focusedEntry.numberedVerseText,
                                 textAlign: TextAlign.center,
                                 style: presentationTextStyle(
                                   context,

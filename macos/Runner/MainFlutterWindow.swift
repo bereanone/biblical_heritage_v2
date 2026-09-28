@@ -2,11 +2,13 @@ import Cocoa
 import FlutterMacOS
 
 class LibraryRootFlutterViewController: FlutterViewController {
+  private var recordedAudio: RecordedBibleAudioBridge?
   private var libraryRootChannel: FlutterMethodChannel?
   private var securityScopedURLs: [URL] = []
 
   override func viewDidLoad() {
     super.viewDidLoad()
+    recordedAudio = RecordedBibleAudioBridge(messenger: engine.binaryMessenger)
     let channel = FlutterMethodChannel(
       name: "studybible/library_root",
       binaryMessenger: engine.binaryMessenger
@@ -95,6 +97,14 @@ class LibraryRootFlutterViewController: FlutterViewController {
 }
 
 class MainFlutterWindow: NSWindow {
+  override var title: String {
+    get { super.title }
+    set {
+      let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+      super.title = "Biblical Heritage — Beta \(build) — In Testing — Not Final"
+    }
+  }
+
   override func awakeFromNib() {
     let flutterViewController = LibraryRootFlutterViewController()
     self.contentViewController = flutterViewController
@@ -116,5 +126,6 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     super.awakeFromNib()
+    self.title = "Biblical Heritage"
   }
 }

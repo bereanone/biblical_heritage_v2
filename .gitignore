@@ -120,6 +120,10 @@ source-data/
 # Restore from the separately verified Purple Drive audio backup.
 /assets/audio/qwen_bible/
 /assets/audio/qwen_test/
+# Keep prerecorded Qwen announcement audio out of GitHub while retaining its
+# small checksum manifest alongside the source.
+/assets/audio/qwen_loop_cues/*.m4a
+/assets/audio/qwen_loop_cues_android/*.m4a
 /tool/Verification/
 
 # Local Obsidian UI state and an empty Finder-created marker.

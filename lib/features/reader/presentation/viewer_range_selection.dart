@@ -53,6 +53,16 @@ class ViewerRangeSelection {
     return const ViewerRangeSelection();
   }
 
+  /// Extend in either direction without dropping any of the existing verses.
+  ViewerRangeSelection extendVerseRange(int blockId) {
+    final low = lowerBlockId ?? blockId;
+    final high = upperBlockId ?? blockId;
+    return ViewerRangeSelection(
+      startBlockId: blockId < low ? blockId : low,
+      endBlockId: blockId > high ? blockId : high,
+    );
+  }
+
   ViewerRangeSelection beginVerseRange(int blockId) {
     return ViewerRangeSelection(startBlockId: blockId, endBlockId: null);
   }

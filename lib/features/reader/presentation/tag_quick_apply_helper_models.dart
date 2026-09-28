@@ -75,6 +75,7 @@ class HashTagEntry {
     this.contentHtml,
     this.noteText,
     this.noteFormatJson,
+    this.shareId,
     List<String>? mediaRefs,
   }) : mediaRefs = mediaRefs ?? const <String>[];
 
@@ -98,12 +99,34 @@ class HashTagEntry {
   final String? contentHtml;
   final String? noteText;
   final String? noteFormatJson;
+  final String? shareId;
   final List<String> mediaRefs;
+
+  // Presentation-only labels: keep verseText unchanged for narration matching.
+  String get numberedVerseText => formatBibleRangeForDisplay(
+    verseText,
+    verseStart: verse,
+    verseEnd: verseEnd,
+  );
 
   bool get hasMedia => mediaRefs.isNotEmpty;
 }
 
 enum HashTagEntrySortMode { slideOrder, verseOrder }
+
+enum SharedListImportMode { separate, merge }
+
+class SharedListImportPreview {
+  const SharedListImportPreview({
+    required this.tag,
+    required this.itemCount,
+    required this.hasExistingList,
+  });
+
+  final String tag;
+  final int itemCount;
+  final bool hasExistingList;
+}
 
 class HashTagQuickApplyResult {
   const HashTagQuickApplyResult({
@@ -261,4 +284,22 @@ class _ParsedSharedSlide {
   final String noteRef;
   final Map<String, Object?>? elibraryMetadata;
   final Map<String, Object?>? studyBibleMetadata;
+}
+
+/// Formats canonical one-line-per-verse text without guessing missing boundaries.
+String formatBibleRangeForDisplay(
+  String text, {
+  required int verseStart,
+  required int verseEnd,
+}) {
+  final trimmed = text.trim();
+  if (verseStart <= 0 || verseEnd <= verseStart) return trimmed;
+  final verses = trimmed.split('\n').map((line) => line.trim()).toList();
+  if (verses.length != verseEnd - verseStart + 1 ||
+      verses.any((line) => line.isEmpty))
+    return trimmed;
+  return List.generate(
+    verses.length,
+    (index) => '${verseStart + index} ${verses[index]}',
+  ).join('\n');
 }

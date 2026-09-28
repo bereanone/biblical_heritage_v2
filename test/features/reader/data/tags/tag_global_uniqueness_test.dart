@@ -107,6 +107,19 @@ void main() {
     }
   });
 
+  test('reference-only imported range loads every Bible verse', () async {
+    final repo = HashTagRepository();
+    final result = await repo.importSharedListFromText(
+      '#Range (1 item)\n\nRevelation 12:1-3\n',
+    );
+    final entries = await repo.loadEntries(result!.tag);
+    expect(entries, hasLength(1));
+    expect(entries.single.verseEnd, 3);
+    expect(entries.single.verseText, contains('woman clothed with the sun'));
+    expect(entries.single.verseText, contains('travailing in birth'));
+    expect(entries.single.verseText, contains('great red dragon'));
+  });
+
   test('summary identity is tag-only across categories', () async {
     final repo = HashTagRepository();
     final db = await _openUserDatabase();

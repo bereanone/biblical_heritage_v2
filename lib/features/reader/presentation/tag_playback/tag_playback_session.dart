@@ -94,8 +94,8 @@ class TagPlaybackSession {
       loop: playback.loop,
       onSettingsChanged: (changed) => unawaited(store.save(changed)),
     );
-    // Load the engine now so the first clip does not pay for model startup.
-    unawaited(narrator.warmUp());
+    // The fallback model loads only if a clip needs synthesis. Recorded Bible
+    // tags should not allocate the speech model merely by opening this popup.
     return TagPlaybackSession(
       tag: tag,
       controller: controller,

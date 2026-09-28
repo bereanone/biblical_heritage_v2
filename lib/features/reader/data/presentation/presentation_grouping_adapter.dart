@@ -271,7 +271,7 @@ class PresentationGroupingAdapter {
     final displayOverride = entry.displayTextOverride?.trim() ?? '';
     if (displayOverride.isNotEmpty) return displayOverride;
 
-    final verseText = entry.verseText.trim();
+    final verseText = entry.numberedVerseText;
     if (verseText.isNotEmpty) return verseText;
 
     return '';

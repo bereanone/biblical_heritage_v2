@@ -11,6 +11,7 @@ enum ViewerRangeAction {
   addDollarTag,
   addToMemory,
   strongs,
+  extendRange,
   resetRange,
 }
 
@@ -180,6 +181,14 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                             : null,
                       ),
                       _ActionButton(
+                        icon: Icons.unfold_more,
+                        label: 'Extend Range',
+                        fontScale: fontScale,
+                        onTap: () => Navigator.of(
+                          sheetContext,
+                        ).pop(ViewerRangeAction.extendRange),
+                      ),
+                      _ActionButton(
                         icon: Icons.close_rounded,
                         label: 'Reset Range',
                         fontScale: fontScale,
@@ -188,6 +197,15 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                         ).pop(ViewerRangeAction.resetRange),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Extend Range: scroll, then long-press another verse. Your current selection stays selected.',
+                    style: TagDialogStyles.bodyTextStyle(
+                      theme,
+                      fontScale,
+                      color: TagDialogStyles.mutedBody(theme),
+                    ),
                   ),
                 ],
               ),

@@ -10,10 +10,16 @@ class TagSpeechClip {
     required this.kind,
     this.blockId,
     this.reference,
+    this.sourceBody,
+    this.sourceReference,
   }) : body = text;
 
   /// The words of the clip without its reference lead-in.
   final String body;
+
+  // Preserve the unedited verse and lead-in after resolving playback settings.
+  final String? sourceBody;
+  final String? sourceReference;
 
   final TagClipKind kind;
 
@@ -42,10 +48,21 @@ class TagSpeechClip {
   TagSpeechClip? resolved({required bool speakReference}) {
     if (reference == null) return body.trim().isEmpty ? null : this;
     if (speakReference) {
-      return TagSpeechClip(text: text, kind: kind, blockId: blockId);
+      return TagSpeechClip(
+        text: text,
+        kind: kind,
+        blockId: blockId,
+        sourceBody: body,
+        sourceReference: reference,
+      );
     }
     if (body.trim().isEmpty) return null;
-    return TagSpeechClip(text: body, kind: kind, blockId: blockId);
+    return TagSpeechClip(
+      text: body,
+      kind: kind,
+      blockId: blockId,
+      sourceBody: body,
+    );
   }
 
   @override
@@ -54,10 +71,13 @@ class TagSpeechClip {
       other.body == body &&
       other.reference == reference &&
       other.kind == kind &&
-      other.blockId == blockId;
+      other.blockId == blockId &&
+      other.sourceBody == sourceBody &&
+      other.sourceReference == sourceReference;
 
   @override
-  int get hashCode => Object.hash(body, reference, kind, blockId);
+  int get hashCode =>
+      Object.hash(body, reference, kind, blockId, sourceBody, sourceReference);
 
   @override
   String toString() => 'TagSpeechClip(${kind.name}, $blockId, $text)';

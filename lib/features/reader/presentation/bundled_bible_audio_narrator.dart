@@ -4,9 +4,50 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../core/audio/narration_media_session.dart';
+import 'bible_loop_announcement_settings.dart';
+
+@immutable
+class BundledAnnouncementEvent {
+  const BundledAnnouncementEvent(this.seconds, this.assets);
+
+  final double seconds;
+  final List<String> assets;
+}
+
+/// A null native range means playback continues through chapter boundaries.
+/// The reader handles a book repeat at the final chapter of that book.
+(double, double)? bundledRepeatRange(
+  BundledChapter chapter, {
+  int? verse,
+  bool repeatChapter = false,
+}) {
+  if (verse != null) return chapter.rangeForVerse(verse);
+  if (repeatChapter) return (0, chapter.durationSeconds);
+  return null;
+}
+
+bool bundledBookShouldWrap({
+  required int currentBook,
+  required int? adjacentBook,
+  required int? loopBook,
+}) => loopBook == currentBook && adjacentBook != currentBook;
+
+Future<void> sendBundledAnnouncementEvents(
+  List<Map<String, Object>> events,
+  Future<int?> Function(List<Map<String, Object>>) send,
+) async {
+  final applied = await send(events);
+  if (applied != events.length) {
+    throw StateError(
+      'Qwen announcement schedule was not accepted '
+      '(${applied ?? 0}/${events.length} boundaries)',
+    );
+  }
+}
 
 class BundledChapter {
   const BundledChapter({
@@ -52,6 +93,54 @@ class BundledChapter {
         ? verseStarts[index + 1].seconds
         : durationSeconds;
     return end > start ? (start, end) : null;
+  }
+
+  /// These are positions in the recording, not positions inferred from the UI.
+  /// Book and chapter labels belong at the chapter start; each verse label
+  /// belongs at that verse's measured start, even when a different unit loops.
+  List<BundledAnnouncementEvent> announcementEvents(
+    BibleLoopAnnouncementSettings settings,
+  ) {
+    final at = <double, List<String>>{};
+    void add(double seconds, String? asset) {
+      if (asset != null) at.putIfAbsent(seconds, () => []).add(asset);
+    }
+
+    if (chapter == 1) {
+      add(
+        0,
+        settings.cueAssetFor(
+          BibleLoopUnit.book,
+          bookNumber: book,
+          chapterNumber: chapter,
+          verseNumber: 1,
+        ),
+      );
+    }
+    add(
+      0,
+      settings.cueAssetFor(
+        BibleLoopUnit.chapter,
+        bookNumber: book,
+        chapterNumber: chapter,
+        verseNumber: 1,
+      ),
+    );
+    for (final verse in verseStarts) {
+      add(
+        verse.seconds,
+        settings.cueAssetFor(
+          BibleLoopUnit.verse,
+          bookNumber: book,
+          chapterNumber: chapter,
+          verseNumber: verse.verse,
+        ),
+      );
+    }
+    final times = at.keys.toList()..sort();
+    return times
+        .map((seconds) => BundledAnnouncementEvent(seconds, at[seconds]!))
+        .toList(growable: false);
   }
 
   static BundledChapter fromJson(Map<String, dynamic> json) => BundledChapter(
@@ -129,12 +218,18 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
 
   static const _channel = MethodChannel('studybible/recorded_audio');
   static const _catalogAsset = 'assets/audio/qwen_bible/catalog.json';
+  static final _cueRoot = Platform.isAndroid
+      ? 'assets/audio/qwen_loop_cues_android'
+      : 'assets/audio/qwen_loop_cues';
+  static String get _cueCatalogAsset => '$_cueRoot/manifest.json';
 
   final void Function(BundledChapter chapter, int firstVerse) onSegmentStart;
   final VoidCallback onChapterComplete;
   final void Function(String message) onError;
 
   Future<void>? _catalogLoad;
+  Future<void>? _cueCatalogLoad;
+  final Map<String, String> _cueHashes = {};
   final List<BundledChapter> _chapters = [];
   final Map<String, BundledChapter> _byReference = {};
   Timer? _poll;
@@ -142,6 +237,9 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
   int _diagnosticTicks = 0;
   bool _disposed = false;
   int _generation = 0;
+  int _announcementGeneration = 0;
+  BibleLoopAnnouncementSettings _requestedAnnouncements =
+      const BibleLoopAnnouncementSettings();
   bool _playing = false;
   double _position = 0;
   double _rate = 1;
@@ -215,14 +313,68 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
     return destination.path;
   }
 
+  Future<void> _loadCueCatalog() => _cueCatalogLoad ??= () async {
+    final data =
+        jsonDecode(await rootBundle.loadString(_cueCatalogAsset))
+            as Map<String, dynamic>;
+    for (final item in data['cues'] as List<dynamic>) {
+      final cue = item as Map<String, dynamic>;
+      _cueHashes[cue['name'] as String] = cue['audio_sha256'] as String;
+    }
+    if (_cueHashes.length != 392) {
+      throw StateError('Incomplete bundled Qwen announcement audio');
+    }
+  }();
+
+  Future<String?> _materializeCue(String? asset) async {
+    if (asset == null) return null;
+    await _loadCueCatalog();
+    final prefix = '$_cueRoot/';
+    if (!asset.startsWith(prefix) || !asset.endsWith('.m4a')) {
+      throw StateError('Unexpected Qwen announcement asset');
+    }
+    final name = asset.substring(prefix.length, asset.length - 4);
+    final expectedHash = _cueHashes[name];
+    if (expectedHash == null) {
+      throw StateError('Qwen announcement unavailable: $name');
+    }
+    final directory = Directory(
+      '${(await getTemporaryDirectory()).path}/qwen_loop_cues',
+    );
+    await directory.create(recursive: true);
+    final destination = File(
+      '${directory.path}/${expectedHash.substring(0, 16)}_$name.m4a',
+    );
+    if (await destination.exists()) {
+      final actual = await sha256.bind(destination.openRead()).first;
+      if (actual.toString() == expectedHash) return destination.path;
+    }
+    final bytes = await rootBundle.load(asset);
+    final content = bytes.buffer.asUint8List(
+      bytes.offsetInBytes,
+      bytes.lengthInBytes,
+    );
+    if (sha256.convert(content).toString() != expectedHash) {
+      throw StateError('Qwen announcement checksum mismatch: $name');
+    }
+    final temporary = File('${destination.path}.copying');
+    await temporary.writeAsBytes(content, flush: true);
+    await temporary.rename(destination.path);
+    return destination.path;
+  }
+
   Future<void> playChapter(
     int book,
     int chapter, {
     int startVerse = 1,
     int? repeatVerse,
     bool repeatChapter = false,
+    BibleLoopAnnouncementSettings announcements =
+        const BibleLoopAnnouncementSettings(),
   }) async {
     final generation = ++_generation;
+    _requestedAnnouncements = announcements;
+    final announcementGeneration = ++_announcementGeneration;
     debugPrint('Qwen chapter request $book:$chapter');
     final item = await this.chapter(book, chapter);
     debugPrint('Qwen chapter catalog found=${item != null}');
@@ -238,6 +390,10 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
       );
     }
     final path = await _materialize(item);
+    final announcementEvents = await _materializeAnnouncementEvents(
+      item,
+      announcements,
+    );
     debugPrint('Qwen chapter copied $path');
     if (_disposed || generation != _generation) return;
     await _channel.invokeMethod<void>('load', {'path': path});
@@ -247,11 +403,14 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
     // always starts at natural pitch; rate changes preserve that pitch.
     await _channel.invokeMethod<void>('setPitch', {'pitch': 0.0});
     await _channel.invokeMethod<void>('setRate', {'rate': _rate});
+    await _sendAnnouncementEvents(announcementEvents);
     if (_disposed || generation != _generation) return;
     if (repeatVerse != null || repeatChapter) {
-      final range = repeatVerse != null
-          ? item.rangeForVerse(repeatVerse)
-          : (0.0, item.durationSeconds);
+      final range = bundledRepeatRange(
+        item,
+        verse: repeatVerse,
+        repeatChapter: repeatChapter,
+      );
       if (range == null) {
         throw StateError('Precise verse timing unavailable for repeat');
       }
@@ -267,6 +426,12 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
     _repeatVerse = repeatVerse;
     _position = startSeconds;
     _lastSegment = -1;
+    // A switch can be flipped while this chapter's files are loading. Apply
+    // the latest choice before audible playback even if _current was null
+    // when the switch was first changed.
+    if (announcementGeneration != _announcementGeneration) {
+      await setAnnouncementsForCurrent(_requestedAnnouncements);
+    }
     // The previously audible recorded-audio screen explicitly reactivates
     // the shared iOS session immediately before play. The reader's media lease
     // starts asynchronously, so do the same here to avoid a begin/end race.
@@ -274,7 +439,12 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
       'bundled Bible',
     );
     debugPrint('Qwen audio session activated=$activated');
-    await _channel.invokeMethod<void>('play');
+    try {
+      await _channel.invokeMethod<void>('play', {'announceAtStart': true});
+    } on PlatformException catch (error) {
+      if (error.code == 'CANCELLED') return;
+      rethrow;
+    }
     debugPrint('Qwen native play acknowledged');
     _playing = true;
     notifyListeners();
@@ -288,11 +458,11 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
   }) async {
     final item = _current;
     if (item == null) return;
-    final (double, double)? range = verse != null
-        ? item.rangeForVerse(verse)
-        : chapter
-        ? (0.0, item.durationSeconds)
-        : null;
+    final range = bundledRepeatRange(
+      item,
+      verse: verse,
+      repeatChapter: chapter,
+    );
     if (verse != null && range == null) {
       throw StateError('Precise verse timing unavailable for repeat');
     }
@@ -306,6 +476,42 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
       _position = range.$1;
       _lastSegment = -1;
     }
+  }
+
+  Future<List<Map<String, Object>>> _materializeAnnouncementEvents(
+    BundledChapter chapter,
+    BibleLoopAnnouncementSettings settings,
+  ) async {
+    final result = <Map<String, Object>>[];
+    for (final event in chapter.announcementEvents(settings)) {
+      final paths = <String>[];
+      for (final asset in event.assets) {
+        final path = await _materializeCue(asset);
+        if (path != null) paths.add(path);
+      }
+      result.add({'seconds': event.seconds, 'paths': paths});
+    }
+    return result;
+  }
+
+  Future<void> _sendAnnouncementEvents(List<Map<String, Object>> events) =>
+      sendBundledAnnouncementEvents(
+        events,
+        (value) => _channel.invokeMethod<int>('setAnnouncementEvents', {
+          'events': value,
+        }),
+      );
+
+  Future<void> setAnnouncementsForCurrent(
+    BibleLoopAnnouncementSettings settings,
+  ) async {
+    _requestedAnnouncements = settings;
+    final generation = ++_announcementGeneration;
+    final item = _current;
+    if (item == null) return;
+    final events = await _materializeAnnouncementEvents(item, settings);
+    if (item != _current || generation != _announcementGeneration) return;
+    await _sendAnnouncementEvents(events);
   }
 
   Future<void> resume() async {
@@ -322,7 +528,9 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
 
   Future<void> pause() async {
     ++_generation;
-    if (!_playing) return;
+    // A short announcement can be audible before recorded playback begins.
+    // Pause must reach the native bridge even while _playing is still false.
+    if (_current == null) return;
     await _channel.invokeMethod<void>('pause');
     _playing = false;
     notifyListeners();
@@ -345,10 +553,11 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> seek(double seconds) async {
+  Future<void> seek(double seconds, {bool announceAtTarget = false}) async {
     if (_current == null) return;
     await _channel.invokeMethod<void>('seek', {
       'seconds': seconds.clamp(0.0, _current!.durationSeconds),
+      'announceAtTarget': announceAtTarget,
     });
     _lastSegment = -1;
     await _readState();
@@ -363,7 +572,7 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
         'Precise verse timing unavailable for ${chapter.book}:${chapter.chapter}:$verse',
       );
     }
-    await seek(seconds);
+    await seek(seconds, announceAtTarget: true);
   }
 
   void _startPoll() {

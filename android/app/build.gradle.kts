@@ -10,6 +10,9 @@ plugins {
 
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
+// Explicit test-bed override: the currently installed Android app uses this
+// machine's debug certificate. Production release builds still fail closed.
+val testBedDebugSigning = providers.gradleProperty("testBedDebugSigning").orNull == "true"
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
@@ -53,7 +56,9 @@ android {
         release {
             // Release builds fail closed when key.properties is absent or
             // incomplete; they must never silently produce a debug-signed APK.
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName(
+                if (testBedDebugSigning) "debug" else "release"
+            )
         }
     }
 }

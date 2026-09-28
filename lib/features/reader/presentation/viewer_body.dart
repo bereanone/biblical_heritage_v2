@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
@@ -19,6 +20,7 @@ import 'text_range_geometry.dart';
 import '../../library/presentation/reader_tilt_autoscroll_controller.dart';
 import '../../library/presentation/mac_reader_autoscroll_controller.dart';
 import 'reader_autoscroll_diagnostics.dart';
+import 'reader_bounded_fling_physics.dart';
 
 part 'viewer_body_helpers.dart';
 
@@ -794,6 +796,7 @@ class _ViewerBodyState extends State<ViewerBody> {
           },
           child: ScrollablePositionedList.builder(
             key: _visibleListKey,
+            physics: Platform.isIOS ? const ReaderBoundedFlingPhysics() : null,
             // Never expose unloaded forward IDs as scrollable blank rows. The
             // item count grows only after ensureWindow has populated them.
             itemCount: viewerBodyItemCountForLoadedWindow(

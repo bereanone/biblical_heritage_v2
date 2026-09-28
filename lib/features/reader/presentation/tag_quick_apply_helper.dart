@@ -272,6 +272,18 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         columnName: 'reference_code',
         columnDefinition: 'TEXT',
       );
+      await _addColumnIfMissing(
+        db,
+        tableName: tableName,
+        columnName: 'share_id',
+        columnDefinition: 'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        tableName: tableName,
+        columnName: 'verse_end',
+        columnDefinition: 'INTEGER',
+      );
     }
     if (tableName == 'hash_tags') {
       await _addColumnIfMissing(
@@ -1556,6 +1568,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         'sort_order',
         if (tableName == 'hash_tags' || tableName == 'dollar_tags')
           'reference_code',
+        if (tableName == 'hash_tags' || tableName == 'dollar_tags') 'share_id',
+        if (tableName == 'hash_tags' || tableName == 'dollar_tags') 'verse_end',
         if (tableName == 'hash_tags') 'presentation_slide_number',
         if (tableName == 'hash_tags') 'presentation_slide_region',
         if (tableName == 'dollar_tags') 'content_html',
@@ -1579,7 +1593,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
               bookNumber: (row['book_number'] as num).toInt(),
               chapter: (row['chapter_number'] as num).toInt(),
               verse: (row['verse_number'] as num).toInt(),
-              verseEnd: (row['verse_number'] as num).toInt(),
+              verseEnd:
+                  _i(row['verse_end']) ?? (row['verse_number'] as num).toInt(),
               verseRef: row['verse_ref']?.toString() ?? '',
               createdAt: (row['created_at'] as num?)?.toInt() ?? 0,
               sortOrder:
@@ -1593,6 +1608,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
                 row['presentation_slide_region']?.toString(),
               ),
               referenceCode: row['reference_code']?.toString(),
+              shareId: row['share_id']?.toString(),
               contentHtml: row['content_html']?.toString(),
               noteText: row['note_text']?.toString(),
               noteFormatJson: row['note_format_json']?.toString(),
@@ -1615,6 +1631,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
             )
             .toList(growable: false),
       );
+      final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
       return [
         for (var i = 0; i < entries.length; i++)
           HashTagEntry(
@@ -1633,6 +1650,13 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
             contentHtml: entries[i].contentHtml,
             noteText: entries[i].noteText,
             noteFormatJson: entries[i].noteFormatJson,
+            shareId: entries[i].shareId?.trim().isNotEmpty == true
+                ? entries[i].shareId
+                : sha1
+                      .convert(
+                        utf8.encode('$deviceId:$tableName:${entries[i].id}'),
+                      )
+                      .toString(),
             mediaRefs: List.unmodifiable(
               mediaByItemId[entries[i].id] ?? const <String>[],
             ),
@@ -1753,6 +1777,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
             noteFormatJson: bibleItemOverlayNoteFormatJson(
               rows[i]['note_format_json'],
             ),
+            shareId: _s(rows[i]['id']).trim(),
             mediaRefs: List.unmodifiable(
               mediaByItemId[_s(rows[i]['id'])] ?? const <String>[],
             ),
@@ -3473,7 +3498,11 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   Future<HashTagImportResult?> importSharedListFromText(
     String text, {
     String? targetCategory,
+    SharedListImportMode mode = SharedListImportMode.separate,
   }) async {
+    if (mode == SharedListImportMode.merge) {
+      throw UnsupportedError('Shared-list merging is not yet available.');
+    }
     final parsed = tableName == 'dollar_tags'
         ? await _parseDollarSharedListFromText(text)
         : await _parseSharedListFromText(text);
@@ -3510,6 +3539,22 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     return _importHashSharedList(
       parsed,
       targetCategory: normalizedTargetCategory,
+    );
+  }
+
+  Future<SharedListImportPreview?> previewSharedListFromText(
+    String text,
+  ) async {
+    final parsed = tableName == 'dollar_tags'
+        ? await _parseDollarSharedListFromText(text)
+        : await _parseSharedListFromText(text);
+    if (parsed == null || parsed.slides.isEmpty) return null;
+    await ensureSchema();
+    final db = await _db();
+    return SharedListImportPreview(
+      tag: parsed.tag,
+      itemCount: parsed.slides.length,
+      hasExistingList: await _tagNameExistsEverywhere(db, parsed.tag),
     );
   }
 
@@ -3857,6 +3902,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       );
     }
 
+    final studyBibleMetadata = _extractSharedStudyBibleMetadata(block);
     final reference = _parseSharedReferenceLine(firstLine, bookLookup);
     if (reference != null) {
       final content = _extractSharedVerseContent(block.skip(1).toList());
@@ -3864,13 +3910,13 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         target: reference,
         contentText: content,
         noteRef: reference.verseRef,
+        studyBibleMetadata: studyBibleMetadata,
       );
     }
 
-    final studyBibleMetadata = _extractSharedStudyBibleMetadata(block);
     if (studyBibleMetadata != null) {
       final kind = _s(studyBibleMetadata['kind']).trim().toLowerCase();
-      if (kind == 'note') {
+      if (kind == 'note' || kind == 'studybible_note') {
         final noteText = _s(studyBibleMetadata['note_text']).trim().isNotEmpty
             ? _s(studyBibleMetadata['note_text']).trim()
             : _extractSharedNoteContent(block, tagName);
@@ -3929,6 +3975,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         contentText: content,
         noteRef: noteRef,
         elibraryMetadata: elibraryMetadata,
+        studyBibleMetadata: studyBibleMetadata,
       );
     }
 
@@ -4005,7 +4052,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     final normalized = line.trim();
     if (normalized.isEmpty) return false;
     if (normalized.toLowerCase().startsWith('note slide')) return true;
-    return RegExp(r'^(.*?)\s+\d+\s*:\s*\d+\s*$').hasMatch(normalized);
+    return RegExp(
+      r'^(.*?)\s+\d+\s*:\s*\d+(?:\s*[-–]\s*\d+)?\s*$',
+    ).hasMatch(normalized);
   }
 
   String _extractSharedVerseContent(List<String> lines) {
@@ -4019,6 +4068,10 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         continue;
       }
       if (normalized.toLowerCase().startsWith('note slide')) {
+        continue;
+      }
+      if (_isSharedStudyBibleMetadataLine(normalized) ||
+          _isSharedELibraryMetadataLine(normalized)) {
         continue;
       }
       if (skipNotesMarker && normalized.toLowerCase() == 'notes:') {
@@ -4058,6 +4111,10 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       if (_isSharedListHeaderLine(normalized, tagName)) {
         continue;
       }
+      if (_isSharedStudyBibleMetadataLine(normalized) ||
+          _isSharedELibraryMetadataLine(normalized)) {
+        continue;
+      }
       if (normalized.toLowerCase().startsWith('note slide')) {
         continue;
       }
@@ -4083,7 +4140,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         contentLines.add('');
         continue;
       }
-      if (_isSharedELibraryMetadataLine(normalized)) {
+      if (_isSharedELibraryMetadataLine(normalized) ||
+          _isSharedStudyBibleMetadataLine(normalized)) {
         continue;
       }
       contentLines.add(line);
@@ -4153,14 +4211,18 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     String line,
     Map<String, (int, String)> bookLookup,
   ) {
-    final referenceRegex = RegExp(r'^(.*?)\s+(\d+)\s*:\s*(\d+)\s*$');
+    final referenceRegex = RegExp(
+      r'^(.*?)\s+(\d+)\s*:\s*(\d+)(?:\s*[-–]\s*(\d+))?\s*$',
+    );
     final match = referenceRegex.firstMatch(line);
     if (match == null) return null;
 
     final rawBook = match.group(1)?.trim() ?? '';
     final chapter = int.tryParse(match.group(2) ?? '');
     final verse = int.tryParse(match.group(3) ?? '');
+    final verseEnd = int.tryParse(match.group(4) ?? '');
     if (rawBook.isEmpty || chapter == null || verse == null) return null;
+    if (verseEnd != null && verseEnd < verse) return null;
 
     final lookup = bookLookup[_normalizeBookKey(rawBook)];
     if (lookup == null) return null;
@@ -4169,7 +4231,10 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       bookNumber: lookup.$1,
       chapter: chapter,
       verse: verse,
-      verseRef: '${lookup.$1}:$chapter:$verse',
+      verseEnd: verseEnd,
+      verseRef: verseEnd != null && verseEnd > verse
+          ? '${lookup.$1}:$chapter:$verse-$verseEnd'
+          : '${lookup.$1}:$chapter:$verse',
     );
   }
 
@@ -4254,6 +4319,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         'book_number': target?.bookNumber ?? 0,
         'chapter_number': target?.chapter ?? 0,
         'verse_number': target?.verse ?? 0,
+        'verse_end': target?.verseEnd ?? target?.verse ?? 0,
         'token_number': target?.tokenNumber,
         'content_html': _plainTextToHtml(contentText),
         'source_author': '',
@@ -4511,6 +4577,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         'book_number': target.bookNumber,
         'chapter_number': target.chapter,
         'verse_number': target.verse,
+        'verse_end': target.verseEnd ?? target.verse,
         'token_number': target.tokenNumber,
         if (importedNoteText != null) 'note_text': importedNoteText,
         'sort_order': sourceOrder,

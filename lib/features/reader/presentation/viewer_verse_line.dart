@@ -93,8 +93,13 @@ class ViewerVerseLine extends StatelessWidget {
             layerType: HighlightLayerType.savedVerse,
             readerBackground: theme.scaffoldBackgroundColor,
           );
-    final baseTextColor =
-        highlightSpec?.textColor ?? theme.colorScheme.onSurface;
+    final selectedBackground = viewerSelectedVerseColor(context);
+    final baseTextColor = isSelected
+        ? highlightForegroundForBackground(
+            selectedBackground,
+            semanticColor: theme.colorScheme.onSurface,
+          )
+        : highlightSpec?.textColor ?? theme.colorScheme.onSurface;
     final rangeSelectionSpec = resolveHighlightRender(
       theme.colorScheme.primary,
       brightness == Brightness.dark,
@@ -180,7 +185,7 @@ class ViewerVerseLine extends StatelessWidget {
         ),
         decoration: BoxDecoration(
           color: isSelected
-              ? viewerSelectedVerseColor(context)
+              ? selectedBackground
               : rangeSelectionBackground ?? Colors.transparent,
           borderRadius: BorderRadius.circular(isSelected ? 3 : 6),
         ),
@@ -193,7 +198,9 @@ class ViewerVerseLine extends StatelessWidget {
               showVerseNumber: !showChapterNumber,
               showChapterNumber: showChapterNumber,
               chapterStyle: chapterStyle,
-              numberStyle: highlightSpec == null
+              numberStyle: isSelected
+                  ? numberStyle.copyWith(color: baseTextColor)
+                  : highlightSpec == null
                   ? numberStyle
                   : numberStyle.copyWith(color: highlightSpec.textColor),
               isTagged: isTagged,

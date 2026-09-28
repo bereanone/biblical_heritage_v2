@@ -32,12 +32,6 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       _openRangeActions();
       return;
     }
-    if (_rangeSelection.hasCompletedRange &&
-        !isTapInsideCurrentSelection(_rangeSelection, line.blockId ?? 0)) {
-      setState(() {
-        _rangeSelection = _rangeSelection.clear();
-      });
-    }
     if (_rangeSelection.hasSelection && !_rangeSelection.hasCompletedRange) {
       setState(() {
         _rangeSelection = _rangeSelection.clear();
@@ -74,6 +68,16 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
   }
 
   void _selectMarkupAnchor(VerseLine line) {
+    if (_rangeSelection.hasCompletedRange) {
+      final blockId = line.blockId ?? 0;
+      if (blockId <= 0) return;
+      setState(
+        () => _rangeSelection = _rangeSelection.extendVerseRange(blockId),
+      );
+      unawaited(_openRangeActions());
+      return;
+    }
+
     _clearBibleSearchSessionForManualSelection();
     final blockId = line.blockId ?? 0;
     if (blockId <= 0) return;
@@ -95,6 +99,16 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
   }
 
   void _selectTokenAnchor(VerseLine line, int tokenIndex) {
+    if (_rangeSelection.hasCompletedRange) {
+      final blockId = line.blockId ?? 0;
+      if (blockId <= 0) return;
+      setState(
+        () => _rangeSelection = _rangeSelection.extendVerseRange(blockId),
+      );
+      unawaited(_openRangeActions());
+      return;
+    }
+
     _stopReaderAutoscroll();
     _clearBibleSearchSessionForManualSelection();
     final blockId = line.blockId ?? 0;
@@ -176,35 +190,64 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
   Future<void> _openRangeActions() async {
     _stopReaderAutoscroll();
     if (!mounted) return;
-    final passage = await _currentPassageOrLoad();
-    if (!mounted) return;
-    final startId = _rangeSelection.startBlockId ?? 0;
-    final endId =
-        _rangeSelection.endBlockId ?? _rangeSelection.startBlockId ?? 0;
-    if (startId <= 0 || endId <= 0) return;
-    final low = startId < endId ? startId : endId;
-    final high = startId < endId ? endId : startId;
-    final selectedLines = passage.lines
-        .where((line) {
-          final blockId = line.blockId ?? 0;
-          return blockId >= low && blockId <= high;
-        })
+    final low = _rangeSelection.lowerBlockId ?? 0;
+    final high = _rangeSelection.upperBlockId ?? low;
+    if (low <= 0 || high <= 0) return;
+    // The scrolling window may have discarded earlier verses. Load the full
+    // selection from the Bible, including every intervening block.
+    final db = await StudyBibleDatabase.instance.bible;
+    final rows = await db.query(
+      'bible_blocks',
+      where: 'id BETWEEN ? AND ?',
+      whereArgs: [low, high],
+      orderBy: 'id ASC',
+    );
+    final selectedLines = rows
+        .map(
+          (row) => VerseLine(
+            blockId: (row['id'] as num).toInt(),
+            bookNumber: (row['book_number'] as num).toInt(),
+            chapter: (row['chapter'] as num).toInt(),
+            verse: (row['block_index'] as num).toInt(),
+            html: row['html']?.toString() ?? '',
+            text: row['plain_text']?.toString() ?? '',
+          ),
+        )
         .toList(growable: false);
     if (selectedLines.isEmpty || !mounted) return;
+
+    final first = selectedLines.first;
+    final passage = PassageData(
+      bookNumber: first.bookNumber,
+      bookName: _bookNames[first.bookNumber] ?? 'Book ${first.bookNumber}',
+      chapter: first.chapter,
+      lines: selectedLines,
+    );
 
     final tokenPreview = _rangeSelection.hasTokenSelection
         ? _buildSelectedTokenPreview(selectedLines)
         : null;
-    final previewText =
-        tokenPreview ??
-        selectedLines.map((line) => '${line.verse} ${line.text}').join('\n');
+    final numberedText =
+        (_rangeSelection.hasTokenSelection
+            ? _buildSelectedTokenPreview(
+                selectedLines,
+                includeVerseNumbers: true,
+              )
+            : null) ??
+        selectedLines
+            .map((line) => '${line.verse} ${line.text.trim()}')
+            .join('\n');
+    final previewText = numberedText; // The preview matches Copy With Citation.
 
     final copyText =
         tokenPreview ??
         selectedLines.map((line) => line.text.trim()).join('\n');
 
     final verseRefs = selectedLines
-        .map((line) => '${passage.bookName} ${line.chapter}:${line.verse}')
+        .map(
+          (line) =>
+              '${_bookNames[line.bookNumber] ?? passage.bookName} ${line.chapter}:${line.verse}',
+        )
         .toList(growable: false);
     final label = _buildRangeLabel(
       passage.bookName,
@@ -231,7 +274,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         await _copyRangeToClipboard(copyText, label, includeCitation: false);
         break;
       case ViewerRangeAction.copyWithCitation:
-        await _copyRangeToClipboard(copyText, label, includeCitation: true);
+        await _copyRangeToClipboard(numberedText, label, includeCitation: true);
         break;
       case ViewerRangeAction.highlight:
         if (_rangeSelection.hasTokenSelection) {
@@ -289,6 +332,9 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
           onSelectBlockId: _openBlockId,
         );
         return;
+      case ViewerRangeAction.extendRange:
+        ScaffoldMessenger.of(context).clearSnackBars();
+        return;
       case ViewerRangeAction.resetRange:
         if (mounted) {
           setState(() {
@@ -341,9 +387,14 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         }
         return;
       }
-      final chapterGroups = <int, List<VerseLine>>{};
+      final chapterGroups = <String, List<VerseLine>>{};
       for (final line in selectedLines) {
-        chapterGroups.putIfAbsent(line.chapter, () => <VerseLine>[]).add(line);
+        chapterGroups
+            .putIfAbsent(
+              '${line.bookNumber}:${line.chapter}',
+              () => <VerseLine>[],
+            )
+            .add(line);
       }
       var inserted = 0;
       var skipped = 0;
@@ -436,6 +487,10 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
   }
 
   String _buildRangeLabel(String bookName, VerseLine first, VerseLine last) {
+    if (first.bookNumber != last.bookNumber) {
+      final lastBook = _bookNames[last.bookNumber] ?? 'Book ${last.bookNumber}';
+      return '$bookName ${first.chapter}:${first.verse} - $lastBook ${last.chapter}:${last.verse}';
+    }
     if (first.chapter == last.chapter) {
       if (first.verse == last.verse) {
         return '$bookName ${first.chapter}:${first.verse}';
@@ -504,9 +559,13 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
     showReadableSnackBar(context, message, fontScale: _fontScale);
   }
 
-  String? _buildSelectedTokenPreview(List<VerseLine> lines) {
+  String? _buildSelectedTokenPreview(
+    List<VerseLine> lines, {
+    bool includeVerseNumbers = false,
+  }) {
     final pieces = <String>[];
     for (final line in lines) {
+      final versePieces = <String>[];
       final blockId = line.blockId ?? 0;
       for (final segment in parseViewerMarkupSegments(
         html: line.html,
@@ -519,13 +578,17 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         if (_rangeSelection.containsTokenPosition(blockId, tokenIndex)) {
           final text = segment.text.trim();
           if (text.isNotEmpty) {
-            pieces.add(text);
+            versePieces.add(text);
           }
         }
       }
+      if (versePieces.isNotEmpty) {
+        final text = versePieces.join(' ');
+        pieces.add(includeVerseNumbers ? '${line.verse} $text' : text);
+      }
     }
     if (pieces.isEmpty) return null;
-    return pieces.join(' ');
+    return pieces.join(includeVerseNumbers ? '\n' : ' ');
   }
 
   String? _selectedSingleStrongs(List<VerseLine> lines) {

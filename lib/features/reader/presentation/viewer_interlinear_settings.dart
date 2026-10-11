@@ -1,5 +1,8 @@
+enum ViewerInterlinearDisplayStyle { englishPhrases, fullInterlinear }
+
 class ViewerInterlinearSettings {
   const ViewerInterlinearSettings({
+    this.displayStyle = ViewerInterlinearDisplayStyle.englishPhrases,
     this.englishOrder = false,
     this.showEnglishGloss = true,
     this.showOriginalText = true,
@@ -9,6 +12,7 @@ class ViewerInterlinearSettings {
     this.showMorphology = false,
   });
 
+  final ViewerInterlinearDisplayStyle displayStyle;
   final bool englishOrder;
   final bool showEnglishGloss;
   final bool showOriginalText;
@@ -18,6 +22,7 @@ class ViewerInterlinearSettings {
   final bool showMorphology;
 
   ViewerInterlinearSettings copyWith({
+    ViewerInterlinearDisplayStyle? displayStyle,
     bool? englishOrder,
     bool? showEnglishGloss,
     bool? showOriginalText,
@@ -27,6 +32,7 @@ class ViewerInterlinearSettings {
     bool? showMorphology,
   }) {
     return ViewerInterlinearSettings(
+      displayStyle: displayStyle ?? this.displayStyle,
       englishOrder: englishOrder ?? this.englishOrder,
       showEnglishGloss: showEnglishGloss ?? this.showEnglishGloss,
       showOriginalText: showOriginalText ?? this.showOriginalText,

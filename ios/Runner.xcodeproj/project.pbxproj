@@ -7,11 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		075B9C1D3EF7708EFC517233 /* BibleWatchShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEFBBF1B0D4935CD48388C4B /* BibleWatchShared.swift */; };
 		111A9588E357258E1018052B /* WatchRemoteBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C10C8E686DD800F8B4B79D0 /* WatchRemoteBridge.swift */; };
+		11649DD110A84ECBD6013B9C /* StudyBibleRemoteWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3926385880EC233BA599E81A /* StudyBibleRemoteWidget.swift */; };
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
 		24B9703E17E9B471BFB01B40 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C78345D9722924E7DC1B725B /* Assets.xcassets */; };
 		331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C807B294A618700263BE5 /* RunnerTests.swift */; };
+		36344D8C04190774484D1210 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CA5CCEF193F493F0547E9A59 /* Foundation.framework */; };
 		3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */; };
+		43F97286B0724DC25570A7FA /* BibleWatchShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEFBBF1B0D4935CD48388C4B /* BibleWatchShared.swift */; };
+		47531FDBD2188D34598653C5 /* StudyBibleWatchWidgets.appex in Embed Watch Widgets */ = {isa = PBXBuildFile; fileRef = C9BDCAFD7CE5FA19B665EB62 /* StudyBibleWatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		538A39C39CD88682049AA79A /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 640E56254D83EC2146F6FB05 /* Pods_RunnerTests.framework */; };
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */; };
@@ -32,6 +37,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 97C146ED1CF9000F007C117D;
 			remoteInfo = Runner;
+		};
+		B5BC942FD4ABC8061EDD8BF4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 97C146E61CF9000F007C117D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 78372DF0DB57249FB44C404A;
+			remoteInfo = StudyBibleWatchWidgets;
 		};
 		BB4FD44EC0B017518D0D2755 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -64,24 +76,39 @@
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BF7B2270BFD33CF981264999 /* Embed Watch Widgets */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				47531FDBD2188D34598653C5 /* StudyBibleWatchWidgets.appex in Embed Watch Widgets */,
+			);
+			name = "Embed Watch Widgets";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1498D2321E8E86230040F4C2 /* GeneratedPluginRegistrant.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GeneratedPluginRegistrant.h; sourceTree = "<group>"; };
 		1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GeneratedPluginRegistrant.m; sourceTree = "<group>"; };
 		245C933739CE5C5D499429DD /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
+		3123750841142C7D90547318 /* StudyBibleWatchWidgets.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = StudyBibleWatchWidgets.entitlements; sourceTree = "<group>"; };
 		331C807B294A618700263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		331C8081294A63A400263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3926385880EC233BA599E81A /* StudyBibleRemoteWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StudyBibleRemoteWidget.swift; sourceTree = "<group>"; };
 		3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = AppFrameworkInfo.plist; path = Flutter/AppFrameworkInfo.plist; sourceTree = "<group>"; };
 		3C10C8E686DD800F8B4B79D0 /* WatchRemoteBridge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchRemoteBridge.swift; sourceTree = "<group>"; };
 		4A3C1FF846E1449D137B00B8 /* Pods-RunnerTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.release.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.release.xcconfig"; sourceTree = "<group>"; };
 		528B89BA973E7311704823F6 /* StudyBibleWatchApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StudyBibleWatchApp.swift; sourceTree = "<group>"; };
 		59945963A0ADCC1840A4EC8C /* StudyBibleWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StudyBibleWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		640E56254D83EC2146F6FB05 /* Pods_RunnerTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_RunnerTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		73BB6C017BC3DB5F37339D4D /* StudyBibleWatch.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = StudyBibleWatch.entitlements; sourceTree = "<group>"; };
 		74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Runner-Bridging-Header.h"; sourceTree = "<group>"; };
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Release.xcconfig; path = Flutter/Release.xcconfig; sourceTree = "<group>"; };
+		82E11359DC373362BA8E5956 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		899192B04EC1FCF2252A03C8 /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = Debug.xcconfig; path = Flutter/Debug.xcconfig; sourceTree = "<group>"; };
 		9740EEB31CF90195004384FC /* Generated.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = Generated.xcconfig; path = Flutter/Generated.xcconfig; sourceTree = "<group>"; };
@@ -94,7 +121,10 @@
 		A1B2C3D42F00000100AAAA04 /* NarrationTelemetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NarrationTelemetry.swift; sourceTree = "<group>"; };
 		AE863FA52F36C7C42FDDC31F /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 		C78345D9722924E7DC1B725B /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C9BDCAFD7CE5FA19B665EB62 /* StudyBibleWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StudyBibleWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		CA5CCEF193F493F0547E9A59 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/WatchOS.platform/Developer/SDKs/WatchOS11.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		D1848281D7692235366BBAF1 /* Pods-RunnerTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.debug.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.debug.xcconfig"; sourceTree = "<group>"; };
+		EEFBBF1B0D4935CD48388C4B /* BibleWatchShared.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BibleWatchShared.swift; sourceTree = "<group>"; };
 		FCE27850C7A8E03081090B3A /* Pods-RunnerTests.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.profile.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.profile.xcconfig"; sourceTree = "<group>"; };
 		FF8D119E2E6ADDDF67D26CC9 /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -123,6 +153,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A7406E8C9D38B7A20CA2656C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				36344D8C04190774484D1210 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -131,6 +169,7 @@
 			children = (
 				899192B04EC1FCF2252A03C8 /* Pods_Runner.framework */,
 				640E56254D83EC2146F6FB05 /* Pods_RunnerTests.framework */,
+				87B59693A0453A2CA232F4B9 /* watchOS */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -140,6 +179,8 @@
 			children = (
 				528B89BA973E7311704823F6 /* StudyBibleWatchApp.swift */,
 				C78345D9722924E7DC1B725B /* Assets.xcassets */,
+				EEFBBF1B0D4935CD48388C4B /* BibleWatchShared.swift */,
+				73BB6C017BC3DB5F37339D4D /* StudyBibleWatch.entitlements */,
 			);
 			name = StudyBibleWatch;
 			path = StudyBibleWatch;
@@ -151,6 +192,25 @@
 				331C807B294A618700263BE5 /* RunnerTests.swift */,
 			);
 			path = RunnerTests;
+			sourceTree = "<group>";
+		};
+		87B59693A0453A2CA232F4B9 /* watchOS */ = {
+			isa = PBXGroup;
+			children = (
+				CA5CCEF193F493F0547E9A59 /* Foundation.framework */,
+			);
+			name = watchOS;
+			sourceTree = "<group>";
+		};
+		92FD8E1B486D756D368C6D65 /* StudyBibleWatchWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				3926385880EC233BA599E81A /* StudyBibleRemoteWidget.swift */,
+				82E11359DC373362BA8E5956 /* Info.plist */,
+				3123750841142C7D90547318 /* StudyBibleWatchWidgets.entitlements */,
+			);
+			name = StudyBibleWatchWidgets;
+			path = StudyBibleWatchWidgets;
 			sourceTree = "<group>";
 		};
 		9740EEB11CF90186004384FC /* Flutter */ = {
@@ -174,6 +234,7 @@
 				9D0E292FDCB1A7ACDA036A97 /* Pods */,
 				20DD38D9C4C92441DC92E087 /* Frameworks */,
 				2F5C62FDD3D2E1720AE67976 /* StudyBibleWatch */,
+				92FD8E1B486D756D368C6D65 /* StudyBibleWatchWidgets */,
 			);
 			sourceTree = "<group>";
 		};
@@ -183,6 +244,7 @@
 				97C146EE1CF9000F007C117D /* Runner.app */,
 				331C8081294A63A400263BE5 /* RunnerTests.xctest */,
 				59945963A0ADCC1840A4EC8C /* StudyBibleWatch.app */,
+				C9BDCAFD7CE5FA19B665EB62 /* StudyBibleWatchWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -249,15 +311,34 @@
 				19E73859B5DF60EA62985222 /* Sources */,
 				99B5BEEC0BCFCB14FE7BDDB8 /* Frameworks */,
 				EE8C4FF2CA89AECE50F2F2EF /* Resources */,
+				BF7B2270BFD33CF981264999 /* Embed Watch Widgets */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				546BDD5A481D1A2710D5866D /* PBXTargetDependency */,
 			);
 			name = StudyBibleWatch;
 			productName = StudyBibleWatch;
 			productReference = 59945963A0ADCC1840A4EC8C /* StudyBibleWatch.app */;
 			productType = "com.apple.product-type.application";
+		};
+		78372DF0DB57249FB44C404A /* StudyBibleWatchWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8AC43279F8A1B8313F29EF3E /* Build configuration list for PBXNativeTarget "StudyBibleWatchWidgets" */;
+			buildPhases = (
+				16D9CEE899CB64922DDCF250 /* Sources */,
+				A7406E8C9D38B7A20CA2656C /* Frameworks */,
+				EF9654CB9C529F6C4F35F0F2 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = StudyBibleWatchWidgets;
+			productName = StudyBibleWatchWidgets;
+			productReference = C9BDCAFD7CE5FA19B665EB62 /* StudyBibleWatchWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		97C146ED1CF9000F007C117D /* Runner */ = {
 			isa = PBXNativeTarget;
@@ -297,6 +378,22 @@
 						CreatedOnToolsVersion = 14.0;
 						TestTargetID = 97C146ED1CF9000F007C117D;
 					};
+					5C9B00251C01A1FB46E3B7EE = {
+						DevelopmentTeam = RTCYBY39S5;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
+						};
+					};
+					78372DF0DB57249FB44C404A = {
+						DevelopmentTeam = RTCYBY39S5;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
+						};
+					};
 					97C146ED1CF9000F007C117D = {
 						CreatedOnToolsVersion = 7.3.1;
 						LastSwiftMigration = 1100;
@@ -319,6 +416,7 @@
 				97C146ED1CF9000F007C117D /* Runner */,
 				331C8080294A63A400263BE5 /* RunnerTests */,
 				5C9B00251C01A1FB46E3B7EE /* StudyBibleWatch */,
+				78372DF0DB57249FB44C404A /* StudyBibleWatchWidgets */,
 			);
 		};
 /* End PBXProject section */
@@ -347,6 +445,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				24B9703E17E9B471BFB01B40 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EF9654CB9C529F6C4F35F0F2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -448,11 +553,21 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		16D9CEE899CB64922DDCF250 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				11649DD110A84ECBD6013B9C /* StudyBibleRemoteWidget.swift in Sources */,
+				43F97286B0724DC25570A7FA /* BibleWatchShared.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		19E73859B5DF60EA62985222 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				F2CDEB24A6E467684E5619C2 /* StudyBibleWatchApp.swift in Sources */,
+				075B9C1D3EF7708EFC517233 /* BibleWatchShared.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -491,6 +606,12 @@
 			target = 97C146ED1CF9000F007C117D /* Runner */;
 			targetProxy = 331C8085294A63A400263BE5 /* PBXContainerItemProxy */;
 		};
+		546BDD5A481D1A2710D5866D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = StudyBibleWatchWidgets;
+			target = 78372DF0DB57249FB44C404A /* StudyBibleWatchWidgets */;
+			targetProxy = B5BC942FD4ABC8061EDD8BF4 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
@@ -518,7 +639,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = StudyBibleWatch/StudyBibleWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = RTCYBY39S5;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Bible Remote";
@@ -529,6 +652,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.deanbowen.bibleAppMac.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -664,6 +788,35 @@
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runner";
 			};
 			name = Profile;
+		};
+		8DF8BB2C10A1C4C4830D0A5F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = StudyBibleWatchWidgets/StudyBibleWatchWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = RTCYBY39S5;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = StudyBibleWatchWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "StudyBible Controls";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.deanbowen.bibleAppMac.watchkitapp.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
 		};
 		97C147031CF9000F007C117D /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -823,16 +976,14 @@
 		};
 		AEC0B12FF7081FA3B5A4F35B /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 9740EEB31CF90195004384FC /* Generated.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Manual;
-				PROVISIONING_PROFILE_SPECIFIER = "StudyBible2 Watch Development 2026";
+				CODE_SIGN_ENTITLEMENTS = StudyBibleWatch/StudyBibleWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = RTCYBY39S5;
 				GENERATE_INFOPLIST_FILE = YES;
-				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
-				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
 				INFOPLIST_KEY_CFBundleDisplayName = "Bible Remote";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.deanbowen.bibleAppMac;
 				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
@@ -841,6 +992,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.deanbowen.bibleAppMac.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -853,12 +1005,74 @@
 			};
 			name = Release;
 		};
+		C465CDB4CF81C8907678F759 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = StudyBibleWatchWidgets/StudyBibleWatchWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = RTCYBY39S5;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = StudyBibleWatchWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "StudyBible Controls";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.deanbowen.bibleAppMac.watchkitapp.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+		D7456F761B2CAFF07A85682D /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = StudyBibleWatchWidgets/StudyBibleWatchWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = RTCYBY39S5;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = StudyBibleWatchWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "StudyBible Controls";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.deanbowen.bibleAppMac.watchkitapp.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Profile;
+		};
 		F99F2EDC090B177935121D88 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = StudyBibleWatch/StudyBibleWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = RTCYBY39S5;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Bible Remote";
@@ -869,6 +1083,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = "$(FLUTTER_BUILD_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.deanbowen.bibleAppMac.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -889,6 +1104,16 @@
 				331C8088294A63A400263BE5 /* Debug */,
 				331C8089294A63A400263BE5 /* Release */,
 				331C808A294A63A400263BE5 /* Profile */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8AC43279F8A1B8313F29EF3E /* Build configuration list for PBXNativeTarget "StudyBibleWatchWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C465CDB4CF81C8907678F759 /* Release */,
+				8DF8BB2C10A1C4C4830D0A5F /* Debug */,
+				D7456F761B2CAFF07A85682D /* Profile */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

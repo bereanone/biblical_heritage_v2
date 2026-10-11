@@ -20,11 +20,11 @@ Future<BibleVisibleLocation?> loadBiblePlaybackSkipTarget(
       where = 'book_number $comparison ? AND chapter = 1 AND block_index = 1';
       args = [current.bookNumber];
     case BibleLoopUnit.chapter:
+    case null:
       where =
           '(book_number $comparison ? OR (book_number = ? AND chapter $comparison ?)) AND block_index = 1';
       args = [current.bookNumber, current.bookNumber, current.chapter];
     case BibleLoopUnit.verse:
-    case null:
       where = 'id $comparison ?';
       args = [current.blockId];
   }

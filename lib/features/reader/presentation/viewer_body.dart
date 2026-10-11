@@ -71,6 +71,17 @@ bool viewerVisibleLocationCallbackIsCurrent({
   required int currentGeneration,
 }) => scheduledGeneration == currentGeneration;
 
+/// An item and its position in the viewport, retained across reader navigation.
+class ViewerReaderScrollPosition {
+  const ViewerReaderScrollPosition({
+    required this.blockId,
+    required this.alignment,
+  });
+
+  final int blockId;
+  final double alignment;
+}
+
 class ViewerBody extends StatefulWidget {
   const ViewerBody({
     super.key,
@@ -89,6 +100,12 @@ class ViewerBody extends StatefulWidget {
     this.onSelectTokenLongPressMove,
     this.onSelectVerseNumberLongPressMove,
     this.onTapSelectedRange = _noop,
+    this.underlineMappedStrongs = false,
+    this.selectedMappedBlockId,
+    this.selectedMappedTokenIndex,
+    this.onTapMappedPhrase,
+    this.restoreScrollPosition,
+    this.onScrollPositionChanged,
     this.rangeSelection = const ViewerRangeSelection(),
     this.highlightRefreshTick = 0,
     this.navigationTick = 0,
@@ -111,6 +128,13 @@ class ViewerBody extends StatefulWidget {
   onSelectTokenLongPressMove;
   final ValueChanged<VerseLine>? onSelectVerseNumberLongPressMove;
   final VoidCallback onTapSelectedRange;
+  final bool underlineMappedStrongs;
+  final int? selectedMappedBlockId;
+  final int? selectedMappedTokenIndex;
+  final void Function(VerseLine line, ViewerMappedPhrase phrase)?
+  onTapMappedPhrase;
+  final ViewerReaderScrollPosition? restoreScrollPosition;
+  final ValueChanged<ViewerReaderScrollPosition>? onScrollPositionChanged;
   final ViewerRangeSelection rangeSelection;
   final VoidCallback? onTokenLongPressEnd;
   final int highlightRefreshTick;
@@ -226,6 +250,9 @@ class _ViewerBodyState extends State<ViewerBody> {
   @override
   void initState() {
     super.initState();
+    if (widget.restoreScrollPosition != null) {
+      _lastScrolledBlockId = widget.selectedBlockId;
+    }
     _itemPositionsListener.itemPositions.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.autoScrollTarget?.attach(_scrollByPixels);
@@ -498,6 +525,18 @@ class _ViewerBodyState extends State<ViewerBody> {
                 left.itemLeadingEdge.compareTo(right.itemLeadingEdge),
           );
     if (positions.isEmpty) return;
+    final firstFullyVisible = positions.where(
+      (position) => position.itemLeadingEdge >= 0,
+    );
+    final first = firstFullyVisible.isNotEmpty
+        ? firstFullyVisible.first
+        : positions.first;
+    widget.onScrollPositionChanged?.call(
+      ViewerReaderScrollPosition(
+        blockId: first.index + 1,
+        alignment: first.itemLeadingEdge.clamp(0.0, 1.0),
+      ),
+    );
     final centeredBlockId = centeredBibleVerseBlockId(
       positions.map((position) {
         final blockId = position.index + 1;
@@ -805,8 +844,10 @@ class _ViewerBodyState extends State<ViewerBody> {
             itemScrollController: _itemScrollController,
             scrollOffsetController: _scrollOffsetController,
             itemPositionsListener: _itemPositionsListener,
-            initialScrollIndex: _indexForBlockId(widget.anchorBlockId),
-            initialAlignment: 0.5,
+            initialScrollIndex: _indexForBlockId(
+              widget.restoreScrollPosition?.blockId ?? widget.anchorBlockId,
+            ),
+            initialAlignment: widget.restoreScrollPosition?.alignment ?? 0.5,
             padding: const EdgeInsets.fromLTRB(22, 4, 22, 14),
             itemBuilder: (context, index) {
               // Make the visible pixel position available before the first
@@ -873,6 +914,15 @@ class _ViewerBodyState extends State<ViewerBody> {
                         line: line,
                         style: bodyStyle,
                         isSelected: selectedBlockId == blockId,
+                        underlineMappedStrongs: widget.underlineMappedStrongs,
+                        selectedMappedTokenIndex:
+                            widget.selectedMappedBlockId == blockId
+                            ? widget.selectedMappedTokenIndex
+                            : null,
+                        onTapMappedPhrase: widget.onTapMappedPhrase == null
+                            ? null
+                            : (phrase) =>
+                                  widget.onTapMappedPhrase!(line, phrase),
                         isRangeSelected: rangeSelected,
                         geometryRegistry: _enableTextRangeGeometry
                             ? _geometryRegistry

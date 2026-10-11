@@ -270,6 +270,7 @@ class _BootstrapGateState extends State<BootstrapGate> {
 
     if (snapshot.requiresDecision) {
       return _LegacyUpgradeDecisionScreen(
+        isUpdateReview: snapshot.isUpdateReview,
         status: snapshot.message,
         errorMessage: _error?.toString() ?? snapshot.errorMessage,
         onUpgrade: () =>
@@ -277,7 +278,8 @@ class _BootstrapGateState extends State<BootstrapGate> {
         onFreshStart: () => _runSelection(
           StartupCoordinator.instance.startFreshButKeepLegacyBackup,
         ),
-        onNotNow: _continueToBibleOnly,
+        onNotNow: () =>
+            _runSelection(StartupCoordinator.instance.keepCurrentData),
       );
     }
 
@@ -381,6 +383,7 @@ class _BootstrapSplash extends StatelessWidget {
 
 class _LegacyUpgradeDecisionScreen extends StatelessWidget {
   const _LegacyUpgradeDecisionScreen({
+    required this.isUpdateReview,
     required this.status,
     required this.onUpgrade,
     required this.onFreshStart,
@@ -388,6 +391,7 @@ class _LegacyUpgradeDecisionScreen extends StatelessWidget {
     this.errorMessage,
   });
 
+  final bool isUpdateReview;
   final String status;
   final String? errorMessage;
   final VoidCallback onUpgrade;
@@ -403,76 +407,82 @@ class _LegacyUpgradeDecisionScreen extends StatelessWidget {
         backgroundColor: Colors.black,
         body: SafeArea(
           child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Card(
-                  elevation: 0,
-                  color: const Color(0xFF151515),
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Legacy data found',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
+            child: SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Card(
+                    elevation: 0,
+                    color: const Color(0xFF151515),
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isUpdateReview
+                                ? 'Study data after this update'
+                                : 'Legacy data found',
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          status,
-                          style: const TextStyle(color: Colors.white70),
-                        ),
-                        if (errorMessage != null) ...[
                           const SizedBox(height: 12),
                           Text(
-                            errorMessage!,
-                            style: const TextStyle(color: Colors.redAccent),
+                            status,
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                          if (errorMessage != null) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              errorMessage!,
+                              style: const TextStyle(color: Colors.redAccent),
+                            ),
+                          ],
+                          const SizedBox(height: 20),
+                          Text(
+                            isUpdateReview
+                                ? 'Choose Keep Current Data to continue with your existing study library. The other choices are available if you want to work with older files.'
+                                : 'This device has tags, notes, or bookmarks saved by an older version of the app. Choose how to handle them:',
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                          const SizedBox(height: 20),
+                          _LegacyDecisionOption(
+                            description:
+                                'Recommended. Backs up your existing tags, notes, and bookmarks, then upgrades them into the new format so you keep everything.',
+                            button: FilledButton(
+                              onPressed: onUpgrade,
+                              child: const Text(
+                                'Back Up and Upgrade Existing Data',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _LegacyDecisionOption(
+                            description:
+                                'Backs up your old data to a file first, then opens with a clean, empty library. Your old tags/notes/bookmarks are not carried over automatically, but the backup file is kept in case you want them restored later.',
+                            button: OutlinedButton(
+                              onPressed: onFreshStart,
+                              child: const Text(
+                                'Start Fresh but Keep Legacy Backup',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _LegacyDecisionOption(
+                            description:
+                                'Open with your current study data. Remember this choice until the next app update. Older files are kept unchanged.',
+                            button: TextButton(
+                              onPressed: onNotNow,
+                              child: const Text('Keep Current Data'),
+                            ),
                           ),
                         ],
-                        const SizedBox(height: 20),
-                        const Text(
-                          'This device has tags, notes, or bookmarks saved by an older version of the app. Choose how to handle them:',
-                          style: TextStyle(color: Colors.white70),
-                        ),
-                        const SizedBox(height: 20),
-                        _LegacyDecisionOption(
-                          description:
-                              'Recommended. Backs up your existing tags, notes, and bookmarks, then upgrades them into the new format so you keep everything.',
-                          button: FilledButton(
-                            onPressed: onUpgrade,
-                            child: const Text(
-                              'Back Up and Upgrade Existing Data',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        _LegacyDecisionOption(
-                          description:
-                              'Backs up your old data to a file first, then opens with a clean, empty library. Your old tags/notes/bookmarks are not carried over automatically, but the backup file is kept in case you want them restored later.',
-                          button: OutlinedButton(
-                            onPressed: onFreshStart,
-                            child: const Text(
-                              'Start Fresh but Keep Legacy Backup',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        _LegacyDecisionOption(
-                          description:
-                              'Skip this decision for now and open the Bible without changing any files. You will be asked again the next time you start the app.',
-                          button: TextButton(
-                            onPressed: onNotNow,
-                            child: const Text('Continue to Bible Only'),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),

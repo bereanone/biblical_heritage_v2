@@ -479,10 +479,15 @@ class ELibraryDownloadService {
                 ? File(
                     p.join(
                       dryRunRoot!.path,
-                      '${collection.folderName}_${book.code}_${format.name}.downloading',
+                      '.downloading.${collection.folderName}_${book.code}.${format.name}',
                     ),
                   )
-                : File('${destinationFile.path}.downloading');
+                : File(
+                    p.join(
+                      destinationFile.parent.path,
+                      '.downloading.${p.basename(destinationFile.path)}',
+                    ),
+                  );
             if (await stagingFile.exists()) {
               await stagingFile.delete();
             }

@@ -448,7 +448,9 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
                 padding: const EdgeInsets.all(20),
                 children: [
                   Text(
-                    'This selects the root folder for future user-owned databases, tags, markup, graphics, media, backups, and sync folders.',
+                    LibraryRootNative.usesAndroidDocumentTree
+                        ? 'Select a StudyBible folder to import existing content. Installed and downloaded copies stay in private StudyBible2 storage, separate from originals. Uninstalling removes the app’s private storage.'
+                        : 'This selects the root folder for future user-owned databases, tags, markup, graphics, media, backups, and sync folders.',
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
                   const SizedBox(height: 16),
@@ -637,8 +639,10 @@ class _LibraryRootSetupScreenState extends State<LibraryRootSetupScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Choose a folder in the native folder picker, or use the default app-managed folder. The app will create the required subfolders inside the selected Library Root.',
+                  Text(
+                    LibraryRootNative.usesAndroidDocumentTree
+                        ? 'Shared originals are kept. Use Remove Added Data in App Tools to empty the private library before uninstalling. Export a backup first if you want to keep personal studies.'
+                        : 'Choose a folder in the native folder picker, or use the default app-managed folder. The app will create the required subfolders inside the selected Library Root.',
                   ),
                   if (_migrationResult != null) ...[
                     const SizedBox(height: 12),

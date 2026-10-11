@@ -16,6 +16,7 @@ import '../../../core/theme/app_settings_service.dart';
 import '../data/canonical_activation.dart';
 import '../data/library_catalog_service.dart';
 import '../data/library_document_canonicalizer.dart';
+import '../data/library_source_type.dart';
 import '../data/library_document_models.dart';
 import '../data/library_citation_links.dart';
 import '../data/library_document_assets.dart';
@@ -33,6 +34,7 @@ import 'reader_tilt_autoscroll_controller.dart';
 import 'reader_tilt_autoscroll_controls.dart';
 import 'reader_tilt_motion_source.dart';
 import 'reader_tilt_preferences.dart';
+import 'speech_tilt_binding.dart';
 import 'mac_reader_autoscroll_controller.dart';
 import 'mac_reader_autoscroll_controls.dart';
 import 'library_narration_media_controls.dart';
@@ -421,6 +423,31 @@ class CanonicalReaderPreparation {
 typedef CanonicalReaderPrepare =
     Future<CanonicalReaderPreparation?> Function(LibraryCatalogItem item);
 
+/// Repairs only the proven legacy ZIP-as-text failure, not accepted prose.
+Future<bool> _hasLegacyZipText(
+  LibraryDocumentRepository repository,
+  String itemId,
+  File source,
+) async {
+  final rows = await repository.db.query(
+    'library_document_blocks',
+    columns: ['plain_text'],
+    where: 'library_item_id = ?',
+    whereArgs: [itemId],
+    orderBy: 'display_order',
+    limit: 3,
+  );
+  final zipText = rows.any((row) {
+    final text = (row['plain_text']?.toString() ?? '').trimLeft();
+    return text.startsWith('PK\u0003\u0004') ||
+        (text.startsWith('PK') &&
+            (text.contains('mimetype') || text.contains('META-INF/')));
+  });
+  return zipText &&
+      await source.exists() &&
+      librarySourceIsEpub(await source.readAsBytes(), path: source.path);
+}
+
 Future<CanonicalReaderPreparation?> prepareCanonicalCaptureClipperReader(
   LibraryCatalogItem item,
 ) async {
@@ -437,7 +464,8 @@ Future<CanonicalReaderPreparation?> prepareCanonicalCaptureClipperReader(
   final source = File(resolvedPath);
   final db = await ELibraryDatabase.instance.database;
   final repository = LibraryDocumentRepository(db);
-  if (await repository.isComplete(item.id)) {
+  final repairZipText = await _hasLegacyZipText(repository, item.id, source);
+  if (await repository.isComplete(item.id) && !repairZipText) {
     return CanonicalReaderPreparation(
       repository: repository,
       sourceRoot: source.parent,
@@ -448,6 +476,7 @@ Future<CanonicalReaderPreparation?> prepareCanonicalCaptureClipperReader(
     db: db,
     libraryItemId: item.id,
     source: source,
+    force: repairZipText,
   );
   if (!outcome.isReady) return null;
   return CanonicalReaderPreparation(
@@ -509,12 +538,14 @@ Future<CanonicalReaderPreparation?> prepareCanonicalEpubReader(
   // Version upgrades are explicit maintenance. A read must not replace
   // accepted content or move saved selections simply because code changed.
   final alreadyComplete = await repository.isComplete(item.id);
-  if (!alreadyComplete) {
+  final repairZipText = await _hasLegacyZipText(repository, item.id, source);
+  if (!alreadyComplete || repairZipText) {
     if (!await source.exists()) return null;
     final outcome = await CanonicalActivation.activate(
       db: db,
       libraryItemId: item.id,
       source: source,
+      force: repairZipText,
       applyStoragePolicy: true,
       rootPath: rootPath,
     );
@@ -766,6 +797,7 @@ class _CanonicalLibraryReaderScreenState
   Timer? _positionSaveTimer;
   Future<void> _positionSave = Future<void>.value();
   int _latestVisibleOrder = 0;
+  String? _selectedRecordedCursor;
   String? _spokenBlockId;
   double _fontScale = 1;
   bool _showRefCodes = false;
@@ -815,7 +847,8 @@ class _CanonicalLibraryReaderScreenState
     if (_usesMacAutoscroll || usesNarrationOnly) {
       _macAutoScroll = MacReaderAutoScrollController(
         scrollTarget: _scrollTarget,
-        narrationControlsPacing: Platform.isMacOS || usesNarrationOnly,
+        narrationControlsPacing:
+            Platform.isMacOS || Platform.isAndroid || usesNarrationOnly,
       )..addListener(_macAutoscrollChanged);
       AppSettingsService.instance.loadMacAutoscrollPreferences().then((value) {
         if (mounted) _macAutoScroll?.updatePreferences(value);
@@ -1134,6 +1167,9 @@ class _CanonicalLibraryReaderScreenState
                       _macAutoScroll?.pauseNarrationForInteraction();
                     },
                     narrationBlockId: _spokenBlockId,
+                    onParagraphTap: (order) {
+                      setState(() => _selectedRecordedCursor = '$order');
+                    },
                     sourceRoot: widget.sourceRoot,
                     diagnostics: widget.diagnostics,
                     proofCommands: _commands,
@@ -1183,6 +1219,10 @@ class _CanonicalLibraryReaderScreenState
                   initialCursor: () => '$_latestVisibleOrder',
                   load: _loadSpeechItem,
                   reveal: _revealSpeechItem,
+                  revealRecorded: (item) =>
+                      _revealSpeechItem(item, recorded: true),
+                  recordedStartCursor: '0',
+                  selectedRecordedCursor: () => _selectedRecordedCursor,
                   onPaused: () {
                     if (mounted) setState(() => _spokenBlockId = null);
                   },
@@ -1299,12 +1339,6 @@ class _CanonicalLibraryReaderScreenState
                 ),
             ],
           ),
-          if (_macAutoScroll != null)
-            MacReaderAutoscrollStatusOverlay(
-              controller: _macAutoScroll!,
-              foregroundColor: foreground,
-              backgroundColor: background,
-            ),
         ],
       ),
     );
@@ -1348,9 +1382,18 @@ class _CanonicalLibraryReaderScreenState
       order < _controller.blockCount;
       order++
     ) {
-      await _controller.ensureNavigationWindow(order);
-      if (!mounted) return null;
-      final block = _controller.blockAt(order);
+      // Speech indexing must not depend on the viewport's coalesced window
+      // requests: scrolling can replace the pending audio destination.
+      var block = _controller.blockAt(order);
+      if (block == null) {
+        final rows = await widget.repository.loadWindow(
+          widget.item.id,
+          centerOrder: order,
+          radius: 0,
+        );
+        if (!mounted) return null;
+        block = rows.isEmpty ? null : rows.first;
+      }
       if (block == null) {
         throw StateError('A book text block could not be loaded.');
       }
@@ -1369,12 +1412,17 @@ class _CanonicalLibraryReaderScreenState
     return null;
   }
 
-  Future<void> _revealSpeechItem(LibrarySpeechItem item) async {
+  Future<void> _revealSpeechItem(
+    LibrarySpeechItem item, {
+    bool recorded = false,
+  }) async {
     if (!mounted) return;
     final order = int.parse(item.sourceCursor);
+    if (recorded) await _controller.ensureNavigationWindow(order);
+    if (!mounted) return;
     if (item.startOffset > 0) {
       // Later slices of a long paragraph: keep the spoken part on screen.
-      if (_macAutoScroll?.isScrolling == true) {
+      if (recorded || _macAutoScroll?.isScrolling == true) {
         unawaited(
           _speechFollow.follow(
             order,
@@ -1391,7 +1439,7 @@ class _CanonicalLibraryReaderScreenState
     });
     unawaited(_saveCurrentLocation());
     await WidgetsBinding.instance.endOfFrame;
-    if (mounted && _macAutoScroll?.isScrolling == true) {
+    if (mounted && (recorded || _macAutoScroll?.isScrolling == true)) {
       _commands.jumpToOrder(order);
     }
   }
@@ -1457,16 +1505,9 @@ class _CanonicalLibraryReaderScreenState
   }
 
   void _toggleTiltAutoscroll() {
-    if (_macAutoScroll?.audioEnabled == true) {
-      _macAutoScroll!.setSignedStep(_macAutoScroll!.isScrolling ? 0 : 1);
-      return;
-    }
-    if (_autoScroll.isActive) {
-      _autoScroll.stop();
-    } else {
-      _macAutoScroll?.stopForManualInteraction();
-      _autoScroll.activate();
-    }
+    unawaited(
+      toggleSilentReaderTilt(tilt: _autoScroll, speech: _macAutoScroll),
+    );
   }
 
   Future<void> _openTiltAutoscrollSettings() async {
@@ -2097,6 +2138,7 @@ class CanonicalLibraryDocumentBody extends StatefulWidget {
     this.onInitialScrollCompleted,
     this.highlightedBlockIds = const <String>{},
     this.narrationBlockId,
+    this.onParagraphTap,
     this.markupsByBlockId = const <String, List<ElibraryMarkupRecord>>{},
     this.onSelectionChanged,
     this.onOpenSelectionMenu,
@@ -2128,6 +2170,7 @@ class CanonicalLibraryDocumentBody extends StatefulWidget {
   final VoidCallback? onInitialScrollCompleted;
   final Set<String> highlightedBlockIds;
   final String? narrationBlockId;
+  final ValueChanged<int>? onParagraphTap;
   final Map<String, List<ElibraryMarkupRecord>> markupsByBlockId;
   final void Function(LibraryDocumentBlock block, TextSelection selection)?
   onSelectionChanged;
@@ -2222,14 +2265,61 @@ class _CanonicalLibraryDocumentBodyState
     if (position == null || !position.hasPixels) return false;
     for (final item in _positions.itemPositions.value) {
       if (item.index != order) continue;
-      final delta = librarySpeechFollowDelta(
+      final sliceDelta = librarySpeechFollowDelta(
         sliceTop:
             (item.itemLeadingEdge +
                 progress * (item.itemTrailingEdge - item.itemLeadingEdge)) *
             position.viewportDimension,
         viewportHeight: position.viewportDimension,
       );
-      return delta != null && await animateSpeechFollow(position, delta);
+      final spokenTop =
+          (item.itemLeadingEdge +
+              progress * (item.itemTrailingEdge - item.itemLeadingEdge)) *
+          position.viewportDimension;
+      final delta = spokenTop - position.viewportDimension * .35;
+      return delta > 1
+          ? await animateSpeechFollow(
+              position,
+              delta,
+              duration: const Duration(milliseconds: 400),
+              curve: Curves.linear,
+            )
+          : sliceDelta != null && sliceDelta < 0
+          ? await animateSpeechFollow(position, sliceDelta)
+          : false;
+    }
+    // A phrase may begin in a block that is not currently on screen.
+    // Bring that block into view instead of silently dropping the update.
+    _itemController.jumpTo(
+      index: order.clamp(0, widget.controller.blockCount - 1),
+      alignment: librarySpeechAnchor,
+    );
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return false;
+    for (final item in _positions.itemPositions.value) {
+      if (item.index != order) continue;
+      final sliceDelta = librarySpeechFollowDelta(
+        sliceTop:
+            (item.itemLeadingEdge +
+                progress * (item.itemTrailingEdge - item.itemLeadingEdge)) *
+            position.viewportDimension,
+        viewportHeight: position.viewportDimension,
+      );
+      final spokenTop =
+          (item.itemLeadingEdge +
+              progress * (item.itemTrailingEdge - item.itemLeadingEdge)) *
+          position.viewportDimension;
+      final delta = spokenTop - position.viewportDimension * .35;
+      return delta > 1
+          ? await animateSpeechFollow(
+              position,
+              delta,
+              duration: const Duration(milliseconds: 400),
+              curve: Curves.linear,
+            )
+          : sliceDelta != null && sliceDelta < 0
+          ? await animateSpeechFollow(position, sliceDelta)
+          : false;
     }
     return false;
   }
@@ -2387,29 +2477,32 @@ class _CanonicalLibraryDocumentBodyState
                     // it changes the sliver geometry when real content arrives.
                     return const SizedBox.shrink();
                   }
-                  return Container(
-                    key: ValueKey(block.id),
-                    color: widget.narrationBlockId == block.id
-                        ? Theme.of(
-                            context,
-                          ).colorScheme.primary.withValues(alpha: .16)
-                        : null,
-                    child: _CanonicalBlockView(
-                      block: block,
-                      color: widget.textColor,
-                      sourceRoot: widget.sourceRoot,
-                      fontScale: widget.fontScale,
-                      showRefCode: widget.showRefCodes,
-                      referenceLinkingEnabled: widget.referenceLinkingEnabled,
-                      citationResolves: widget.citationResolves,
-                      highlightTerms: widget.highlightTerms,
-                      markups: widget.markupsByBlockId[block.id] ?? const [],
-                      onSelectionChanged: (selection) =>
-                          widget.onSelectionChanged?.call(block, selection),
-                      onOpenSelectionMenu: widget.onOpenSelectionMenu,
-                      onFollowLink: widget.onFollowLink == null
-                          ? null
-                          : (href) => widget.onFollowLink!(block, href),
+                  return Listener(
+                    onPointerUp: (_) => widget.onParagraphTap?.call(order),
+                    child: Container(
+                      key: ValueKey(block.id),
+                      color: widget.narrationBlockId == block.id
+                          ? Theme.of(
+                              context,
+                            ).colorScheme.primary.withValues(alpha: .16)
+                          : null,
+                      child: _CanonicalBlockView(
+                        block: block,
+                        color: widget.textColor,
+                        sourceRoot: widget.sourceRoot,
+                        fontScale: widget.fontScale,
+                        showRefCode: widget.showRefCodes,
+                        referenceLinkingEnabled: widget.referenceLinkingEnabled,
+                        citationResolves: widget.citationResolves,
+                        highlightTerms: widget.highlightTerms,
+                        markups: widget.markupsByBlockId[block.id] ?? const [],
+                        onSelectionChanged: (selection) =>
+                            widget.onSelectionChanged?.call(block, selection),
+                        onOpenSelectionMenu: widget.onOpenSelectionMenu,
+                        onFollowLink: widget.onFollowLink == null
+                            ? null
+                            : (href) => widget.onFollowLink!(block, href),
+                      ),
                     ),
                   );
                 },

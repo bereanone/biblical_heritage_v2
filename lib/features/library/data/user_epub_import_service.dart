@@ -9,6 +9,7 @@ import '../../../core/database/elibrary_database.dart';
 import '../../utilities/data/elibrary_folder_policy.dart';
 import '../../utilities/data/epub_download_validator.dart';
 import 'library_epub_metadata.dart';
+import 'library_source_type.dart';
 import 'library_item_identity.dart';
 
 class UserEpubImportResult {
@@ -61,10 +62,10 @@ class UserEpubImportService {
     if (!await sourceFile.exists()) {
       throw StateError('The selected file is no longer available.');
     }
-    if (p.extension(sourceFile.path).toLowerCase() != '.epub') {
+    final sourceBytes = await sourceFile.readAsBytes();
+    if (!librarySourceIsEpub(sourceBytes, path: sourceFile.path)) {
       throw const FormatException('Choose an EPUB file.');
     }
-    final sourceBytes = await sourceFile.readAsBytes();
     final validation = EpubDownloadValidator.validate(sourceBytes);
     if (!validation.isValid) {
       throw FormatException(

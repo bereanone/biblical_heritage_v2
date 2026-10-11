@@ -91,7 +91,9 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
         replyHandler(self.state)
         return
       }
-      guard ["start", "stop", "pause", "toggle", "next", "previous",
+      let bookJump = command.hasPrefix("book:") && (1...66).contains(Int(command.dropFirst(5)) ?? 0)
+      let passageJump = command.hasPrefix("chapter:") || command.hasPrefix("verse:")
+      guard bookJump || passageJump || ["previous:book", "previous:chapter", "previous:verse", "next:book", "next:chapter", "next:verse"].contains(command) || ["start", "stop", "pause", "toggle", "next", "previous",
              "loop:off", "loop:book", "loop:chapter", "loop:verse"].contains(command) else {
         replyHandler(["error": "Unsupported command"])
         return
@@ -135,6 +137,10 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
       "loopTargetVerse": updated["loopTargetVerse"] as? Int ?? verse,
       "pending": updated["pending"] as? Bool ?? false,
     ]
+    if let all = try? loadChapters() {
+      state["chapterCount"] = all.filter { $0.book == book }.map { $0.chapter }.max() ?? 1
+      state["verseCount"] = all.first { $0.book == book && $0.chapter == chapter }?.verseStarts.map { $0.verse }.max() ?? 1
+    }
     if let error = updated["error"] as? String { state["error"] = error }
     UserDefaults.standard.set(state, forKey: Self.savedStateKey)
     publishToWatch()
@@ -175,6 +181,56 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
   }
 
   private func performNative(_ command: String) throws {
+    if command.hasPrefix("chapter:") || command.hasPrefix("verse:") {
+      let parts = command.split(separator: ":")
+      guard parts.count == 2, let number = Int(parts[1]), number > 0 else { throw WatchRemoteError.missingRecording }
+      let old = state
+      let chapter = try currentChapter()
+      let targetChapter = parts[0] == "chapter" ? number : chapter.chapter
+      let targetVerse = parts[0] == "verse" ? number : 1
+      guard let target = try loadChapters().first(where: { $0.book == chapter.book && $0.chapter == targetChapter }),
+            target.verseStarts.contains(where: { $0.verse == targetVerse }) else { throw WatchRemoteError.missingVerseTiming }
+      state["chapter"] = targetChapter
+      state["verse"] = targetVerse
+      state["loopTargetBook"] = chapter.book
+      state["loopTargetChapter"] = targetChapter
+      state["loopTargetVerse"] = targetVerse
+      state["title"] = "\(Self.bookName(chapter.book)) \(targetChapter):\(targetVerse)"
+      do { try playCurrent(shouldPlay: false) }
+      catch { state = old; throw error }
+      return
+    }
+    if command.hasPrefix("book:"), let book = Int(command.dropFirst(5)), (1...66).contains(book) {
+      let old = state
+      state["book"] = book
+      state["chapter"] = 1
+      state["verse"] = 1
+      state["loopTargetBook"] = book
+      state["loopTargetChapter"] = 1
+      state["loopTargetVerse"] = 1
+      state["title"] = "\(Self.bookName(book)) 1:1"
+      do { try playCurrent(shouldPlay: false) }
+      catch { state = old; throw error }
+      return
+    }
+    if command.hasPrefix("previous:") || command.hasPrefix("next:") {
+      let parts = command.split(separator: ":")
+      let scope = String(parts[1])
+      guard ["book", "chapter", "verse"].contains(scope) else { throw WatchRemoteError.missingRecording }
+      let target = try parts[0] == "next" ? nextLocation(scope: scope) : previousLocation(scope: scope)
+      let old = state
+      let wasPlaying = state["playing"] as? Bool ?? false
+      state["book"] = target.book
+      state["chapter"] = target.chapter
+      state["verse"] = target.verse
+      state["loopTargetBook"] = target.book
+      state["loopTargetChapter"] = target.chapter
+      state["loopTargetVerse"] = target.verse
+      state["title"] = "\(Self.bookName(target.book)) \(target.chapter):\(target.verse)"
+      do { try playCurrent(shouldPlay: wasPlaying) }
+      catch { state = old; throw error }
+      return
+    }
     switch command {
     case "start":
       if state["pending"] as? Bool == true { return }
@@ -244,19 +300,18 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
     }
   }
 
-  private func nextLocation() throws -> (book: Int, chapter: Int, verse: Int) {
+  private func nextLocation(scope: String? = nil) throws -> (book: Int, chapter: Int, verse: Int) {
     let all = try loadChapters()
     let chapter = try currentChapter()
     guard let index = all.firstIndex(where: { $0.book == chapter.book && $0.chapter == chapter.chapter }) else {
       throw WatchRemoteError.missingRecording
     }
-    let mode = state["loop"] as? String ?? "off"
-    let verse = state["verse"] as? Int ?? 1
-    let targetBook = state["loopTargetBook"] as? Int ?? chapter.book
-    let targetChapter = state["loopTargetChapter"] as? Int ?? chapter.chapter
-    let targetVerse = state["loopTargetVerse"] as? Int ?? verse
-    if mode == "off" || mode == "verse" {
-      let base = mode == "verse" ? targetVerse : verse
+    let mode = scope ?? (state["loop"] as? String ?? "off")
+    let targetBook = scope != nil ? chapter.book : (state["loopTargetBook"] as? Int ?? chapter.book)
+    let targetChapter = scope != nil ? chapter.chapter : (state["loopTargetChapter"] as? Int ?? chapter.chapter)
+    let targetVerse = scope != nil ? (state["verse"] as? Int ?? 1) : (state["loopTargetVerse"] as? Int ?? 1)
+    if mode == "verse" {
+      let base = targetVerse
       if let next = chapter.verseStarts.first(where: { $0.verse > base }) {
         return (chapter.book, chapter.chapter, next.verse)
       }
@@ -278,19 +333,18 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
     return (next.book, next.chapter, 1)
   }
 
-  private func previousLocation() throws -> (book: Int, chapter: Int, verse: Int) {
+  private func previousLocation(scope: String? = nil) throws -> (book: Int, chapter: Int, verse: Int) {
     let all = try loadChapters()
     let chapter = try currentChapter()
     guard let index = all.firstIndex(where: { $0.book == chapter.book && $0.chapter == chapter.chapter }) else {
       throw WatchRemoteError.missingRecording
     }
-    let mode = state["loop"] as? String ?? "off"
-    let verse = state["verse"] as? Int ?? 1
-    let targetBook = state["loopTargetBook"] as? Int ?? chapter.book
-    let targetChapter = state["loopTargetChapter"] as? Int ?? chapter.chapter
-    let targetVerse = state["loopTargetVerse"] as? Int ?? verse
-    if mode == "off" || mode == "verse" {
-      let base = mode == "verse" ? targetVerse : verse
+    let mode = scope ?? (state["loop"] as? String ?? "off")
+    let targetBook = scope != nil ? chapter.book : (state["loopTargetBook"] as? Int ?? chapter.book)
+    let targetChapter = scope != nil ? chapter.chapter : (state["loopTargetChapter"] as? Int ?? chapter.chapter)
+    let targetVerse = scope != nil ? (state["verse"] as? Int ?? 1) : (state["loopTargetVerse"] as? Int ?? 1)
+    if mode == "verse" {
+      let base = targetVerse
       if let previous = chapter.verseStarts.last(where: { $0.verse < base }) {
         return (chapter.book, chapter.chapter, previous.verse)
       }
@@ -309,6 +363,7 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
     }
     guard index > 0 else { throw WatchRemoteError.startOfBible }
     let previous = all[index - 1]
+    if mode == "off" { return (previous.book, previous.chapter, 1) }
     guard let lastVerse = previous.verseStarts.last?.verse else {
       throw WatchRemoteError.missingVerseTiming
     }

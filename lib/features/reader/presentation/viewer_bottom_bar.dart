@@ -15,6 +15,7 @@ class ViewerBottomBar extends StatelessWidget {
     required this.onToggleThemeMode,
     required this.bookNumber,
     required this.interlinearEnabled,
+    this.readerAllowsAutoscroll = true,
     required this.onToggleInterlinear,
     required this.onMode,
     required this.onHistory,
@@ -37,6 +38,7 @@ class ViewerBottomBar extends StatelessWidget {
   final VoidCallback onToggleThemeMode;
   final int bookNumber;
   final bool interlinearEnabled;
+  final bool readerAllowsAutoscroll;
   final VoidCallback onToggleInterlinear;
   final VoidCallback onMode;
   final VoidCallback onHistory;
@@ -62,7 +64,7 @@ class ViewerBottomBar extends StatelessWidget {
           controller: tiltAutoScrollController,
           onPressed: onToggleTiltAutoScroll,
           onLongPress: onOpenTiltAutoScrollSettings,
-          enabled: !interlinearEnabled,
+          enabled: readerAllowsAutoscroll,
           compact: compact,
         );
       }
@@ -70,7 +72,7 @@ class ViewerBottomBar extends StatelessWidget {
         controller: macController,
         onPressed: onToggleMacAutoScroll!,
         onLongPress: onOpenMacAutoScrollSettings!,
-        enabled: !interlinearEnabled,
+        enabled: readerAllowsAutoscroll,
       );
     }
     return ReaderTiltAutoScrollIconButton(

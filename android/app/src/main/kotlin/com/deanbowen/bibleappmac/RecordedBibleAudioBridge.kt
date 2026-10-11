@@ -10,6 +10,7 @@ import java.nio.ByteOrder
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.PlaybackParams
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import io.flutter.embedding.engine.FlutterEngine
@@ -31,6 +32,8 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
     private var cuePathIndex = 0
     private var events = emptyList<CueEvent>()
     private var nextEvent = 0
+    private var pendingSeekMs: Int? = null
+    private var dispatchedSeekMs: Int? = null
     private var reading = false
     private var generation = 0
     private var rate = 1.0f
@@ -43,13 +46,13 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
             if (!reading) return
             try {
                 val player = chapterPlayer ?: return
-                if (cuePlayer == null) {
+                if (cuePlayer == null && pendingSeekMs == null) {
                     val position = player.currentPosition
                     val end = loopEndMs
                     if (end != null && position >= end) {
                         val start = loopStartMs ?: 0
                         player.pause()
-                        player.seekTo(start)
+                        seekChapter(start)
                         nextEvent = eventIndexAt(start)
                         channel.invokeMethod("looped", null)
                         if (!playDueCue(start)) startChapter()
@@ -153,7 +156,7 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
             if (completed !== chapterPlayer || !reading) return@setOnCompletionListener
             val start = loopStartMs
             if (start != null) {
-                completed.seekTo(start)
+                seekChapter(start)
                 nextEvent = eventIndexAt(start)
                 channel.invokeMethod("looped", null)
                 if (!playDueCue(start)) startChapter()
@@ -167,6 +170,17 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
             reportError(IllegalStateException("Recording playback failed ($what/$extra)"))
             true
         }
+        player.setOnSeekCompleteListener { completed ->
+            if (completed !== chapterPlayer) return@setOnSeekCompleteListener
+            val target = pendingSeekMs ?: return@setOnSeekCompleteListener
+            if (target != dispatchedSeekMs) {
+                dispatchSeek(completed, target)
+            } else {
+                pendingSeekMs = null
+                dispatchedSeekMs = null
+                startChapter()
+            }
+        }
         chapterPlayer = player
         events = emptyList()
         nextEvent = 0
@@ -178,14 +192,15 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
         val player = chapterPlayer ?: error("No recording loaded")
         if (reading) return
         reading = true
-        if (announceAtStart) nextEvent = eventIndexAt(player.currentPosition)
-        if (!playDueCue(player.currentPosition)) startChapter()
+        val position = pendingSeekMs ?: player.currentPosition
+        if (announceAtStart) nextEvent = eventIndexAt(position)
+        if (!playDueCue(position)) startChapter()
         handler.removeCallbacks(tick)
         handler.post(tick)
     }
 
     private fun startChapter() {
-        if (!reading || cuePlayer != null) return
+        if (!reading || cuePlayer != null || pendingSeekMs != null) return
         val player = chapterPlayer ?: return
         if (!player.isPlaying) player.start()
         applyPlaybackParams()
@@ -209,6 +224,8 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
         pause()
         chapterPlayer?.release()
         chapterPlayer = null
+        pendingSeekMs = null
+        dispatchedSeekMs = null
         events = emptyList()
         nextEvent = 0
         loopStartMs = null
@@ -219,9 +236,29 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
         val player = chapterPlayer ?: return
         val target = milliseconds.toInt().coerceIn(0, player.duration)
         releaseCue()
-        player.seekTo(target)
+        seekChapter(target)
         nextEvent = eventIndexAt(target)
         if (reading && !playDueCue(target)) startChapter()
+    }
+
+    // MediaPlayer seeks asynchronously. Keep the chapter paused until the
+    // latest requested position is ready, including when a cue ends first.
+    private fun seekChapter(target: Int) {
+        val player = chapterPlayer ?: return
+        if (player.isPlaying) player.pause()
+        pendingSeekMs = target.coerceIn(0, player.duration)
+        if (dispatchedSeekMs == null) dispatchSeek(player, pendingSeekMs!!)
+    }
+
+    private fun dispatchSeek(player: MediaPlayer, target: Int) {
+        dispatchedSeekMs = target
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            player.seekTo(target.toLong(), MediaPlayer.SEEK_CLOSEST)
+        } else {
+            // Older Android supports only the preceding sync point; it may
+            // replay a little audio but must not skip the opening of a verse.
+            player.seekTo(target)
+        }
     }
 
     private fun setLoopRange(call: MethodCall) {
@@ -247,7 +284,7 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
             CueEvent((seconds * 1000.0).toInt(), paths)
         }.sortedBy { it.milliseconds }
         events = parsed
-        nextEvent = eventIndexAt(chapterPlayer?.currentPosition ?: 0)
+        nextEvent = eventIndexAt(pendingSeekMs ?: chapterPlayer?.currentPosition ?: 0)
         return parsed.size
     }
 
@@ -262,6 +299,9 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
         if (event.milliseconds > position + 30) return false
         ++nextEvent
         chapterPlayer?.let { if (it.isPlaying) it.pause() }
+        // A delayed poll/pause can already have consumed the first word.
+        // Resume from the measured verse boundary after speaking its label.
+        seekChapter(event.milliseconds)
         cuePaths = event.paths
         cuePathIndex = 0
         startNextCue()

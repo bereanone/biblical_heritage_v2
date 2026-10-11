@@ -3,7 +3,7 @@ import WatchConnectivity
 
 @main
 struct StudyBibleWatchApp: App {
-  @StateObject private var remote = BibleWatchSession()
+  @StateObject private var remote = BibleWatchSession.shared
 
   var body: some Scene {
     WindowGroup {
@@ -14,6 +14,10 @@ struct StudyBibleWatchApp: App {
 
 private struct WatchRemoteView: View {
   @EnvironmentObject private var remote: BibleWatchSession
+  @FocusState private var controlsFocused: Bool
+  @State private var choosingBook = false
+  @State private var selectedBook = 1
+  @State private var pickerUnit = "book"
 
   var body: some View {
     ScrollView {
@@ -35,11 +39,11 @@ private struct WatchRemoteView: View {
           .buttonStyle(.bordered)
         }
         HStack(spacing: 8) {
-          Button { remote.command("previous") } label: {
+          Button { remote.command("previous:\(remote.draftLoopUnit)") } label: {
             Text("Previous").frame(maxWidth: .infinity)
           }
           .accessibilityLabel("Previous \(remote.skipUnit)")
-          Button { remote.command("next") } label: {
+          Button { remote.command("next:\(remote.draftLoopUnit)") } label: {
             Text("Next").frame(maxWidth: .infinity)
           }
           .accessibilityLabel("Next \(remote.skipUnit)")
@@ -52,6 +56,7 @@ private struct WatchRemoteView: View {
           loopUnitButton("Chapter", unit: "chapter")
           loopUnitButton("Verse", unit: "verse")
         }
+        Text("Selected: \(remote.draftLoopUnit.capitalized)").font(.caption).fontWeight(.bold)
         HStack(spacing: 8) {
           Button { remote.command("loop:\(remote.draftLoopUnit)") } label: {
             Text("Engage").frame(maxWidth: .infinity)
@@ -63,131 +68,60 @@ private struct WatchRemoteView: View {
           .disabled(remote.awaitingReply || remote.loop == "off")
         }
         .buttonStyle(.bordered)
+        Button {
+          pickerUnit = remote.draftLoopUnit
+          selectedBook = pickerUnit == "book" ? remote.bookNumber : (pickerUnit == "chapter" ? remote.chapterNumber : remote.verseNumber)
+          controlsFocused = false
+          choosingBook = true
+        } label: {
+          Label("Choose \(remote.draftLoopUnit)", systemImage: "book.closed").frame(maxWidth: .infinity)
+        }.buttonStyle(.bordered).disabled(remote.awaitingReply)
         if let message = remote.message {
           Text(message).font(.caption2).multilineTextAlignment(.center)
         }
       }
       .padding(.horizontal, 6)
     }
-    .onAppear { remote.activate() }
+    .focusable()
+    .focused($controlsFocused)
+    .sheet(isPresented: $choosingBook, onDismiss: { controlsFocused = true }) {
+      VStack {
+        Picker(pickerUnit.capitalized, selection: $selectedBook) {
+          if pickerUnit == "book" {
+            ForEach(Array(Self.books.enumerated()), id: \.offset) { index, name in
+              Text(name).tag(index + 1)
+            }
+          } else {
+            ForEach(1...(pickerUnit == "chapter" ? remote.chapterCount : remote.verseCount), id: \.self) { number in
+              Text("\(pickerUnit.capitalized) \(number)").tag(number)
+            }
+          }
+        }.pickerStyle(.wheel)
+        Button("Go to \(pickerUnit)") {
+          remote.command("\(pickerUnit):\(selectedBook)")
+          choosingBook = false
+        }.buttonStyle(.borderedProminent)
+      }
+    }
+    .onAppear { remote.activate(); controlsFocused = true }
   }
+
+  private static let books = ["Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs", "Ecclesiastes", "Song of Solomon", "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi", "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians", "1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"]
 
   private func loopUnitButton(_ label: String, unit: String) -> some View {
     Button { remote.selectLoopUnit(unit) } label: {
-      Text(label).font(.caption2).minimumScaleFactor(0.7)
+      HStack(spacing: 2) {
+        if remote.draftLoopUnit == unit { Image(systemName: "checkmark") }
+        Text(label).lineLimit(1).minimumScaleFactor(0.6)
+      }.font(.caption2)
         .frame(maxWidth: .infinity)
     }
     .buttonStyle(.borderedProminent)
-    .tint(remote.draftLoopUnit == unit ? .accentColor : .gray)
+    .controlSize(.mini)
+    .tint(remote.draftLoopUnit == unit ? .yellow : Color.gray.opacity(0.25))
+    .foregroundStyle(remote.draftLoopUnit == unit ? .black : .white)
     .disabled(remote.awaitingReply)
     .accessibilityLabel("Loop \(label)")
     .accessibilityValue(remote.draftLoopUnit == unit ? "Selected" : "Not selected")
-  }
-}
-
-@MainActor
-private final class BibleWatchSession: NSObject, ObservableObject, WCSessionDelegate {
-  @Published var title = "Open a Bible passage on iPhone"
-  @Published var loop = "off"
-  @Published var lastLoop = "chapter"
-  @Published var draftLoopUnit = "chapter"
-  @Published var playing = false
-  @Published var message: String?
-  @Published var confirmed = false
-  @Published var awaitingReply = false
-  private var hasLocalLoopSelection = false
-
-  var selectedLoopUnit: String { loop == "off" ? lastLoop : loop }
-
-  func selectLoopUnit(_ unit: String) {
-    guard ["book", "chapter", "verse"].contains(unit) else { return }
-    draftLoopUnit = unit
-    hasLocalLoopSelection = true
-  }
-
-  var skipUnit: String {
-    switch loop {
-    case "book": return "book"
-    case "chapter": return "chapter"
-    default: return "verse"
-    }
-  }
-
-  func activate() {
-    guard WCSession.isSupported() else {
-      message = "A paired iPhone is required."
-      return
-    }
-    let session = WCSession.default
-    session.delegate = self
-    session.activate()
-  }
-
-  func command(_ name: String) {
-    guard !awaitingReply else { return }
-    let session = WCSession.default
-    guard session.activationState == .activated else {
-      message = "Connecting to iPhone…"
-      session.activate()
-      return
-    }
-    awaitingReply = true
-    message = "Contacting iPhone…"
-    // A Watch-originated immediate message can wake a suspended or
-    // system-terminated companion app. Do not queue a stale Play command.
-    session.sendMessage(["command": name]) { [weak self] reply in
-      Task { @MainActor in
-        self?.awaitingReply = false
-        self?.apply(reply, fromReply: true)
-      }
-    } errorHandler: { [weak self] error in
-      Task { @MainActor in
-        self?.awaitingReply = false
-        self?.confirmed = false
-        self?.message = "Cannot reach iPhone — command not confirmed."
-      }
-    }
-  }
-
-  private func apply(_ state: [String: Any], fromReply: Bool = false) {
-    confirmed = state["error"] == nil && (state["pending"] as? Bool != true)
-    if let title = state["title"] as? String { self.title = title }
-    if let loop = state["loop"] as? String { self.loop = loop }
-    if let lastLoop = state["lastLoop"] as? String { self.lastLoop = lastLoop }
-    if !hasLocalLoopSelection || (state["loop"] as? String == draftLoopUnit) {
-      draftLoopUnit = selectedLoopUnit
-      hasLocalLoopSelection = false
-    }
-    if let playing = state["playing"] as? Bool { self.playing = playing }
-    if let error = state["error"] as? String { message = error }
-    else if state["pending"] as? Bool == true { message = "Waiting for iPhone to update…" }
-    else if fromReply { message = "iPhone connected" }
-  }
-
-  nonisolated func session(_ session: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {
-    Task { @MainActor in
-      if error != nil {
-        confirmed = false
-        message = "Cannot reach iPhone. Try again when connected."
-      }
-      else if state == .activated {
-        apply(session.receivedApplicationContext)
-        command("state")
-      }
-    }
-  }
-
-  nonisolated func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
-    Task { @MainActor in apply(context) }
-  }
-
-  nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
-    Task { @MainActor in
-      if session.isReachable { command("state") }
-      else if confirmed {
-        confirmed = false
-        message = "iPhone unavailable"
-      }
-    }
   }
 }

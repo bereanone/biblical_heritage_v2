@@ -10,6 +10,7 @@ import '../../utilities/data/epub_download_validator.dart';
 import '../../utilities/data/epub_internal_anchor_section_splitter.dart';
 import '../../utilities/data/pioneer_html_capture_folder_scanner.dart';
 import 'library_document_import_validator.dart';
+import 'library_source_type.dart';
 import 'library_document_assets.dart';
 import 'library_document_block_identity.dart';
 import 'library_captured_reference_alignment.dart';
@@ -70,7 +71,7 @@ class LibraryDocumentCanonicalizer {
   /// otherwise the version-equality check below silently treats
   /// already-imported books as up to date and the fix never reaches them.
   // v41 links chapter references and distinguishes numbered books from verse lists.
-  static const int version = 42;
+  static const int version = 43;
   final LibraryCanonicalizationFailureHook? failureHook;
 
   Future<void> _reconcileStagedBlockIds(
@@ -172,11 +173,12 @@ class LibraryDocumentCanonicalizer {
   Future<void> _requirePreservedSavedPosition(
     DatabaseExecutor txn,
     String itemId,
-    List<Map<String, Object?>> staged,
-  ) async {
+    List<Map<String, Object?>> staged, {
+    bool repairLegacyZipPosition = false,
+  }) async {
     final rows = await txn.query(
       'library_items',
-      columns: ['anchor_id'],
+      columns: ['anchor_id', 'epub_href', 'spine_index', 'paragraph_index'],
       where: 'id = ?',
       whereArgs: [itemId],
       limit: 1,
@@ -184,12 +186,55 @@ class LibraryDocumentCanonicalizer {
     final anchor = rows.firstOrNull?['anchor_id']?.toString() ?? '';
     if (!anchor.startsWith('canonical:')) return;
     final blockId = anchor.substring('canonical:'.length);
-    if (!staged.any((block) => block['id'] == blockId)) {
-      throw StateError(
-        'Content update retained the previous generation: '
-        'saved reading position needs an explicit location mapping.',
+    if (staged.any((block) => block['id'] == blockId)) return;
+    if (repairLegacyZipPosition && staged.isNotEmpty) {
+      final oldBlocks = await txn.query(
+        'library_document_blocks',
+        columns: ['plain_text'],
+        where: 'library_item_id = ? AND id = ?',
+        whereArgs: [itemId, blockId],
+        limit: 1,
       );
+      final oldText = oldBlocks.firstOrNull?['plain_text']?.toString() ?? '';
+      // A location inside a proven ZIP header never represented book prose.
+      // Preserve the old location in an audit row before explicitly moving to
+      // the repaired book's beginning. Real prose positions remain protected.
+      if (oldText.trimLeft().startsWith('PK\u0003\u0004')) {
+        final first = staged.first;
+        await txn.execute('''
+          CREATE TABLE IF NOT EXISTS library_legacy_zip_position_repairs (
+            library_item_id TEXT NOT NULL, old_anchor TEXT NOT NULL,
+            old_location_json TEXT NOT NULL, new_anchor TEXT NOT NULL,
+            repaired_at TEXT NOT NULL,
+            PRIMARY KEY(library_item_id, old_anchor)
+          )
+        ''');
+        final replacement = 'canonical:${first['id']}';
+        await txn.insert('library_legacy_zip_position_repairs', {
+          'library_item_id': itemId,
+          'old_anchor': anchor,
+          'old_location_json': jsonEncode(rows.first),
+          'new_anchor': replacement,
+          'repaired_at': DateTime.now().toUtc().toIso8601String(),
+        });
+        await txn.update(
+          'library_items',
+          {
+            'anchor_id': replacement,
+            'epub_href': first['source_href'],
+            'spine_index': null,
+            'paragraph_index': 0,
+          },
+          where: 'id = ?',
+          whereArgs: [itemId],
+        );
+        return;
+      }
     }
+    throw StateError(
+      'Content update retained the previous generation: '
+      'saved reading position needs an explicit location mapping.',
+    );
   }
 
   Future<LibraryDocumentCanonicalizationResult> canonicalize({
@@ -225,7 +270,22 @@ class LibraryDocumentCanonicalizer {
       );
     }
 
-    final isEpub = p.extension(source.path).toLowerCase() == '.epub';
+    final sourceRows = await db.query(
+      'library_items',
+      columns: ['file_name', 'mime_type'],
+      where: 'id = ?',
+      whereArgs: [libraryItemId],
+      limit: 1,
+    );
+    final sourceRow = sourceRows.isEmpty
+        ? <String, Object?>{}
+        : sourceRows.first;
+    final isEpub = librarySourceIsEpub(
+      bytes,
+      path: source.path,
+      originalName: sourceRow['file_name']?.toString(),
+      mimeType: sourceRow['mime_type']?.toString(),
+    );
     final syntheticReferenceDesignator =
         await _pioneerSyntheticReferenceDesignator(db, libraryItemId);
     final capturedReferenceAlignment = await CapturedReferenceAlignment.load(
@@ -584,7 +644,12 @@ class LibraryDocumentCanonicalizer {
           );
         }
         await _requirePreservedMarkupTargets(txn, libraryItemId, stagedBlocks);
-        await _requirePreservedSavedPosition(txn, libraryItemId, stagedBlocks);
+        await _requirePreservedSavedPosition(
+          txn,
+          libraryItemId,
+          stagedBlocks,
+          repairLegacyZipPosition: isEpub,
+        );
         await txn.delete(
           'library_document_navigation',
           where: 'library_item_id = ?',

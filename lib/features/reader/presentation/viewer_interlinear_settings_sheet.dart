@@ -46,6 +46,45 @@ class _ViewerInterlinearSettingsScreenState
       body: ListView(
         padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
         children: [
+          Text('Display style', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ChoiceChip(
+                label: const Text('English with linked phrases'),
+                selected:
+                    _settings.displayStyle ==
+                    ViewerInterlinearDisplayStyle.englishPhrases,
+                onSelected: (_) => setState(() {
+                  _settings = _settings.copyWith(
+                    displayStyle: ViewerInterlinearDisplayStyle.englishPhrases,
+                  );
+                }),
+              ),
+              ChoiceChip(
+                label: const Text('Full interlinear'),
+                selected:
+                    _settings.displayStyle ==
+                    ViewerInterlinearDisplayStyle.fullInterlinear,
+                onSelected: (_) => setState(() {
+                  _settings = _settings.copyWith(
+                    displayStyle: ViewerInterlinearDisplayStyle.fullInterlinear,
+                  );
+                }),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'English keeps the Bible text visible and underlines phrases '
+            'linked to original-language entries.',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: 18),
+          Text('Full interlinear options', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 12),
           Text('Language Source', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Wrap(

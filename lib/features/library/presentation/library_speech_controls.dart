@@ -9,6 +9,7 @@ import '../../reader/presentation/pronunciation_editor.dart';
 import 'mac_reader_autoscroll_controller.dart';
 import 'library_narration_media_controls.dart';
 import 'library_speech_queue.dart';
+import 'recorded_library_audio_controls.dart';
 import 'speech_tilt_binding.dart';
 import 'reader_tilt_autoscroll_controller.dart';
 import 'dart:io';
@@ -22,6 +23,9 @@ class LibrarySpeechControls extends StatefulWidget {
     required this.initialCursor,
     required this.load,
     required this.reveal,
+    this.revealRecorded,
+    this.recordedStartCursor,
+    this.selectedRecordedCursor,
     required this.onPaused,
     required this.bookId,
     this.title = 'Book narration',
@@ -32,6 +36,9 @@ class LibrarySpeechControls extends StatefulWidget {
   final String Function() initialCursor;
   final Future<LibrarySpeechItem?> Function(String) load;
   final Future<void> Function(LibrarySpeechItem) reveal;
+  final Future<void> Function(LibrarySpeechItem)? revealRecorded;
+  final String? recordedStartCursor;
+  final String? Function()? selectedRecordedCursor;
   final VoidCallback onPaused;
   final String bookId;
 
@@ -64,6 +71,7 @@ class _LibrarySpeechControlsState extends State<LibrarySpeechControls>
   late final LibrarySpeechQueue _queue;
   late final LibrarySpeechSegmenter _segments;
   late final LibraryNarrationMediaControls _media;
+  RecordedLibraryAudioPackage? _recordedPackage;
   bool _firstSegment = true;
   late final Future<void> _ready;
   bool _editing = false;
@@ -110,7 +118,8 @@ class _LibrarySpeechControlsState extends State<LibrarySpeechControls>
       },
       onError: (error) => _failed(error.toString()),
     );
-    if (Platform.isIOS && widget.tiltController != null) {
+    if ((Platform.isIOS || Platform.isAndroid) &&
+        widget.tiltController != null) {
       _speechTilt = SpeechTiltBinding(
         widget.controller,
         widget.tiltController!,
@@ -157,6 +166,8 @@ class _LibrarySpeechControlsState extends State<LibrarySpeechControls>
     final rules = decodeNarrationPronunciations(
       await store.loadRawSetting('narration_pronunciations_v1'),
     );
+    final package = await RecordedLibraryAudioPackage.find(widget.title);
+    if (mounted) setState(() => _recordedPackage = package);
     _rules = rules;
     _deferredRules = await loadDeferredNarrationPronunciations(
       rules: rules,
@@ -292,6 +303,22 @@ class _LibrarySpeechControlsState extends State<LibrarySpeechControls>
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
+    final package = _recordedPackage;
+    if (package != null) {
+      return RecordedLibraryAudioControls(
+        package: package,
+        bookId: widget.bookId,
+        load: widget.load,
+        reveal: widget.revealRecorded ?? widget.reveal,
+        startCursor: widget.recordedStartCursor ?? widget.initialCursor(),
+        selectedCursor: widget.selectedRecordedCursor ?? () => null,
+        beforePlay: () async {
+          c.stopForManualInteraction();
+          await _queue.stop();
+          await _speechEngine?.stop();
+        },
+      );
+    }
     if (!c.audioEnabled) {
       return Align(
         alignment: Alignment.centerLeft,

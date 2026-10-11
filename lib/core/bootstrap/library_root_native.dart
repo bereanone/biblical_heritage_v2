@@ -89,6 +89,24 @@ class LibraryRootNative {
     return AndroidLibraryAuthorization.fromMap(result);
   }
 
+  /// Android shared folders are read-only import sources. The returned
+  /// private path proves that cleanup cannot target a shared source folder.
+  static Future<Map<String, dynamic>?> removeAndroidUserContent({
+    required bool allUserData,
+    required bool includeBackups,
+    required bool preview,
+  }) async {
+    if (!usesAndroidDocumentTree) return null;
+    return _channel.invokeMapMethod<String, dynamic>(
+      'removeAndroidUserContent',
+      {
+        'allUserData': allUserData,
+        'includeBackups': includeBackups,
+        'preview': preview,
+      },
+    );
+  }
+
   static Future<void> clearAndroidLibraryTree() async {
     if (!usesAndroidDocumentTree) return;
     await _channel.invokeMethod<void>('clearAndroidLibraryTree');

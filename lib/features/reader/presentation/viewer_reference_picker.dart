@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../../../core/database/study_bible_database.dart';
@@ -24,6 +25,9 @@ Future<ReferenceSelection?> showViewerReferencePicker(
   required int initialBookNumber,
   required int initialChapter,
   required int initialVerse,
+  bool largerPhoneControls = false,
+  double fontScale = 1.3,
+  ValueListenable<double>? fontScaleListenable,
 }) {
   return showGeneralDialog<ReferenceSelection>(
     context: context,
@@ -35,6 +39,9 @@ Future<ReferenceSelection?> showViewerReferencePicker(
           initialBookNumber: initialBookNumber,
           initialChapter: initialChapter,
           initialVerse: initialVerse,
+          largerPhoneControls: largerPhoneControls,
+          fontScale: fontScale,
+          fontScaleListenable: fontScaleListenable,
         ),
   );
 }
@@ -44,11 +51,17 @@ class _ViewerReferencePickerDialog extends StatefulWidget {
     required this.initialBookNumber,
     required this.initialChapter,
     required this.initialVerse,
+    required this.largerPhoneControls,
+    required this.fontScale,
+    required this.fontScaleListenable,
   });
 
   final int initialBookNumber;
   final int initialChapter;
   final int initialVerse;
+  final bool largerPhoneControls;
+  final double fontScale;
+  final ValueListenable<double>? fontScaleListenable;
 
   @override
   State<_ViewerReferencePickerDialog> createState() =>
@@ -80,7 +93,12 @@ class _ViewerReferencePickerDialogState
     _bookNumber = widget.initialBookNumber;
     _chapter = widget.initialChapter;
     _verse = widget.initialVerse;
+    widget.fontScaleListenable?.addListener(_onFontScaleChanged);
     _load();
+  }
+
+  void _onFontScaleChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _load() async {
@@ -174,6 +192,7 @@ class _ViewerReferencePickerDialogState
 
   @override
   void dispose() {
+    widget.fontScaleListenable?.removeListener(_onFontScaleChanged);
     _scrollController.dispose();
     super.dispose();
   }
@@ -182,6 +201,12 @@ class _ViewerReferencePickerDialogState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final size = MediaQuery.sizeOf(context);
+    final fontScale = widget.fontScaleListenable?.value ?? widget.fontScale;
+    // At the usual 1.3 reader scale the labels are 22.5 points. Changes to
+    // the reader font setting remain visible across its full 0.8–2.4 range.
+    final pickerFontSize = widget.largerPhoneControls
+        ? 19 + (fontScale.clamp(0.8, 2.4) - 0.8) * 7
+        : 14.0;
 
     return Material(
       color: Colors.transparent,
@@ -253,6 +278,8 @@ class _ViewerReferencePickerDialogState
                               onToggleBook: _selectBook,
                               onSelectChapter: _selectChapter,
                               onSelectVerse: _selectVerse,
+                              largerPhoneControls: widget.largerPhoneControls,
+                              pickerFontSize: pickerFontSize,
                             ),
                     ),
                   ],
@@ -340,6 +367,8 @@ class _BookList extends StatelessWidget {
     required this.onToggleBook,
     required this.onSelectChapter,
     required this.onSelectVerse,
+    required this.largerPhoneControls,
+    required this.pickerFontSize,
   });
 
   final ScrollController scrollController;
@@ -354,6 +383,8 @@ class _BookList extends StatelessWidget {
   final ValueChanged<BookRecord> onToggleBook;
   final ValueChanged<int> onSelectChapter;
   final ValueChanged<int> onSelectVerse;
+  final bool largerPhoneControls;
+  final double pickerFontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -396,6 +427,9 @@ class _BookList extends StatelessWidget {
                           color: viewerBookGroupColor(leftBook.bookNumber),
                           selected: leftExpanded,
                           onTap: () => onToggleBook(leftBook),
+                          fontSize: pickerFontSize,
+                          minimumTapHeight: largerPhoneControls ? 48 : 0,
+                          expandWidth: false,
                         ),
                       ),
                     ),
@@ -412,6 +446,9 @@ class _BookList extends StatelessWidget {
                                 ),
                                 selected: rightExpanded,
                                 onTap: () => onToggleBook(rightBook),
+                                fontSize: pickerFontSize,
+                                minimumTapHeight: largerPhoneControls ? 48 : 0,
+                                expandWidth: false,
                               ),
                             ),
                     ),
@@ -427,6 +464,8 @@ class _BookList extends StatelessWidget {
                     currentVerse: currentVerse,
                     onSelectChapter: onSelectChapter,
                     onSelectVerse: onSelectVerse,
+                    largerPhoneControls: largerPhoneControls,
+                    pickerFontSize: pickerFontSize,
                   ),
                 if (rightExpanded)
                   _ChapterAndVerseSelector(
@@ -438,6 +477,8 @@ class _BookList extends StatelessWidget {
                     currentVerse: currentVerse,
                     onSelectChapter: onSelectChapter,
                     onSelectVerse: onSelectVerse,
+                    largerPhoneControls: largerPhoneControls,
+                    pickerFontSize: pickerFontSize,
                   ),
               ],
             );
@@ -458,6 +499,8 @@ class _ChapterAndVerseSelector extends StatelessWidget {
     required this.currentVerse,
     required this.onSelectChapter,
     required this.onSelectVerse,
+    required this.largerPhoneControls,
+    required this.pickerFontSize,
   });
 
   final Color color;
@@ -467,6 +510,8 @@ class _ChapterAndVerseSelector extends StatelessWidget {
   final int currentVerse;
   final ValueChanged<int> onSelectChapter;
   final ValueChanged<int> onSelectVerse;
+  final bool largerPhoneControls;
+  final double pickerFontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -475,6 +520,8 @@ class _ChapterAndVerseSelector extends StatelessWidget {
         values: chapters,
         color: color,
         onSelect: onSelectChapter,
+        fontSize: pickerFontSize,
+        minimumItemExtent: largerPhoneControls ? 48 : 44,
       );
     }
 
@@ -486,6 +533,8 @@ class _ChapterAndVerseSelector extends StatelessWidget {
         selectedValue: currentVerse,
         scrollToSelected: true,
         onSelect: onSelectVerse,
+        fontSize: pickerFontSize,
+        minimumItemExtent: largerPhoneControls ? 48 : 44,
       ),
     );
   }

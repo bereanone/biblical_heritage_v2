@@ -72,18 +72,19 @@ Future<bool> followSpeechInBlock({
 }
 
 /// Scrolls [position] by [delta] pixels, clamped to its extent.
-Future<bool> animateSpeechFollow(ScrollPosition position, double delta) async {
+Future<bool> animateSpeechFollow(
+  ScrollPosition position,
+  double delta, {
+  Duration duration = _followDuration,
+  Curve curve = Curves.easeOutCubic,
+}) async {
   if (!position.hasPixels) return false;
   final target = (position.pixels + delta).clamp(
     position.minScrollExtent,
     position.maxScrollExtent,
   );
   if ((target - position.pixels).abs() <= 1) return false;
-  await position.animateTo(
-    target,
-    duration: _followDuration,
-    curve: Curves.easeOutCubic,
-  );
+  await position.animateTo(target, duration: duration, curve: curve);
   return true;
 }
 

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -61,6 +62,7 @@ class AppSettingsService {
   static const _defaultElibraryHighlightColorKey =
       'viewer.elibrary.highlight.color_hex';
   static const _interlinearEnabledKey = 'viewer.interlinear.enabled';
+  static const _interlinearDisplayStyleKey = 'viewer.interlinear.display_style';
   static const _interlinearEnglishOrderKey = 'viewer.interlinear.english_order';
   static const _interlinearShowEnglishGlossKey =
       'viewer.interlinear.show_english_gloss';
@@ -272,7 +274,15 @@ class AppSettingsService {
         row['key'].toString(): row['value']?.toString() ?? '',
     };
     return MacAutoscrollPreferences.fromStoredValues(
-      baseSpeed: values[_macAutoscrollBaseSpeedKey],
+      // Upgrade the old Android default (6 px/s with Audio On) while
+      // respecting any distinct reading speed selected by the user.
+      baseSpeed:
+          defaultTargetPlatform == TargetPlatform.android &&
+              (values[_macAutoscrollBaseSpeedKey] == null ||
+                  double.tryParse(values[_macAutoscrollBaseSpeedKey] ?? '') ==
+                      defaultMacAutoscrollBaseSpeed)
+          ? '48'
+          : values[_macAutoscrollBaseSpeedKey],
       speechRate: values[_macSpeechRateKey],
       lastNonzeroStep: values[_macAutoscrollLastStepKey],
       maximumStep: values[_macAutoscrollMaximumStepKey],
@@ -431,8 +441,9 @@ class AppSettingsService {
     final rows = await db.query(
       'app_settings',
       columns: ['key', 'value'],
-      where: 'key IN (?, ?, ?, ?, ?, ?, ?)',
+      where: 'key IN (?, ?, ?, ?, ?, ?, ?, ?)',
       whereArgs: [
+        _interlinearDisplayStyleKey,
         _interlinearEnglishOrderKey,
         _interlinearShowEnglishGlossKey,
         _interlinearShowOriginalTextKey,
@@ -446,6 +457,9 @@ class AppSettingsService {
       for (final row in rows) row['key'] as String: row['value'] as String,
     };
     return ViewerInterlinearSettings(
+      displayStyle: values[_interlinearDisplayStyleKey] == 'full_interlinear'
+          ? ViewerInterlinearDisplayStyle.fullInterlinear
+          : ViewerInterlinearDisplayStyle.englishPhrases,
       englishOrder: _parseBool(values[_interlinearEnglishOrderKey]) ?? false,
       showEnglishGloss:
           _parseBool(values[_interlinearShowEnglishGlossKey]) ?? true,
@@ -473,6 +487,14 @@ class AppSettingsService {
         'value': value ? '1' : '0',
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
+
+    batch.insert('app_settings', {
+      'key': _interlinearDisplayStyleKey,
+      'value':
+          settings.displayStyle == ViewerInterlinearDisplayStyle.fullInterlinear
+          ? 'full_interlinear'
+          : 'english_phrases',
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
 
     put(_interlinearEnglishOrderKey, settings.englishOrder);
     put(_interlinearShowEnglishGlossKey, settings.showEnglishGloss);

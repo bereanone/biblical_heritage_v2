@@ -7,6 +7,7 @@ class _LibraryPane extends StatelessWidget {
     required this.selectedBookId,
     required this.view,
     required this.onSelectBook,
+    this.onLongPressBook,
     required this.isEmptyMessage,
   });
 
@@ -14,6 +15,7 @@ class _LibraryPane extends StatelessWidget {
   final String? selectedBookId;
   final _LibraryView view;
   final ValueChanged<LibraryCatalogItem> onSelectBook;
+  final ValueChanged<LibraryCatalogItem>? onLongPressBook;
   final String isEmptyMessage;
 
   @override
@@ -49,6 +51,9 @@ class _LibraryPane extends StatelessWidget {
             item: item,
             selected: item.id == selectedBookId,
             onTap: () => onSelectBook(item),
+            onLongPress: onLongPressBook == null
+                ? null
+                : () => onLongPressBook!(item),
           );
         },
       ),
@@ -63,6 +68,9 @@ class _LibraryPane extends StatelessWidget {
             item: item,
             selected: item.id == selectedBookId,
             onTap: () => onSelectBook(item),
+            onLongPress: onLongPressBook == null
+                ? null
+                : () => onLongPressBook!(item),
           );
         },
       ),
@@ -76,12 +84,14 @@ class _RecentPane extends StatelessWidget {
     required this.books,
     required this.selectedBookId,
     required this.onSelectBook,
+    this.onLongPressBook,
     required this.isEmptyMessage,
   });
 
   final List<LibraryCatalogItem> books;
   final String? selectedBookId;
   final ValueChanged<LibraryCatalogItem> onSelectBook;
+  final ValueChanged<LibraryCatalogItem>? onLongPressBook;
   final String isEmptyMessage;
 
   @override
@@ -110,6 +120,9 @@ class _RecentPane extends StatelessWidget {
           item: item,
           selected: item.id == selectedBookId,
           onTap: () => onSelectBook(item),
+          onLongPress: onLongPressBook == null
+              ? null
+              : () => onLongPressBook!(item),
           trailing: _RecentStamp(item: item),
         );
       },
@@ -241,73 +254,77 @@ class _CollectionFilterMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final borderRadius = BorderRadius.circular(14);
-    return Tooltip(
-      message: 'Choose collection',
-      child: SizedBox(
-        width: double.infinity,
-        height: 44,
-        child: DropdownButtonFormField<String>(
+    final selected = options.where((option) => option.value == currentValue);
+    // Popup menus remain open when dismissing the search keyboard changes
+    // the responsive toolbar layout and disposes the original button.
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () async {
+        final button = context.findRenderObject()! as RenderBox;
+        final overlay =
+            Navigator.of(context).overlay!.context.findRenderObject()!
+                as RenderBox;
+        final position = RelativeRect.fromRect(
+          Rect.fromPoints(
+            button.localToGlobal(Offset.zero, ancestor: overlay),
+            button.localToGlobal(
+              button.size.bottomRight(Offset.zero),
+              ancestor: overlay,
+            ),
+          ),
+          Offset.zero & overlay.size,
+        );
+        // Capture the parent's callback: the toolbar may be rebuilt while
+        // this independent route is open, but selection must still apply.
+        final select = onSelected;
+        final value = await showMenu<String>(
+          context: context,
+          position: position,
           initialValue: currentValue,
+          color: _librarySurfaceHighColor(theme),
           items: [
             for (final option in options)
-              DropdownMenuItem<String>(
+              PopupMenuItem<String>(
                 value: option.value,
                 child: Text(option.label),
               ),
           ],
-          onChanged: (value) {
-            if (value == null) return;
-            onSelected(value);
-          },
-          isDense: true,
-          isExpanded: true,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
-          borderRadius: borderRadius,
-          icon: Icon(
-            Icons.arrow_drop_down,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-          iconSize: 22,
-          style: libraryControlTextStyle(
-            context,
-            theme.textTheme.labelLarge,
-            fontWeight: FontWeight.w800,
-            color: theme.colorScheme.onSurface,
-          ),
-          dropdownColor: _librarySurfaceHighColor(theme),
-          decoration: InputDecoration(
-            prefixIconConstraints: const BoxConstraints(
-              minWidth: 28,
-              minHeight: 28,
-            ),
-            prefixIcon: Icon(
+        );
+        if (value != null) select(value);
+      },
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: _librarySurfaceHighColor(theme),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _libraryOutlineColor(theme)),
+        ),
+        child: Row(
+          children: [
+            Icon(
               Icons.folder_outlined,
               size: 18,
               color: theme.colorScheme.onSurfaceVariant,
             ),
-            filled: true,
-            fillColor: _librarySurfaceHighColor(theme),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 0,
-            ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(color: _libraryOutlineColor(theme)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(color: _libraryOutlineColor(theme)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(
-                color: theme.colorScheme.primary,
-                width: 1.5,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                selected.isEmpty ? 'All Collections' : selected.first.label,
+                overflow: TextOverflow.ellipsis,
+                style: libraryControlTextStyle(
+                  context,
+                  theme.textTheme.labelLarge,
+                  fontWeight: FontWeight.w800,
+                  color: theme.colorScheme.onSurface,
+                ),
               ),
             ),
-          ),
+            Icon(
+              Icons.arrow_drop_down,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ],
         ),
       ),
     );
@@ -467,9 +484,14 @@ class _TabSelector extends StatelessWidget {
       style: _librarySegmentedButtonStyle(context),
       segments: [
         ButtonSegment(
+          value: _LibraryTab.topShelf,
+          icon: Icon(Icons.star_outline),
+          label: const Text('Top Shelf'),
+        ),
+        ButtonSegment(
           value: _LibraryTab.books,
           icon: Icon(Icons.auto_stories_outlined),
-          label: const Text('Books'),
+          label: const Text('All Books'),
         ),
         ButtonSegment(
           value: _LibraryTab.recent,
@@ -934,11 +956,13 @@ class _BookCoverCard extends StatelessWidget {
     required this.item,
     required this.selected,
     required this.onTap,
+    this.onLongPress,
   });
 
   final LibraryCatalogItem item;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -959,6 +983,7 @@ class _BookCoverCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.all(8),
           child: Column(
@@ -1020,12 +1045,14 @@ class _BookListTile extends StatelessWidget {
     required this.item,
     required this.selected,
     required this.onTap,
+    this.onLongPress,
     this.trailing,
   });
 
   final LibraryCatalogItem item;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final Widget? trailing;
 
   @override
@@ -1041,6 +1068,7 @@ class _BookListTile extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: ListTile(
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 14,

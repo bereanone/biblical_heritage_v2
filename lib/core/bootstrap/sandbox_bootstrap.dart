@@ -13,6 +13,8 @@ class SandboxBootstrap {
   SandboxBootstrap._();
 
   static const _bibleDbName = 'bible_base.db';
+  // Reference content only. User notes, tags and library books are in other DBs.
+  static const _bibleAssetVersion = 20261005;
   static const _crossReferencesDbName = 'cross_references.db';
   static const _userDbName = 'user.db';
   static const _eLibraryDbName = 'eLibrary.db';
@@ -116,16 +118,67 @@ class SandboxBootstrap {
 
     final biblePath = await bibleDatabasePath();
     onStatus?.call('Materializing Bible database...');
-    await _ensureAssetFile(
-      assetPath: 'assets/databases/$_bibleDbName',
-      destinationPath: biblePath,
-    );
+    await _ensureVersionedBibleAsset(biblePath);
 
     onStatus?.call('Validating sandbox...');
     await _touchDatabase(
       biblePath,
       assetPath: 'assets/databases/$_bibleDbName',
     );
+  }
+
+  static Future<void> _ensureVersionedBibleAsset(String path) async {
+    if (await File(path).exists()) {
+      try {
+        final installed = await openDatabase(
+          path,
+          readOnly: true,
+          singleInstance: false,
+        );
+        try {
+          final rows = await installed.rawQuery('PRAGMA user_version');
+          if (rows.first.values.first == _bibleAssetVersion) return;
+        } finally {
+          await installed.close();
+        }
+      } catch (_) {
+        // A damaged or older reference copy is replaced from this app bundle.
+      }
+    }
+
+    final asset = await rootBundle.load('assets/databases/$_bibleDbName');
+    final bytes = asset.buffer.asUint8List(
+      asset.offsetInBytes,
+      asset.lengthInBytes,
+    );
+    final staged = File('$path.next');
+    await staged.writeAsBytes(bytes, flush: true);
+    try {
+      final candidate = await openDatabase(
+        staged.path,
+        readOnly: true,
+        singleInstance: false,
+      );
+      try {
+        final rows = await candidate.rawQuery('PRAGMA user_version');
+        if (rows.first.values.first != _bibleAssetVersion) {
+          throw StateError('Bundled Bible reference version is invalid');
+        }
+        final tables = await candidate.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+          "('bible_blocks','bible_tokens','strongs_dictionary','lexicon_entries')",
+        );
+        if (tables.length != 4) {
+          throw StateError('Bundled Bible reference tables are incomplete');
+        }
+      } finally {
+        await candidate.close();
+      }
+      await staged.rename(path);
+    } catch (_) {
+      if (await staged.exists()) await staged.delete();
+      rethrow;
+    }
   }
 
   static Future<void> ensureCrossReferencesReady() async {

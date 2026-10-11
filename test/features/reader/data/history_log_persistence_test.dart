@@ -1,3 +1,4 @@
+import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -41,6 +42,13 @@ void main() {
   late Directory documentsDir;
 
   setUp(() async {
+    PackageInfo.setMockInitialValues(
+      appName: 'StudyBible',
+      packageName: 'test.studybible',
+      version: '2.0.5',
+      buildNumber: '75',
+      buildSignature: '',
+    );
     await UserDatabase.instance.close();
     supportDir = await Directory.systemTemp.createTemp(
       'history_persistence_support_',
@@ -118,7 +126,9 @@ void main() {
       LibraryRootService.instance.invalidateCachedSelection();
 
       final startup = await StartupCoordinator.instance.initialize();
-      expect(startup.phase, StartupPhase.ready);
+      expect(startup.isUpdateReview, isTrue);
+      await StartupCoordinator.instance.keepCurrentData();
+      expect((await StartupCoordinator.instance.initialize()).isReady, isTrue);
       expect(await SandboxBootstrap.userDatabasePath(), expectedPath);
       expect(
         (await HistoryLogService.instance.fetchHistory()).map(

@@ -51,6 +51,8 @@ final class NarrationMediaBridge: NSObject {
 
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
+    case "keepReaderAwake":
+      UIApplication.shared.isIdleTimerDisabled = call.arguments as? Bool ?? false
     case "begin":
       begin()
     case "end":

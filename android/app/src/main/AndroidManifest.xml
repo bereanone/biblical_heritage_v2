@@ -2,6 +2,9 @@
     <!-- Pioneer and EGW source downloads are available in release builds. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:label="Biblical Heritage #StudyBible"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"

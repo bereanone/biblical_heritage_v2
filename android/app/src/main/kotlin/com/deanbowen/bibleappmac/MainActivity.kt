@@ -99,11 +99,18 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
                     call.argument<Boolean>("requireExisting") ?: false,
                 )
                 "validateAndroidLibraryTree" -> validateSavedLibraryTree(result)
-                "syncAndroidLibraryTree" -> syncSavedLibraryTree(result)
-                "scanAndroidLibraryTree" -> scanSavedLibraryTree(
-                    result,
-                    call.argument<Boolean>("force") ?: false,
-                )
+                // Shared folders are import sources. Never place installed files beside originals.
+                "syncAndroidLibraryTree" -> result.success(mapOf("created" to 0, "existing" to 0))
+                // Reimport is explicit through the picker; background scans must not
+                // restore files deliberately removed from the private library.
+                "scanAndroidLibraryTree" -> result.success(mapOf("skipped" to true, "reason" to "private_library"))
+                "removeAndroidUserContent" -> {
+                    val saved = getSharedPreferences(pickerPreferences, Context.MODE_PRIVATE)
+                        .getString(libraryTreeUriKey, null)
+                    val base = getExternalFilesDir(null) ?: filesDir
+                    val mirror = privateLibraryDirectory()
+                    result.success(mapOf("files" to 0, "bytes" to 0, "privatePath" to mirror.absolutePath, "ownedRoots" to listOf(base.absolutePath, filesDir.absolutePath, File(applicationInfo.dataDir, "app_flutter").absolutePath)))
+                }
                 "clearAndroidLibraryTree" -> {
                     getSharedPreferences(pickerPreferences, Context.MODE_PRIVATE)
                         .edit().remove(libraryTreeUriKey).apply()
@@ -153,28 +160,8 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
     //    underlying Surface (its actual SurfaceFlinger buffer queue) rather
     //    than through any View-level voting system. This is the mechanism
     //    that actually moved the measured cadence.
-    private var frameRateReassertHandler: Handler? = null
-    private val frameRateReassertRunnable = object : Runnable {
-        override fun run() {
-            applyReaderAutoscrollFrameRateBoost(true)
-            frameRateReassertHandler?.postDelayed(this, 500)
-        }
-    }
-
     private fun setReaderAutoscrollFrameRateBoost(active: Boolean) {
-        frameRateReassertHandler?.removeCallbacks(frameRateReassertRunnable)
         applyReaderAutoscrollFrameRateBoost(active)
-        if (active) {
-            // DIAGNOSTIC: test whether a one-time vote is being silently
-            // cleared by Android's own 3s touch-boost-timeout event, versus
-            // the API itself having no effect on this surface regardless of
-            // call frequency. Re-asserting every 500ms is not the intended
-            // final shape of this fix either way.
-            val handler = frameRateReassertHandler ?: Handler(mainLooper).also {
-                frameRateReassertHandler = it
-            }
-            handler.postDelayed(frameRateReassertRunnable, 500)
-        }
     }
 
     private fun applyReaderAutoscrollFrameRateBoost(active: Boolean) {
@@ -288,7 +275,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
             }
             val destination = File(
                 destinationDirectory,
-                "${System.currentTimeMillis()}-${sanitizeFileName(documentDisplayName(uri))}",
+                "${System.currentTimeMillis()}-${epubCacheFileName(documentDisplayName(uri), contentResolver.getType(uri))}",
             )
             contentResolver.openInputStream(uri).use { input ->
                 requireNotNull(input) { "The selected cloud file could not be opened." }
@@ -387,169 +374,29 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
         }
     }
 
+    // A shared document tree is only an import source. Reading the installed
+    // private library must work even after that source is moved or revoked.
+    private fun privateLibraryDirectory(): File {
+        val saved = getSharedPreferences(pickerPreferences, Context.MODE_PRIVATE)
+            .getString(libraryTreeUriKey, null)
+        val suffix = saved?.hashCode()?.toString() ?: "Private"
+        return File(getExternalFilesDir(null) ?: filesDir, "StudyBibleMirror_$suffix")
+    }
+
     private fun validateSavedLibraryTree(result: MethodChannel.Result) {
-        Log.i(storageLogTag, "library_root_validation_started")
+        val mirror = privateLibraryDirectory()
+        val ready = mirror.isDirectory || mirror.mkdirs()
         val saved = getSharedPreferences(pickerPreferences, Context.MODE_PRIVATE)
             .getString(libraryTreeUriKey, null)
-        if (saved.isNullOrBlank()) {
-            Log.w(storageLogTag, "library_root_reconnect_required")
-            rememberAuthorizationError("No saved Android document-tree URI.")
-            result.success(
-                mapOf(
-                    "authorized" to false,
-                    "authorizationState" to "libraryRootAuthorizationMissing",
-                    "validationError" to "No saved Android document-tree URI.",
-                    "lastAuthorizationError" to "No saved Android document-tree URI.",
-                ),
-            )
-            return
-        }
-        storageExecutor.execute {
-            try {
-                val validation = inspectTree(Uri.parse(saved), materialize = false)
-                if (validation["authorized"] == true) {
-                    Log.i(storageLogTag, "library_root_validation_succeeded")
-                } else {
-                    Log.w(storageLogTag, "library_root_validation_failed")
-                    rememberAuthorizationError(
-                        validation["validationError"]?.toString()
-                            ?: "The saved library authorization is incomplete.",
-                    )
-                }
-                runOnUiThread { result.success(validation) }
-            } catch (error: Exception) {
-                Log.e(storageLogTag, "library_root_validation_failed", error)
-                rememberAuthorizationError(
-                    error.localizedMessage ?: error.javaClass.simpleName,
-                )
-                runOnUiThread {
-                    result.success(
-                        mapOf(
-                            "treeUri" to saved,
-                            "authorized" to false,
-                            "authorizationState" to "libraryRootAuthorizationMissing",
-                            "validationError" to (error.localizedMessage ?: error.javaClass.simpleName),
-                        ),
-                    )
-                }
-            }
-        }
-    }
-
-    private fun syncSavedLibraryTree(result: MethodChannel.Result) {
-        val saved = getSharedPreferences(pickerPreferences, Context.MODE_PRIVATE)
-            .getString(libraryTreeUriKey, null)
-        if (saved.isNullOrBlank()) {
-            result.error(
-                "library_root_authorization_missing",
-                "Reconnect the existing StudyBible folder to continue.",
-                null,
-            )
-            return
-        }
-        storageExecutor.execute {
-            try {
-                val uri = Uri.parse(saved)
-                val validation = inspectTree(uri, materialize = false)
-                if (validation["authorized"] != true) {
-                    throw SecurityException("The saved library grant is no longer valid.")
-                }
-                val rootId = DocumentsContract.getTreeDocumentId(uri)
-                val mirror = File(validation["path"].toString())
-                val counts = syncMirrorToTree(uri, rootId, mirror)
-                runOnUiThread {
-                    result.success(
-                        mapOf(
-                            "created" to counts.first,
-                            "existing" to counts.second,
-                        ),
-                    )
-                }
-            } catch (error: Exception) {
-                runOnUiThread {
-                    result.error(
-                        "library_tree_sync_failed",
-                        "Completed files could not be saved to the authorized library folder.",
-                        error.localizedMessage,
-                    )
-                }
-            }
-        }
-    }
-
-    private fun syncMirrorToTree(
-        treeUri: Uri,
-        parentDocumentId: String,
-        source: File,
-    ): Pair<Int, Int> {
-        if (!source.exists()) return Pair(0, 0)
-        var created = 0
-        var existing = 0
-        val childrenByName = listChildren(treeUri, parentDocumentId)
-            .associateBy { it.name }
-            .toMutableMap()
-        for (local in source.listFiles().orEmpty()) {
-            if (local.name.endsWith(".downloading") ||
-                local.name.endsWith(".saf_importing")
-            ) {
-                continue
-            }
-            val remote = childrenByName[local.name]
-            if (local.isDirectory) {
-                val directoryId = if (
-                    remote != null &&
-                    remote.mimeType == DocumentsContract.Document.MIME_TYPE_DIR
-                ) {
-                    remote.documentId
-                } else if (remote == null) {
-                    val parentUri = DocumentsContract.buildDocumentUriUsingTree(
-                        treeUri,
-                        parentDocumentId,
-                    )
-                    val createdUri = DocumentsContract.createDocument(
-                        contentResolver,
-                        parentUri,
-                        DocumentsContract.Document.MIME_TYPE_DIR,
-                        local.name,
-                    ) ?: throw IllegalStateException("Cannot create ${local.name}")
-                    created += 1
-                    DocumentsContract.getDocumentId(createdUri)
-                } else {
-                    existing += 1
-                    continue
-                }
-                val nested = syncMirrorToTree(treeUri, directoryId, local)
-                created += nested.first
-                existing += nested.second
-                continue
-            }
-            if (remote != null) {
-                existing += 1
-                continue
-            }
-            val parentUri = DocumentsContract.buildDocumentUriUsingTree(
-                treeUri,
-                parentDocumentId,
-            )
-            val mime = when (local.extension.lowercase()) {
-                "epub" -> "application/epub+zip"
-                "pdf" -> "application/pdf"
-                "json" -> "application/json"
-                else -> "application/octet-stream"
-            }
-            val createdUri = DocumentsContract.createDocument(
-                contentResolver,
-                parentUri,
-                mime,
-                local.name,
-            ) ?: throw IllegalStateException("Cannot create ${local.name}")
-            contentResolver.openOutputStream(createdUri, "w").use { output ->
-                requireNotNull(output) { "Cannot write ${local.name}" }
-                local.inputStream().use { input -> input.copyTo(output) }
-            }
-            created += 1
-        }
-        return Pair(created, existing)
+        result.success(mapOf(
+            "authorized" to ready, "path" to mirror.absolutePath,
+            "treeUri" to saved, "displayName" to "StudyBible2 private library",
+            "persistedRead" to ready, "persistedWrite" to ready,
+            "enumerates" to ready, "validFolder" to ready,
+            "expectedMarkersFound" to ready,
+            "authorizationState" to if (ready) "privateStorage" else "privateStorageUnavailable",
+            "validationError" to if (ready) null else "App storage is unavailable. Free device space and try again.",
+        ))
     }
 
     private fun inspectTree(
@@ -939,6 +786,16 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
         }
         return uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null }
             ?: "selected_file"
+    }
+
+    private fun epubCacheFileName(value: String, mimeType: String?): String {
+        val safe = sanitizeFileName(value)
+        val normalized = Regex("(?i)\\.epub\\.(\\d+)$").replace(safe) {
+            ".${it.groupValues[1]}.epub"
+        }
+        return if (mimeType == "application/epub+zip" &&
+            !normalized.endsWith(".epub", ignoreCase = true)) "$normalized.epub"
+        else normalized
     }
 
     private fun sanitizeFileName(value: String): String =

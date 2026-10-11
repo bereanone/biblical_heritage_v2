@@ -25,7 +25,8 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   bool _loading = true;
   String _loadingStatus = 'Loading library...';
   String? _loadingError;
-  _LibraryTab _tab = _LibraryTab.books;
+  _LibraryTab _tab = _LibraryTab.topShelf;
+  List<String> _topShelfIds = [];
   _LibraryView _view = _LibraryView.shelf;
   double _viewerFontScale = 1.3;
   String _fileTypeFilter = libraryMediaFilterAll;
@@ -128,10 +129,22 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
           ? _collectionFilter
           : _normalizeCollectionFilterSelection(storedCollectionFilter);
       final items = await itemsFuture;
+      final topShelfRaw = await AppSettingsService.instance.loadRawSetting(
+        'elibrary_top_shelf_v1',
+      );
+      List<String> topShelf = [];
+      try {
+        topShelf = (jsonDecode(topShelfRaw ?? '[]') as List)
+            .whereType<String>()
+            .toSet()
+            .toList();
+      } catch (_) {}
+
       if (!mounted) return;
       setState(() {
         _selection = selection;
         _items = items;
+        _topShelfIds = topShelf;
         _viewerFontScale = viewerFontScale;
         _fileTypeFilter = fileTypeFilter;
         _collectionFilter = collectionFilter;
@@ -555,7 +568,8 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
     bool preserveLetterFilter = false,
   }) async {
     final normalizedValue = _normalizeCollectionFilterSelection(value);
-    if (_collectionFilter == normalizedValue) return;
+    if (_collectionFilter == normalizedValue && _tab == _LibraryTab.books)
+      return;
     setState(() {
       _collectionFilter = normalizedValue;
       if (!preserveLetterFilter) {
@@ -577,6 +591,16 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   }
 
   Future<void> _handleCollectionFilterSelected(String value) {
+    if (value == 'top_shelf') {
+      setState(() {
+        _tab = _LibraryTab.topShelf;
+        _selectedInitialLetter = null;
+      });
+      return _syncSelectionAndNavigation(
+        _topShelfBooks,
+        preferExistingSelection: true,
+      );
+    }
     if (_normalizeCollectionFilterSelection(value) == 'all') {
       return _resetCollectionFilterToAll();
     }
@@ -620,6 +644,97 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
       return 'all';
     }
     return trimmed;
+  }
+
+  List<LibraryCatalogItem> get _topShelfBooks {
+    final byId = {for (final item in _items) item.id: item};
+    final query = compactLibrarySearchText(_searchQuery);
+    return [
+      for (final id in _topShelfIds)
+        if (byId[id] != null &&
+            (query.isEmpty ||
+                libraryCatalogSearchTextForItem(byId[id]!).contains(query)))
+          byId[id]!,
+    ];
+  }
+
+  Future<void> _showTopShelfMenu(LibraryCatalogItem item) async {
+    final present = _topShelfIds.contains(item.id);
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(item.displayTitle),
+              subtitle: const Text('Top Shelf'),
+            ),
+            ListTile(
+              leading: Icon(present ? Icons.star_border : Icons.star),
+              title: Text(
+                present ? 'Remove from Top Shelf' : 'Add to Top Shelf',
+              ),
+              onTap: () => Navigator.pop(context, 'toggle'),
+            ),
+            if (present && _topShelfIds.indexOf(item.id) > 0)
+              ListTile(
+                leading: const Icon(Icons.arrow_upward),
+                title: const Text('Move earlier'),
+                onTap: () => Navigator.pop(context, 'earlier'),
+              ),
+            if (present &&
+                _topShelfIds.indexOf(item.id) < _topShelfIds.length - 1)
+              ListTile(
+                leading: const Icon(Icons.arrow_downward),
+                title: const Text('Move later'),
+                onTap: () => Navigator.pop(context, 'later'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    // Another library view may have updated the shelf since this view loaded.
+    // Apply this action to the saved list, rather than overwriting its books.
+    final saved = await AppSettingsService.instance.loadRawSetting(
+      'elibrary_top_shelf_v1',
+    );
+    if (!mounted) return;
+    List<String> ids;
+    try {
+      ids = (jsonDecode(saved ?? '[]') as List)
+          .whereType<String>()
+          .toSet()
+          .toList();
+    } catch (_) {
+      ids = List<String>.of(_topShelfIds);
+    }
+    if (action == 'toggle') {
+      if (present) {
+        ids.remove(item.id);
+      } else {
+        if (!ids.contains(item.id)) ids.add(item.id);
+      }
+    } else {
+      final old = ids.indexOf(item.id);
+      final next = old + (action == 'earlier' ? -1 : 1);
+      if (old < 0 || next < 0 || next >= ids.length) return;
+      ids.removeAt(old);
+      ids.insert(next, item.id);
+    }
+    try {
+      await AppSettingsService.instance.saveRawSetting(
+        'elibrary_top_shelf_v1',
+        jsonEncode(ids),
+      );
+      if (mounted) setState(() => _topShelfIds = ids);
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Top Shelf could not be saved.')),
+        );
+    }
   }
 
   void _setTab(_LibraryTab tab) {
@@ -966,7 +1081,13 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
     final background = theme.scaffoldBackgroundColor;
     final cardBackground = _librarySurfaceLowColor(theme);
     final selection = _selection;
-    final collectionOptions = _availableCollectionFilters;
+    final collectionOptions = <LibraryCollectionFilterOption>[
+      const LibraryCollectionFilterOption(
+        value: 'top_shelf',
+        label: 'Top Shelf',
+      ),
+      ..._availableCollectionFilters,
+    ];
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
 
     return Scaffold(
@@ -1026,12 +1147,25 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
                           final catalogPane = AnimatedSwitcher(
                             duration: const Duration(milliseconds: 180),
                             child: switch (_tab) {
+                              _LibraryTab.topShelf => _LibraryPane(
+                                key: const ValueKey('top-shelf'),
+                                books: _topShelfBooks,
+                                selectedBookId: _selectedBookId,
+                                view: _view,
+                                onSelectBook: _selectBook,
+                                onLongPressBook: (item) =>
+                                    unawaited(_showTopShelfMenu(item)),
+                                isEmptyMessage:
+                                    'Your Top Shelf is empty. Open All Books and long-press a book to add it.',
+                              ),
                               _LibraryTab.books => _LibraryPane(
                                 key: const ValueKey('books'),
                                 books: _filteredBooks,
                                 selectedBookId: _selectedBookId,
                                 view: _view,
                                 onSelectBook: _selectBook,
+                                onLongPressBook: (item) =>
+                                    unawaited(_showTopShelfMenu(item)),
                                 isEmptyMessage: _booksEmptyMessage(),
                               ),
                               _LibraryTab.recent => _RecentPane(
@@ -1039,6 +1173,8 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
                                 books: _recentBooks,
                                 selectedBookId: _selectedBookId,
                                 onSelectBook: _selectBook,
+                                onLongPressBook: (item) =>
+                                    unawaited(_showTopShelfMenu(item)),
                                 isEmptyMessage: _recentEmptyMessage(),
                               ),
                             },
@@ -1063,7 +1199,9 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
                               SizedBox(
                                 width: collectionWidth,
                                 child: _CollectionFilterMenu(
-                                  currentValue: _collectionFilter,
+                                  currentValue: _tab == _LibraryTab.topShelf
+                                      ? 'top_shelf'
+                                      : _collectionFilter,
                                   options: collectionOptions,
                                   onSelected: _handleCollectionFilterSelected,
                                 ),
@@ -1229,7 +1367,9 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
                                 children: [
                                   Expanded(
                                     child: _CollectionFilterMenu(
-                                      currentValue: _collectionFilter,
+                                      currentValue: _tab == _LibraryTab.topShelf
+                                          ? 'top_shelf'
+                                          : _collectionFilter,
                                       options: collectionOptions,
                                       onSelected:
                                           _handleCollectionFilterSelected,

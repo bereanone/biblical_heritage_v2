@@ -37,7 +37,9 @@ void main() {
     tilt.dispose();
     await tester.pump();
   });
-  testWidgets('turning audio on stops existing silent tilt', (tester) async {
+  testWidgets('audio preference leaves silent tilt alone until playback', (
+    tester,
+  ) async {
     final target = CallbackReaderAutoScrollTarget();
     final tilt = ReaderTiltAutoScrollController(
       motionSource: FakeReaderTiltMotionSource(),
@@ -53,8 +55,43 @@ void main() {
     speech.updatePreferences(
       const MacAutoscrollPreferences(audioEnabled: true, speechRate: 1.2),
     );
-    expect(tilt.isActive, isFalse);
+    expect(tilt.isActive, isTrue);
     expect(speech.speechRate, 1.2);
+    speech.setSignedStep(1);
+    await tester.pump();
+    expect(tilt.isActive, isFalse);
+    binding.dispose();
+    speech.dispose();
+    tilt.dispose();
+    await tester.pump();
+  });
+  testWidgets('Autoscroll never starts Play when Read aloud is enabled', (
+    tester,
+  ) async {
+    final target = CallbackReaderAutoScrollTarget();
+    final tilt = ReaderTiltAutoScrollController(
+      motionSource: FakeReaderTiltMotionSource(),
+      scrollTarget: target,
+    );
+    final speech = MacReaderAutoScrollController(
+      scrollTarget: target,
+      narrationControlsPacing: true,
+      preferences: const MacAutoscrollPreferences(audioEnabled: true),
+    );
+    final binding = SpeechTiltBinding(speech, tilt, (_) {});
+    await toggleSilentReaderTilt(tilt: tilt, speech: speech);
+    expect(tilt.isActive, isTrue);
+    expect(speech.isScrolling, isFalse);
+    expect(speech.audioEnabled, isTrue);
+    await toggleSilentReaderTilt(tilt: tilt, speech: speech);
+    expect(tilt.isActive, isFalse);
+    speech.setSignedStep(1);
+    await tester.pump();
+    expect(speech.isScrolling, isTrue);
+    await toggleSilentReaderTilt(tilt: tilt, speech: speech);
+    expect(speech.isScrolling, isFalse);
+    expect(tilt.isActive, isTrue);
+    await tilt.stop();
     binding.dispose();
     speech.dispose();
     tilt.dispose();

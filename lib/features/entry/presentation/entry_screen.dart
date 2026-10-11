@@ -37,7 +37,7 @@ class _EntryScreenState extends State<EntryScreen> {
   }
 
   Future<void> _showAboutDialog() async {
-    final version = await AppVersionInfo.versionName();
+    final version = await AppVersionInfo.versionWithBuild();
     if (!mounted) return;
     showDialog<void>(
       context: context,

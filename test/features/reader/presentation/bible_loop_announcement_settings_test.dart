@@ -9,10 +9,14 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('Qwen loop cue assets include the chapter-six recording', () async {
+    const cueRoot = String.fromEnvironment(
+      'TEST_QWEN_CUE_ROOT',
+      defaultValue: 'assets/audio/qwen_loop_cues',
+    );
     final manifest =
         jsonDecode(
               await rootBundle.loadString(
-                'assets/audio/qwen_loop_cues/manifest.json',
+                '$cueRoot/manifest.json',
               ),
             )
             as Map<String, dynamic>;
@@ -23,7 +27,7 @@ void main() {
     );
     expect(chapterSix['text'], 'Chapter six.');
     final bytes = await rootBundle.load(
-      'assets/audio/qwen_loop_cues/chapter_006.m4a',
+      '$cueRoot/chapter_006.m4a',
     );
     expect(
       sha256
@@ -35,13 +39,13 @@ void main() {
     );
   });
 
-  test('announcements are off by default and independent', () {
+  test('book and chapter default on, verse off, and switches are independent', () {
     const defaults = BibleLoopAnnouncementSettings();
-    expect(defaults.book, isFalse);
-    expect(defaults.chapter, isFalse);
+    expect(defaults.book, isTrue);
+    expect(defaults.chapter, isTrue);
     expect(defaults.verse, isFalse);
 
-    final chapterOnly = defaults.withValue(BibleLoopUnit.chapter, true);
+    final chapterOnly = defaults.withValue(BibleLoopUnit.book, false);
     expect(chapterOnly.book, isFalse);
     expect(chapterOnly.chapter, isTrue);
     expect(chapterOnly.verse, isFalse);
@@ -122,7 +126,15 @@ void main() {
         saved[key] = value;
       },
     );
-    expect((await store.load()).chapter, isFalse);
+    expect((await store.load()).book, isTrue);
+    expect((await store.load()).chapter, isTrue);
+    expect((await store.load()).verse, isFalse);
+    await store.save(BibleLoopUnit.book, false);
+    expect((await store.load()).book, isFalse);
+    expect((await store.load()).chapter, isTrue);
+    await store.save(BibleLoopUnit.verse, true);
+    expect((await store.load()).verse, isTrue);
+    await store.save(BibleLoopUnit.verse, false);
     await store.save(BibleLoopUnit.chapter, true);
     await store.save(BibleLoopUnit.book, true);
     await store.save(BibleLoopUnit.chapter, false);

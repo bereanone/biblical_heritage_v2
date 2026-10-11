@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
@@ -34,7 +35,7 @@ part 'library_screen_browser.dart';
 part 'library_screen_toc.dart';
 part 'library_screen_helpers.dart';
 
-enum _LibraryTab { books, recent }
+enum _LibraryTab { topShelf, books, recent }
 
 enum _LibraryView { shelf, list }
 

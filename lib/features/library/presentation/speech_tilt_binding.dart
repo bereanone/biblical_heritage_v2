@@ -13,7 +13,7 @@ class SpeechTiltBinding {
   final void Function(double) onRate;
   void _changed() {
     onRate(speech.speechRate);
-    if (speech.audioEnabled && tilt.isActive) {
+    if (speech.isScrolling && tilt.isActive) {
       unawaited(tilt.stop());
     }
   }
@@ -21,4 +21,18 @@ class SpeechTiltBinding {
   void dispose() {
     speech.removeListener(_changed);
   }
+}
+
+/// The motion button always means silent scrolling, regardless of the saved
+/// Read aloud preference. Playback remains on the separate Play control.
+Future<void> toggleSilentReaderTilt({
+  required ReaderTiltAutoScrollController tilt,
+  MacReaderAutoScrollController? speech,
+}) async {
+  if (tilt.isActive) {
+    await tilt.stop();
+    return;
+  }
+  speech?.stopForManualInteraction();
+  await tilt.activate();
 }

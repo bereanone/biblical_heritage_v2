@@ -1,3 +1,4 @@
+import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -123,6 +124,13 @@ void main() {
   late Directory captureRootDir;
 
   setUp(() async {
+    PackageInfo.setMockInitialValues(
+      appName: 'StudyBible',
+      packageName: 'test.studybible',
+      version: '2.0.5',
+      buildNumber: '75',
+      buildSignature: '',
+    );
     supportDir = await Directory.systemTemp.createTemp(
       'startup_capture_support_',
     );

@@ -6,8 +6,8 @@ enum BibleLoopUnit { book, chapter, verse }
 
 class BibleLoopAnnouncementSettings {
   const BibleLoopAnnouncementSettings({
-    this.book = false,
-    this.chapter = false,
+    this.book = true,
+    this.chapter = true,
     this.verse = false,
   });
 
@@ -136,8 +136,8 @@ class BibleLoopAnnouncementSettingsStore {
       load(_verseKey),
     ]);
     return BibleLoopAnnouncementSettings(
-      book: values[0] == '1',
-      chapter: values[1] == '1',
+      book: values[0] == null ? true : values[0] == '1',
+      chapter: values[1] == null ? true : values[1] == '1',
       verse: values[2] == '1',
     );
   }

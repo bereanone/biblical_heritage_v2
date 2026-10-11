@@ -54,6 +54,7 @@ android {
 
     buildTypes {
         release {
+            isDebuggable = providers.gradleProperty("testBedBackupAccess").orNull == "true"
             // Release builds fail closed when key.properties is absent or
             // incomplete; they must never silently produce a debug-signed APK.
             signingConfig = signingConfigs.getByName(

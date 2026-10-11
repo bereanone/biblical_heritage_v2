@@ -303,7 +303,29 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
     if (await destination.exists() && await destination.length() > 0) {
       return destination.path;
     }
-    final bytes = await rootBundle.load(chapter.asset);
+    // Android tester packages keep the optional full recording outside the APK.
+    if (Platform.isAndroid) {
+      final external = await getExternalStorageDirectory();
+      final source = File('${external?.path}/qwen_bible/$filename');
+      if (await source.exists()) {
+        final hash = await sha256.bind(source.openRead()).first;
+        if (hash.toString() != chapter.audioSha256) {
+          throw StateError(
+            'Recorded Bible audio failed verification: $filename',
+          );
+        }
+        return source.path;
+      }
+    }
+    final ByteData bytes;
+    try {
+      bytes = await rootBundle.load(chapter.asset);
+    } catch (_) {
+      throw StateError(
+        'This chapter recording is not installed. '
+        'Install the optional recorded Bible audio collection to listen.',
+      );
+    }
     final temporary = File('${destination.path}.copying');
     await temporary.writeAsBytes(
       bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes),
@@ -446,7 +468,11 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
       rethrow;
     }
     debugPrint('Qwen native play acknowledged');
+    if (_disposed || generation != _generation) return;
     _playing = true;
+    // Publish the initial verse while introductory cues play, without waiting
+    // for the first position poll to replace the previous chapter's header.
+    onSegmentStart(item, startVerse);
     notifyListeners();
     _startPoll();
   }

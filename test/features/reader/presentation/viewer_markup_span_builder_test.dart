@@ -27,6 +27,24 @@ void main() {
     ]);
   });
 
+  test('a linked English phrase maps to its source, not adjacent punctuation', () {
+    final segments = parseViewerMarkupSegments(
+      html: '<w lemma="strong:H06490">Through thy precepts</w>, '
+          '<w lemma="strong:H0995">I get understanding</w>.',
+      fallbackText: 'Through thy precepts, I get understanding.',
+      baseStyle: const TextStyle(),
+      redLetterColor: Colors.red,
+    );
+    final first = viewerMappedPhraseAtTextOffset(segments, 10);
+    expect(first?.text, 'Through thy precepts');
+    expect(first?.strongs, {'H6490'});
+    expect(viewerMappedPhraseAtTextOffset(segments, 20), isNull);
+    expect(viewerMappedPhraseAtTextOffset(segments, 21), isNull);
+    final second = viewerMappedPhraseAtTextOffset(segments, 25);
+    expect(second?.text, 'I get understanding');
+    expect(second?.strongs, {'H0995'});
+  });
+
   test('highlighted Bible markup keeps italics and overrides unsafe red', () {
     final span =
         buildViewerMarkupSpan(

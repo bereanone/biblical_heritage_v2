@@ -54,12 +54,12 @@ void main() {
               forward: forward,
             );
         final nextId = switch (unit) {
-          BibleLoopUnit.chapter => 10,
+          BibleLoopUnit.chapter || null => 10,
           BibleLoopUnit.book => 13,
           _ => 9,
         };
         final previousId = switch (unit) {
-          BibleLoopUnit.chapter => 4,
+          BibleLoopUnit.chapter || null => 4,
           BibleLoopUnit.book => 1,
           _ => 7,
         };

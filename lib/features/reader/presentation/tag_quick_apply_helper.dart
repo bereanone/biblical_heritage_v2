@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -49,6 +50,17 @@ String bibleRangeSourceId({
   return normalizedEnd > verseStart
       ? '$bookNumber:$chapter:$verseStart-$normalizedEnd'
       : '$bookNumber:$chapter:$verseStart';
+}
+
+/// A list entry has its own identity even when another entry points to the
+/// same Bible verse. Repeated verses are intentional in memorization lists.
+String newTagListItemId() {
+  final random = Random.secure();
+  final suffix = List.generate(
+    4,
+    (_) => random.nextInt(1 << 32).toRadixString(16).padLeft(8, '0'),
+  ).join();
+  return 'tag_item_$suffix';
 }
 
 Future<String> loadBibleRangeText({
@@ -1854,9 +1866,12 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     var inserted = 0;
     var skipped = 0;
     final now = DateTime.now().millisecondsSinceEpoch;
+    var nextSortOrder = await _nextSortOrderForTag(db, normalizedTag);
     for (final target in targets) {
-      final exists = await db.rawQuery(
-        '''
+      final exists = tableName == 'hash_tags'
+          ? const <Map<String, Object?>>[]
+          : await db.rawQuery(
+              '''
         SELECT 1
         FROM $tableName
         WHERE user_id = ?
@@ -1865,15 +1880,15 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
           AND ((book_number = ? AND chapter_number = ? AND verse_number = ?) OR verse_ref = ?)
         LIMIT 1
         ''',
-        [
-          userId,
-          normalizedTag,
-          target.bookNumber,
-          target.chapter,
-          target.verse,
-          target.verseRef,
-        ],
-      );
+              [
+                userId,
+                normalizedTag,
+                target.bookNumber,
+                target.chapter,
+                target.verse,
+                target.verseRef,
+              ],
+            );
       if (exists.isNotEmpty) {
         skipped++;
         continue;
@@ -1888,8 +1903,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         'verse_number': target.verse,
         'token_number': target.tokenNumber,
         if (tableName == 'dollar_tags') 'content_html': '',
-        'sort_order': now,
-        'created_at': now,
+        'sort_order': nextSortOrder++,
+        'created_at': now + inserted,
       });
       inserted++;
     }
@@ -2052,7 +2067,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
             ],
       limit: 1,
     );
-    if (legacyExists.isNotEmpty || normalizedExists.isNotEmpty) {
+    if (tableName != 'hash_tags' &&
+        (legacyExists.isNotEmpty || normalizedExists.isNotEmpty)) {
       return HashTagSearchQuickApplyResult(
         tag: normalizedTag,
         inserted: 0,
@@ -2067,8 +2083,9 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       groupId: groupId,
     );
     await db.insert('tag_items', {
-      'id':
-          'tag_item_${_slug(groupId)}_${result.bookNumber}_${result.chapter}_${result.verse}',
+      'id': tableName == 'hash_tags'
+          ? newTagListItemId()
+          : 'tag_item_${_slug(groupId)}_${result.bookNumber}_${result.chapter}_${result.verse}',
       'tag_group_id': groupId,
       'tag_kind': tagKind,
       'book_id': result.bookNumber,
@@ -2177,7 +2194,8 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
             ],
       limit: 1,
     );
-    if (legacyExists.isNotEmpty || normalizedExists.isNotEmpty) {
+    if (tableName != 'hash_tags' &&
+        (legacyExists.isNotEmpty || normalizedExists.isNotEmpty)) {
       return HashTagSearchQuickApplyResult(
         tag: normalizedTag,
         inserted: 0,
@@ -2191,14 +2209,16 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       normalizedTag: normalizedTag,
       groupId: groupId,
     );
-    final itemId = [
-      'tag_item',
-      _slug(groupId),
-      bookNumber,
-      chapter,
-      verseStart,
-      normalizedVerseEnd,
-    ].join('_');
+    final itemId = tableName == 'hash_tags'
+        ? newTagListItemId()
+        : [
+            'tag_item',
+            _slug(groupId),
+            bookNumber,
+            chapter,
+            verseStart,
+            normalizedVerseEnd,
+          ].join('_');
     await db.insert('tag_items', {
       'id': itemId,
       'tag_group_id': groupId,

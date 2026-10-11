@@ -45,18 +45,18 @@ void main() {
   test('verse labels can be on independently of chapter and book labels', () {
     final events = _chapter(
       6,
-    ).announcementEvents(const BibleLoopAnnouncementSettings(verse: true));
+    ).announcementEvents(const BibleLoopAnnouncementSettings(book: false, chapter: false, verse: true));
     expect(events.map((event) => event.seconds), [2, 10, 20]);
     expect(events.last.assets.single, endsWith('verse_003.m4a'));
     expect(_chapter(6).rangeForVerse(2), (10.0, 20.0));
     expect(
-      _chapter(6).announcementEvents(const BibleLoopAnnouncementSettings()),
+      _chapter(6).announcementEvents(const BibleLoopAnnouncementSettings(book: false, chapter: false)),
       isEmpty,
     );
   });
 
   test('book repeat and verse announcements work across chapters and wrap', () {
-    const settings = BibleLoopAnnouncementSettings(verse: true);
+    const settings = BibleLoopAnnouncementSettings(book: false, chapter: false, verse: true);
     final middle = _chapter(6).announcementEvents(settings);
     final last = _chapter(16).announcementEvents(settings);
     final first = _chapter(1).announcementEvents(settings);
@@ -101,7 +101,7 @@ void main() {
     () async {
       final events = _chapter(
         6,
-      ).announcementEvents(const BibleLoopAnnouncementSettings(verse: true));
+      ).announcementEvents(const BibleLoopAnnouncementSettings(book: false, chapter: false, verse: true));
       final payload = events
           .map(
             (event) => <String, Object>{

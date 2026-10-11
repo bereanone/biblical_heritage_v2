@@ -138,3 +138,6 @@ source-data/
 # packages/*/DICTIONARY_MODE.md; checksums are in docs/narration_model_restore.md
 /packages/sherpa_onnx_ios_lexicon/ios/sherpa_onnx_ios/SherpaOnnxC.xcframework/
 /packages/sherpa_onnx_macos_lexicon/macos/sherpa_onnx_macos/sherpa-onnx.xcframework/
+
+# Generated iOS build products
+/ios/build/

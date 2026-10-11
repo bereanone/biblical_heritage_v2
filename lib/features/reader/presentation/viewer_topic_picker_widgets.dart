@@ -219,6 +219,7 @@ class ViewerTopicGraphPanel extends StatelessWidget {
     required this.items,
     required this.onTap,
     required this.fontScale,
+    this.selectedItemId,
     this.customRowHeight,
     this.customFontSize,
   });
@@ -226,6 +227,7 @@ class ViewerTopicGraphPanel extends StatelessWidget {
   final List<ViewerTopicGraphItem> items;
   final ValueChanged<int> onTap;
   final double fontScale;
+  final int? selectedItemId;
   final double? customRowHeight;
   final double? customFontSize;
 
@@ -245,7 +247,9 @@ class ViewerTopicGraphPanel extends StatelessWidget {
       height: textLineHeight,
     );
     final countStyle = labelStyle.copyWith(
-      color: Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.6),
+      color: Theme.of(
+        context,
+      ).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
     );
     final maxCount = items.fold(1, (m, i) => i.count > m ? i.count : m);
     final panelHeight = _rowsExtent(rowHeight, items.length.toDouble());
@@ -259,90 +263,111 @@ class ViewerTopicGraphPanel extends StatelessWidget {
           for (final item in items)
             Material(
               color: Colors.transparent,
-              child: InkWell(
-                onTap: () => onTap(item.id),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: rowHeight,
-                  child: LayoutBuilder(
-                    builder: (context, rowConstraints) {
-                      const gap = 4.0;
-                      const edge = 4.0;
-                      final usable =
-                          (rowConstraints.maxWidth - ((edge * 2) + (gap * 2)))
-                              .clamp(0.0, rowConstraints.maxWidth);
-                      final labelWidth = (usable * 0.44).floorToDouble();
-                      final barWidth = (usable * 0.36).floorToDouble();
-                      final countWidth = (usable - labelWidth - barWidth).clamp(
-                        0.0,
-                        usable,
-                      );
-                      final fillWidth = barWidth * (item.count / maxCount);
-                      final barHeightPreferred = (graphFontSize * 0.55).clamp(
-                        1.0,
-                        13.0,
-                      );
-                      final barHeight = (rowHeight - 2.0).clamp(
-                        1.0,
-                        barHeightPreferred,
-                      );
+              child: Semantics(
+                selected: item.id == selectedItemId,
+                button: true,
+                child: InkWell(
+                  onTap: () => onTap(item.id),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: rowHeight,
+                    child: LayoutBuilder(
+                      builder: (context, rowConstraints) {
+                        const gap = 4.0;
+                        const edge = 4.0;
+                        final usable =
+                            (rowConstraints.maxWidth - ((edge * 2) + (gap * 2)))
+                                .clamp(0.0, rowConstraints.maxWidth);
+                        final labelWidth = (usable * 0.44).floorToDouble();
+                        final barWidth = (usable * 0.36).floorToDouble();
+                        final countWidth = (usable - labelWidth - barWidth)
+                            .clamp(0.0, usable);
+                        final fillWidth = barWidth * (item.count / maxCount);
+                        final barHeightPreferred = (graphFontSize * 0.55).clamp(
+                          1.0,
+                          13.0,
+                        );
+                        final barHeight = (rowHeight - 2.0).clamp(
+                          1.0,
+                          barHeightPreferred,
+                        );
 
-                      return Row(
-                        children: [
-                          const SizedBox(width: edge),
-                          SizedBox(
-                            width: labelWidth,
-                            child: Text(
-                              item.label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: labelStyle,
+                        return Row(
+                          children: [
+                            const SizedBox(width: edge),
+                            SizedBox(
+                              width: labelWidth,
+                              child: Text(
+                                item.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: item.id == selectedItemId
+                                    ? labelStyle.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                      )
+                                    : labelStyle,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: gap),
-                          SizedBox(
-                            width: barWidth,
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: SizedBox(
-                                height: barHeight,
-                                child: Stack(
-                                  children: [
-                                    Container(
-                                      decoration: BoxDecoration(
-                                        color: item.color.withOpacity(0.18),
-                                        borderRadius: BorderRadius.circular(4),
+                            const SizedBox(width: gap),
+                            SizedBox(
+                              width: barWidth,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: SizedBox(
+                                  height: barHeight,
+                                  child: Stack(
+                                    children: [
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          color: item.color.withValues(
+                                            alpha: 0.18,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                    Container(
-                                      width: fillWidth,
-                                      decoration: BoxDecoration(
-                                        color: item.color.withOpacity(0.7),
-                                        borderRadius: BorderRadius.circular(4),
+                                      Container(
+                                        width: fillWidth,
+                                        decoration: BoxDecoration(
+                                          color: item.color.withValues(
+                                            alpha: item.id == selectedItemId
+                                                ? 1.0
+                                                : 0.7,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: gap),
-                          SizedBox(
-                            width: countWidth,
-                            child: Align(
-                              alignment: Alignment.centerRight,
-                              child: Text(
-                                '${item.count}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: countStyle,
+                            const SizedBox(width: gap),
+                            SizedBox(
+                              width: countWidth,
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: Text(
+                                  '${item.count}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: item.id == selectedItemId
+                                      ? countStyle.copyWith(
+                                          color: item.color,
+                                          fontWeight: FontWeight.w700,
+                                        )
+                                      : countStyle,
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: edge),
-                        ],
-                      );
-                    },
+                            const SizedBox(width: edge),
+                          ],
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),

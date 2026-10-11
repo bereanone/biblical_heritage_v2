@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../data/highlights_repository.dart';
 import 'viewer_passage_models.dart';
@@ -32,6 +33,9 @@ class ViewerVerseLine extends StatelessWidget {
     this.onTokenLongPressEnd,
     this.onTokenLongPressMove,
     this.onTokenLongPressMoveDetails,
+    this.underlineMappedStrongs = false,
+    this.selectedMappedTokenIndex,
+    this.onTapMappedPhrase,
     this.geometryRegistry,
     this.geometryScopeId,
     this.geometryRevision = 0,
@@ -57,6 +61,9 @@ class ViewerVerseLine extends StatelessWidget {
   final VoidCallback? onTokenLongPressEnd;
   final ValueChanged<int>? onTokenLongPressMove;
   final ValueChanged<LongPressMoveUpdateDetails>? onTokenLongPressMoveDetails;
+  final bool underlineMappedStrongs;
+  final int? selectedMappedTokenIndex;
+  final ValueChanged<ViewerMappedPhrase>? onTapMappedPhrase;
   final TextRangeGeometryRegistry? geometryRegistry;
   final String? geometryScopeId;
   final int geometryRevision;
@@ -132,12 +139,18 @@ class ViewerVerseLine extends StatelessWidget {
           onTokenLongPressMove: onTokenLongPressMove,
           onTokenLongPressMoveDetails: onTokenLongPressMoveDetails,
           persistedHighlights: tokenHighlights,
+          underlineMappedStrongs: underlineMappedStrongs,
+          selectedMappedTokenIndex: selectedMappedTokenIndex,
         ),
       ],
     );
 
     final registry = geometryRegistry;
-    final textWidget = _enableTextRangeGeometry && registry != null
+    final mappedTapEnabled =
+        underlineMappedStrongs && onTapMappedPhrase != null;
+    final richTextKey = mappedTapEnabled ? GlobalKey() : null;
+    final richText = RichText(key: richTextKey, text: textSpan);
+    final renderedText = _enableTextRangeGeometry && registry != null
         ? GestureDetector(
             behavior: HitTestBehavior.translucent,
             onLongPressEnd: (_) => onTokenLongPressEnd?.call(),
@@ -168,10 +181,49 @@ class ViewerVerseLine extends StatelessWidget {
               geometryRevision: geometryRevision,
               textDirection: textDirection,
               textAlign: TextAlign.start,
-              child: RichText(text: textSpan),
+              child: richText,
             ),
           )
-        : RichText(text: textSpan);
+        : richText;
+    final textWidget = !mappedTapEnabled
+        ? renderedText
+        : GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTapUp: (details) {
+              final paragraph = richTextKey?.currentContext?.findRenderObject();
+              if (paragraph is! RenderParagraph) {
+                onTap();
+                return;
+              }
+              final local = paragraph.globalToLocal(details.globalPosition);
+              final position = paragraph.getPositionForOffset(local);
+              final segments = parseViewerMarkupSegments(
+                html: line.html,
+                fallbackText: line.text,
+                baseStyle: style.copyWith(color: baseTextColor),
+                redLetterColor: redLetterColor,
+                startsInRedLetter: startsInRedLetter,
+              );
+              final phrase = viewerMappedPhraseAtTextOffset(
+                segments,
+                position.offset,
+              );
+              if (phrase == null ||
+                  !paragraph
+                      .getBoxesForSelection(
+                        TextSelection(
+                          baseOffset: phrase.startOffset,
+                          extentOffset: phrase.endOffset,
+                        ),
+                      )
+                      .any((box) => box.toRect().inflate(2).contains(local))) {
+                onTap();
+                return;
+              }
+              onTapMappedPhrase!(phrase);
+            },
+            child: renderedText,
+          );
 
     return Material(
       color: Colors.transparent,
@@ -211,7 +263,7 @@ class ViewerVerseLine extends StatelessWidget {
             ),
             Expanded(
               child: InkWell(
-                onTap: onTap,
+                onTap: mappedTapEnabled ? null : onTap,
                 borderRadius: BorderRadius.circular(isSelected ? 3 : 6),
                 child: textWidget,
               ),

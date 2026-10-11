@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -39,6 +40,7 @@ class StartupSnapshot {
     this.backupPath,
     this.importReportPath,
     this.errorMessage,
+    this.isUpdateReview = false,
   });
 
   final StartupPhase phase;
@@ -47,6 +49,7 @@ class StartupSnapshot {
   final String? backupPath;
   final String? importReportPath;
   final String? errorMessage;
+  final bool isUpdateReview;
 
   bool get isReady => phase == StartupPhase.ready;
   bool get requiresDecision => phase == StartupPhase.legacyFoundWaitingForUser;
@@ -59,6 +62,102 @@ class StartupCoordinator {
 
   static const _fromVersion = 'legacy-v1';
   static const _toVersion = 'v2';
+  static const _readyStatuses = {
+    'migration_completed',
+    'fresh_install_selected',
+    'no_legacy_found',
+    'no_legacy_content',
+    'keep_current_data',
+  };
+
+  // Separate from migration history: acknowledging one build must not hide
+  // the choices after a later update, or be lost when history is recovered.
+  static const _reviewedVersionKey = 'startup_reviewed_version';
+
+  Future<String> _installedVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    return '${info.version}+${info.buildNumber}';
+  }
+
+  Future<void> _rememberReview() async {
+    final version = await _installedVersion();
+    final settings = await LocalSettingsStore.instance.load();
+    settings[_reviewedVersionKey] = version;
+    await LocalSettingsStore.instance.save(settings);
+  }
+
+  Future<StartupSnapshot> _completeSelection(
+    Future<StartupSnapshot> selection,
+  ) async {
+    final result = await selection;
+    if (result.isReady ||
+        result.phase == StartupPhase.freshInstallSelected ||
+        result.phase == StartupPhase.migrationCompleted) {
+      await _rememberReview();
+    }
+    return result;
+  }
+
+  Future<Map<String, Object?>?> _completedStateInCurrentDatabase() async {
+    final path = await SandboxBootstrap.userDatabasePath();
+    if (!await File(path).exists()) return null;
+    Database? db;
+    try {
+      db = await openDatabase(path, readOnly: true, singleInstance: false);
+      final tables = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_migrations'",
+      );
+      if (tables.isEmpty) return null;
+      final rows = await db.query(
+        'app_migrations',
+        where: "COALESCE(deleted_at, '') = ''",
+        orderBy:
+            'COALESCE(updated_at, completed_at, created_at) DESC, rowid DESC',
+        limit: 1,
+      );
+      if (rows.isEmpty || !_readyStatuses.contains(rows.single['status'])) {
+        return null;
+      }
+      return Map<String, Object?>.from(rows.single);
+    } catch (error) {
+      debugPrint('Could not recover saved startup state: $error');
+      return null;
+    } finally {
+      await db?.close();
+    }
+  }
+
+  /// Keep both current and legacy files intact and remember the user's choice.
+  Future<StartupSnapshot> keepCurrentData() async {
+    _ensureDesktopSqlite();
+    final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
+    await _ensureFreshV2Database(deviceId: deviceId);
+    final now = _utcNow();
+    await _recordMigrationRow(
+      deviceId: deviceId,
+      migrationKey: 'keep_current_data',
+      startedAt: now,
+      completedAt: now,
+      backupPath: null,
+      status: 'keep_current_data',
+      errorMessage: null,
+      sourceDeviceName: _sourceDeviceName(),
+    );
+    await LocalSettingsStore.instance.saveMigrationState({
+      'migration_key': 'keep_current_data',
+      'status': 'keep_current_data',
+      'from_version': _fromVersion,
+      'to_version': _toVersion,
+      'started_at': now,
+      'completed_at': now,
+    });
+    await _rememberReview();
+    return const StartupSnapshot(
+      phase: StartupPhase.ready,
+      message: 'Current study data ready.',
+      migrationKey: 'keep_current_data',
+    );
+  }
 
   Future<StartupSnapshot> initialize({ValueChanged<String>? onStatus}) async {
     onStatus?.call('Checking saved startup state...');
@@ -66,13 +165,31 @@ class StartupCoordinator {
     onStatus?.call('Reading device identity...');
     final deviceId = await LocalSettingsStore.instance.ensureDeviceId();
     onStatus?.call('Reading saved migration state...');
-    final migrationState = await LocalSettingsStore.instance
-        .loadMigrationState();
+    var migrationState = await LocalSettingsStore.instance.loadMigrationState();
+    if ((migrationState['status']?.toString() ?? '').isEmpty) {
+      final recovered = await _completedStateInCurrentDatabase();
+      if (recovered != null) {
+        migrationState = recovered;
+        await LocalSettingsStore.instance.saveMigrationState(recovered);
+      }
+    }
     final migrationStatus = migrationState['status']?.toString() ?? '';
     final migrationKey = migrationState['migration_key']?.toString().trim();
 
-    if (migrationStatus == 'migration_completed' ||
-        migrationStatus == 'fresh_install_selected') {
+    if (_readyStatuses.contains(migrationStatus)) {
+      final version = await _installedVersion();
+      final settings = await LocalSettingsStore.instance.load();
+      if (settings[_reviewedVersionKey] != version) {
+        return StartupSnapshot(
+          phase: StartupPhase.legacyFoundWaitingForUser,
+          message:
+              'Choose how to handle your study data for this update. '
+              'We will ask again only after another app update.',
+          migrationKey: migrationKey,
+          backupPath: migrationState['backup_path']?.toString(),
+          isUpdateReview: true,
+        );
+      }
       onStatus?.call('Preparing user database...');
       await _ensureFreshV2Database(deviceId: deviceId);
       onStatus?.call('Recording startup state...');
@@ -131,6 +248,7 @@ class StartupCoordinator {
         'status': migrationKey,
         'error_message': null,
       });
+      await _rememberReview();
       return StartupSnapshot(
         phase: StartupPhase.noLegacyFound,
         message: legacyFiles.isEmpty
@@ -308,11 +426,11 @@ class StartupCoordinator {
   }
 
   Future<StartupSnapshot> backUpAndUpgrade() async {
-    return _runSelection(importLegacyData: true);
+    return _completeSelection(_runSelection(importLegacyData: true));
   }
 
   Future<StartupSnapshot> startFreshButKeepLegacyBackup() async {
-    return _runSelection(importLegacyData: false);
+    return _completeSelection(_runSelection(importLegacyData: false));
   }
 
   Future<StartupSnapshot> _runSelection({

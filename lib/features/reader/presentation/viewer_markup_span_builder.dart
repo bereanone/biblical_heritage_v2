@@ -19,6 +19,69 @@ class ViewerMarkupSegment {
   final Set<String>? strongs;
 }
 
+/// The English phrase enclosed by one source `w` tag. A token may represent
+/// several English words; the source Strong's IDs are kept together.
+class ViewerMappedPhrase {
+  const ViewerMappedPhrase({
+    required this.text,
+    required this.tokenIndex,
+    required this.strongs,
+    required this.startOffset,
+    required this.endOffset,
+  });
+
+  final String text;
+  final int tokenIndex;
+  final Set<String> strongs;
+  final int startOffset;
+  final int endOffset;
+}
+
+ViewerMappedPhrase? viewerMappedPhraseAtTextOffset(
+  List<ViewerMarkupSegment> segments,
+  int offset,
+) {
+  var cursor = 0;
+  int? matchedToken;
+  for (final segment in segments) {
+    final end = cursor + segment.text.length;
+    if (offset >= cursor &&
+        offset < end &&
+        segment.tokenIndex != null &&
+        segment.strongs?.isNotEmpty == true) {
+      matchedToken = segment.tokenIndex;
+      break;
+    }
+    cursor = end;
+  }
+  if (matchedToken == null) return null;
+
+  cursor = 0;
+  int? start;
+  var end = 0;
+  final text = StringBuffer();
+  final strongs = <String>{};
+  for (final segment in segments) {
+    final next = cursor + segment.text.length;
+    if (segment.tokenIndex == matchedToken &&
+        segment.strongs?.isNotEmpty == true) {
+      start ??= cursor;
+      end = next;
+      text.write(segment.text);
+      strongs.addAll(segment.strongs!);
+    }
+    cursor = next;
+  }
+  if (start == null || strongs.isEmpty) return null;
+  return ViewerMappedPhrase(
+    text: text.toString().trim(),
+    tokenIndex: matchedToken,
+    strongs: strongs,
+    startOffset: start,
+    endOffset: end,
+  );
+}
+
 InlineSpan buildViewerMarkupSpan({
   required String html,
   required String fallbackText,
@@ -35,6 +98,8 @@ InlineSpan buildViewerMarkupSpan({
   List<VerseHighlightRecord> persistedHighlights =
       const <VerseHighlightRecord>[],
   Set<String> highlightedStrongs = const <String>{},
+  bool underlineMappedStrongs = false,
+  int? selectedMappedTokenIndex,
 }) {
   final segments = parseViewerMarkupSegments(
     html: html,
@@ -67,7 +132,15 @@ InlineSpan buildViewerMarkupSpan({
     final isStrongsMatch =
         segment.strongs != null &&
         segment.strongs!.any(highlightedStrongs.contains);
+    final isMappedPhrase =
+        underlineMappedStrongs && segment.strongs?.isNotEmpty == true;
+    final isSelectedMappedPhrase =
+        isMappedPhrase &&
+        tokenIndex != null &&
+        tokenIndex == selectedMappedTokenIndex;
     final sourceHighlight = (isSelected || isPendingAnchor)
+        ? selectedColor
+        : isSelectedMappedPhrase
         ? selectedColor
         : persisted?.color;
     final highlightSpec = sourceHighlight == null
@@ -84,8 +157,12 @@ InlineSpan buildViewerMarkupSpan({
       segment.style,
       backgroundColor: highlightSpec?.backgroundColor,
       highlightTextColor: highlightSpec?.textColor,
-      emphasizeWeight: isSelected || isPendingAnchor || isStrongsMatch,
-      underline: isStrongsMatch,
+      emphasizeWeight:
+          isSelected ||
+          isPendingAnchor ||
+          isStrongsMatch ||
+          isSelectedMappedPhrase,
+      underline: isStrongsMatch || isMappedPhrase,
     );
     GestureLongPressMoveUpdateCallback? moveUpdateCallback;
     if (onTokenLongPressMoveDetails != null) {
@@ -313,6 +390,9 @@ List<ViewerMarkupSegment> parseViewerMarkupSegments({
       } else if (tagName == 'w') {
         // Keep the last word token active so trailing punctuation stays attached
         // to the selected/exported token span instead of falling out of range.
+        // The language link itself ends at </w>; punctuation and whitespace
+        // outside it must not pretend to map to that Strong's entry.
+        activeStrongs = null;
       }
       index = closeIndex + 1;
       continue;

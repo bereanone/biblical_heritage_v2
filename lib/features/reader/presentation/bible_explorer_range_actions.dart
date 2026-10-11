@@ -21,6 +21,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
           line.chapter != _chapter ||
           line.verse != _verse) {
         setState(() {
+          _interlinearEnabled = false;
           _selectedBlockId = line.blockId;
           _bookNumber = line.bookNumber;
           _chapter = line.chapter;
@@ -45,6 +46,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
     }
     _resetRapidTagArmed();
     setState(() {
+      _interlinearEnabled = false;
       _selectedBlockId = line.blockId;
       _bookNumber = line.bookNumber;
       _chapter = line.chapter;

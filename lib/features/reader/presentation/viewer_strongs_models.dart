@@ -18,6 +18,34 @@ class ViewerStrongsEntry {
   final String shortDefinition;
 }
 
+class ViewerLexiconPart {
+  const ViewerLexiconPart(this.text, {this.blockId});
+
+  final String text;
+  final int? blockId;
+}
+
+class ViewerLexiconSense {
+  const ViewerLexiconSense({required this.number, required this.parts});
+
+  final String number;
+  final List<ViewerLexiconPart> parts;
+}
+
+class ViewerAbbottSmithEntry {
+  const ViewerAbbottSmithEntry({required this.senses, required this.related});
+
+  final List<ViewerLexiconSense> senses;
+  final List<List<ViewerLexiconPart>> related;
+}
+
+class ViewerBdbEntry {
+  const ViewerBdbEntry({required this.text, required this.articleId});
+
+  final String text;
+  final String articleId;
+}
+
 class ViewerStrongsOccurrence {
   const ViewerStrongsOccurrence({
     required this.blockId,

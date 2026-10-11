@@ -18,14 +18,22 @@ class StudyBibleDatabase {
   /// Older installed databases can still be read while the new asset is staged.
   Future<Map<String, Object?>?> loadVersePronunciation(int blockId) async {
     final db = await bible;
-    final supported = await (_hasPronunciation ??= db.rawQuery('PRAGMA table_info(bible_blocks)').then(
-      (columns) => columns.any((column) => column['name'] == 'pronunciation'),
-    ));
+    final supported = await (_hasPronunciation ??= db
+        .rawQuery('PRAGMA table_info(bible_blocks)')
+        .then(
+          (columns) =>
+              columns.any((column) => column['name'] == 'pronunciation'),
+        ));
     if (!supported) return null;
-    final rows = await db.query('bible_blocks', columns:['plain_text','pronunciation'], where:'id = ?', whereArgs:[blockId], limit:1);
+    final rows = await db.query(
+      'bible_blocks',
+      columns: ['plain_text', 'pronunciation'],
+      where: 'id = ?',
+      whereArgs: [blockId],
+      limit: 1,
+    );
     return rows.isEmpty ? null : rows.first;
   }
-
 
   Future<void> initialize() async {
     // Verse popups can perform many lookups. An open read-only connection has

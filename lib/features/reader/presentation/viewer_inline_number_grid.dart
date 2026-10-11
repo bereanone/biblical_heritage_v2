@@ -8,6 +8,8 @@ class ViewerInlineNumberGrid extends StatefulWidget {
     required this.onSelect,
     this.selectedValue,
     this.scrollToSelected = false,
+    this.fontSize = 14,
+    this.minimumItemExtent = 44,
   });
 
   final List<int> values;
@@ -15,6 +17,8 @@ class ViewerInlineNumberGrid extends StatefulWidget {
   final int? selectedValue;
   final ValueChanged<int> onSelect;
   final bool scrollToSelected;
+  final double fontSize;
+  final double minimumItemExtent;
 
   @override
   State<ViewerInlineNumberGrid> createState() => _ViewerInlineNumberGridState();
@@ -69,24 +73,32 @@ class _ViewerInlineNumberGridState extends State<ViewerInlineNumberGrid> {
               key: _itemKeys.putIfAbsent(value, () => GlobalKey()),
               onTap: () => widget.onSelect(value),
               child: Container(
-                width: 44,
-                height: 44,
-                alignment: Alignment.center,
+                constraints: BoxConstraints(
+                  minWidth: widget.minimumItemExtent,
+                  minHeight: widget.minimumItemExtent,
+                ),
+                padding: widget.minimumItemExtent > 44
+                    ? const EdgeInsets.symmetric(horizontal: 8, vertical: 6)
+                    : EdgeInsets.zero,
                 decoration: BoxDecoration(
                   color: widget.color,
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: Text(
-                  '$value',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: widget.selectedValue == value
-                        ? FontWeight.bold
-                        : FontWeight.normal,
-                    decoration: widget.selectedValue == value
-                        ? TextDecoration.underline
-                        : TextDecoration.none,
-                    color: textColor,
+                child: Center(
+                  widthFactor: 1,
+                  heightFactor: 1,
+                  child: Text(
+                    '$value',
+                    style: TextStyle(
+                      fontSize: widget.fontSize,
+                      fontWeight: widget.selectedValue == value
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                      decoration: widget.selectedValue == value
+                          ? TextDecoration.underline
+                          : TextDecoration.none,
+                      color: textColor,
+                    ),
                   ),
                 ),
               ),

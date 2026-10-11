@@ -45,6 +45,7 @@ import 'reader_tilt_autoscroll_controller.dart';
 import 'reader_tilt_autoscroll_controls.dart';
 import 'reader_tilt_motion_source.dart';
 import 'reader_tilt_preferences.dart';
+import 'speech_tilt_binding.dart';
 import 'mac_reader_autoscroll_controller.dart';
 import 'mac_reader_autoscroll_controls.dart';
 import 'library_narration_media_controls.dart';
@@ -219,7 +220,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       // and bible_explorer_screen.
       narrationControlsPacing:
           defaultTargetPlatform == TargetPlatform.macOS ||
-          defaultTargetPlatform == TargetPlatform.iOS,
+          defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.android,
     )..addListener(_onMacAutoscrollChanged);
     _tiltScrollTarget.attach(_scrollContinuousDocument);
     _loadTiltPreferences();
@@ -397,6 +399,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     _readerFocusNode.requestFocus();
   }
 
+  String? _selectedRecordedCursor;
   String _initialSpeechCursor() {
     final section = _contentSectionForIndex(_selectedIndex);
     final visible = _visibleBlockForSection(_selectedIndex);
@@ -439,14 +442,17 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     return null;
   }
 
-  Future<void> _revealLibrarySpeechItem(LibrarySpeechItem item) async {
+  Future<void> _revealLibrarySpeechItem(
+    LibrarySpeechItem item, {
+    bool recorded = false,
+  }) async {
     if (!mounted) return;
     final parts = item.sourceCursor.split(':');
     final sectionIndex = int.parse(parts[0]);
     final blockIndex = int.parse(parts[1]);
     if (item.startOffset > 0) {
       // Later slices of a long paragraph: keep the spoken part on screen.
-      if (!_steadyAutoScroll.isScrolling) return;
+      if (!recorded && !_steadyAutoScroll.isScrolling) return;
       final block = _contentSectionForIndex(sectionIndex)?.blocks[blockIndex];
       final context = block == null
           ? null
@@ -468,7 +474,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     if (changedSection) _selectSection(sectionIndex, forNarration: true);
     setState(() => _speechCursor = item.sourceCursor);
     await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || !_steadyAutoScroll.isScrolling) return;
+    if (!mounted || (!recorded && !_steadyAutoScroll.isScrolling)) return;
     if (changedSection && _itemScrollController.isAttached) {
       _itemScrollController.jumpTo(
         index: _readableSectionIndices.indexOf(sectionIndex),
@@ -476,7 +482,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       );
       await WidgetsBinding.instance.endOfFrame;
     }
-    if (!mounted || !_steadyAutoScroll.isScrolling) return;
+    if (!mounted || (!recorded && !_steadyAutoScroll.isScrolling)) return;
     final block = _contentSectionForIndex(sectionIndex)!.blocks[blockIndex];
     final target =
         _bodyBlockKeys[_blockTargetKey(block, blockIndex)]?.currentContext;
@@ -517,16 +523,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   }
 
   void _toggleTiltAutoscroll() {
-    if (_steadyAutoScroll.audioEnabled) {
-      _steadyAutoScroll.setSignedStep(_steadyAutoScroll.isScrolling ? 0 : 1);
-      return;
-    }
-    if (_tiltAutoScroll.isActive) {
-      _tiltAutoScroll.stop();
-    } else {
-      _steadyAutoScroll.stopForManualInteraction();
-      _tiltAutoScroll.activate();
-    }
+    unawaited(
+      toggleSilentReaderTilt(tilt: _tiltAutoScroll, speech: _steadyAutoScroll),
+    );
   }
 
   Future<void> _saveTiltPreferences(ReaderTiltPreferences preferences) async {
@@ -4281,6 +4280,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                 : null,
             onWordTap: active
                 ? (token) {
+                    setState(
+                      () => _selectedRecordedCursor = '$sectionIndex:$index',
+                    );
                     if (_rangeSelection.hasCompletedRange &&
                         _rangeSelection.containsTokenPosition(index, token)) {
                       _showLibrarySelectionActionsMenu(
@@ -4666,9 +4668,10 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                         ),
                       ),
                       const SizedBox(height: 12),
-                      ReaderTiltAutoScrollActiveIndicator(
-                        controller: _tiltAutoScroll,
-                      ),
+                      if (defaultTargetPlatform != TargetPlatform.android)
+                        ReaderTiltAutoScrollActiveIndicator(
+                          controller: _tiltAutoScroll,
+                        ),
                       Expanded(
                         child: Material(
                           color: cardBackground,
@@ -4803,6 +4806,11 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                           initialCursor: _initialSpeechCursor,
                           load: _loadLibrarySpeechItem,
                           reveal: _revealLibrarySpeechItem,
+                          revealRecorded: (item) =>
+                              _revealLibrarySpeechItem(item, recorded: true),
+                          recordedStartCursor:
+                              '${_readableSectionIndices.first}:0',
+                          selectedRecordedCursor: () => _selectedRecordedCursor,
                           onPaused: () {
                             if (mounted) setState(() => _speechCursor = null);
                           },
@@ -4811,11 +4819,6 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                   ),
                 ),
               ),
-            ),
-            MacReaderAutoscrollStatusOverlay(
-              controller: _steadyAutoScroll,
-              foregroundColor: textColor,
-              backgroundColor: background,
             ),
           ],
         ),

@@ -14,6 +14,7 @@ import 'library_root_setup_screen.dart';
 import '../../reader/presentation/bible_explorer_screen.dart';
 import 'elibrary_download_screen.dart';
 import 'elibrary_setup_screen.dart';
+import 'user_content_removal_screen.dart';
 
 class UtilitiesScreen extends StatelessWidget {
   const UtilitiesScreen({
@@ -523,6 +524,17 @@ class UtilitiesScreen extends StatelessWidget {
                                     'Manage common app settings and protect your personal data.',
                                 actions: [
                                   _UtilityActionButton(
+                                    label: 'Remove Added Data',
+                                    icon: Icons.delete_outline,
+                                    filled: false,
+                                    onPressed: () => Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) =>
+                                            const UserContentRemovalScreen(),
+                                      ),
+                                    ),
+                                  ),
+                                  _UtilityActionButton(
                                     label: 'Backup User Data',
                                     icon: Icons.cloud,
                                     filled: true,
@@ -674,6 +686,17 @@ class UtilitiesScreen extends StatelessWidget {
                                 helperText:
                                     'Manage common app settings and protect your personal data.',
                                 actions: [
+                                  _UtilityActionButton(
+                                    label: 'Remove Added Data',
+                                    icon: Icons.delete_outline,
+                                    filled: false,
+                                    onPressed: () => Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) =>
+                                            const UserContentRemovalScreen(),
+                                      ),
+                                    ),
+                                  ),
                                   _UtilityActionButton(
                                     label: 'Backup User Data',
                                     icon: Icons.cloud,

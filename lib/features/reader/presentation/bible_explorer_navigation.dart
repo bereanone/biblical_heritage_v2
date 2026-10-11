@@ -136,6 +136,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
     int blockId, {
     required bool recordHistory,
     bool preserveBibleSearchSession = false,
+    ViewerReaderScrollPosition? restoreScrollPosition,
   }) async {
     final reference = await StudyBibleDatabase.instance.loadReferenceForBlockId(
       blockId,
@@ -154,6 +155,13 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
       _verse = reference.verse;
       _anchorBlockId = blockId;
       _selectedBlockId = blockId;
+      _readerRestoreScrollPosition = restoreScrollPosition;
+      // A deliberate jump leaves Greek/Hebrew study mode. Scrolling through
+      // the current passage does not call this method, so it stays available
+      // while the reader is studying that passage.
+      _interlinearEnabled = false;
+      _selectedMappedBlockId = null;
+      _selectedMappedTokenIndex = null;
       _navigationTick += 1;
     });
     final location = BibleVisibleLocation(
@@ -169,6 +177,127 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
     }
   }
 
+  Future<void> _openMappedPhrase(
+    VerseLine line,
+    ViewerMappedPhrase phrase,
+  ) async {
+    final blockId = line.blockId;
+    if (blockId == null) return;
+    final strongs = phrase.strongs
+        .map(normalizeStrongsCanonical)
+        .whereType<String>()
+        .toList(growable: false);
+    if (strongs.isEmpty) return;
+    _stopReaderAutoscroll();
+    String? chosen = strongs.singleOrNull;
+    if (chosen == null) {
+      final entries = await Future.wait(
+        strongs.map((id) => const ViewerStrongsRepository().loadEntry(id)),
+      );
+      if (!mounted) return;
+      chosen = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => SimpleDialog(
+          title: Text('Sources for “${phrase.text}”'),
+          children: [
+            for (var index = 0; index < strongs.length; index++)
+              SimpleDialogOption(
+                onPressed: () =>
+                    Navigator.of(dialogContext).pop(strongs[index]),
+                child: Text(
+                  '${strongs[index]} · '
+                  '${entries[index]?.lemma ?? 'Source entry'}',
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+    if (chosen == null || !mounted) return;
+    final morphology = await const ViewerStrongsRepository().loadMorphologyTag(
+      blockId: blockId,
+      mappedTokenIndex: phrase.tokenIndex,
+    );
+    if (!mounted) return;
+    setState(() {
+      _selectedMappedBlockId = blockId;
+      _selectedMappedTokenIndex = phrase.tokenIndex;
+    });
+    final source = _LexicalSourceContext(
+      blockId: blockId,
+      reference:
+          '${_bookNames[line.bookNumber] ?? 'Book ${line.bookNumber}'} '
+          '${line.chapter}:${line.verse}',
+      phrase: phrase.text,
+      tokenIndex: phrase.tokenIndex,
+      strongsId: chosen,
+      morphologyTag: morphology,
+      readerPosition: _latestReaderScrollPosition,
+    );
+    await _showLexicalSource(source);
+  }
+
+  Future<void> _showLexicalSource(
+    _LexicalSourceContext source, {
+    bool startOnOccurrences = false,
+  }) => showViewerStrongsPageOne(
+    context,
+    strongsId: source.strongsId,
+    mappedPhrase: source.phrase,
+    morphologyTag: source.morphologyTag,
+    startOnOccurrences: startOnOccurrences,
+    occurrenceViewState: source.occurrenceState,
+    initialPanelScrollOffset: source.panelScrollOffset,
+    onSelectCitation: (blockId, panelScrollOffset) => unawaited(
+      _openLexicalCitation(
+        source.withPanelScrollOffset(panelScrollOffset),
+        blockId,
+      ),
+    ),
+    onSelectBlockId: (blockId) => unawaited(_openBlockId(blockId)),
+    onSelectOccurrence: (blockId, state) => unawaited(
+      _openLexicalOccurrence(source.withOccurrenceState(state), blockId),
+    ),
+  );
+
+  Future<void> _openLexicalOccurrence(
+    _LexicalSourceContext source,
+    int blockId,
+  ) async {
+    if (!mounted) return;
+    setState(() => _lexicalReturnContext = source);
+    await _navigateToBlockId(blockId, recordHistory: true);
+  }
+
+  Future<void> _openLexicalCitation(
+    _LexicalSourceContext source,
+    int blockId,
+  ) async {
+    if (!mounted) return;
+    setState(() => _lexicalReturnContext = source);
+    await _navigateToBlockId(blockId, recordHistory: true);
+  }
+
+  Future<void> _returnToLexicalSource() async {
+    final source = _lexicalReturnContext;
+    if (source == null) return;
+    await _navigateToBlockId(
+      source.blockId,
+      recordHistory: false,
+      restoreScrollPosition: source.readerPosition,
+    );
+    if (!mounted) return;
+    setState(() {
+      _interlinearEnabled = true;
+      _selectedMappedBlockId = source.blockId;
+      _selectedMappedTokenIndex = source.tokenIndex;
+    });
+    await _showLexicalSource(
+      source,
+      startOnOccurrences: source.returnToOccurrences,
+    );
+  }
+
   Future<void> _openReferencePicker(BuildContext context) async {
     _resetRapidTagArmed();
     final selection = await showViewerReferencePicker(
@@ -176,6 +305,10 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
       initialBookNumber: _bookNumber,
       initialChapter: _chapter,
       initialVerse: _verse,
+      largerPhoneControls:
+          Platform.isIOS && MediaQuery.sizeOf(context).shortestSide < 600,
+      fontScale: _fontScale,
+      fontScaleListenable: _referencePickerFontScale,
     );
     if (selection == null || !mounted) return;
     final blockId = await StudyBibleDatabase.instance.loadBlockIdForVerse(
@@ -288,15 +421,16 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
     setState(() {
       _fontScale = settings.viewerFontScale.clamp(_minFontScale, _maxFontScale);
     });
+    _referencePickerFontScale.value = _fontScale;
   }
 
   Future<void> _loadInterlinearSettings() async {
-    final enabled = await AppSettingsService.instance.loadInterlinearEnabled();
     final settings = await AppSettingsService.instance
         .loadInterlinearSettings();
     if (!mounted) return;
     setState(() {
-      _interlinearEnabled = enabled;
+      // Study mode is opt-in for each reader session, even if an older build
+      // saved its enabled state. Keep the user's display preferences only.
       _interlinearSettings = settings;
     });
   }

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../bootstrap/sandbox_bootstrap.dart';
+import '../bootstrap/bundled_content_platform.dart';
 import 'elibrary_schema.dart';
 import 'bundled_library_content.dart';
 
@@ -74,7 +75,7 @@ class ELibraryDatabase {
         await ELibrarySchema.ensure(database);
       },
     );
-    if (Platform.isAndroid) {
+    if (bundledContentEnabled) {
       final parent = p.dirname(dbPath);
       final libraryRoot = p.basename(parent) == 'Databases' ? p.dirname(parent) : parent;
       try {

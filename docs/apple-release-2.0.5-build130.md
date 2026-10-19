@@ -1,6 +1,6 @@
 # Apple validation builds — 2.0.5 build 130
 
-Prepared October 18, 2026. These are local validation artifacts, not an App Store, TestFlight, or notarized Mac release.
+Prepared October 18, 2026. The subsequent [iPhone build131 update](iphone-release-2.0.5-build131.md) adds and verifies automatic iPhone content provisioning; the results below describe build130. These are local validation artifacts, not an App Store, TestFlight, or notarized Mac release.
 
 ## Packages
 

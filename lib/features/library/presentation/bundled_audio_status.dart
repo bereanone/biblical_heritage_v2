@@ -1,8 +1,8 @@
-import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import '../data/bundled_audio_setup.dart';
+import '../../../core/bootstrap/bundled_content_platform.dart';
 
 class BundledAudioStatus extends StatefulWidget {
   const BundledAudioStatus({super.key, this.sourceHashes = const {}});
@@ -39,7 +39,7 @@ class _BundledAudioStatusState extends State<BundledAudioStatus> {
     super.initState();
     BundledAudioSetup.instance.addListener(_scheduleCompletionHide);
     _scheduleCompletionHide();
-    if (Platform.isAndroid) {
+    if (bundledContentEnabled) {
       BundledAudioSetup.instance.ensure(sourceHashes: widget.sourceHashes);
     }
   }
@@ -47,7 +47,7 @@ class _BundledAudioStatusState extends State<BundledAudioStatus> {
   @override
   void didUpdateWidget(covariant BundledAudioStatus oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (Platform.isAndroid &&
+    if (bundledContentEnabled &&
         !setEquals(oldWidget.sourceHashes, widget.sourceHashes)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -59,7 +59,7 @@ class _BundledAudioStatusState extends State<BundledAudioStatus> {
 
   @override
   Widget build(BuildContext context) {
-    if (!Platform.isAndroid) return const SizedBox.shrink();
+    if (!bundledContentEnabled) return const SizedBox.shrink();
     final setup = BundledAudioSetup.instance;
     return ListenableBuilder(
       listenable: setup,

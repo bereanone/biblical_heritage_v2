@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'bundled_audio_installer.dart';
 import 'verified_audio_download.dart';
 import 'optional_book_companions.dart';
+import '../../../core/bootstrap/bundled_content_platform.dart';
 
 class BundledAudioSetup extends ChangeNotifier {
   BundledAudioSetup._();
@@ -41,7 +42,7 @@ class BundledAudioSetup extends ChangeNotifier {
       _sources.addAll(sourceHashes.where(OptionalBookCompanions.matchesWor));
     }
     if (!setEquals(_sources, _completedSources)) complete = false;
-    if ((!Platform.isAndroid && _testInstall == null) || complete) {
+    if ((!bundledContentEnabled && _testInstall == null) || complete) {
       return Future.value();
     }
     return _pending ??= _run().whenComplete(() {

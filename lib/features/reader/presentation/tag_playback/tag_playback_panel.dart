@@ -222,7 +222,9 @@ class _TagPlaybackPanelState extends State<TagPlaybackPanel> {
         children: [
           IconButton(
             key: const Key('tag_playback_loop'),
-            tooltip: _c.loop ? 'Loop on: repeat the tag' : 'Loop off: play once',
+            tooltip: _c.loop
+                ? 'Loop on: repeat the tag'
+                : 'Loop off: play once',
             isSelected: _c.loop,
             style: IconButton.styleFrom(
               backgroundColor: _c.loop
@@ -305,8 +307,8 @@ class _TagPlaybackPanelState extends State<TagPlaybackPanel> {
                   : (item.hasNote && _c.includeNotes
                         ? '${item.preview}  ·  + note'
                         : item.preview),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              maxLines: isCurrent ? null : 2,
+              overflow: isCurrent ? TextOverflow.visible : TextOverflow.ellipsis,
               style: body.copyWith(
                 fontSize: (body.fontSize ?? 15) - 1,
                 fontStyle: silent ? FontStyle.italic : FontStyle.normal,

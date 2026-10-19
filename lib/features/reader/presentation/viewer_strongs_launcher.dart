@@ -7,6 +7,8 @@ import 'viewer_strongs_repository.dart';
 Future<void> showViewerStrongsPageOne(
   BuildContext context, {
   required String strongsId,
+  List<String> alternateStrongsIds = const [],
+  ValueChanged<String>? onStrongsChanged,
   required ValueChanged<int> onSelectBlockId,
   void Function(int blockId, ViewerStrongsOccurrenceViewState viewState)?
   onSelectOccurrence,
@@ -20,33 +22,52 @@ Future<void> showViewerStrongsPageOne(
   void Function(int blockId, double panelScrollOffset)? onSelectCitation,
   double initialPanelScrollOffset = 0,
 }) async {
-  final canonical = normalizeStrongsCanonical(strongsId);
+  var canonical = normalizeStrongsCanonical(strongsId);
   if (canonical == null) return;
+  var selected = canonical;
 
   final openPageTwo = startOnOccurrences
       ? true
-      : await showModalBottomSheet<bool>(
+      : await showDialog<bool>(
           context: context,
-          isScrollControlled: true,
-          useSafeArea: true,
-          backgroundColor: Theme.of(context).colorScheme.surface,
           builder: (sheetContext) {
-            return DraggableScrollableSheet(
-              expand: false,
-              initialChildSize: 0.43,
-              minChildSize: 0.32,
-              maxChildSize: 0.80,
-              builder: (sheetContext, scrollController) => ViewerStrongsPageOne(
-                strongsId: canonical,
-                mappedPhrase: mappedPhrase,
-                morphologyTag: morphologyTag,
-                scrollController: scrollController,
-                initialScrollOffset: initialPanelScrollOffset,
-                onSelectCitation: onSelectCitation,
-                repository: repository,
-                onOpenPageTwo: () {
-                  Navigator.of(sheetContext).pop(true);
-                },
+            return Dialog(
+              clipBehavior: Clip.antiAlias,
+              insetPadding: const EdgeInsets.all(20),
+              child: SizedBox(
+                width: 640,
+                height: MediaQuery.sizeOf(sheetContext).height * 0.85,
+                child: StatefulBuilder(builder: (context, setState) => Column(
+                  children: [
+                    if (alternateStrongsIds.length > 1)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: DropdownButton<String>(
+                          isExpanded: true,
+                          value: selected,
+                          items: alternateStrongsIds.toSet().map((id) =>
+                            DropdownMenuItem(value: id, child: Text('Source: $id'))).toList(),
+                          onChanged: (id) {
+                            if (id == null) return;
+                            setState(() => selected = id);
+                            onStrongsChanged?.call(id);
+                          },
+                        ),
+                      ),
+                    Expanded(child: ViewerStrongsPageOne(
+                  key: ValueKey(selected),
+                  strongsId: selected,
+                  mappedPhrase: mappedPhrase,
+                  morphologyTag: morphologyTag,
+                  initialScrollOffset: initialPanelScrollOffset,
+                  onSelectCitation: onSelectCitation,
+                  repository: repository,
+                  onOpenPageTwo: () {
+                    Navigator.of(sheetContext).pop(true);
+                  },
+                )),
+                  ],
+                )),
               ),
             );
           },
@@ -55,7 +76,7 @@ Future<void> showViewerStrongsPageOne(
   if (!context.mounted || openPageTwo != true) return;
   await showViewerStrongsPageTwo(
     context,
-    strongsId: canonical,
+    strongsId: selected,
     onSelectBlockId: onSelectBlockId,
     onSelectOccurrence: onSelectOccurrence,
     initialViewState: occurrenceViewState,
@@ -78,21 +99,23 @@ Future<void> showViewerStrongsPageTwo(
   final canonical = normalizeStrongsCanonical(strongsId);
   if (canonical == null) return Future<void>.value();
 
-  return showModalBottomSheet<void>(
+  return showDialog<void>(
     context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    backgroundColor: Theme.of(context).colorScheme.surface,
     builder: (sheetContext) {
-      return SizedBox(
-        height: MediaQuery.of(sheetContext).size.height * 0.92,
-        child: ViewerStrongsPageTwo(
-          strongsId: canonical,
-          onSelectBlockId: onSelectBlockId,
-          onSelectOccurrence: onSelectOccurrence,
-          initialViewState: initialViewState,
-          repository: repository,
-          dataOverride: dataOverride,
+      return Dialog(
+        clipBehavior: Clip.antiAlias,
+        insetPadding: const EdgeInsets.all(20),
+        child: SizedBox(
+          width: 760,
+          height: MediaQuery.sizeOf(sheetContext).height * 0.85,
+          child: ViewerStrongsPageTwo(
+            strongsId: canonical,
+            onSelectBlockId: onSelectBlockId,
+            onSelectOccurrence: onSelectOccurrence,
+            initialViewState: initialViewState,
+            repository: repository,
+            dataOverride: dataOverride,
+          ),
         ),
       );
     },

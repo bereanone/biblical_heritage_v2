@@ -182,6 +182,12 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
 
   Future<void> _pasteImageFromClipboard() async {
     if (_saving) return;
+    final copiedImage=await NoteImageClipboard.read();
+    if(copiedImage!=null && copiedImage.isNotEmpty) {
+      await _stageImageBytes(copiedImage,'image/png');
+      if(mounted)setState((){});
+      return;
+    }
     final nativeBytes = await _readClipboardImageBytes();
     if (nativeBytes != null && nativeBytes.isNotEmpty) {
       await _stageImageBytes(nativeBytes, 'image/png');
@@ -358,43 +364,14 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
     );
   }
 
-  Widget _buildMediaTile(_StagedMediaAttachment attachment, int index) {
-    final theme = Theme.of(context);
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            width: 112,
-            height: 84,
-            color: TagDialogStyles.card(theme),
-            child: Image.memory(attachment.bytes, fit: BoxFit.cover),
-          ),
-        ),
-        Positioned(
-          right: 4,
-          top: 4,
-          child: Material(
-            color: TagDialogStyles.surfaceHigh(theme),
-            shape: const CircleBorder(),
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: _saving ? null : () => _removeMediaAt(index),
-              child: Padding(
-                padding: const EdgeInsets.all(3),
-                child: Icon(
-                  Icons.close,
-                  size: 14,
-                  color: TagDialogStyles.title(theme),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
+  Future<void> _copyImage(_StagedMediaAttachment attachment) async {
+    if(_saving)return;
+    try { await NoteImageClipboard.copy(attachment.bytes,attachment.mimeType); }
+    catch(_) { if(mounted)_showSnack('Could not copy this image. Please try again.'); }
   }
+
+  Widget _buildMediaTile(_StagedMediaAttachment attachment, int index) => NoteImageThumbnail(
+    bytes:attachment.bytes,enabled:!_saving,onCopy:()=>_copyImage(attachment),onRemove:()=>_removeMediaAt(index));
 
   Future<void> _save() async {
     if (_saving) return;
@@ -789,6 +766,7 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
 class _EditEntryNoteDialog extends StatefulWidget {
   const _EditEntryNoteDialog({
     required this.repository,
+    required this.presentationAspect,
     required this.entry,
     required this.fontScale,
     required this.title,
@@ -808,6 +786,7 @@ class _EditEntryNoteDialog extends StatefulWidget {
   });
 
   final HashTagRepository repository;
+  final PresentationAspectRatioPreset presentationAspect;
   final HashTagEntry entry;
   final double fontScale;
   final String title;
@@ -842,6 +821,8 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
   PresentationTextFormat? _titleFormat;
   PresentationTextFormat? _displayTextFormat;
   PresentationTextFormat? _noteFormat;
+  NoteImageLayout? _imageLayout;
+  PresentationBlockAlignments _blockAlignments = const PresentationBlockAlignments();
   bool _saving = false;
   String _lastTitleText = '';
   String _lastDisplayText = '';
@@ -888,6 +869,8 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
       text: widget.initialReferenceCode,
     );
     _media.addAll(widget.initialMedia);
+    _imageLayout = noteImageLayoutFromFormat(widget.initialNoteFormatJson);
+    _blockAlignments = PresentationBlockAlignments.fromFormat(widget.initialNoteFormatJson);
     _lastTitleText = _titleController.text;
     _lastDisplayText = _displayTextController.text;
     _lastNoteText = _noteController.text;
@@ -1202,6 +1185,12 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
 
   Future<void> _pasteImageFromClipboard() async {
     if (_saving) return;
+    final copiedImage=await NoteImageClipboard.read();
+    if(copiedImage!=null && copiedImage.isNotEmpty) {
+      await _stageImageBytes(copiedImage,'image/png');
+      if(mounted)setState((){});
+      return;
+    }
     final nativeBytes = await _readClipboardImageBytes();
     if (nativeBytes != null && nativeBytes.isNotEmpty) {
       await _stageImageBytes(nativeBytes, 'image/png');
@@ -1246,47 +1235,44 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
 
   void _removeMediaAt(int index) {
     if (index < 0 || index >= _media.length) return;
+    final layout = _imageLayout;
+    if (layout != null && index <= layout.imageIndex) {
+      _imageLayout = index == layout.imageIndex ? null : NoteImageLayout.fromCells(
+        rows: layout.rows, columns: layout.columns, cells: layout.cells,
+        imageIndex: layout.imageIndex - 1, aspectRatio: layout.aspectRatio,
+        header: layout.header, footer: layout.footer, fill: layout.fill);
+    }
     _media.removeAt(index);
     setState(() {});
   }
 
-  Widget _buildMediaTile(_StagedMediaAttachment attachment, int index) {
-    final theme = Theme.of(context);
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            width: 112,
-            height: 84,
-            color: TagDialogStyles.card(theme),
-            child: Image.memory(attachment.bytes, fit: BoxFit.cover),
-          ),
-        ),
-        Positioned(
-          right: 4,
-          top: 4,
-          child: Material(
-            color: TagDialogStyles.surfaceHigh(theme),
-            shape: const CircleBorder(),
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: _saving ? null : () => _removeMediaAt(index),
-              child: Padding(
-                padding: const EdgeInsets.all(3),
-                child: Icon(
-                  Icons.close,
-                  size: 14,
-                  color: TagDialogStyles.title(theme),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
+  Future<void> _openImageLayout() async {
+    if (_media.isEmpty) return;
+    final preset = widget.presentationAspect;
+    final original = _imageLayout ?? const NoteImageLayout();
+    final initial = NoteImageLayout.fromJson({...original.toJson(), 'aspect_ratio': preset.aspectRatio ?? 16 / 9});
+    final result = await showNoteImageLayoutEditor(context,
+      images: _media.map((media) => media.bytes).toList(),
+      text: _noteController.text,
+      formatJson: _blockAlignments.withFormat(presentationTextFormatJsonForText(text: _noteController.text, format: _noteFormat)),
+      initial: initial,
     );
+    if (!mounted || result == null) return;
+    setState(() {
+      _imageLayout = result.layout;
+      if (result.alignments != null) _blockAlignments = result.alignments!;
+
+    });
   }
+
+  Future<void> _copyImage(_StagedMediaAttachment attachment) async {
+    if(_saving)return;
+    try { await NoteImageClipboard.copy(attachment.bytes,attachment.mimeType); }
+    catch(_) { if(mounted)_showSnack('Could not copy this image. Please try again.'); }
+  }
+
+  Widget _buildMediaTile(_StagedMediaAttachment attachment, int index) => NoteImageThumbnail(
+    bytes:attachment.bytes,enabled:!_saving,onCopy:()=>_copyImage(attachment),onRemove:()=>_removeMediaAt(index));
 
   Future<void> _save() async {
     if (_saving) return;
@@ -1319,12 +1305,18 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
       _saving = true;
     });
 
-    final noteFormatJson = noteText.isEmpty
+    final formattedNoteJson = noteText.isEmpty
         ? null
         : presentationTextFormatJsonForText(
             text: noteText,
             format: _noteFormat,
           );
+    final mergedNoteFormatJson = mergeNoteFormattingAndImageLayout(
+      original: widget.initialNoteFormatJson,
+      formatted: formattedNoteJson,
+      layout: _imageLayout,
+    );
+    final noteFormatJson = _blockAlignments.withFormat(mergedNoteFormatJson);
     final titleFormatJson = userTitle.isEmpty
         ? null
         : presentationTextFormatJsonForText(
@@ -1632,7 +1624,56 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                Text(
+                  'Title (optional)',
+                  style: TagDialogStyles.labelTextStyle(
+                    theme,
+                    widget.fontScale,
+                    color: titleColor,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(spacing:6,runSpacing:4,crossAxisAlignment:WrapCrossAlignment.center,children:[
+                  _titleFormatButton(Icons.format_bold,'Bold',PresentationTextDecorationKind.bold),
+                  _titleFormatButton(Icons.format_underline,'Underline',PresentationTextDecorationKind.underline),
+                  _titleFormatButton(Icons.format_italic,'Italic',PresentationTextDecorationKind.italic),
+                  BlockAlignmentButtons(value:_blockAlignments.title,onChanged:(v)=>setState(()=>_blockAlignments=PresentationBlockAlignments(title:v,body:_blockAlignments.body,footer:_blockAlignments.footer,citation:_blockAlignments.citation))),
+
+                ]),
+                const SizedBox(height: 8),
                 TextField(
+                  controller: _titleController,
+                  minLines: 1,
+                  maxLines: 3,
+                  textAlign: _blockAlignments.title,
+                  style: _titleBaseStyle(theme),
+                  decoration:
+                      const InputDecoration(
+                        hintText: 'Optional title for this Bible range',
+                        border: OutlineInputBorder(),
+                      ).copyWith(
+                        labelStyle: TagDialogStyles.labelTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.body(theme),
+                        ),
+                        floatingLabelStyle: TagDialogStyles.labelTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.title(theme),
+                        ),
+                        hintStyle: TagDialogStyles.bodyTextStyle(
+                          theme,
+                          widget.fontScale,
+                          color: TagDialogStyles.mutedBody(theme),
+                        ),
+                      ),
+                ),
+                const SizedBox(height: 12),
+                BlockAlignmentButtons(value:_blockAlignments.citation,onChanged:(v)=>setState(()=>_blockAlignments=PresentationBlockAlignments(title:_blockAlignments.title,body:_blockAlignments.body,footer:_blockAlignments.footer,citation:v))),
+                TextField(
+                  textAlign:_blockAlignments.citation,
                   controller: _displayCitationController,
                   textInputAction: TextInputAction.next,
                   decoration:
@@ -1660,7 +1701,7 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'User title',
+                  'Passage shown in this list',
                   style: TagDialogStyles.labelTextStyle(
                     theme,
                     widget.fontScale,
@@ -1669,114 +1710,19 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    _titleFormatButton(
-                      Icons.format_bold,
-                      'Bold selected text',
-                      PresentationTextDecorationKind.bold,
-                    ),
-                    const SizedBox(width: 6),
-                    _titleFormatButton(
-                      Icons.format_underline,
-                      'Underline selected text',
-                      PresentationTextDecorationKind.underline,
-                    ),
-                    const SizedBox(width: 6),
-                    _titleFormatButton(
-                      Icons.format_italic,
-                      'Italic selected text',
-                      PresentationTextDecorationKind.italic,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Select text first, then tap B, U, or I.',
-                        style: TagDialogStyles.bodyTextStyle(
-                          theme,
-                          widget.fontScale,
-                          color: bodyColor,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _titleController,
-                  minLines: 1,
-                  maxLines: 3,
-                  style: _titleBaseStyle(theme),
-                  decoration:
-                      const InputDecoration(
-                        hintText: 'Optional title for this Bible range',
-                        border: OutlineInputBorder(),
-                      ).copyWith(
-                        labelStyle: TagDialogStyles.labelTextStyle(
-                          theme,
-                          widget.fontScale,
-                          color: TagDialogStyles.body(theme),
-                        ),
-                        floatingLabelStyle: TagDialogStyles.labelTextStyle(
-                          theme,
-                          widget.fontScale,
-                          color: TagDialogStyles.title(theme),
-                        ),
-                        hintStyle: TagDialogStyles.bodyTextStyle(
-                          theme,
-                          widget.fontScale,
-                          color: TagDialogStyles.mutedBody(theme),
-                        ),
-                      ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Main display text',
-                  style: TagDialogStyles.labelTextStyle(
-                    theme,
-                    widget.fontScale,
-                    color: titleColor,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    _displayFormatButton(
-                      Icons.format_bold,
-                      'Bold selected text',
-                      PresentationTextDecorationKind.bold,
-                    ),
-                    const SizedBox(width: 6),
-                    _displayFormatButton(
-                      Icons.format_underline,
-                      'Underline selected text',
-                      PresentationTextDecorationKind.underline,
-                    ),
-                    const SizedBox(width: 6),
-                    _displayFormatButton(
-                      Icons.format_italic,
-                      'Italic selected text',
-                      PresentationTextDecorationKind.italic,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Select text first, then tap B, U, or I.',
-                        style: TagDialogStyles.bodyTextStyle(
-                          theme,
-                          widget.fontScale,
-                          color: bodyColor,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                Wrap(spacing:6,runSpacing:4,crossAxisAlignment:WrapCrossAlignment.center,children:[
+                  _displayFormatButton(Icons.format_bold,'Bold',PresentationTextDecorationKind.bold),
+                  _displayFormatButton(Icons.format_underline,'Underline',PresentationTextDecorationKind.underline),
+                  _displayFormatButton(Icons.format_italic,'Italic',PresentationTextDecorationKind.italic),
+                  BlockAlignmentButtons(value:_blockAlignments.body,onChanged:(v)=>setState(()=>_blockAlignments=PresentationBlockAlignments(title:_blockAlignments.title,body:v,footer:_blockAlignments.footer,citation:_blockAlignments.citation))),
+                  TextButton.icon(onPressed:_saving?null:_resetDisplayTextToSource,icon:const Icon(Icons.restart_alt),label:const Text('Reset')),
+                ]),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _displayTextController,
                   minLines: 5,
                   maxLines: 14,
+                  textAlign: _blockAlignments.body,
                   style: _displayTextBaseStyle(theme),
                   decoration:
                       const InputDecoration(
@@ -1803,58 +1749,8 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                       ),
                 ),
                 const SizedBox(height: 10),
-                ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  childrenPadding: const EdgeInsets.only(bottom: 4),
-                  title: Text(
-                    'Source text',
-                    style: TagDialogStyles.labelTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: titleColor,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'Read-only Bible DB text for reference',
-                    style: TagDialogStyles.bodyTextStyle(
-                      theme,
-                      widget.fontScale,
-                      color: bodyColor,
-                    ),
-                  ),
-                  children: [
-                    if (widget.verseText.isNotEmpty)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: TagDialogStyles.surfaceHigh(theme),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          widget.verseText,
-                          style: TagDialogStyles.bodyTextStyle(
-                            theme,
-                            widget.fontScale,
-                            color: TagDialogStyles.title(theme),
-                          ),
-                        ),
-                      )
-                    else
-                      Text(
-                        'Source text unavailable.',
-                        style: TagDialogStyles.bodyTextStyle(
-                          theme,
-                          widget.fontScale,
-                          color: bodyColor,
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
                 Text(
-                  'User note / comment',
+                  'Your note',
                   style: TagDialogStyles.labelTextStyle(
                     theme,
                     widget.fontScale,
@@ -1863,43 +1759,19 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    _formatButton(
-                      Icons.format_bold,
-                      'Bold selected text',
-                      PresentationTextDecorationKind.bold,
-                    ),
-                    const SizedBox(width: 6),
-                    _formatButton(
-                      Icons.format_underline,
-                      'Underline selected text',
-                      PresentationTextDecorationKind.underline,
-                    ),
-                    const SizedBox(width: 6),
-                    _formatButton(
-                      Icons.format_italic,
-                      'Italic selected text',
-                      PresentationTextDecorationKind.italic,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Select text first, then tap B, U, or I.',
-                        style: TagDialogStyles.bodyTextStyle(
-                          theme,
-                          widget.fontScale,
-                          color: bodyColor,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                Wrap(spacing:6,runSpacing:4,crossAxisAlignment:WrapCrossAlignment.center,children:[
+                  _formatButton(Icons.format_bold,'Bold',PresentationTextDecorationKind.bold),
+                  _formatButton(Icons.format_underline,'Underline',PresentationTextDecorationKind.underline),
+                  _formatButton(Icons.format_italic,'Italic',PresentationTextDecorationKind.italic),
+                  BlockAlignmentButtons(value:_blockAlignments.body,onChanged:(v)=>setState(()=>_blockAlignments=PresentationBlockAlignments(title:_blockAlignments.title,body:v,footer:_blockAlignments.footer,citation:_blockAlignments.citation))),
+
+                ]),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _noteController,
                   minLines: 4,
                   maxLines: 10,
+                  textAlign: _blockAlignments.body,
                   style: _noteBaseStyle(theme),
                   decoration:
                       const InputDecoration(
@@ -1934,25 +1806,10 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                   ),
                 ),
               const SizedBox(height: 12),
-              if (_isBibleItem) ...[
-                const SizedBox(height: 14),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: _saving ? null : _resetDisplayTextToSource,
-                    icon: const Icon(Icons.restart_alt),
-                    label: Text(
-                      'Reset display text to source',
-                      style: TagDialogStyles.buttonTextStyle(
-                        theme,
-                        widget.fontScale,
-                        color: TagDialogStyles.accent(theme),
-                      ),
-                    ),
-                  ),
-                ),
-              ] else ...[
+              if (!_isBibleItem) ...[
+                BlockAlignmentButtons(value:_blockAlignments.title,onChanged:(v)=>setState(()=>_blockAlignments=PresentationBlockAlignments(title:v,body:_blockAlignments.body,footer:_blockAlignments.footer,citation:_blockAlignments.citation))),
                 TextField(
+                  textAlign: _blockAlignments.title,
                   controller: _displayCitationController,
                   textInputAction: TextInputAction.next,
                   decoration: InputDecoration(
@@ -1977,44 +1834,20 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    _formatButton(
-                      Icons.format_bold,
-                      'Bold selected text',
-                      PresentationTextDecorationKind.bold,
-                    ),
-                    const SizedBox(width: 6),
-                    _formatButton(
-                      Icons.format_underline,
-                      'Underline selected text',
-                      PresentationTextDecorationKind.underline,
-                    ),
-                    const SizedBox(width: 6),
-                    _formatButton(
-                      Icons.format_italic,
-                      'Italic selected text',
-                      PresentationTextDecorationKind.italic,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Select text first, then tap B, U, or I.',
-                        style: TagDialogStyles.bodyTextStyle(
-                          theme,
-                          widget.fontScale,
-                          color: bodyColor,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                Wrap(spacing:6,runSpacing:4,crossAxisAlignment:WrapCrossAlignment.center,children:[
+                  _formatButton(Icons.format_bold,'Bold',PresentationTextDecorationKind.bold),
+                  _formatButton(Icons.format_underline,'Underline',PresentationTextDecorationKind.underline),
+                  _formatButton(Icons.format_italic,'Italic',PresentationTextDecorationKind.italic),
+                  BlockAlignmentButtons(value:_blockAlignments.body,onChanged:(v)=>setState(()=>_blockAlignments=PresentationBlockAlignments(title:_blockAlignments.title,body:v,footer:_blockAlignments.footer,citation:_blockAlignments.citation))),
+
+                ]),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _noteController,
                   autofocus: true,
                   minLines: 4,
                   maxLines: 10,
+                  textAlign: _blockAlignments.body,
                   style: _noteBaseStyle(theme),
                   decoration: InputDecoration(
                     labelText: 'Note / comment',
@@ -2038,75 +1871,92 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                 ),
               ],
               const SizedBox(height: 14),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: TagDialogStyles.surfaceHigh(theme),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: outlineColor),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
+              ExpansionTile(
+                title: const Text('More options'),
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: TagDialogStyles.surfaceHigh(theme),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: outlineColor),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Expanded(
-                          child: Text(
-                            'Media',
-                            style: TagDialogStyles.labelTextStyle(
-                              theme,
-                              widget.fontScale,
-                              color: titleColor,
-                              fontWeight: FontWeight.w800,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Media',
+                                style: TagDialogStyles.labelTextStyle(
+                                  theme,
+                                  widget.fontScale,
+                                  color: titleColor,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
                             ),
+                            TextButton.icon(
+                              onPressed: _saving
+                                  ? null
+                                  : _pasteImageFromClipboard,
+                              icon: const Icon(Icons.content_paste),
+                              label: Text(
+                                'Paste Image',
+                                style: TagDialogStyles.buttonTextStyle(
+                                  theme,
+                                  widget.fontScale,
+                                  color: TagDialogStyles.accent(theme),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Paste an image from the clipboard. It will be copied into the app media folder.',
+                          style: TagDialogStyles.bodyTextStyle(
+                            theme,
+                            widget.fontScale,
+                            color: bodyColor,
+                            height: 1.25,
                           ),
                         ),
-                        TextButton.icon(
-                          onPressed: _saving ? null : _pasteImageFromClipboard,
-                          icon: const Icon(Icons.content_paste),
-                          label: Text(
-                            'Paste Image',
-                            style: TagDialogStyles.buttonTextStyle(
+                        if (_media.isNotEmpty && !_isBibleItem)
+                          Align(alignment: Alignment.centerLeft, child: TextButton.icon(
+                            onPressed: _saving ? null : _openImageLayout,
+                            icon: const Icon(Icons.photo_size_select_large_outlined),
+                            label: const Text('Image Layout'),
+                          )),
+                        const SizedBox(height: 10),
+                        if (_media.isEmpty)
+                          Text(
+                            'No image attached yet.',
+                            style: TagDialogStyles.bodyTextStyle(
                               theme,
                               widget.fontScale,
-                              color: TagDialogStyles.accent(theme),
+                              color: bodyColor,
                             ),
+                          )
+                        else
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (
+                                var index = 0;
+                                index < _media.length;
+                                index++
+                              )
+                                _buildMediaTile(_media[index], index),
+                            ],
                           ),
-                        ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Paste an image from the clipboard. It will be copied into the app media folder.',
-                      style: TagDialogStyles.bodyTextStyle(
-                        theme,
-                        widget.fontScale,
-                        color: bodyColor,
-                        height: 1.25,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    if (_media.isEmpty)
-                      Text(
-                        'No image attached yet.',
-                        style: TagDialogStyles.bodyTextStyle(
-                          theme,
-                          widget.fontScale,
-                          color: bodyColor,
-                        ),
-                      )
-                    else
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (var index = 0; index < _media.length; index++)
-                            _buildMediaTile(_media[index], index),
-                        ],
-                      ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ],
           ),

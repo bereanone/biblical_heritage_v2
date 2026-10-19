@@ -27,6 +27,7 @@ Future<void> showPresentationLaunchOptions(
     context,
     slides: slides,
     initialIndex: initialSlideIndex,
+    tagFamily:tagFamily,tag:tag,
   );
 }
 
@@ -34,10 +35,12 @@ Future<void> showViewerPresentationScreen(
   BuildContext context, {
   required List<PresentationSlide> slides,
   required int initialIndex,
+  String? tagFamily, String? tag,
 }) async {
   if (slides.isEmpty) return;
-  final preset = await AppSettingsService.instance
-      .loadPresentationAspectRatioPreset();
+  final preset = tagFamily != null && tag != null
+      ? await AppSettingsService.instance.loadTagPresentationAspectRatioPreset(tagFamily:tagFamily,tag:tag)
+      : await AppSettingsService.instance.loadPresentationAspectRatioPreset();
   if (!context.mounted) return;
   await Navigator.of(context).push(
     MaterialPageRoute<void>(

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../core/audio/synthesis_thermal_gate.dart';
+import '../features/reader/presentation/memory_schedule/memory_schedule_reminder.dart';
 
 import '../core/navigation/app_route_observer.dart';
 import '../core/theme/app_theme.dart';
@@ -15,6 +17,10 @@ class StudyBibleApp extends StatefulWidget {
 }
 
 class _StudyBibleAppState extends State<StudyBibleApp> {
+  final _audioMessages = GlobalKey<ScaffoldMessengerState>();
+  bool _temperatureNoticeVisible = false;
+  final _navigator = GlobalKey<NavigatorState>();
+  late final MacMemoryReminderService _memoryReminders;
   AppThemeMode _themeMode = AppThemeMode.sepia;
   AppVisualSettings? _visualSettings;
   bool _loadedTheme = false;
@@ -22,16 +28,54 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
   @override
   void initState() {
     super.initState();
+    SynthesisThermalGate.instance.waitingForTemperature.addListener(
+      _temperatureChanged,
+    );
+    _memoryReminders = MacMemoryReminderService(_navigator)..start();
     ThemePreferences.themeModeListenable.addListener(_handleThemeModeChanged);
     _loadThemeMode();
   }
 
   @override
   void dispose() {
+    SynthesisThermalGate.instance.waitingForTemperature.removeListener(
+      _temperatureChanged,
+    );
+    _memoryReminders.dispose();
     ThemePreferences.themeModeListenable.removeListener(
       _handleThemeModeChanged,
     );
     super.dispose();
+  }
+
+  void _temperatureChanged() {
+    final waiting = SynthesisThermalGate.instance.waitingForTemperature.value;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final messages = _audioMessages.currentState;
+      if (waiting && !_temperatureNoticeVisible) {
+        _temperatureNoticeVisible = true;
+        messages?.showSnackBar(
+          const SnackBar(
+            duration: Duration(days: 1),
+            content: Text(
+              'Paused to let your phone cool down. Audio generation will resume when it’s safe.',
+            ),
+          ),
+        );
+      } else if (!waiting && _temperatureNoticeVisible) {
+        _temperatureNoticeVisible = false;
+        messages?.hideCurrentSnackBar();
+        if (!SynthesisThermalGate.instance.paused) {
+          messages?.showSnackBar(
+            const SnackBar(
+              content: Text('The phone has cooled. Audio creation can resume.'),
+            ),
+          );
+        }
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   void _handleThemeModeChanged() {
@@ -68,6 +112,8 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Biblical Heritage StudyBible 2.0',
+      scaffoldMessengerKey: _audioMessages,
+      navigatorKey: _navigator,
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(_themeMode, settings: _visualSettings),
       navigatorObservers: [appRouteObserver],

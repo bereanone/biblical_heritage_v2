@@ -141,14 +141,14 @@ class _HashTagTrashDialogState extends State<HashTagTrashDialog> {
   String get _scopeHelperText {
     if (_scopeKind == 'tag') return 'Showing trashed cards for this tag only.';
     if (_scopeKind == 'category') {
-      return 'Showing trashed cards in this category.';
+      return 'Showing trashed cards in this folder.';
     }
     return 'Showing trashed cards from all tags.';
   }
 
   String get _emptyScopeMessage {
     if (_scopeKind == 'tag') return 'No trashed cards for this tag.';
-    if (_scopeKind == 'category') return 'No trashed cards in this category.';
+    if (_scopeKind == 'category') return 'No trashed cards in this folder.';
     return 'No trashed cards.';
   }
 
@@ -375,7 +375,7 @@ class _HashTagTrashDialogState extends State<HashTagTrashDialog> {
     final tag = _scopeTag;
     if (tag != null) return 'in tag $tag';
     final category = _scopeCategory;
-    if (category != null) return 'in category $category';
+    if (category != null) return 'in folder $category';
     final scopeLabel = _scopeLabel;
     if (scopeLabel != null) return 'in $scopeLabel';
     return 'in this view';
@@ -694,14 +694,14 @@ class _HashTagTrashDialogState extends State<HashTagTrashDialog> {
         value: null,
         label: 'None',
         searchText: 'none uncategorized',
-        subtitle: 'Uncategorized',
+        subtitle: 'No folder',
       ),
       ...categoryChoices.map(
         (category) => _DestinationChoice<String?>(
           value: category,
           label: category,
           searchText: '$category category',
-          subtitle: 'Category',
+          subtitle: 'Folder',
         ),
       ),
     ];
@@ -710,10 +710,10 @@ class _HashTagTrashDialogState extends State<HashTagTrashDialog> {
         ? 'Current selection: None'
         : 'Current selection: $currentCategory';
     return _showSelectionDialog<String?>(
-      title: 'Destination category',
+      title: 'Destination folder',
       currentSelectionLabel: currentLabel,
-      searchLabel: 'Search categories',
-      typedActionLabel: 'Use typed category',
+      searchLabel: 'Search folders',
+      typedActionLabel: 'Use typed folder',
       choices: choices,
       isSelected: (value) {
         final normalizedValue = value?.trim().toLowerCase() ?? '';
@@ -721,7 +721,7 @@ class _HashTagTrashDialogState extends State<HashTagTrashDialog> {
         return normalizedValue == normalizedCurrent;
       },
       buildTypedValue: (value) => value.trim(),
-      emptyMessage: 'No categories match this search.',
+      emptyMessage: 'No folders match this search.',
     );
   }
 
@@ -744,8 +744,8 @@ class _HashTagTrashDialogState extends State<HashTagTrashDialog> {
               option.count.toString(),
             ].join(' '),
             subtitle: option.primaryCategory == null
-                ? 'Category: None'
-                : 'Category: ${option.primaryCategory} - Active: ${option.count}',
+                ? 'Folder: None'
+                : 'Folder: ${option.primaryCategory} - Active: ${option.count}',
           ),
         )
         .toList(growable: false);
@@ -753,7 +753,7 @@ class _HashTagTrashDialogState extends State<HashTagTrashDialog> {
     final preferredLabel = preferredCategory?.trim() ?? '';
     final currentLabel = preferredLabel.isEmpty
         ? 'Current tag: ${currentTag.trim().isEmpty ? 'None' : currentTag}'
-        : 'Current tag: ${currentTag.trim().isEmpty ? 'None' : currentTag} - Preferred category: $preferredLabel';
+        : 'Current tag: ${currentTag.trim().isEmpty ? 'None' : currentTag} - Preferred folder: $preferredLabel';
     final result = await _showSelectionDialog<String>(
       title: 'Destination tag',
       currentSelectionLabel: currentLabel,
@@ -898,10 +898,10 @@ class _HashTagTrashDialogState extends State<HashTagTrashDialog> {
                         });
                       },
                       decoration: InputDecoration(
-                        labelText: 'Destination category',
+                        labelText: 'Destination folder',
                         border: const OutlineInputBorder(),
                         suffixIcon: IconButton(
-                          tooltip: 'Choose existing category',
+                          tooltip: 'Choose existing folder',
                           onPressed: () async {
                             final chosen = await _showCategoryPicker(
                               currentCategory: destinationCategoryValue,
@@ -1260,7 +1260,7 @@ class _HashTagTrashDialogState extends State<HashTagTrashDialog> {
                                           if (categoryLabel.isNotEmpty) ...[
                                             const SizedBox(height: 2),
                                             Text(
-                                              'Category: $categoryLabel',
+                                              'Folder: $categoryLabel',
                                               style: theme.textTheme.labelSmall
                                                   ?.copyWith(
                                                     color: colorScheme

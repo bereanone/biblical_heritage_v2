@@ -1,11 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../bootstrap/sandbox_bootstrap.dart';
 import 'elibrary_schema.dart';
+import 'bundled_library_content.dart';
 
 const bool kLogKnownELibrarySqfliteFalsePositives = false;
 
@@ -72,6 +74,17 @@ class ELibraryDatabase {
         await ELibrarySchema.ensure(database);
       },
     );
+    if (Platform.isAndroid) {
+      final parent = p.dirname(dbPath);
+      final libraryRoot = p.basename(parent) == 'Databases' ? p.dirname(parent) : parent;
+      try {
+        await BundledLibraryContent.ensure(destination: db, libraryRoot: libraryRoot);
+      } catch (error, stack) {
+        debugPrint('Bundled library preparation failed: $error');
+        await db.close();
+        Error.throwWithStackTrace(const BundledLibraryPreparationException(), stack);
+      }
+    }
     return db;
   }
 

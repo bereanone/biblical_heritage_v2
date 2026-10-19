@@ -283,6 +283,37 @@ Future<List<LibraryPopupVerse>> loadLibraryPopupVerses(String citation) async {
   return verses;
 }
 
+Future<List<LibraryPopupVerse>> loadLibraryPopupContext(
+  List<LibraryPopupVerse> selected, {
+  int radius = 2,
+}) async {
+  if (selected.isEmpty) return const <LibraryPopupVerse>[];
+  final db = StudyBibleDatabase.instance;
+  final books = await db.loadBooks();
+  final verseCounts = await db.loadVerseCounts();
+  final grouped = <(int, int), List<int>>{};
+  for (final verse in selected) {
+    grouped
+        .putIfAbsent((verse.target.book, verse.target.chapter), () => <int>[])
+        .add(verse.target.verse);
+  }
+  final result = <LibraryPopupVerse>[];
+  for (final entry in grouped.entries) {
+    final book = books.firstWhere((item) => item.bookNumber == entry.key.$1);
+    final maxVerse = verseCounts[entry.key.$1]?[entry.key.$2];
+    if (maxVerse == null) continue;
+    entry.value.sort();
+    final first = (entry.value.first - radius).clamp(1, maxVerse);
+    final last = (entry.value.last + radius).clamp(1, maxVerse);
+    result.addAll(
+      await loadLibraryPopupVerses(
+        '${book.bookName} ${entry.key.$2}:$first-$last',
+      ),
+    );
+  }
+  return result;
+}
+
 Future<String> tagLibraryPopupVerses(List<LibraryPopupVerse> verses) async {
   final repository = HashTagRepository();
   final tag = repository.normalizeTagName(
@@ -327,11 +358,14 @@ class LibraryVersePopup extends StatefulWidget {
     required this.citation,
     this.fontScale = 1,
     this.loader = loadLibraryPopupVerses,
+    this.contextLoader = loadLibraryPopupContext,
     this.tagger = tagLibraryPopupVerses,
   });
   final String citation;
   final double fontScale;
   final Future<List<LibraryPopupVerse>> Function(String) loader;
+  final Future<List<LibraryPopupVerse>> Function(List<LibraryPopupVerse>)
+  contextLoader;
   final Future<String> Function(List<LibraryPopupVerse>) tagger;
   @override
   State<LibraryVersePopup> createState() => _LibraryVersePopupState();
@@ -342,7 +376,39 @@ class _LibraryVersePopupState extends State<LibraryVersePopup> {
     widget.citation,
   );
   bool _busy = false;
+  bool _contextBusy = false;
+  bool _showContext = false;
+  List<LibraryPopupVerse>? _contextVerses;
   String? _message;
+
+  Future<void> _toggleContext(List<LibraryPopupVerse> selected) async {
+    if (_contextBusy) return;
+    if (_showContext) {
+      setState(() => _showContext = false);
+      return;
+    }
+    if (_contextVerses != null) {
+      setState(() => _showContext = true);
+      return;
+    }
+    setState(() => _contextBusy = true);
+    try {
+      final verses = await widget.contextLoader(selected);
+      if (mounted) {
+        setState(() {
+          _contextVerses = verses;
+          _showContext = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _message = 'Surrounding Bible context is unavailable.');
+      }
+    } finally {
+      if (mounted) setState(() => _contextBusy = false);
+    }
+  }
+
   Future<void> _tag(List<LibraryPopupVerse> verses) async {
     if (_busy || verses.isEmpty) return;
     setState(() => _busy = true);
@@ -384,6 +450,21 @@ class _LibraryVersePopupState extends State<LibraryVersePopup> {
               ),
             )
           : null;
+      final contextAction =
+          snapshot.hasData && !snapshot.hasError && verses.isNotEmpty
+          ? TextButton.icon(
+              icon: Icon(
+                _showContext ? Icons.menu_book : Icons.chrome_reader_mode,
+              ),
+              label: Text(
+                _showContext ? 'Show cited verses' : 'Show Bible context',
+              ),
+              onPressed: _contextBusy ? null : () => _toggleContext(verses),
+            )
+          : null;
+      final displayedVerses = _showContext
+          ? (_contextVerses ?? verses)
+          : verses;
       return AlertDialog(
         backgroundColor: Theme.of(context).colorScheme.surface,
         title: Column(
@@ -402,7 +483,13 @@ class _LibraryVersePopupState extends State<LibraryVersePopup> {
               ],
             ),
             if (narrow && action != null)
-              Align(alignment: Alignment.centerRight, child: action),
+              Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [?contextAction, action],
+              )
+            else if (contextAction != null)
+              Align(alignment: Alignment.centerRight, child: contextAction),
             if (_message != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
@@ -438,7 +525,7 @@ class _LibraryVersePopupState extends State<LibraryVersePopup> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      for (final verse in verses)
+                      for (final verse in displayedVerses)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 16),
                           child: SelectableText.rich(

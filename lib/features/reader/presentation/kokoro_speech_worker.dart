@@ -18,7 +18,7 @@ import '../../../core/audio/synthesis_job_probe.dart';
 /// synthesis forever (each request has a deadline), and can be pinged. A
 /// worker that dies or hangs closes itself and fails everything pending with
 /// [SpeechEngineUnavailableException] so callers can rebuild it.
-class KokoroSpeechWorker implements SpeechEngine {
+class KokoroSpeechWorker implements SpeechEngine, CancellableSpeechEngine {
   KokoroSpeechWorker._(
     this._port,
     this._messages,
@@ -183,7 +183,29 @@ class KokoroSpeechWorker implements SpeechEngine {
   /// where a backgrounded app is paced (see [SynthesisGovernor]).
   @override
   Future<sherpa.GeneratedAudio> generate(String text, double speed) =>
-      _governor.run(() => _measured(text, speed));
+      generateCancellable(text, speed, () => false);
+
+  @override
+  Future<sherpa.GeneratedAudio> generateCancellable(
+    String text,
+    double speed,
+    bool Function() cancelled,
+  ) async {
+    try {
+      return await _governor.run(() {
+        if (cancelled()) throw const SpeechSynthesisCancelled();
+        if (_closed) {
+          throw const SpeechEngineUnavailableException('Speech worker closed');
+        }
+        return _measured(text, speed);
+      }, cancelled: () => cancelled() || _closed);
+    } on SpeechSynthesisCancelled {
+      if (_closed && !cancelled()) {
+        throw const SpeechEngineUnavailableException('Speech worker closed');
+      }
+      rethrow;
+    }
+  }
 
   /// One governed job, timed and logged; see [SynthesisJobProbe].
   Future<sherpa.GeneratedAudio> _measured(String text, double speed) async {

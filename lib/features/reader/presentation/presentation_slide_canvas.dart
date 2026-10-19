@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../data/presentation/presentation_models.dart';
+import '../data/presentation/note_image_layout.dart';
+import 'note_image_flow.dart';
 import '../data/presentation/presentation_slide_settings.dart';
 import '../data/presentation/presentation_text_format.dart';
 import 'viewer_presentation_settings.dart';
@@ -48,6 +50,9 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
   }
 
   PresentationSlide get _slide => widget.slide;
+
+  PresentationBlockAlignments _alignments(PresentationSlide slide) =>
+      PresentationBlockAlignments.fromFormat(slide.items.firstOrNull?.noteFormatJson);
 
   String _slideTitle(PresentationSlide slide) {
     return slide.slideTitle?.trim() ?? '';
@@ -162,9 +167,19 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
     return _hasMediaItems(slide);
   }
 
+  NoteImageLayout? _noteImageLayout(PresentationSlide slide) {
+    if (slide.items.length != 1) return null;
+    final item = slide.items.single;
+    if (item.itemKind != PresentationItemKind.note) return null;
+    final layout = noteImageLayoutFromFormat(item.noteFormatJson);
+    if (layout == null || layout.imageIndex >= (item.mediaRefs?.length ?? 0)) return null;
+    return layout;
+  }
+
   PresentationLayoutPreference _effectiveLayoutPreference(
     PresentationSlide slide,
   ) {
+    if (_noteImageLayout(slide) != null) return PresentationLayoutPreference.textOnly;
     final override = _layoutPreferenceForSlide(slide);
     if (override != PresentationLayoutPreference.auto) return override;
     final hasText = _slideHasText(slide);
@@ -534,7 +549,11 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
         : _referenceHeadingForItem(item);
     final showAttachedNote =
         includeAttachedNote && noteText.isNotEmpty && noteText != verseText;
-    final showCitation = citationText.isNotEmpty;
+    // The slide title already supplies this citation when it matches. Keep
+    // distinct item citations on grouped slides and beneath custom titles.
+    String normalizedCitation(String text) => text.trim().replaceAll('–', '-').replaceAll('—', '-');
+    final showCitation = citationText.isNotEmpty &&
+        normalizedCitation(citationText) != normalizedCitation(slideTitle);
     final attachedNoteFontSize = math.min(bodyFontSize, 24.0);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -564,10 +583,10 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
           const SizedBox(height: 8),
           Text(
             citationText,
+            textAlign: PresentationBlockAlignments.fromFormat(item.noteFormatJson).citation,
             style: headingStyle.copyWith(
               fontSize: math.max(13, bodyFontSize * 0.36),
             ),
-            textAlign: bodyTextAlign,
             softWrap: true,
           ),
         ],
@@ -723,6 +742,7 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
   }
 
   TextAlign _bodyTextAlign(PresentationSlide slide) {
+    if (widget.settings.alignmentOverride == null) return _alignments(slide).body;
     final alignment = _defaultBodyAlignment(slide);
     return switch (alignment) {
       PresentationAlignmentPreference.left => TextAlign.left,
@@ -794,6 +814,19 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
         builder: (context, bodyConstraints) {
           final bodyWidth = math.max(0.0, bodyConstraints.maxWidth);
           final bodyHeight = math.max(0.0, bodyConstraints.maxHeight);
+          final imageLayout = _noteImageLayout(slide);
+          if (imageLayout != null) {
+            final item = slide.items.single;
+            final path = _resolveMediaPath(item.mediaRefs![imageLayout.imageIndex]);
+            return NoteImageFlow(text: item.displayText,
+              formatJson: item.noteFormatJson, layout: imageLayout,
+              aspectRatio: widget.aspectRatioPreset.aspectRatio ?? 16 / 9,
+              style: noteTextStyle.copyWith(fontSize: bodyMaxFontSize),
+              image: path == null ? const Icon(Icons.broken_image_outlined)
+                : Image.file(File(path), fit: imageLayout.fill ? BoxFit.cover : BoxFit.contain,
+                    errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined)),
+            );
+          }
           final chosenSlideBodySize = _chosenBodyFontSize(
             slide: slide,
             bodyStyle: bodyStyle,
@@ -1869,10 +1902,7 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
               letterSpacing: 0.08,
             );
         final bodyMinFontSize = 18.0;
-        final bodyMaxFontSize = math.min(
-          88.0,
-          math.max(56.0, constraints.maxWidth * 0.085),
-        );
+        final bodyMaxFontSize = math.max(56.0, math.min(constraints.maxWidth, constraints.maxHeight) * 0.7);
         final noteTextStyle = bodyStyle.copyWith(
           color: const Color(0xFFEADCC2),
           height: 1.22,
@@ -1881,20 +1911,14 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
         final availableWidth = constraints.maxWidth;
         final availableHeight = constraints.maxHeight;
         final aspectRatio = widget.aspectRatioPreset.aspectRatio;
-        var panelWidth = availableWidth;
-        final panelHeight = availableHeight;
+        var panelWidth = math.max(0.0, availableWidth - 32);
+        var panelHeight = math.max(0.0, availableHeight - 32);
         if (aspectRatio != null && aspectRatio.isFinite && aspectRatio > 0) {
-          final ratioWidth = panelHeight * aspectRatio;
-          if (ratioWidth <= availableWidth) {
-            panelWidth = ratioWidth;
+          if (panelWidth / math.max(panelHeight, 1) > aspectRatio) {
+            panelWidth = panelHeight * aspectRatio;
+          } else {
+            panelHeight = panelWidth / aspectRatio;
           }
-        }
-        if (availableWidth <= 0) {
-          panelWidth = 0.0;
-        } else if (availableWidth < 280.0) {
-          panelWidth = math.min(panelWidth, availableWidth);
-        } else {
-          panelWidth = panelWidth.clamp(280.0, availableWidth).toDouble();
         }
 
         final titleIsVisible = slideTitle.trim().isNotEmpty;
@@ -1937,7 +1961,7 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
                                 ? RichText(
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.center,
+                                    textAlign: _alignments(slide).title,
                                     text: TextSpan(
                                       children: buildPresentationTextSpans(
                                         text: slideTitle,
@@ -1950,6 +1974,7 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
                                   )
                                 : Text(
                                     slideTitle,
+                                    textAlign: _alignments(slide).title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: titleStyle.copyWith(

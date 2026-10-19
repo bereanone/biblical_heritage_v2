@@ -3,12 +3,41 @@ import FlutterMacOS
 
 class LibraryRootFlutterViewController: FlutterViewController {
   private var recordedAudio: RecordedBibleAudioBridge?
+  private var richClipboardChannel: FlutterMethodChannel?
   private var libraryRootChannel: FlutterMethodChannel?
   private var securityScopedURLs: [URL] = []
 
   override func viewDidLoad() {
     super.viewDidLoad()
     recordedAudio = RecordedBibleAudioBridge(messenger: engine.binaryMessenger)
+    let clipboard = FlutterMethodChannel(name: "studybible/rich_clipboard", binaryMessenger: engine.binaryMessenger)
+    clipboard.setMethodCallHandler { call, result in
+      if call.method == "writeImage" {
+        guard let args = call.arguments as? [String: Any], let bytes = args["bytes"] as? FlutterStandardTypedData,
+          let image = NSImage(data: bytes.data) else {
+          result(FlutterError(code:"invalid_image",message:"Could not read image",details:nil)); return
+        }
+        NSPasteboard.general.clearContents()
+        result(NSPasteboard.general.writeObjects([image]) ? nil : FlutterError(code:"clipboard_failed",message:"Could not copy image",details:nil)); return
+      }
+      if call.method == "readImage" {
+        let objects = NSPasteboard.general.readObjects(forClasses:[NSImage.self],options:nil)
+        guard let image = objects?.first as? NSImage, let tiff = image.tiffRepresentation,
+          let bitmap = NSBitmapImageRep(data:tiff), let png = bitmap.representation(using:.png,properties:[:]) else {result(nil); return}
+        result(FlutterStandardTypedData(bytes:png)); return
+      }
+      guard call.method == "write" else { result(FlutterMethodNotImplemented); return }
+      guard let args = call.arguments as? [String: String], let text = args["text"], let html = args["html"] else {
+        result(FlutterError(code: "invalid_arguments", message: "Missing clipboard text or HTML", details: nil)); return
+      }
+      let item = NSPasteboardItem()
+      item.setString(text, forType: .string)
+      item.setString(html, forType: .html)
+      NSPasteboard.general.clearContents()
+      result(NSPasteboard.general.writeObjects([item]) ? nil : FlutterError(code: "clipboard_failed", message: "Could not copy study", details: nil))
+    }
+    richClipboardChannel = clipboard
+
     let channel = FlutterMethodChannel(
       name: "studybible/library_root",
       binaryMessenger: engine.binaryMessenger

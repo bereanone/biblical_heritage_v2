@@ -1,0 +1,949 @@
+{
+  "version": 1,
+  "packages": [
+    {
+      "id": "cis",
+      "title": "The Cross and Its Shadow",
+      "bytes": 262573522,
+      "sha256": "dac48f28739170d22833b32c636d2b2544046ecc980387044964dc88207ded9c",
+      "files": [
+        {
+          "name": "audio-manifest.json",
+          "bytes": 1364661,
+          "sha256": "8ffa60d2833a447b9cecf0a3fd48de75ca0445dbbcdf858c6f1173c263b52d74"
+        },
+        {
+          "name": "track-01-d940d5bd53b7.mp3",
+          "bytes": 447405,
+          "sha256": "d940d5bd53b7aac9962099c0894aed5f5d08d9f052ba1935f8259ec53516ac5d"
+        },
+        {
+          "name": "track-02-ff1c5466b6ac.mp3",
+          "bytes": 1235949,
+          "sha256": "ff1c5466b6acbbf1efa981710b07b565819c6da7b9cee023bc41965de9abbf48"
+        },
+        {
+          "name": "track-03-715d4e3627a8.mp3",
+          "bytes": 2544813,
+          "sha256": "715d4e3627a870b7cd8ad83b94e20b6864bf784884c57f274f90c2d98c6b7d19"
+        },
+        {
+          "name": "track-04-2187f284dffd.mp3",
+          "bytes": 300333,
+          "sha256": "2187f284dffd888141c168dd6fced599cb59ac2e636eccf3b176f8c50467ad9d"
+        },
+        {
+          "name": "track-05-65b5804a644a.mp3",
+          "bytes": 6017133,
+          "sha256": "65b5804a644a9a5e3e2dbc4003fd49732dae00d3658998e904cb37efdfb0eafa"
+        },
+        {
+          "name": "track-06-3d78829f0eff.mp3",
+          "bytes": 2942637,
+          "sha256": "3d78829f0effb910dcbd5c791fbf9f4f054653f997154bdb674ccd26fd915ce0"
+        },
+        {
+          "name": "track-07-9037346e1571.mp3",
+          "bytes": 6358701,
+          "sha256": "9037346e15710f0a43f8de49ac1d9db8582a04bec8329bd87f36dd2925d188af"
+        },
+        {
+          "name": "track-08-8519ec12ae0e.mp3",
+          "bytes": 261357,
+          "sha256": "8519ec12ae0e29bd25a78070a3cd327fc8725a462c03e5f66536586ba2d52e82"
+        },
+        {
+          "name": "track-09-bf0b16bda838.mp3",
+          "bytes": 3319533,
+          "sha256": "bf0b16bda83866f299a42b989c0a42a295c9f6f4c41974b3efc4b34e50e75887"
+        },
+        {
+          "name": "track-10-e49414a12711.mp3",
+          "bytes": 3834477,
+          "sha256": "e49414a127115697f6f97b18f9d6d9ac2f2eb0dc03ec64c4bcaf91f202da3a9a"
+        },
+        {
+          "name": "track-11-7fd7c21d7732.mp3",
+          "bytes": 2945901,
+          "sha256": "7fd7c21d77324e1ee3e68e697efcce583310199819795dd2138995a76e17a091"
+        },
+        {
+          "name": "track-12-406139096faf.mp3",
+          "bytes": 5258925,
+          "sha256": "406139096fafd16425045f7fc61e54608b1261ece952aa79a7d28064e329eb02"
+        },
+        {
+          "name": "track-13-f8f70708a98d.mp3",
+          "bytes": 353325,
+          "sha256": "f8f70708a98d8e6c2f0bcc7e445cf699b3d0ebc492ada6bb0f70da5f22ce999a"
+        },
+        {
+          "name": "track-14-1249deb7689e.mp3",
+          "bytes": 3874221,
+          "sha256": "1249deb7689ef32d2a7c034df26d26dceeba0896b4507bd8328ab1d3699b864a"
+        },
+        {
+          "name": "track-15-64a3371ab024.mp3",
+          "bytes": 3372909,
+          "sha256": "64a3371ab0240a9bfd0ea17d0c7029dd825649054f525ad3570afbf05a9de368"
+        },
+        {
+          "name": "track-16-8cca8cec7956.mp3",
+          "bytes": 2601837,
+          "sha256": "8cca8cec79569229a508c372cd528d3ab85ac397eca223e4491dd0a574a88f3c"
+        },
+        {
+          "name": "track-17-e91eebb08e15.mp3",
+          "bytes": 2318637,
+          "sha256": "e91eebb08e15e6cee4427a486addc4732afc3bcba2753258f095a0008c40f2b4"
+        },
+        {
+          "name": "track-18-5fc518676a2d.mp3",
+          "bytes": 2655597,
+          "sha256": "5fc518676a2d8e96b3290bc47a602d2c588a9fcef874d468cc67e8dfb67d97f8"
+        },
+        {
+          "name": "track-19-a3e2ac8d73a8.mp3",
+          "bytes": 442029,
+          "sha256": "a3e2ac8d73a8fb848c7f489179540561c91a302003e3fd1fff3910ba383f1431"
+        },
+        {
+          "name": "track-20-1229002b2aae.mp3",
+          "bytes": 8129709,
+          "sha256": "1229002b2aaede12176c610d757ebe26ee5174e340db11f8c973e6b88e29ca7b"
+        },
+        {
+          "name": "track-21-c5a4a4a42321.mp3",
+          "bytes": 3759405,
+          "sha256": "c5a4a4a42321ab1002943b60acbf1f6012fafef42dcd3aee5e05ac435de8b77e"
+        },
+        {
+          "name": "track-22-904fe635f668.mp3",
+          "bytes": 5881197,
+          "sha256": "904fe635f668e0436de7fc7b42933a0300dddec3fabe7207c04ee16c7503de02"
+        },
+        {
+          "name": "track-23-b06cfbd3f1eb.mp3",
+          "bytes": 3651885,
+          "sha256": "b06cfbd3f1eb259906f4394eead008d111e6772e97f898402adead355d5e08b4"
+        },
+        {
+          "name": "track-24-40cbb24308f3.mp3",
+          "bytes": 357741,
+          "sha256": "40cbb24308f3ca5760b9461d67591182af866e30cd92c701bbcd03533845ccb2"
+        },
+        {
+          "name": "track-25-3946fe72019d.mp3",
+          "bytes": 6628077,
+          "sha256": "3946fe72019dd104a6fb22b723de183ed9fb49c1a56b379836f6c124389a5ba2"
+        },
+        {
+          "name": "track-26-eaf3f39eb8a0.mp3",
+          "bytes": 3068013,
+          "sha256": "eaf3f39eb8a0999fbb267872bec5ddab391e660ffd5cc7d3db391d7b6f996473"
+        },
+        {
+          "name": "track-27-503d9bb465a6.mp3",
+          "bytes": 2009325,
+          "sha256": "503d9bb465a636456e9be56d584240c50750c801a240b39c702e291d94edfd0f"
+        },
+        {
+          "name": "track-28-bc51b4d0d2f9.mp3",
+          "bytes": 3167277,
+          "sha256": "bc51b4d0d2f9054eaa9d3253768805f04cb5bc8f000aa183fb010c49434c934d"
+        },
+        {
+          "name": "track-29-e3775356e4b3.mp3",
+          "bytes": 2325165,
+          "sha256": "e3775356e4b32d0a24387dd01dd3fba4607e30c9676e3d600a72cb0bd9e858f4"
+        },
+        {
+          "name": "track-30-9c785427ef2a.mp3",
+          "bytes": 4976493,
+          "sha256": "9c785427ef2abbd43d82cc1207c40ec7b162a2999647e2e51a4355881602bc0c"
+        },
+        {
+          "name": "track-31-19a52e4a0193.mp3",
+          "bytes": 6380781,
+          "sha256": "19a52e4a01934e035c8bfa3611eae256e0b8cbbae2bfbc50697a700552dd5599"
+        },
+        {
+          "name": "track-32-9b816e37dcef.mp3",
+          "bytes": 7253229,
+          "sha256": "9b816e37dcef59304a419d4e052284f525cfbb9ebbdf9482deb968b8a4b2ae3f"
+        },
+        {
+          "name": "track-33-16abd5b795ca.mp3",
+          "bytes": 385005,
+          "sha256": "16abd5b795cafd6fa2c8c173242687d09694c492bc7d257230c7ef0e006dded7"
+        },
+        {
+          "name": "track-34-3c86a04b49c4.mp3",
+          "bytes": 5796909,
+          "sha256": "3c86a04b49c4d3cd813b3e0b139f4887f4233ad40ec2807f40694e18ee84595b"
+        },
+        {
+          "name": "track-35-90828be1175c.mp3",
+          "bytes": 3511341,
+          "sha256": "90828be1175c1f22837e68f6a7016bc162b44920b40440db705245f8562a5e81"
+        },
+        {
+          "name": "track-36-349d54e447c0.mp3",
+          "bytes": 8048685,
+          "sha256": "349d54e447c0c2ac1098d278fc6c3e316ecf79e0268d1c952ae97b55077c836d"
+        },
+        {
+          "name": "track-37-4c8da15a2716.mp3",
+          "bytes": 390573,
+          "sha256": "4c8da15a271653c1a817d2cdbf9e5af655f7bbff9717e424cc617e8463029389"
+        },
+        {
+          "name": "track-38-403d9e8fc3fe.mp3",
+          "bytes": 5219181,
+          "sha256": "403d9e8fc3fe890400a9194f3f2b8153b2ccc0f85689ad479888847538294e71"
+        },
+        {
+          "name": "track-39-1c9e694cdda8.mp3",
+          "bytes": 8488557,
+          "sha256": "1c9e694cdda8b57a52c9aacac19251e25df53afa6eda8352566701f968e6e310"
+        },
+        {
+          "name": "track-40-f997eec661f2.mp3",
+          "bytes": 7193325,
+          "sha256": "f997eec661f245f126f7612d60ba96717d921f949e19fdb487a88838a9e336a4"
+        },
+        {
+          "name": "track-41-6edb9ba7379f.mp3",
+          "bytes": 6631917,
+          "sha256": "6edb9ba7379fb7ad0d8b5bf130bfd7094c425954c347c94d301e62e2d5382d9a"
+        },
+        {
+          "name": "track-42-0f60fda80f10.mp3",
+          "bytes": 4349229,
+          "sha256": "0f60fda80f10a4d7de1e79896a09a9b42c2f8dd4f2bf8e0a12870073c537a857"
+        },
+        {
+          "name": "track-43-47c5474d09fc.mp3",
+          "bytes": 316461,
+          "sha256": "47c5474d09fc5ac308615e6784679a9d3ed36c4354033b3fbb745bc821ce4998"
+        },
+        {
+          "name": "track-44-2de757daee33.mp3",
+          "bytes": 9297069,
+          "sha256": "2de757daee338b75a4b13a8001f705878d24e5d3fc2c32a62a2f8d77d69c4bba"
+        },
+        {
+          "name": "track-45-9dc791cf33a4.mp3",
+          "bytes": 5669997,
+          "sha256": "9dc791cf33a475b9df083c4c15aa99963bcf31796294b09740f25fcdc651bf1a"
+        },
+        {
+          "name": "track-46-a4b6413288f0.mp3",
+          "bytes": 5648685,
+          "sha256": "a4b6413288f01260c41aef0cb8cd64414b632fc95855e1c9a5880007841814dd"
+        },
+        {
+          "name": "track-47-bd4c6f17e2ad.mp3",
+          "bytes": 7600365,
+          "sha256": "bd4c6f17e2ad1e2873f4eb08ccd2206cb251cf0e93931acbed8770ead18eecd5"
+        },
+        {
+          "name": "track-48-c372aa2c4c7e.mp3",
+          "bytes": 559917,
+          "sha256": "c372aa2c4c7e8c881162b9630cffd173038c1a6a3d242dc40062fa086a98786b"
+        },
+        {
+          "name": "track-49-98c7268118bb.mp3",
+          "bytes": 4482669,
+          "sha256": "98c7268118bb8993b1a778793f418e755af7cbbfbba015d3cc1f5dea8c496d7b"
+        },
+        {
+          "name": "track-50-3a34b38e37a4.mp3",
+          "bytes": 4174893,
+          "sha256": "3a34b38e37a4eb10a486b18d76a5f06a2db09f7ba9f29b2f4a129743f1f7028d"
+        },
+        {
+          "name": "track-51-add129cb5035.mp3",
+          "bytes": 4534125,
+          "sha256": "add129cb50350b588d5c10e413ee301be57355c659bdb202c16725a9f348b39f"
+        },
+        {
+          "name": "track-52-351a15da46fe.mp3",
+          "bytes": 5427309,
+          "sha256": "351a15da46fe60f3f4ed8425045a11ec425767a7550484e13c4b5eb39ae21155"
+        },
+        {
+          "name": "track-53-ae88df752ba2.mp3",
+          "bytes": 3175533,
+          "sha256": "ae88df752ba237bd0d0044082df9ce09bb1ccba6f19ddfaf0bf9df84c1c59171"
+        },
+        {
+          "name": "track-54-bee4de3e3870.mp3",
+          "bytes": 4425453,
+          "sha256": "bee4de3e3870b871906e7adab94bbfa5b0c390e92f7f925833089faf34bd035a"
+        },
+        {
+          "name": "track-55-e2ec9b6f762b.mp3",
+          "bytes": 9051309,
+          "sha256": "e2ec9b6f762b93b66a970fdddd79d0d241f6050928d26f29553e6d085e67afe1"
+        },
+        {
+          "name": "track-56-af5d4c0cb137.mp3",
+          "bytes": 3664365,
+          "sha256": "af5d4c0cb137133f9cbce337f7ee2cdadd91c995779f8246bff49e808d8b608f"
+        },
+        {
+          "name": "track-57-3a145d8f080a.mp3",
+          "bytes": 3316461,
+          "sha256": "3a145d8f080a9b0d893bf1d75c009de5e45d9d7ac68704900f414da657a25b67"
+        },
+        {
+          "name": "track-58-e166f374f9ca.mp3",
+          "bytes": 5282157,
+          "sha256": "e166f374f9ca23de87a9e4f8b530ad70d608fbfc023aae59cca33c9d58935fc6"
+        },
+        {
+          "name": "track-59-e6363187e19c.mp3",
+          "bytes": 5944173,
+          "sha256": "e6363187e19c44fc83b46b496ee1d39a624d3ae583737ae8c46ab3ec316c144a"
+        },
+        {
+          "name": "track-60-0dfe4b1748f9.mp3",
+          "bytes": 3465069,
+          "sha256": "0dfe4b1748f9427a5b8c3c2d19c20563e7c6b29f7972db3d63fd0d379f4d258a"
+        },
+        {
+          "name": "track-61-c7df49a68714.mp3",
+          "bytes": 8203245,
+          "sha256": "c7df49a68714b68193ffa746ff5c6a0a2adea11acb1a5ce664f668474d3a9dd8"
+        },
+        {
+          "name": "track-62-c809e0d47dd6.mp3",
+          "bytes": 7554285,
+          "sha256": "c809e0d47dd6d75dc883ef76a8c3bb85e1be6ceef8f04941f93b5f2397e1e0c4"
+        },
+        {
+          "name": "track-63-2fbaeb05960c.mp3",
+          "bytes": 718509,
+          "sha256": "2fbaeb05960c488422ce7966b748881353f85de040f8c8550ce52587a63b3198"
+        }
+      ],
+      "url": "https://drive.usercontent.google.com/download?id=1ERDG164gNPyEqYMPcAF9wrHTZEHdrX6F&export=download&confirm=t"
+    },
+    {
+      "id": "dar",
+      "title": "Daniel and the Revelation",
+      "bytes": 848679705,
+      "sha256": "04d8b220af866c6e436b6844fcd3dfba7df668e43e07d9f2eaf1dc4ef04b6854",
+      "files": [
+        {
+          "name": "audio-manifest.json",
+          "bytes": 1690119,
+          "sha256": "5082ea4e678504a9991059ce733a6691906d267cb5ac39926ee2729a8897a5ed"
+        },
+        {
+          "name": "chapter-01.mp3",
+          "bytes": 8636013,
+          "sha256": "7da58d7a0124ab9dcd4c06f3b2418a4394c0258f6e9952773196e337e1e336ca"
+        },
+        {
+          "name": "chapter-02.mp3",
+          "bytes": 53748909,
+          "sha256": "16801f9583da6c95cd60612801bcd4fe9a0f292804f2d903cab06340507327eb"
+        },
+        {
+          "name": "chapter-03.mp3",
+          "bytes": 8470509,
+          "sha256": "ed2af0c06d9eceb93f04e9a0204082b911ffe7a1ea69d82e635fd22ca9e488bc"
+        },
+        {
+          "name": "chapter-04.mp3",
+          "bytes": 10853229,
+          "sha256": "1ddb62e8df8c46f2a205d8117c707353d0f8fc271c130541bac046ef69af2e9f"
+        },
+        {
+          "name": "chapter-05.mp3",
+          "bytes": 13539501,
+          "sha256": "02d11185dfa1450429b6cd55616c849576fd711ad237f143a2d65854caaa0361"
+        },
+        {
+          "name": "chapter-06.mp3",
+          "bytes": 7983213,
+          "sha256": "22e3669928a5a4936e6885f2ec10ff65ba026ab291dbb2d15bfc01b6f4206e6d"
+        },
+        {
+          "name": "chapter-07.mp3",
+          "bytes": 43896045,
+          "sha256": "fafc90c4762f87e2fbae0319f64cbad17eab22685e79fe6f140b158f1bdf97dd"
+        },
+        {
+          "name": "chapter-08.mp3",
+          "bytes": 50027565,
+          "sha256": "8af002226369ee631498a923ebcae1c6a7abdb6232f46ecdc2ed183519282e72"
+        },
+        {
+          "name": "chapter-09.mp3",
+          "bytes": 43550445,
+          "sha256": "2f28305d1a4fd0323dc5c13a785c407a05dd5029899c879250175f7fb792de6f"
+        },
+        {
+          "name": "chapter-10.mp3",
+          "bytes": 10088109,
+          "sha256": "70fd3968df16fb70be1353e0c74a5ab8ee61f426f93a5405882cf217d67f9410"
+        },
+        {
+          "name": "chapter-11.mp3",
+          "bytes": 83022957,
+          "sha256": "1dbbdbe7223eb8258cf719d6bedf6cc9c19a24c246b215a61782110ccc21f287"
+        },
+        {
+          "name": "chapter-12.mp3",
+          "bytes": 34806189,
+          "sha256": "10bfb1463de4143242f4a039fe2d2837ef40e0712d6b25c5980f71de4a9f88f8"
+        },
+        {
+          "name": "chapter-13.mp3",
+          "bytes": 25142061,
+          "sha256": "4b6c112dcbc74638039a54c453d8c0017689d6cc98f240945d3357d93a88d330"
+        },
+        {
+          "name": "chapter-14.mp3",
+          "bytes": 21770349,
+          "sha256": "5458d1647ed8a16c3755689c134c3a30e29a8dd6adc75421895d38accd7bdd8f"
+        },
+        {
+          "name": "chapter-15.mp3",
+          "bytes": 25934829,
+          "sha256": "574d28ceca5eb7f17c4867695328dfb6b021300417e8dff04b7950d2de94086c"
+        },
+        {
+          "name": "chapter-16.mp3",
+          "bytes": 7925805,
+          "sha256": "c20574d908f5db0c17541f6ae8ab9801e87370252d413e4b2fafac5c7509dc4a"
+        },
+        {
+          "name": "chapter-17.mp3",
+          "bytes": 13108653,
+          "sha256": "97eda90dbe84490d9c4433bb87adce52eb3669453c96a5ce92548416817e0e25"
+        },
+        {
+          "name": "chapter-18.mp3",
+          "bytes": 38625261,
+          "sha256": "e66bb19094f1d4e385fa40776d25dfdbd62b5993d0f1125ea55368d247d74806"
+        },
+        {
+          "name": "chapter-19.mp3",
+          "bytes": 20468973,
+          "sha256": "1c5a112d4ee8abc3b26ea28a019b17b606f008912a63dbd0a90d1651a07720e5"
+        },
+        {
+          "name": "chapter-20.mp3",
+          "bytes": 23965485,
+          "sha256": "8018ee8d5e6350309ea9985419775cc95468ed62523e8016e144b7bc8738433e"
+        },
+        {
+          "name": "chapter-21.mp3",
+          "bytes": 21871533,
+          "sha256": "3f63be846ed780701ea762b17d729447a6d7056320b421ea500eb3570f1424a4"
+        },
+        {
+          "name": "chapter-22.mp3",
+          "bytes": 9976365,
+          "sha256": "841e16f575619d33770274aa7e34b9dfceaabf7bb881d5528b993aaa3e3ec44a"
+        },
+        {
+          "name": "chapter-23.mp3",
+          "bytes": 13799853,
+          "sha256": "5287277c60461a9892befc8ef2933951b4df17437330b14d74930d099f3824a3"
+        },
+        {
+          "name": "chapter-24.mp3",
+          "bytes": 13198893,
+          "sha256": "df5937c460e586a1cd8dc6eae8aeed7dc497bf0ad1549d62ca1a2930427647ac"
+        },
+        {
+          "name": "chapter-25.mp3",
+          "bytes": 72303597,
+          "sha256": "7603733fd7e430b7e36c706a342d4088b7f503cc92c704f5af391c74c8741580"
+        },
+        {
+          "name": "chapter-26.mp3",
+          "bytes": 65465709,
+          "sha256": "68892a3688a131b14e8094eed7f733a9721af75842312cddf187e6cd17e7d695"
+        },
+        {
+          "name": "chapter-27.mp3",
+          "bytes": 3389613,
+          "sha256": "2d47c6ef6888d01adfd38a769efe2b5c3d486af19c16aed764906fd3b4846812"
+        },
+        {
+          "name": "chapter-28.mp3",
+          "bytes": 18764013,
+          "sha256": "3820f03ac804fb2256c883370adcab785b44274198f97dade8d4ab7f9297bc47"
+        },
+        {
+          "name": "chapter-29.mp3",
+          "bytes": 6336813,
+          "sha256": "13a26c6c39039768406f39b655ef426ebb80b0267fd52761c0dd287a5756a4ff"
+        },
+        {
+          "name": "chapter-30.mp3",
+          "bytes": 19698477,
+          "sha256": "4d83f687c8fd1caa97352f5570f7100d0aa497fa0412bcdf7ea74f860d358c56"
+        },
+        {
+          "name": "chapter-31.mp3",
+          "bytes": 8376237,
+          "sha256": "d95bc2926d7d5cfc81aa2b07903230742532343c85e6ac01b8ed28149d1037e8"
+        },
+        {
+          "name": "chapter-32.mp3",
+          "bytes": 17575341,
+          "sha256": "396c4f1bf3d6bc5e8e15546f4ce2748fab60b5ebfc220f4ac3a1b84dcbdfd68d"
+        },
+        {
+          "name": "chapter-33.mp3",
+          "bytes": 16819437,
+          "sha256": "6b7e38e3e4359c3f252d122e98274bf68f67ccc0375d2971e8a31fb25ac66302"
+        },
+        {
+          "name": "chapter-34.mp3",
+          "bytes": 13845933,
+          "sha256": "3306e67d25767d21b784ec49ec825f55c44359f1bf3d331bc25a5b1ed14d6525"
+        }
+      ],
+      "url": "https://drive.usercontent.google.com/download?id=1tGmEyuyqvsVee7UXJj99-WZ3y3y0GMDy&export=download&confirm=t"
+    },
+    {
+      "id": "fp",
+      "title": "Fundamental Principles",
+      "bytes": 7786463,
+      "sha256": "16e6a20cbc10b3294c7503be727d6013048ea56f4ac4c6b1013cb934ed89e348",
+      "files": [
+        {
+          "name": "audio-manifest.json",
+          "bytes": 17474,
+          "sha256": "7e858c4e198b984cd0ca458fad83eb691a1b82f0f9c96c234d59fdacd5008026"
+        },
+        {
+          "name": "chapter-01.mp3",
+          "bytes": 7768749,
+          "sha256": "8d0bac7f84b55e664ea77560f93a48fcc05bd6be1f2a44f1b0d6ee80aed67a5f"
+        }
+      ],
+      "url": "https://drive.usercontent.google.com/download?id=1yNcxSqZKWAYixMxeJ-hMnloRhxVcKSL-&export=download&confirm=t"
+    },
+    {
+      "id": "sc",
+      "title": "Steps to Christ",
+      "bytes": 130487743,
+      "sha256": "beecf7d0ae81cf51374735a569c019e934b2ec9db2f9290a3559ad5cace5adb6",
+      "files": [
+        {
+          "name": "audio-manifest.json",
+          "bytes": 193688,
+          "sha256": "800ff31649b8efc9ce2c24a5242a655077c1ff949372b848bf682d59d1de2845"
+        },
+        {
+          "name": "chapter-01-level-b0651b4fe9da.mp3",
+          "bytes": 8839341,
+          "sha256": "b0651b4fe9daebd3e8fe753fd97f00b245015729101b1cf4b841187bf20ba46d"
+        },
+        {
+          "name": "chapter-02-level-2c2ea0bce4d1.mp3",
+          "bytes": 6544269,
+          "sha256": "2c2ea0bce4d1e82573988b3b52dbb6bb6a86bdf2f235210f23b51163ab8aa7c3"
+        },
+        {
+          "name": "chapter-03-title-c27867e5209b.mp3",
+          "bytes": 16721037,
+          "sha256": "c27867e5209b30842275d1a0bf2b77e92bc867824b00a72c1c61fe33c7895706"
+        },
+        {
+          "name": "chapter-04-level-ee8b8ed43e05.mp3",
+          "bytes": 5789133,
+          "sha256": "ee8b8ed43e0529c42dbc195456a51a51a2213a004e5f7218e1a7456e2b08ffeb"
+        },
+        {
+          "name": "chapter-05-level-4fefd88f73e0.mp3",
+          "bytes": 6579405,
+          "sha256": "4fefd88f73e01398cd156eff6e8a99eab671a092294146cd0cb96ef0cb2f865d"
+        },
+        {
+          "name": "chapter-06-level-affe1817a4f6.mp3",
+          "bytes": 7942221,
+          "sha256": "affe1817a4f686c458ae869619723730a6fd8899fea16289ce308ef36d90979a"
+        },
+        {
+          "name": "chapter-07-level-9c194d7250e6.mp3",
+          "bytes": 10870605,
+          "sha256": "9c194d7250e6695b0ae21db1b9594324b9cda96c63946dc5b2ac9abe18003652"
+        },
+        {
+          "name": "chapter-08-level-db0ab76fe282.mp3",
+          "bytes": 11466477,
+          "sha256": "db0ab76fe282ccfd945192faef27041a9b8248633c006b20c232f2907e2daf0e"
+        },
+        {
+          "name": "chapter-09-level-48a869bab0d8.mp3",
+          "bytes": 8187309,
+          "sha256": "48a869bab0d8f1410597797a1f465c219344e8078165c358e7385c6d33d91a37"
+        },
+        {
+          "name": "chapter-10-level-d52cbe39bfb5.mp3",
+          "bytes": 8374797,
+          "sha256": "d52cbe39bfb5f8aa33950676fc287ae2d0877472c351822b2228efc4a3c694a5"
+        },
+        {
+          "name": "chapter-11-level-f802ae8de557.mp3",
+          "bytes": 14119821,
+          "sha256": "f802ae8de557c7cd2672856f497e6137532bcdaa4c9ad3491d01718412f67cdb"
+        },
+        {
+          "name": "chapter-12-level-d3220f8c5bee.mp3",
+          "bytes": 10349325,
+          "sha256": "d3220f8c5bee97c035f3f42fed6ce1c2cb19fb2d96830863c06f4962cb732c9c"
+        },
+        {
+          "name": "chapter-13-level-d9a0dd6d84c4.mp3",
+          "bytes": 14508333,
+          "sha256": "d9a0dd6d84c42242903ae51db9ed05b33c502813b2747ab7fcf69b10e7f3865c"
+        }
+      ],
+      "url": "https://drive.usercontent.google.com/download?id=1XzBwJOTfqEiQXAFHqvcCcAR3MttnZGJg&export=download&confirm=t"
+    },
+    {
+      "id": "sdp",
+      "title": "The Story of Daniel the Prophet",
+      "bytes": 383734097,
+      "sha256": "e1cb246cf398dd62641bb80e91dc0e7113e9128bb75f024532aac1261a7c3c55",
+      "files": [
+        {
+          "name": "audio-manifest.json",
+          "bytes": 1223491,
+          "sha256": "51eb1f967a2c5c48be6b663a3bdb4b6b73d97fa27f70cc47454f1ab36d563974"
+        },
+        {
+          "name": "track-01-9d16a4899729.mp3",
+          "bytes": 21224301,
+          "sha256": "9d16a489972928114286ce6364378114d68da6da2f5b6d41dc93ab9c688e921f"
+        },
+        {
+          "name": "track-02-0ac0b1741b22.mp3",
+          "bytes": 17901741,
+          "sha256": "0ac0b1741b22589126e6d18707b2438a0c682af580426ff534179beed4bb24ea"
+        },
+        {
+          "name": "track-03-e7509f8a496a.mp3",
+          "bytes": 16578861,
+          "sha256": "e7509f8a496aec39dc71f2c6aa8ce7423530cf5b8a5bb084884e53e39234ea8b"
+        },
+        {
+          "name": "track-04-df996c829091.mp3",
+          "bytes": 14333805,
+          "sha256": "df996c8290918029ff27882eb65b40947b2885c5c159ceb76b282ea64aec1356"
+        },
+        {
+          "name": "track-05-1f187829356c.mp3",
+          "bytes": 11474349,
+          "sha256": "1f187829356c6e72c5a9ecdd4adecd81d79bfa3c6e67426d0e409ead65509e44"
+        },
+        {
+          "name": "track-06-26ecebfa952d.mp3",
+          "bytes": 13708653,
+          "sha256": "26ecebfa952d4b765ddc3cd6aec9c9de4f08fa4b68a0efcf7896d3730fc9ab19"
+        },
+        {
+          "name": "track-07-034e7b5b777d.mp3",
+          "bytes": 16965741,
+          "sha256": "034e7b5b777d50183caa6bdba1e652ac178db98eaa22b3204f2e7de9d70908e3"
+        },
+        {
+          "name": "track-08-7b50ad006f80.mp3",
+          "bytes": 24043245,
+          "sha256": "7b50ad006f8027fc07db3e60a449e1b0afc4d5eea778512b5c0f072dafa3849d"
+        },
+        {
+          "name": "track-09-18c842e5e4a9.mp3",
+          "bytes": 21056301,
+          "sha256": "18c842e5e4a9651c2e9e173c1efa47ca4903bbb8529c0cde0e55f701a23bf555"
+        },
+        {
+          "name": "track-10-f06fbffa6e4a.mp3",
+          "bytes": 23077677,
+          "sha256": "f06fbffa6e4a9b6b9b139c7a276b2ded25e7af255bce7d93cdf3ae923bf73fed"
+        },
+        {
+          "name": "track-11-0d11530ff445.mp3",
+          "bytes": 29418285,
+          "sha256": "0d11530ff44517f4f535d4caf0e25bd0152f5f1a9288baf91487242f4bdd3f1b"
+        },
+        {
+          "name": "track-12-db5b9c25f2c2.mp3",
+          "bytes": 9390381,
+          "sha256": "db5b9c25f2c27c225b049cf2f3e5ce817b7cd99f9c83c50e024e14dc6328f913"
+        },
+        {
+          "name": "track-13-41067c1855e3.mp3",
+          "bytes": 27877869,
+          "sha256": "41067c1855e339d482b535eda98591e983c2d912b619249e142f8a086b8c4d34"
+        },
+        {
+          "name": "track-14-7766dca964ca.mp3",
+          "bytes": 29931693,
+          "sha256": "7766dca964caa9db9e5526d48c53c304b80ae1ea3866cd2fe024d8999d897919"
+        },
+        {
+          "name": "track-15-c52c7f27edca.mp3",
+          "bytes": 26579949,
+          "sha256": "c52c7f27edcae027491ea2ec6009bff57a66bdbfbfb1cb2272e9d42b8c19a5c9"
+        },
+        {
+          "name": "track-16-91cea9e7fddb.mp3",
+          "bytes": 26819181,
+          "sha256": "91cea9e7fddb8b27e0f6e8da078119500aa559435c04f8cae19cbb4ad74eb144"
+        },
+        {
+          "name": "track-17-475062b206c4.mp3",
+          "bytes": 22547373,
+          "sha256": "475062b206c489d95486e71fecb7f9995ad98046d684f66d6f654b658b8ae663"
+        },
+        {
+          "name": "track-18-ff0a351fb296.mp3",
+          "bytes": 29578797,
+          "sha256": "ff0a351fb29629c78de0f94cf78b5966ff768ed1d3a07887176444323bae7f3f"
+        }
+      ],
+      "url": "https://drive.usercontent.google.com/download?id=1nAd4eSwYUibhUgUjZJF2i0mifHbBfvHw&export=download&confirm=t"
+    },
+    {
+      "id": "ssp",
+      "title": "The Story of the Seer of Patmos",
+      "bytes": 292226965,
+      "sha256": "b460e704036b65e859158b588e864be8dfccb776a54129a2e2e543af676a0a78",
+      "files": [
+        {
+          "name": "audio-manifest.json",
+          "bytes": 1126917,
+          "sha256": "505cfec59a09c8a2d2f3ca0b09f764aa8e5313124e7235318260581b5a5203af"
+        },
+        {
+          "name": "track-01-b1b9cf28b0bd.mp3",
+          "bytes": 11808621,
+          "sha256": "b1b9cf28b0bd3be7740bca3243c291043111fd727a03aa31d3c6a7e45a5a77f3"
+        },
+        {
+          "name": "track-02-6a20e4c72810.mp3",
+          "bytes": 8153517,
+          "sha256": "6a20e4c728107ae94dde93d9a844d13f11aad7af36a2a49327ff366bf0b59f86"
+        },
+        {
+          "name": "track-03-b74a7f820157.mp3",
+          "bytes": 22604205,
+          "sha256": "b74a7f820157584ed227771134864fb8328ed7bb4919edf7525ffb9e65bdd05d"
+        },
+        {
+          "name": "track-04-dc2927ca7bec.mp3",
+          "bytes": 16882029,
+          "sha256": "dc2927ca7bec8b8756b055812d2e239e6f6b2b56fa99a0799abc5d5e120e57e2"
+        },
+        {
+          "name": "track-05-588e09cde021.mp3",
+          "bytes": 7017069,
+          "sha256": "588e09cde0212ee0b62ab489abf127111a0fdbc2318bbab54ac65874f1927dca"
+        },
+        {
+          "name": "track-06-8977b496ebb7.mp3",
+          "bytes": 6085677,
+          "sha256": "8977b496ebb7809fc8a7d86dc5ebd12e21203dc35a6d75ffa57202ee98d66d1c"
+        },
+        {
+          "name": "track-07-ad95a72671b0.mp3",
+          "bytes": 13300077,
+          "sha256": "ad95a72671b069a5bc6bce0758f26291a92ef161a81def22128caf1ef236c311"
+        },
+        {
+          "name": "track-08-88755c5e92b1.mp3",
+          "bytes": 16088109,
+          "sha256": "88755c5e92b1009291161df5bd5a994a55e8a8d8607d31a0020695e2c9b78641"
+        },
+        {
+          "name": "track-09-68228b94abab.mp3",
+          "bytes": 15798381,
+          "sha256": "68228b94ababab6fcb6b19fb8488f0f2603fc771cf4aabcc2eb79250ace13498"
+        },
+        {
+          "name": "track-10-dba1084a805f.mp3",
+          "bytes": 16047405,
+          "sha256": "dba1084a805f9191f2d08cf14b340fd9eab3e2f1a603a92d89a39ad24fe89f7b"
+        },
+        {
+          "name": "track-11-073d929cdcd5.mp3",
+          "bytes": 9071853,
+          "sha256": "073d929cdcd5f20704bb7c3a4806425bf1fe5f503aa27ec112fd67f0e05ab061"
+        },
+        {
+          "name": "track-12-207f1164596f.mp3",
+          "bytes": 15114477,
+          "sha256": "207f1164596fb67a88c656acc5dc502a5a0f2c8f597e92e1c5bcb0288e71a427"
+        },
+        {
+          "name": "track-13-44768b894fa6.mp3",
+          "bytes": 12661869,
+          "sha256": "44768b894fa662251b199ae590e7caaa987c332cbec499776864f3e9870e687e"
+        },
+        {
+          "name": "track-14-180ff86a30cb.mp3",
+          "bytes": 17103405,
+          "sha256": "180ff86a30cb813d657783088ec295ba0c02bd954fcc2e97e884cf50b167ff10"
+        },
+        {
+          "name": "track-15-eda871cb6213.mp3",
+          "bytes": 16125549,
+          "sha256": "eda871cb621370e83a0b80322ef814a5d1d3deea138af6238393e3ca4945a554"
+        },
+        {
+          "name": "track-16-ee08750a1056.mp3",
+          "bytes": 5727789,
+          "sha256": "ee08750a10563455f334442918d7152c50dc0896e03bbfcfeb383c88d7a101e8"
+        },
+        {
+          "name": "track-17-a0b261991b95.mp3",
+          "bytes": 12634221,
+          "sha256": "a0b261991b9599b25641416f243135bd1629b77e66eb4dda58f68925299fbbee"
+        },
+        {
+          "name": "track-18-0c15db66df33.mp3",
+          "bytes": 9524205,
+          "sha256": "0c15db66df33623e6914b9f98664e0e41179110b7793646087bf7d6c0199c814"
+        },
+        {
+          "name": "track-19-fb6fe6b15f0c.mp3",
+          "bytes": 11821485,
+          "sha256": "fb6fe6b15f0c0348c419c3f45ed158cf141e16dedae812c4855bfa453fb0e525"
+        },
+        {
+          "name": "track-20-8b8202305d56.mp3",
+          "bytes": 7921389,
+          "sha256": "8b8202305d568bd248787ea4bfeb823c26790d1fcf6193cf1dc31dc02009dac8"
+        },
+        {
+          "name": "track-21-4e0c0aea6dc1.mp3",
+          "bytes": 11189997,
+          "sha256": "4e0c0aea6dc11aa846808d6dbc57213d68140cd05da413231ef82c346c16d4bb"
+        },
+        {
+          "name": "track-22-52d2edc31a5d.mp3",
+          "bytes": 9823725,
+          "sha256": "52d2edc31a5d9e6cfe0abb6577e1c00e52df2f9905e08c5d90d2796318ae5d7a"
+        },
+        {
+          "name": "track-23-b22806774296.mp3",
+          "bytes": 11205549,
+          "sha256": "b228067742965b6ec9a9d291767057dd831db44d13392ee7ee6d1d38ccd42d66"
+        },
+        {
+          "name": "track-24-1e8714bbc3e0.mp3",
+          "bytes": 7386285,
+          "sha256": "1e8714bbc3e0a7f8721d803e08f910ca38048c1d02d4d0c417dceac74edf18c9"
+        }
+      ],
+      "url": "https://drive.usercontent.google.com/download?id=1faOo1n9H4GnDCTkYJBCTB6dI1BbMm7r9&export=download&confirm=t"
+    },
+    {
+      "id": "wor",
+      "title": "Waggoner on Romans (matching imported copy)",
+      "requires_source_sha256": "887a248acb34648cc510af7a0d729964d4a3736e9698e36a71583b3a6b34b4d6",
+      "bytes": 317502351,
+      "sha256": "1870d81bad6cdb698b8e68fdcf4be159c4c940de11a79c99402229b3bfd5eb56",
+      "files": [
+        {
+          "name": "audio-manifest.json",
+          "bytes": 865367,
+          "sha256": "257ee4d8035875a74955e79708e5333f14087d7eb8f94ef779bb793935d6ef1f"
+        },
+        {
+          "name": "track-01-67abf09b520e.mp3",
+          "bytes": 43707693,
+          "sha256": "67abf09b520e5a389dc797ece2eee24e33d5647c3e3d8661a520cd8ad9e7c6e5"
+        },
+        {
+          "name": "track-02-851b7817164f.mp3",
+          "bytes": 33808365,
+          "sha256": "851b7817164f0dd63641c5fc63784364660f1957a98e01879f13009de2cde0c2"
+        },
+        {
+          "name": "track-03-026692257146.mp3",
+          "bytes": 29988717,
+          "sha256": "02669225714649be43fc7418a84fd6ae2049e78122de855eb65b2ed9551102c4"
+        },
+        {
+          "name": "track-04-dd10206b804a.mp3",
+          "bytes": 19798125,
+          "sha256": "dd10206b804a8162599079d5befe599124548892e0e6acb29837cab46847c241"
+        },
+        {
+          "name": "track-05-0474e336271a.mp3",
+          "bytes": 25066413,
+          "sha256": "0474e336271a52e999d9746688fe7936b6e0c2c90c75f0e50f7103acf96ab0c3"
+        },
+        {
+          "name": "track-06-2e27c8c76e26.mp3",
+          "bytes": 12719085,
+          "sha256": "2e27c8c76e2694f0ac41cf70670a98abeba01a266ef10b0b38df1c528af0441d"
+        },
+        {
+          "name": "track-07-fecab8c8ee10.mp3",
+          "bytes": 14190957,
+          "sha256": "fecab8c8ee1062ca1f517518ff54158d262a644c083d1ea3654db0cb2de853a4"
+        },
+        {
+          "name": "track-08-28bb86414635.mp3",
+          "bytes": 38761965,
+          "sha256": "28bb8641463566bb30f9dc99d094125c795715d47da37650cdf160c2f2025718"
+        },
+        {
+          "name": "track-09-cfec15157668.mp3",
+          "bytes": 14049453,
+          "sha256": "cfec1515766817d7ba2232366349e7e141d9b17917b5c4abdbd0e931451590c3"
+        },
+        {
+          "name": "track-10-a78da550e072.mp3",
+          "bytes": 9856365,
+          "sha256": "a78da550e072a98d9694dd9385c7acad16882b431adcfd873ad708ae6aed152c"
+        },
+        {
+          "name": "track-11-dd516b683e0a.mp3",
+          "bytes": 7924845,
+          "sha256": "dd516b683e0a47f4c122e5aad0431e764e79292327b2893032cfaeadd1427fb4"
+        },
+        {
+          "name": "track-12-5b0c6893ecc5.mp3",
+          "bytes": 8810349,
+          "sha256": "5b0c6893ecc5d9da8f44e8430eee7abb94f82583ed71bd82116e16e34e0f95fb"
+        },
+        {
+          "name": "track-13-b24d0c0cf4e6.mp3",
+          "bytes": 24951021,
+          "sha256": "b24d0c0cf4e60ec88e8efa7942f3a848e09ff5fcef3307a848f98614419d4735"
+        },
+        {
+          "name": "track-14-abb7949d0430.mp3",
+          "bytes": 16970925,
+          "sha256": "abb7949d04300a4a61878a40c4faf301d48fdc969de28a04e94e8817250fe958"
+        },
+        {
+          "name": "track-15-4735879d4413.mp3",
+          "bytes": 5247789,
+          "sha256": "4735879d441382d18e4451d98b7902c108a381654d4219687b8b8d4043633d54"
+        },
+        {
+          "name": "track-16-9d0a9cdcd625.mp3",
+          "bytes": 10782765,
+          "sha256": "9d0a9cdcd625edb2a44e0b37d3637b80b321a860ef34f15dc9078243196d9ed9"
+        }
+      ],
+      "url": "https://drive.usercontent.google.com/download?id=18Oy2RF2kirhxggPniD59ZBxiruQp0MXU&export=download&confirm=t"
+    }
+  ]
+}

@@ -196,34 +196,6 @@ class ViewerTopBar extends StatelessWidget {
 
     return [
       cell(
-        'viewer-phone-action-cell-saved-presentations',
-        IconButton(
-          key: const ValueKey('viewer-saved-presentations-button'),
-          constraints: BoxConstraints.tightFor(
-            width: actionExtent,
-            height: actionExtent,
-          ),
-          padding: EdgeInsets.zero,
-          onPressed: onSavedPresentations,
-          icon: Icon(Icons.folder_open_outlined, size: iconSize),
-          tooltip: 'Saved Presentations',
-        ),
-      ),
-      cell(
-        'viewer-phone-action-cell-presentation-setup',
-        IconButton(
-          key: const ValueKey('viewer-presentation-setup-button'),
-          constraints: BoxConstraints.tightFor(
-            width: actionExtent,
-            height: actionExtent,
-          ),
-          padding: EdgeInsets.zero,
-          onPressed: onDollarTag,
-          icon: Icon(Icons.slideshow_outlined, size: iconSize),
-          tooltip: 'Presentation Setup',
-        ),
-      ),
-      cell(
         'viewer-phone-action-cell-standard-tag',
         ReaderTagButtons(
           fontScale: fontScale,
@@ -288,8 +260,6 @@ class ViewerTopBar extends StatelessWidget {
 
   // ─── Wide layout (iPad / macOS) ───────────────────────────────────────────
 
-  // Keeps the safe presLeft clamp from commit 256b35c.
-  // Presentation cluster (saved presentations + setup) is shown only here.
   Widget _buildWide(BuildContext context) {
     final theme = Theme.of(context);
     const actionExtent = 48.0;
@@ -317,19 +287,6 @@ class ViewerTopBar extends StatelessWidget {
         final halfBar = barWidth / 2.0;
         final halfTitle = titleWidth / 2.0;
         const clusterGap = 20.0;
-        final presClusterW = 2.0 * actionExtent + 8.0;
-
-        // Safe clamp: narrow bars can produce lower > upper; clamp lower first.
-        final presClampMax = (halfBar - presClusterW).clamp(
-          0.0,
-          double.infinity,
-        );
-        final presClampMin = (24.0 + 2.0 * actionExtent + 8.0).clamp(
-          0.0,
-          presClampMax,
-        );
-        final presLeft = (halfBar - halfTitle - clusterGap - presClusterW)
-            .clamp(presClampMin, presClampMax);
         final tagLeft = halfBar + halfTitle + clusterGap;
 
         return Material(
@@ -402,43 +359,6 @@ class ViewerTopBar extends StatelessWidget {
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                    Positioned(
-                      left: presLeft,
-                      top: 0,
-                      bottom: 0,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            constraints: BoxConstraints.tightFor(
-                              width: actionExtent,
-                              height: actionExtent,
-                            ),
-                            padding: EdgeInsets.zero,
-                            onPressed: onSavedPresentations,
-                            icon: Icon(
-                              Icons.folder_open_outlined,
-                              size: iconSize,
-                            ),
-                            tooltip: 'Saved Presentations',
-                          ),
-                          const SizedBox(width: 8),
-                          IconButton(
-                            constraints: BoxConstraints.tightFor(
-                              width: actionExtent,
-                              height: actionExtent,
-                            ),
-                            padding: EdgeInsets.zero,
-                            onPressed: onDollarTag,
-                            icon: Icon(
-                              Icons.slideshow_outlined,
-                              size: iconSize,
-                            ),
-                            tooltip: 'Presentation Setup',
-                          ),
-                        ],
                       ),
                     ),
                     Positioned(

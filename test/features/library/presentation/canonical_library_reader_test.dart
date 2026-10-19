@@ -23,6 +23,97 @@ import 'package:studybible2/features/library/presentation/reader_tilt_autoscroll
 import 'package:studybible2/features/library/presentation/mac_reader_autoscroll_controller.dart';
 
 void main() {
+  test(
+    'Android and iOS retain narration when pixel autoscroll is disabled',
+    () {
+      for (final mobile in [(true, false), (false, true)]) {
+        expect(
+          canonicalReaderNeedsNarrationController(
+            steadyScrolling: false,
+            isIOS: mobile.$1,
+            isAndroid: mobile.$2,
+          ),
+          isTrue,
+        );
+      }
+      expect(
+        canonicalReaderNeedsNarrationController(
+          steadyScrolling: true,
+          isIOS: false,
+          isAndroid: false,
+        ),
+        isTrue,
+      );
+      expect(
+        canonicalReaderNeedsNarrationController(
+          steadyScrolling: false,
+          isIOS: false,
+          isAndroid: false,
+        ),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'margin-note follow progress advances through the linked note group',
+    () {
+      expect(
+        canonicalMarginNoteFollowProgress(
+          bodyLength: 100,
+          noteLengths: const [300, 100],
+          noteIndex: 0,
+          noteProgress: 0,
+        ),
+        .2,
+      );
+      expect(
+        canonicalMarginNoteFollowProgress(
+          bodyLength: 100,
+          noteLengths: const [300, 100],
+          noteIndex: 0,
+          noteProgress: .5,
+        ),
+        .5,
+      );
+      expect(
+        canonicalMarginNoteFollowProgress(
+          bodyLength: 100,
+          noteLengths: const [300, 100],
+          noteIndex: 1,
+          noteProgress: 1,
+        ),
+        1,
+      );
+    },
+  );
+
+  test('margin-note progress resolves into the rendered note text', () {
+    expect(
+      canonicalSpeechSegmentForProgress(
+        bodyText: 'body',
+        marginNotes: const ['first note', 'second note'],
+        progress: 0,
+      ),
+      (text: 'body', offset: 0),
+    );
+    expect(
+      canonicalSpeechSegmentForProgress(
+        bodyText: 'body',
+        marginNotes: const ['first note', 'second note'],
+        progress: .5,
+      ).text,
+      'first note',
+    );
+    final end = canonicalSpeechSegmentForProgress(
+      bodyText: 'body',
+      marginNotes: const ['first note', 'second note'],
+      progress: 1,
+    );
+    expect(end.text, 'second note');
+    expect(end.offset, 'second note'.length);
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
@@ -84,6 +175,101 @@ void main() {
           .toList();
       expect(paragraphs, contains('Symbols explained. DAR 13.3'));
       expect(paragraphs, contains('And I saw the first seal. DAR 402.1'));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(() async {
+        await setup.db.close();
+        await setup.dir.delete(recursive: true);
+      });
+    },
+  );
+
+  testWidgets(
+    'active recorded margin-note cue opens notes on update and initial mount',
+    (tester) async {
+      final setup = await tester.runAsync(() async {
+        sqfliteFfiInit();
+        final dir = await Directory.systemTemp.createTemp(
+          'margin_note_reader_',
+        );
+        final db = await databaseFactoryFfi.openDatabase(
+          p.join(dir.path, 'library.db'),
+        );
+        await ELibrarySchema.ensure(db);
+        final source = File(p.join(dir.path, 'source.html'));
+        await source.writeAsString(
+          '<p data-refcode="SDP 14.3">The owning paragraph.</p>',
+        );
+        await const LibraryDocumentCanonicalizer().canonicalize(
+          db: db,
+          libraryItemId: 'margin-book',
+          source: source,
+        );
+        final row = (await db.query(
+          'library_document_blocks',
+          where: 'library_item_id = ?',
+          whereArgs: const <Object?>['margin-book'],
+          limit: 1,
+        )).single;
+        final formatted = LibraryFormattedContent.fromJson(
+          row['formatted_content']?.toString(),
+        );
+        await db.update(
+          'library_document_blocks',
+          <String, Object?>{
+            'formatted_content': LibraryFormattedContent(
+              nodes: formatted.nodes,
+              alignment: formatted.alignment,
+              metadata: <String, Object?>{
+                ...formatted.metadata,
+                'margin_notes': <Map<String, Object?>>[
+                  <String, Object?>{'text': 'Deuteronomy 4:14.'},
+                ],
+              },
+            ).toJson(),
+          },
+          where: 'id = ?',
+          whereArgs: <Object?>[row['id']],
+        );
+        final controller = LibraryDocumentController(
+          libraryItemId: 'margin-book',
+          repository: LibraryDocumentRepository(db),
+        );
+        await controller.initialize();
+        return (
+          db: db,
+          dir: dir,
+          controller: controller,
+          blockId: row['id']!.toString(),
+        );
+      });
+      final target = CallbackReaderAutoScrollTarget();
+
+      Widget reader(String? activeMarginNotesBlockId) => MaterialApp(
+        home: Scaffold(
+          body: CanonicalLibraryDocumentBody(
+            controller: setup!.controller,
+            autoScrollTarget: target,
+            onVisibleOrderChanged: (_) {},
+            textColor: Colors.black,
+            narrationMarginNotesBlockId: activeMarginNotesBlockId,
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(reader(null));
+      await tester.pumpAndSettle();
+      expect(find.text('Deuteronomy 4:14.'), findsNothing);
+
+      await tester.pumpWidget(reader(setup!.blockId));
+      await tester.pumpAndSettle();
+      expect(find.text('Deuteronomy 4:14.'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(reader(setup.blockId));
+      await tester.pumpAndSettle();
+      expect(find.text('Deuteronomy 4:14.'), findsOneWidget);
+
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.runAsync(() async {
         await setup.db.close();
@@ -969,6 +1155,149 @@ void main() {
     },
   );
 
+  testWidgets(
+    'section arrows follow authored Contents immediately after a Contents jump',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final setup = await tester.runAsync(() async {
+        sqfliteFfiInit();
+        databaseFactory = databaseFactoryFfi;
+        final dir = await Directory.systemTemp.createTemp(
+          'canonical_authored_section_navigation_',
+        );
+        final db = await openDatabase(p.join(dir.path, 'test.db'));
+        await ELibrarySchema.ensure(db);
+        final source = File(p.join(dir.path, 'book.html'));
+        String body(String label) => List<String>.generate(
+          25,
+          (index) => '<p>$label body paragraph $index.</p>',
+        ).join();
+        await source.writeAsString(
+          '<h1>Introduction</h1>${body('Introduction')}'
+          '<h1>A Word to the Reader</h1>${body('Reader')}'
+          '<h1>Chapter 1</h1>${body('Chapter one')}'
+          '<h2>An internal chapter subheading</h2>${body('More chapter one')}'
+          '<h1>Chapter 2</h1>${body('Chapter two')}'
+          '<h1>General Index</h1>${body('Index')}',
+        );
+        await const LibraryDocumentCanonicalizer().canonicalize(
+          db: db,
+          libraryItemId: 'item',
+          source: source,
+        );
+        final rows = await db.query(
+          'library_document_blocks',
+          where: 'library_item_id = ? AND block_type = ?',
+          whereArgs: const <Object?>['item', 'heading'],
+          orderBy: 'display_order',
+        );
+        final byLabel = <String, Map<String, Object?>>{
+          for (final row in rows) row['plain_text']!.toString(): row,
+        };
+        await db.delete(
+          'library_document_navigation',
+          where: 'library_item_id = ?',
+          whereArgs: const <Object?>['item'],
+        );
+        final labels = <String>[
+          'Introduction',
+          'A Word to the Reader',
+          'Chapter 1',
+          'Chapter 2',
+          'General Index',
+        ];
+        for (var index = 0; index < labels.length; index++) {
+          final row = byLabel[labels[index]]!;
+          await db.insert('library_document_navigation', <String, Object?>{
+            'id': 'nav-$index',
+            'library_item_id': 'item',
+            'label': labels[index],
+            'depth': 0,
+            'display_order': index,
+            'source_href': 'book.html',
+            'source_anchor': 'destination-$index',
+            'target_block_id': row['id'],
+          });
+        }
+        const pathProviderChannel = MethodChannel(
+          'plugins.flutter.io/path_provider',
+        );
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              pathProviderChannel,
+              (_) async => dir.path,
+            );
+        return (db: db, dir: dir);
+      });
+      final completedSetup = setup!;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CanonicalLibraryReaderScreen(
+            item: _item(fileFormat: 'html', sourceType: 'egw_html_capture'),
+            repository: LibraryDocumentRepository(completedSetup.db),
+          ),
+        ),
+      );
+      for (var i = 0; i < 40; i++) {
+        await tester.runAsync(() async => Future<void>.delayed(Duration.zero));
+        await tester.pump(const Duration(milliseconds: 100));
+        if (find.text('Chapter 1').evaluate().isNotEmpty) break;
+      }
+
+      await tester.tap(find.text('Contents'));
+      for (var i = 0; i < 20; i++) {
+        await tester.runAsync(() async => Future<void>.delayed(Duration.zero));
+        await tester.pump(const Duration(milliseconds: 50));
+        if (find.text('Introduction').evaluate().length > 1) break;
+      }
+      expect(find.text('Introduction'), findsWidgets);
+      await tester.tap(find.text('Introduction').last);
+      // Press Next before the remounted list can report its new visible row.
+      // The command must already regard Introduction as the current entry.
+      await tester.pump();
+      tester
+          .widget<IconButton>(
+            find.widgetWithIcon(IconButton, Icons.keyboard_double_arrow_right),
+          )
+          .onPressed!();
+      for (var i = 0; i < 40; i++) {
+        await tester.runAsync(() async => Future<void>.delayed(Duration.zero));
+        await tester.pump(const Duration(milliseconds: 100));
+        final bodyHeading = find.descendant(
+          of: find.byKey(const ValueKey('canonical-flat-list')),
+          matching: find.text('A Word to the Reader'),
+        );
+        if (bodyHeading.evaluate().isNotEmpty) break;
+      }
+
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('canonical-flat-list')),
+          matching: find.text('A Word to the Reader'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Chapter 2'), findsNothing);
+      expect(find.text('An internal chapter subheading'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      const pathProviderChannel = MethodChannel(
+        'plugins.flutter.io/path_provider',
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(pathProviderChannel, null);
+      await tester.runAsync(() async {
+        await UserDatabase.instance.close();
+        await ELibraryDatabase.instance.close();
+        await completedSetup.db.close();
+        await completedSetup.dir.delete(recursive: true);
+      });
+    },
+  );
+
   testWidgets('Contents target waits for its coalesced long-document window', (
     tester,
   ) async {
@@ -982,11 +1311,7 @@ void main() {
       await ELibrarySchema.ensure(db);
       final source = File(p.join(dir.path, 'long.html'));
       String chapter(String title, int count) =>
-          '<h1>$title</h1>' +
-          List<String>.generate(
-            count,
-            (index) => '<p>$title body paragraph $index.</p>',
-          ).join();
+          '<h1>$title</h1>${List<String>.generate(count, (index) => '<p>$title body paragraph $index.</p>').join()}';
       await source.writeAsString(
         chapter('Chapter 1', 260) +
             chapter('Chapter 8', 260) +
@@ -1088,6 +1413,30 @@ void main() {
       );
       expect(current?.plainText, 'Chapter 3 - Preparatory Messages');
     });
+  });
+
+  test('margin notes flatten into separately selectable source lines', () {
+    final lines = canonicalMarginNoteParagraphs(<Map<String, Object?>>[
+      <String, Object?>{'text': 'First line.\nSecond line.'},
+
+      <String, Object?>{'text': 'Third line.'},
+    ]);
+
+    expect(lines.map((line) => line.text), <String>[
+      'First line.',
+
+      'Second line.',
+
+      'Third line.',
+    ]);
+
+    expect(lines[1].noteOrder, 0);
+
+    expect(lines[1].lineIndex, 1);
+
+    expect(lines[2].noteOrder, 1);
+
+    expect(lines[2].lineIndex, 0);
   });
 }
 

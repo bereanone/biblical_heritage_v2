@@ -75,7 +75,7 @@ void main() {
 
     expect(find.text('eLibrary'), findsOne);
     expect(find.text('Library'), findsOne);
-    expect(find.text('Books'), findsOne);
+    expect(find.text('All Books'), findsOne);
     expect(find.text('Recent'), findsOne);
     expect(find.text('Shelf'), findsOne);
     expect(find.text('List'), findsOne);
@@ -98,7 +98,7 @@ void main() {
 
       expect(find.text('eLibrary'), findsOne);
       expect(find.text('Library'), findsOne);
-      expect(find.text('Books'), findsOne);
+      expect(find.text('All Books'), findsOne);
       expect(find.text('Shelf'), findsOne);
       expect(find.text('List'), findsOne);
       expect(tester.takeException(), isNull);
@@ -113,7 +113,7 @@ void main() {
 
       expect(stickyToolbarFinder, findsOne);
       expect(secondaryControlsFinder, findsOne);
-      expect(find.text('Books'), findsOne);
+      expect(find.text('All Books'), findsOne);
       expect(find.text('Recent'), findsOne);
       expect(find.text('Shelf'), findsOne);
       expect(find.text('List'), findsOne);
@@ -160,7 +160,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(stickyToolbarFinder, findsOne);
-      expect(find.text('Books'), findsOne);
+      expect(find.text('All Books'), findsOne);
       expect(find.text('Shelf'), findsOne);
       expect(tester.takeException(), isNull);
     },
@@ -181,7 +181,7 @@ void main() {
       tester.view.physicalSize = _kTallDesktop;
       await tester.pumpAndSettle();
       expect(stickyToolbarFinder, findsNothing);
-      expect(find.text('Books'), findsOne);
+      expect(find.text('All Books'), findsOne);
       expect(tester.takeException(), isNull);
     },
   );
@@ -196,7 +196,7 @@ void main() {
       _kTallDesktop,
     ]) {
       await pumpLibrary(tester, size);
-      expect(find.text('Books'), findsOne, reason: 'at size $size');
+      expect(find.text('All Books'), findsOne, reason: 'at size $size');
       expect(find.text('Shelf'), findsOne, reason: 'at size $size');
       expect(find.text('List'), findsOne, reason: 'at size $size');
       expect(tester.takeException(), isNull, reason: 'at size $size');

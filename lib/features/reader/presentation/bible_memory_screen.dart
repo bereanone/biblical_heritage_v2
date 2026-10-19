@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/bible_memory_repository.dart';
 import 'bible_memory_practice_screen.dart';
+import 'bible_memory_audio.dart';
 import 'bible_memory_support.dart';
 import 'viewer_reference_picker.dart';
 
@@ -461,6 +462,21 @@ class _BibleMemoryScreenState extends State<BibleMemoryScreen> {
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
+                                    IconButton(
+                                      tooltip: 'Listen to memory passage',
+                                      onPressed: () =>
+                                          showMemoryAudioPopup(context, item),
+                                      icon: const Icon(
+                                        Icons.headphones_rounded,
+                                      ),
+                                      constraints:
+                                          const BoxConstraints.tightFor(
+                                            width: 40,
+                                            height: 40,
+                                          ),
+                                      padding: const EdgeInsets.all(6),
+                                      visualDensity: VisualDensity.compact,
+                                    ),
                                     IconButton(
                                       tooltip: 'Drill memory verse',
                                       onPressed: () => _openPractice(item),

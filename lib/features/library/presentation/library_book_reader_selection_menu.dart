@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../reader/presentation/tag_dialog_styles.dart';
 
 enum LibrarySelectionRangeAction {
+  playFromHere,
   copyNoCitation,
   copyWithCitation,
   copyWithMarkup,
@@ -30,6 +31,7 @@ Future<LibrarySelectionRangeAction?> showLibrarySelectionRangeActionsSheet(
   BuildContext context, {
   required LibrarySelectionRangeActionsPayload payload,
   required double fontScale,
+  bool showPlayFromHere = true,
   bool showRichCopy = true,
   bool showUnderline = false,
 }) {
@@ -110,6 +112,15 @@ Future<LibrarySelectionRangeAction?> showLibrarySelectionRangeActionsSheet(
                           spacing: 8,
                           runSpacing: 8,
                           children: [
+                            if (showPlayFromHere)
+                              _SelectionActionButton(
+                                icon: Icons.play_arrow,
+                                label: 'Play from here',
+                                fontScale: fontScale,
+                                onTap: () => Navigator.of(
+                                  sheetContext,
+                                ).pop(LibrarySelectionRangeAction.playFromHere),
+                              ),
                             _SelectionActionButton(
                               icon: Icons.copy_outlined,
                               label: 'Copy No Citation',

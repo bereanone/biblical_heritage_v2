@@ -13,6 +13,7 @@ import '../../library/data/library_citation_display_helper.dart';
 import '../../library/data/library_catalog_service.dart'
     show extractLibrarySearchHighlightTerms;
 import '../data/presentation/presentation_models.dart';
+import '../data/tags/shared_list_text_blocks.dart';
 import '../data/presentation/presentation_text_format.dart';
 import 'viewer_passage_models.dart';
 import 'viewer_range_selection.dart';
@@ -167,14 +168,29 @@ String? bibleItemOverlayDisplayTextOverride(Object? raw) {
 }
 
 String? bibleItemOverlayNoteFormatJson(Object? raw) {
-  final overlay = parseBibleItemOverlay(raw);
-  if (overlay != null) {
-    final nested = overlay.noteFormatJson?.trim() ?? '';
-    if (nested.isNotEmpty) return nested;
-    return null;
+  final rawText=(raw?.toString()??'').trim();
+  final overlay=parseBibleItemOverlay(raw);
+  if(overlay==null)return rawText.isEmpty?null:rawText;
+  var nested=overlay.noteFormatJson?.trim()??'';
+  bool? latestLink;
+  // Earlier legacy reads could rewrap an overlay while toggling a link.
+  // Unwrap those layers on read; retain the most recent explicit link flag.
+  for(var depth=0;depth<16 && nested.isNotEmpty;depth++) {
+    try {
+      final data=jsonDecode(nested);
+      if(data is Map && latestLink==null && data['link_with_next'] is bool) latestLink=data['link_with_next'] as bool;
+    }catch(_){break;}
+    final layer=parseBibleItemOverlay(nested);
+    if(layer==null)break;
+    nested=layer.noteFormatJson?.trim()??'';
   }
-  final rawText = (raw?.toString() ?? '').trim();
-  return rawText.isEmpty ? null : rawText;
+  if(latestLink!=null) {
+    try {
+      final data=Map<String,dynamic>.from(jsonDecode(nested.isEmpty?'{}':nested) as Map);
+      data['link_with_next']=latestLink;return jsonEncode(data);
+    }catch(_){return nested.isEmpty?null:nested;}
+  }
+  return nested.isEmpty?null:nested;
 }
 
 String? bibleItemOverlayTitleFormatJson(Object? raw) {
@@ -1623,7 +1639,11 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
               shareId: row['share_id']?.toString(),
               contentHtml: row['content_html']?.toString(),
               noteText: row['note_text']?.toString(),
-              noteFormatJson: row['note_format_json']?.toString(),
+              userTitle:bibleItemOverlayUserTitle(row['note_format_json']),
+              displayTextOverride:bibleItemOverlayDisplayTextOverride(row['note_format_json']),
+              titleFormatJson:bibleItemOverlayTitleFormatJson(row['note_format_json']),
+              displayTextFormatJson:bibleItemOverlayDisplayTextFormatJson(row['note_format_json']),
+              noteFormatJson:bibleItemOverlayNoteFormatJson(row['note_format_json']),
             ),
           )
           .toList(growable: false);
@@ -1658,6 +1678,11 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
             sortOrder: entries[i].sortOrder,
             isNormalized: false,
             presentationSlideNumber: entries[i].presentationSlideNumber,
+            presentationSlideRegion:entries[i].presentationSlideRegion,
+            userTitle:entries[i].userTitle,
+            displayTextOverride:entries[i].displayTextOverride,
+            titleFormatJson:entries[i].titleFormatJson,
+            displayTextFormatJson:entries[i].displayTextFormatJson,
             referenceCode: entries[i].referenceCode,
             contentHtml: entries[i].contentHtml,
             noteText: entries[i].noteText,
@@ -3855,37 +3880,10 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     List<String> lines,
     String tagName,
   ) {
-    final blocks = <List<String>>[];
-    var current = <String>[];
-    for (final rawLine in lines) {
-      final line = rawLine.replaceAll('\r', '');
-      final normalized = line.trim();
-      // A blank line ends the current card. This must be checked BEFORE the
-      // wrapper/header skip below, because _isSharedListWrapperLine() returns
-      // true for empty strings — if the wrapper check ran first it would
-      // `continue` past this break, silently merging blank-separated cards
-      // (e.g. a trailing readable eLibrary block) into the preceding card.
-      if (normalized.isEmpty) {
-        if (current.isNotEmpty) {
-          blocks.add(current);
-          current = <String>[];
-        }
-        continue;
-      }
-      if (_isSharedListWrapperLine(normalized) ||
-          _isSharedListHeaderLine(normalized, tagName)) {
-        continue;
-      }
-      if (current.isNotEmpty && _isSharedSlideStartLine(normalized)) {
-        blocks.add(current);
-        current = <String>[];
-      }
-      current.add(line);
-    }
-    if (current.isNotEmpty) {
-      blocks.add(current);
-    }
-    return blocks;
+    return splitSharedListTextBlocks(lines,
+      isWrapper:_isSharedListWrapperLine,
+      isListHeader:(line)=>_isSharedListHeaderLine(line,tagName),
+      isSlideStart:_isSharedSlideStartLine);
   }
 
   _ParsedSharedSlide _parseSharedSlideBlock(
@@ -3997,6 +3995,13 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         elibraryMetadata: elibraryMetadata,
         studyBibleMetadata: studyBibleMetadata,
       );
+    }
+
+    if (isSharedNoteHeading(firstLine)) {
+      final content=_extractSharedNoteContent(block,tagName);
+      final metadata=<String,Object?>{'kind':'studybible_note','reference_code':firstLine,'note_text':content};
+      final key=_sharedStudyBibleMetadataKey(metadata:metadata,block:block,kind:'note');
+      return _ParsedSharedSlide(target:null,contentText:content,noteRef:'note:$key',studyBibleMetadata:metadata);
     }
 
     if (_looksLikeSharedNoteBlock(block)) {

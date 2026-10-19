@@ -432,6 +432,10 @@ class BibleMemorySupport {
                 style: TextStyle(fontWeight: FontWeight.w700),
               ),
               SizedBox(height: 8),
+              Text(
+                '• Headphones beside an entry: open its audio controls. Play reads the saved verse or range; Loop repeats it. Closing the audio popup stops playback. Audio listening does not change your recall-drill results.',
+              ),
+              SizedBox(height: 6),
               Text('• Add Verse: memorize a single verse.'),
               SizedBox(height: 6),
               Text('• Add Range: memorize a passage range.'),

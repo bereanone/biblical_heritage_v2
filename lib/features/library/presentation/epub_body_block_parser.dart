@@ -156,7 +156,9 @@ class _SectionBlockView extends StatelessWidget {
       children: [
         ...buildLibraryInteractiveEpubSpans(
           html: displayHtml,
-          citationRecognizer: rangeSelection.hasSelection ? null : citationRecognizer,
+          citationRecognizer: rangeSelection.hasSelection
+              ? null
+              : citationRecognizer,
           citationResolves: citationResolves,
           fallbackText: displayText,
           baseStyle: resolvedStyle,
@@ -258,6 +260,26 @@ class _SectionBlockView extends StatelessWidget {
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
             onTap: onBlockTap,
+            onTapUp: onBlockTap != null
+                ? null
+                : (details) {
+                    final tokenIndex = hitTestLibraryInteractiveEpubTokenIndex(
+                      html: displayHtml,
+                      fallbackText: displayText,
+                      baseStyle: resolvedStyle,
+                      maxWidth: textWidth,
+                      localPosition: Offset(
+                        (details.localPosition.dx - (isBlockquote ? 12 : 0))
+                            .clamp(0.0, textWidth),
+                        details.localPosition.dy,
+                      ),
+                      textDirection: Directionality.of(context),
+                      textAlign: textAlign,
+                      highlightQuery: searchQuery,
+                      highlightTerms: highlightTerms,
+                    );
+                    if (tokenIndex != null) onWordTap(tokenIndex);
+                  },
             onLongPressStart: (details) {
               final localPosition = Offset(
                 (details.localPosition.dx - (isBlockquote ? 12 : 0)).clamp(

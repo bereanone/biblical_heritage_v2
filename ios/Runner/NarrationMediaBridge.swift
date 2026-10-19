@@ -16,6 +16,17 @@ final class NarrationMediaBridge: NSObject {
   private var recordedAudio: RecordedBibleAudioBridge?
   private let probeChannel: FlutterMethodChannel
   private var active = false
+  private var dartActive = false
+  private var nativePlaybackActive = false
+  var nativeCommandHandler: ((String) -> Bool)?
+
+  /// Both players share one remote-command registration. A native Watch
+  /// recording must own headset controls even before the reader opens.
+  func setNativePlaybackActive(_ playing: Bool) {
+    nativePlaybackActive = playing
+    if playing { begin() }
+    else if !dartActive { end() }
+  }
   private var commandTargets: [(MPRemoteCommand, Any)] = []
   private var observers: [NSObjectProtocol] = []
   private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -54,9 +65,11 @@ final class NarrationMediaBridge: NSObject {
     case "keepReaderAwake":
       UIApplication.shared.isIdleTimerDisabled = call.arguments as? Bool ?? false
     case "begin":
+      dartActive = true
       begin()
     case "end":
-      end()
+      dartActive = false
+      if !nativePlaybackActive { end() }
     case "updateNowPlaying":
       if let arguments = call.arguments as? [String: Any] { updateNowPlaying(arguments) }
     case "setBuffering":
@@ -158,11 +171,13 @@ final class NarrationMediaBridge: NSObject {
       command.isEnabled = true
       let target = command.addTarget { [weak self] _ in
         DispatchQueue.main.async {
+          guard let self else { return }
+          if self.nativeCommandHandler?(name) == true { return }
           // A play from the lock screen wakes a suspended app for only a
           // moment. Hold background time now rather than after Dart has
           // scheduled its own request, so the first clip can be finished.
-          if name == "play" || name == "toggle" { self?.holdForCommand() }
-          self?.channel.invokeMethod("command", arguments: name)
+          if name == "play" || name == "toggle" { self.holdForCommand() }
+          self.channel.invokeMethod("command", arguments: name)
         }
         return .success
       }

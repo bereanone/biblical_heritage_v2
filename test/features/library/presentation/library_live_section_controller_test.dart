@@ -14,6 +14,92 @@ void main() {
     generation: generation,
   );
 
+  const labels = {
+    'support': 'Ellen White’s Support',
+    'chapter-1': 'Chapter 1 — Living By Faith',
+    'chapter-2': 'Chapter 2 — Lessons On Faith',
+  };
+
+  test('shared EPUB file does not keep Contents on its first entry', () {
+    expect(
+      libraryLiveContentsNavigationId(
+        location: location(
+          navigationId: 'support',
+          entryName: 'book.xhtml',
+          label: 'Chapter 1 — Living By Faith',
+          generation: 1,
+        ),
+        labelsById: labels,
+        fallbackId: 'support',
+      ),
+      'chapter-1',
+    );
+  });
+
+  test('Contents advances with live heading despite stale navigation ID', () {
+    final controller = LibraryLiveSectionController();
+    addTearDown(controller.dispose);
+    final selections = <String?>[];
+    controller.addListener(
+      () => selections.add(
+        libraryLiveContentsNavigationId(
+          location: controller.value,
+          labelsById: labels,
+          fallbackId: 'support',
+        ),
+      ),
+    );
+    for (var chapter = 1; chapter <= 2; chapter++) {
+      controller.update(
+        location(
+          navigationId: 'support',
+          entryName: 'book.xhtml',
+          label: labels['chapter-$chapter']!,
+          generation: chapter,
+        ),
+      );
+    }
+    expect(selections, ['chapter-1', 'chapter-2']);
+  });
+
+  test('Contents tolerates heading punctuation and preserves fallback', () {
+    expect(
+      libraryLiveContentsNavigationId(
+        location: location(
+          navigationId: 'support',
+          entryName: 'book.xhtml',
+          label: 'CHAPTER 1 - Living By Faith',
+          generation: 1,
+        ),
+        labelsById: labels,
+      ),
+      'chapter-1',
+    );
+    expect(
+      libraryLiveContentsNavigationId(
+        location: null,
+        labelsById: labels,
+        fallbackId: 'chapter-2',
+      ),
+      'chapter-2',
+    );
+  });
+
+  test('duplicate headings do not select an unrelated chapter', () {
+    expect(
+      libraryLiveContentsNavigationId(
+        location: location(
+          navigationId: 'second',
+          entryName: 'two.xhtml',
+          label: 'Introduction',
+          generation: 1,
+        ),
+        labelsById: {'first': 'Introduction', 'second': 'Introduction'},
+      ),
+      'second',
+    );
+  });
+
   test('initial and subsequent readable sections remain current', () {
     final controller = LibraryLiveSectionController();
     addTearDown(controller.dispose);

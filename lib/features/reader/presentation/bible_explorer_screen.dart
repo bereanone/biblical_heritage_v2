@@ -63,7 +63,6 @@ import 'viewer_top_bar.dart';
 import 'viewer_search_dialog.dart';
 import 'viewer_search_models.dart';
 import 'viewer_topic_picker.dart';
-import 'presentation_prep/presentation_ui_helpers.dart';
 import 'presentation_prep/tag_presentation_prep_launcher.dart';
 import 'presentation_prep/tag_presentation_prep_models.dart';
 import 'presentation_prep/tag_saved_presentations_screen.dart';
@@ -78,8 +77,6 @@ part 'bible_explorer_range_actions.dart';
 const double _minFontScale = 0.8;
 const double _maxFontScale = 2.4;
 const double _fontStep = 0.1;
-const String _iphoneForwardTiltDefaultKey =
-    'bible_iphone_forward_tilt_default_v1';
 
 enum _BibleLoopMode { off, verse, chapter, book }
 
@@ -92,6 +89,7 @@ class _LexicalSourceContext {
     required this.strongsId,
     required this.readerPosition,
     this.morphologyTag,
+    this.alternateStrongsIds = const [],
     this.occurrenceState = const ViewerStrongsOccurrenceViewState(),
     this.panelScrollOffset = 0,
     this.returnToOccurrences = false,
@@ -102,11 +100,18 @@ class _LexicalSourceContext {
   final String phrase;
   final int tokenIndex;
   final String strongsId;
+  final List<String> alternateStrongsIds;
   final ViewerReaderScrollPosition? readerPosition;
   final String? morphologyTag;
   final ViewerStrongsOccurrenceViewState occurrenceState;
   final double panelScrollOffset;
   final bool returnToOccurrences;
+
+  _LexicalSourceContext withStrongsId(String id) => _LexicalSourceContext(
+    blockId: blockId, reference: reference, phrase: phrase,
+    tokenIndex: tokenIndex, strongsId: id, readerPosition: readerPosition,
+    morphologyTag: morphologyTag, alternateStrongsIds: alternateStrongsIds,
+  );
 
   _LexicalSourceContext withOccurrenceState(
     ViewerStrongsOccurrenceViewState state,
@@ -116,6 +121,7 @@ class _LexicalSourceContext {
     phrase: phrase,
     tokenIndex: tokenIndex,
     strongsId: strongsId,
+    alternateStrongsIds: alternateStrongsIds,
     readerPosition: readerPosition,
     morphologyTag: morphologyTag,
     occurrenceState: state,
@@ -130,6 +136,7 @@ class _LexicalSourceContext {
         phrase: phrase,
         tokenIndex: tokenIndex,
         strongsId: strongsId,
+    alternateStrongsIds: alternateStrongsIds,
         readerPosition: readerPosition,
         morphologyTag: morphologyTag,
         occurrenceState: occurrenceState,
@@ -158,6 +165,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     with WidgetsBindingObserver {
   String _viewerStatus = 'Loading Bible Explorer...';
   String? _viewerLoadError;
+  String? _feedbackMessage;
   int _bookNumber = 1;
   int _chapter = 1;
   int _verse = 1;
@@ -347,6 +355,12 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     });
   }
 
+  void _showReaderFeedback(BuildContext context, String message, {
+    required double fontScale, bool isRapid = false,
+  }) {
+    if (!isRapid && mounted) setState(() => _feedbackMessage = message);
+  }
+
   void _bumpMarkupRefresh() {
     if (!mounted) return;
     setState(() {
@@ -436,6 +450,11 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
             SafeArea(
               child: Column(
                 children: [
+                  if (_feedbackMessage != null)
+                    Semantics(liveRegion: true, child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(_feedbackMessage!, style: TextStyle(
+                        color: Theme.of(context).colorScheme.error)))),
                   ValueListenableBuilder<BibleVisibleLocation?>(
                     valueListenable: _liveVisibleLocation,
                     builder: (context, liveLocation, _) {
@@ -625,6 +644,10 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
                       _stopReaderAutoscroll();
                       _openCommentary();
                     },
+                    onMemory: () {
+                      _stopReaderAutoscroll();
+                      _openBibleMemory();
+                    },
                     onMode: () {
                       _stopReaderAutoscroll();
                       _openMode();
@@ -702,6 +725,10 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     final next = !_interlinearEnabled;
     setState(() {
       _interlinearEnabled = next;
+      if (!next) {
+        _selectedMappedBlockId = null;
+        _selectedMappedTokenIndex = null;
+      }
     });
   }
 
@@ -795,9 +822,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     NarrationDiagnostics.log('bible narration FAILED: $message');
     if (!mounted) return;
     _macAutoScroll?.stopForManualInteraction();
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Speech stopped: $message')));
+    setState(() => _feedbackMessage = 'Speech stopped: $message');
   }
 
   Future<void> _syncBundledNarration() async {
@@ -1447,9 +1472,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     } catch (error) {
       debugPrint('Watch playback handoff failed: $error');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Watch playback handoff stopped: $error')),
-        );
+        setState(() => _feedbackMessage = 'Watch playback handoff stopped: $error');
       }
     } finally {
       _watchHandoffInProgress = false;
@@ -1462,21 +1485,29 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     if (controller == null) throw StateError('Reader audio unavailable');
     if (command.startsWith('next:') || command.startsWith('previous:')) {
       final parts = command.split(':');
-      final scope = _BibleLoopMode.values.firstWhere((mode) => mode.name == parts.last);
+      final scope = _BibleLoopMode.values.firstWhere(
+        (mode) => mode.name == parts.last,
+      );
       await _skipBundledBible(parts.first == 'next', navigationScope: scope);
       await _publishWatchState();
       return;
     }
-    if (command.startsWith('book:') || command.startsWith('chapter:') || command.startsWith('verse:')) {
+    if (command.startsWith('book:') ||
+        command.startsWith('chapter:') ||
+        command.startsWith('verse:')) {
       final parts = command.split(':');
       final number = int.tryParse(parts.last);
       if (number == null || number < 1) throw StateError('Invalid passage');
       final book = parts.first == 'book' ? number : _bookNumber;
-      final chapter = parts.first == 'chapter' ? number : (parts.first == 'verse' ? _chapter : 1);
+      final chapter = parts.first == 'chapter'
+          ? number
+          : (parts.first == 'verse' ? _chapter : 1);
       final verse = parts.first == 'verse' ? number : 1;
       if (book < 1 || book > 66) throw StateError('Invalid book');
       final block = await StudyBibleDatabase.instance.loadBlockIdForVerse(
-        bookNumber: book, chapter: chapter, verse: verse,
+        bookNumber: book,
+        chapter: chapter,
+        verse: verse,
       );
       if (block == null) throw StateError('Book is unavailable');
       controller.setSignedStep(0);
@@ -1632,9 +1663,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       await _bundledNarrator?.setAnnouncementsForCurrent(_loopAnnouncements);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Announcement could not start: $error')),
-      );
+      setState(() => _feedbackMessage = 'Announcement could not start: $error');
     }
   }
 
@@ -1689,13 +1718,17 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     }
   }
 
-  Future<void> _skipBundledBible(bool forward, {_BibleLoopMode? navigationScope}) async {
+  Future<void> _skipBundledBible(
+    bool forward, {
+    _BibleLoopMode? navigationScope,
+  }) async {
     final controller = _macAutoScroll;
     final narrator = _bundledNarrator;
     if (_bundledSkipInProgress || controller == null || narrator == null) {
       return;
     }
-    final current = navigationScope != null || _bibleLoopMode == _BibleLoopMode.off
+    final current =
+        navigationScope != null || _bibleLoopMode == _BibleLoopMode.off
         ? _bundledHeaderLocation()
         : (_bibleLoopTarget ?? _bundledHeaderLocation());
     if (current == null) return;
@@ -1884,19 +1917,8 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
   }
 
   Future<void> _loadTiltPreferences() async {
-    var preferences = await _tiltPreferencesStore.load();
+    final preferences = await _tiltPreferencesStore.load();
     if (!mounted) return;
-    // Change the existing iPhone default once, without changing iPad or Mac
-    // behavior. A later explicit direction choice remains saved.
-    if (Platform.isIOS && MediaQuery.sizeOf(context).shortestSide < 600) {
-      final settings = await LocalSettingsStore.instance.load();
-      if (settings[_iphoneForwardTiltDefaultKey] != true) {
-        preferences = preferences.copyWith(reverseVerticalDirection: true);
-        settings[ReaderTiltPreferencesStore.storageKey] = preferences.toJson();
-        settings[_iphoneForwardTiltDefaultKey] = true;
-        await LocalSettingsStore.instance.save(settings);
-      }
-    }
     if (mounted) {
       _tiltAutoScroll.updatePreferences(preferences, showBanner: false);
     }
@@ -2072,7 +2094,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         _bumpMarkupRefresh();
         return;
       }
-      showReadableSnackBar(
+      _showReaderFeedback(
         context,
         result.inserted == 0 && result.skipped > 0
             ? 'Already in ${result.tag}'
@@ -2111,7 +2133,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       _bumpMarkupRefresh();
     } catch (error) {
       if (!mounted) return;
-      showReadableSnackBar(
+      _showReaderFeedback(
         context,
         'Could not open # tags: $error',
         fontScale: _fontScale,
@@ -2151,7 +2173,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       );
     } catch (error) {
       if (!mounted) return;
-      showReadableSnackBar(
+      _showReaderFeedback(
         context,
         'Could not open presentation setup: $error',
         fontScale: _fontScale,
@@ -2191,7 +2213,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       );
     } catch (error) {
       if (!mounted) return;
-      showReadableSnackBar(
+      _showReaderFeedback(
         context,
         'Could not open rapid # tags: $error',
         fontScale: _fontScale,

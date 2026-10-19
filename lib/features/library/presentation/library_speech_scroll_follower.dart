@@ -48,6 +48,7 @@ const _followDuration = Duration(milliseconds: 280);
 Future<bool> followSpeechInBlock({
   required BuildContext blockContext,
   required double progress,
+  bool continuous = false,
 }) async {
   if (!blockContext.mounted) return false;
   final scrollable = Scrollable.maybeOf(blockContext, axis: Axis.vertical);
@@ -63,12 +64,26 @@ Future<bool> followSpeechInBlock({
     return false;
   }
   final blockTop = box.localToGlobal(Offset.zero, ancestor: viewport).dy;
-  final delta = librarySpeechFollowDelta(
-    sliceTop: blockTop + progress * box.size.height,
+  final sliceTop = blockTop + progress.clamp(0.0, 1.0) * box.size.height;
+  final bandDelta = librarySpeechFollowDelta(
+    sliceTop: sliceTop,
     viewportHeight: viewport.size.height,
   );
+  // A tall recorded paragraph moves gradually with playback instead of
+  // waiting for a large jump at the next paragraph or comfort-band edge.
+  final forwardDelta = sliceTop - viewport.size.height * .35;
+  final delta = continuous && box.size.height > viewport.size.height
+      ? (forwardDelta > 1
+            ? forwardDelta
+            : (bandDelta != null && bandDelta < 0 ? bandDelta : null))
+      : bandDelta;
   if (delta == null) return false;
-  return animateSpeechFollow(scrollable.position, delta);
+  return animateSpeechFollow(
+    scrollable.position,
+    delta,
+    duration: continuous ? const Duration(milliseconds: 400) : _followDuration,
+    curve: continuous ? Curves.linear : Curves.easeOutCubic,
+  );
 }
 
 /// Scrolls [position] by [delta] pixels, clamped to its extent.
@@ -84,7 +99,15 @@ Future<bool> animateSpeechFollow(
     position.maxScrollExtent,
   );
   if ((target - position.pixels).abs() <= 1) return false;
-  await position.animateTo(target, duration: duration, curve: curve);
+  final animation = position.animateTo(
+    target,
+    duration: duration,
+    curve: curve,
+  );
+  // Driven scrolling normally absorbs hits on the text. Narration must remain
+  // interruptible by a word press, even when follow animations are continuous.
+  position.context.setIgnorePointer(false);
+  await animation;
   return true;
 }
 
@@ -102,4 +125,22 @@ class LibrarySpeechFollowHandle {
       _follow = callback;
 
   void detach() => _follow = null;
+}
+
+/// Forward playback never pulls text back down after revealing a paragraph.
+/// Tall paragraphs advance continuously; short paragraphs stay in place while
+/// their spoken text is comfortably visible. Explicit seeks are handled by
+/// the reader before applying this correction.
+double? recordedSpeechFollowDelta({
+  required double spokenTop,
+  required double paragraphHeight,
+  required double viewportHeight,
+}) {
+  if (viewportHeight <= 0) return null;
+  if (paragraphHeight <= viewportHeight &&
+      spokenTop <= viewportHeight * librarySpeechComfortBottom) {
+    return null;
+  }
+  final delta = spokenTop - viewportHeight * .5;
+  return delta > 1 ? delta : null;
 }

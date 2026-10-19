@@ -397,7 +397,19 @@ class _BookList extends StatelessWidget {
 
     onInitialScroll();
 
-    return ScrollConfiguration(
+    return LayoutBuilder(builder: (context, constraints) {
+      final columnWidth = (constraints.maxWidth - 36 - 12) / 2;
+      final fittedFontSize = fitBookPickerFontSize(
+        labels: books.map((book) => book.bookName),
+        baseStyle: DefaultTextStyle.of(context).style,
+        requestedSize: MediaQuery.textScalerOf(context).scale(pickerFontSize),
+        availableTextWidth: columnWidth - (largerPhoneControls ? 16 : 12),
+        textDirection: Directionality.of(context),
+      );
+      // The requested system/app scaling was applied above, then capped to fit.
+      return MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+        child: ScrollConfiguration(
       behavior: const MaterialScrollBehavior().copyWith(overscroll: false),
       child: SingleChildScrollView(
         controller: scrollController,
@@ -427,9 +439,10 @@ class _BookList extends StatelessWidget {
                           color: viewerBookGroupColor(leftBook.bookNumber),
                           selected: leftExpanded,
                           onTap: () => onToggleBook(leftBook),
-                          fontSize: pickerFontSize,
+                          fontSize: fittedFontSize,
                           minimumTapHeight: largerPhoneControls ? 48 : 0,
                           expandWidth: false,
+                          singleLine: true,
                         ),
                       ),
                     ),
@@ -446,9 +459,10 @@ class _BookList extends StatelessWidget {
                                 ),
                                 selected: rightExpanded,
                                 onTap: () => onToggleBook(rightBook),
-                                fontSize: pickerFontSize,
+                                fontSize: fittedFontSize,
                                 minimumTapHeight: largerPhoneControls ? 48 : 0,
                                 expandWidth: false,
+                          singleLine: true,
                               ),
                             ),
                     ),
@@ -465,7 +479,7 @@ class _BookList extends StatelessWidget {
                     onSelectChapter: onSelectChapter,
                     onSelectVerse: onSelectVerse,
                     largerPhoneControls: largerPhoneControls,
-                    pickerFontSize: pickerFontSize,
+                    pickerFontSize: fittedFontSize,
                   ),
                 if (rightExpanded)
                   _ChapterAndVerseSelector(
@@ -478,14 +492,16 @@ class _BookList extends StatelessWidget {
                     onSelectChapter: onSelectChapter,
                     onSelectVerse: onSelectVerse,
                     largerPhoneControls: largerPhoneControls,
-                    pickerFontSize: pickerFontSize,
+                    pickerFontSize: fittedFontSize,
                   ),
               ],
             );
           }),
         ),
       ),
-    );
+    ),
+      );
+    });
   }
 }
 

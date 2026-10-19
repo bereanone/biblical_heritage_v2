@@ -28,7 +28,7 @@ void main() {
 
   test('defaults and ranges are stable', () {
     const defaults = ReaderTiltPreferences.defaults;
-    expect(defaults.reverseVerticalDirection, isFalse);
+    expect(defaults.reverseVerticalDirection, isTrue);
     expect(defaults.neutralZoneFraction, closeTo(0.05, 0.0001));
     expect(defaults.speedMultiplier, 1);
     expect(defaults.horizontalChapterTiltEnabled, isFalse);
@@ -36,6 +36,20 @@ void main() {
     expect(defaults.horizontalSensitivity, 0.5);
     expect(defaults.horizontalChapterTiltAvailabilityMigrated, isFalse);
     expect(defaults.statusBannerMode, ReaderTiltStatusBannerMode.autoHide);
+  });
+
+  test('absent direction uses forward-up while saved choice wins', () {
+    expect(
+      ReaderTiltPreferences.fromJson(null).reverseVerticalDirection,
+      isTrue,
+    );
+    expect(ReaderTiltPreferences.fromJson({}).reverseVerticalDirection, isTrue);
+    expect(
+      ReaderTiltPreferences.fromJson({
+        'reverse_vertical_direction': false,
+      }).reverseVerticalDirection,
+      isFalse,
+    );
   });
 
   test('JSON round trip preserves every preference', () {
@@ -60,10 +74,10 @@ void main() {
     expect(restored.statusBannerMode, ReaderTiltStatusBannerMode.alwaysHidden);
   });
 
-  test('preferences persist across store reopen', () async {
+  test('explicit opposite direction persists across store reopen', () async {
     const store = ReaderTiltPreferencesStore();
     const saved = ReaderTiltPreferences(
-      reverseVerticalDirection: true,
+      reverseVerticalDirection: false,
       neutralZoneFraction: 0.09,
       speedMultiplier: 1.5,
       horizontalChapterTiltEnabled: true,

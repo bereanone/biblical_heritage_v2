@@ -912,7 +912,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
             List<({String text, int? number})> author,
           })
         >[
-          for (final item in filtered)
+          for (final item in selectDistinctLibraryFiles(filtered))
             (
               item: item,
               title: _naturalSortKey(_sortableTitle(item.displayTitle)),
@@ -1110,6 +1110,13 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
                   onRefresh: _refreshFolders,
                   onOpenCaptureImports: _openCaptureImports,
                 ),
+                BundledAudioStatus(
+                  sourceHashes: _items
+                      .where(libraryItemIsNormallyReadable)
+                      .map((item) => item.fileHash)
+                      .whereType<String>()
+                      .toSet(),
+                ),
                 const SizedBox(height: 12),
                 Expanded(
                   child: DecoratedBox(
@@ -1248,6 +1255,8 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
                                 onChanged: _setInitialLetter,
                               ),
                               const SizedBox(height: 10),
+                            ],
+                            if (_tab != _LibraryTab.recent) ...[
                               _ViewToggleRow(
                                 view: _view,
                                 onViewChanged: _setView,
@@ -1397,7 +1406,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
                                     selectedTab: _tab,
                                     onChanged: _setTab,
                                   ),
-                                  if (_tab == _LibraryTab.books)
+                                  if (_tab != _LibraryTab.recent)
                                     _ViewToggleRow(
                                       view: _view,
                                       onViewChanged: _setView,

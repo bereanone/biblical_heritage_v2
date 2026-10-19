@@ -100,7 +100,7 @@ void main() {
     final normal = readerTiltSpeedForPreferences(
       angle,
       settings,
-      ReaderTiltPreferences.defaults,
+      const ReaderTiltPreferences(reverseVerticalDirection: false),
     );
     final reversed = readerTiltSpeedForPreferences(
       angle,
@@ -112,12 +112,18 @@ void main() {
     final moreSensitive = readerTiltSpeedForPreferences(
       1 * math.pi / 180,
       settings,
-      const ReaderTiltPreferences(neutralZoneFraction: 0.02),
+      const ReaderTiltPreferences(
+        reverseVerticalDirection: false,
+        neutralZoneFraction: 0.02,
+      ),
     );
     final lessSensitive = readerTiltSpeedForPreferences(
       1 * math.pi / 180,
       settings,
-      const ReaderTiltPreferences(neutralZoneFraction: 0.10),
+      const ReaderTiltPreferences(
+        reverseVerticalDirection: false,
+        neutralZoneFraction: 0.10,
+      ),
     );
     expect(moreSensitive, greaterThan(0));
     expect(lessSensitive, 0);
@@ -125,12 +131,18 @@ void main() {
     final slower = readerTiltSpeedForPreferences(
       angle,
       settings,
-      const ReaderTiltPreferences(speedMultiplier: 0.5),
+      const ReaderTiltPreferences(
+        reverseVerticalDirection: false,
+        speedMultiplier: 0.5,
+      ),
     );
     final faster = readerTiltSpeedForPreferences(
       angle,
       settings,
-      const ReaderTiltPreferences(speedMultiplier: 2),
+      const ReaderTiltPreferences(
+        reverseVerticalDirection: false,
+        speedMultiplier: 2,
+      ),
     );
     expect(faster, closeTo(slower * 4, 0.001));
   });
@@ -140,6 +152,7 @@ void main() {
   ) async {
     final source = FakeReaderTiltMotionSource();
     final controller = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: source,
       scrollTarget: CallbackReaderAutoScrollTarget(),
       settings: settings,
@@ -166,6 +179,9 @@ void main() {
       final source = FakeReaderTiltMotionSource();
       final boost = FakeReaderAutoScrollFrameRateBoost();
       final controller = ReaderTiltAutoScrollController(
+        preferences: const ReaderTiltPreferences(
+          reverseVerticalDirection: false,
+        ),
         motionSource: source,
         scrollTarget: CallbackReaderAutoScrollTarget(),
         settings: settings,
@@ -194,6 +210,9 @@ void main() {
       final source = FakeReaderTiltMotionSource();
       final boost = FakeReaderAutoScrollFrameRateBoost();
       final controller = ReaderTiltAutoScrollController(
+        preferences: const ReaderTiltPreferences(
+          reverseVerticalDirection: false,
+        ),
         motionSource: source,
         scrollTarget: CallbackReaderAutoScrollTarget(),
         settings: settings,
@@ -230,6 +249,7 @@ void main() {
       ),
     );
     final controller = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: source,
       scrollTarget: ScrollControllerReaderAutoScrollTarget(scroll),
       settings: settings,
@@ -275,6 +295,7 @@ void main() {
         scrollTarget: target,
         settings: settings,
         preferences: const ReaderTiltPreferences(
+          reverseVerticalDirection: false,
           horizontalChapterTiltEnabled: true,
         ),
         canChangeChapter: (_) => true,
@@ -329,6 +350,7 @@ void main() {
     final source = FakeReaderTiltMotionSource();
     final transitions = <ReaderChapterTiltDirection>[];
     final controller = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: source,
       scrollTarget: CallbackReaderAutoScrollTarget()..attach((_) => false),
       settings: settings,
@@ -369,6 +391,7 @@ void main() {
         return true;
       });
     final controller = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: source,
       scrollTarget: target,
       settings: settings,
@@ -413,6 +436,7 @@ void main() {
     final target = CallbackReaderAutoScrollTarget();
     var boundaryRequests = 0;
     final controller = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: source,
       scrollTarget: target,
       settings: settings,
@@ -460,6 +484,9 @@ void main() {
       var boundaryCallbacks = 0;
       var sectionIndex = 2;
       final controller = ReaderTiltAutoScrollController(
+        preferences: const ReaderTiltPreferences(
+          reverseVerticalDirection: false,
+        ),
         motionSource: source,
         scrollTarget: target,
         settings: settings,
@@ -501,6 +528,7 @@ void main() {
   testWidgets('sample smoothing dampens a noisy jump', (tester) async {
     final source = FakeReaderTiltMotionSource();
     final controller = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: source,
       scrollTarget: CallbackReaderAutoScrollTarget(),
       settings: const ReaderTiltAutoScrollSettings(
@@ -526,6 +554,7 @@ void main() {
   ) async {
     final source = FakeReaderTiltMotionSource();
     final controller = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: source,
       scrollTarget: CallbackReaderAutoScrollTarget(),
       settings: settings,
@@ -550,6 +579,9 @@ void main() {
     (tester) async {
       final source = FakeReaderTiltMotionSource();
       final controller = ReaderTiltAutoScrollController(
+        preferences: const ReaderTiltPreferences(
+          reverseVerticalDirection: false,
+        ),
         motionSource: source,
         scrollTarget: CallbackReaderAutoScrollTarget(),
         settings: settings,
@@ -572,6 +604,7 @@ void main() {
   testWidgets('unavailable and error states do not crash', (tester) async {
     final unavailable = FakeReaderTiltMotionSource(isSupported: false);
     final first = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: unavailable,
       scrollTarget: CallbackReaderAutoScrollTarget(),
     );
@@ -581,6 +614,7 @@ void main() {
 
     final failing = FakeReaderTiltMotionSource();
     final second = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: failing,
       scrollTarget: CallbackReaderAutoScrollTarget(),
       settings: settings,
@@ -606,6 +640,7 @@ void main() {
         scrollTarget: target,
         settings: settings,
         preferences: const ReaderTiltPreferences(
+          reverseVerticalDirection: false,
           horizontalChapterTiltEnabled: true,
         ),
         canChangeChapter: (_) => true,
@@ -645,6 +680,9 @@ void main() {
       var now = DateTime.utc(2026, 1, 1);
       final changes = <ReaderChapterTiltDirection>[];
       final controller = ReaderTiltAutoScrollController(
+        preferences: const ReaderTiltPreferences(
+          reverseVerticalDirection: false,
+        ),
         motionSource: source,
         scrollTarget: CallbackReaderAutoScrollTarget(),
         settings: settings,
@@ -662,7 +700,10 @@ void main() {
       expect(changes, isEmpty);
 
       controller.updatePreferences(
-        const ReaderTiltPreferences(horizontalChapterTiltEnabled: true),
+        const ReaderTiltPreferences(
+          reverseVerticalDirection: false,
+          horizontalChapterTiltEnabled: true,
+        ),
       );
       source.add(sample(0, horizontalDegrees: 17));
       source.add(
@@ -697,6 +738,7 @@ void main() {
       scrollTarget: target,
       settings: settings,
       preferences: const ReaderTiltPreferences(
+        reverseVerticalDirection: false,
         horizontalChapterTiltEnabled: true,
       ),
       canChangeChapter: (direction) =>
@@ -732,6 +774,7 @@ void main() {
       scrollTarget: CallbackReaderAutoScrollTarget()..attach((_) => true),
       settings: settings,
       preferences: const ReaderTiltPreferences(
+        reverseVerticalDirection: false,
         horizontalChapterTiltEnabled: true,
       ),
       canChangeChapter: (_) => true,
@@ -761,6 +804,7 @@ void main() {
         return true;
       });
     final controller = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: source,
       scrollTarget: target,
       settings: settings,
@@ -782,6 +826,7 @@ void main() {
   testWidgets('activation owns exactly one frame driver', (tester) async {
     final source = FakeReaderTiltMotionSource();
     final controller = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: source,
       scrollTarget: CallbackReaderAutoScrollTarget(),
       settings: settings,
@@ -808,6 +853,9 @@ void main() {
             return true;
           });
         final controller = ReaderTiltAutoScrollController(
+          preferences: const ReaderTiltPreferences(
+            reverseVerticalDirection: false,
+          ),
           motionSource: source,
           scrollTarget: target,
           settings: settings,
@@ -833,7 +881,7 @@ void main() {
       final speed = readerTiltSpeedForPreferences(
         10 * math.pi / 180,
         settings,
-        ReaderTiltPreferences.defaults,
+        const ReaderTiltPreferences(reverseVerticalDirection: false),
       );
       expect(lowFrequency, closeTo(speed * 0.1, 0.0001));
       expect(lowFrequency, isNot(lowFrequency.roundToDouble()));
@@ -845,6 +893,7 @@ void main() {
   ) async {
     final source = FakeReaderTiltMotionSource();
     final controller = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: source,
       scrollTarget: CallbackReaderAutoScrollTarget()..attach((_) => true),
       settings: const ReaderTiltAutoScrollSettings(
@@ -880,6 +929,9 @@ void main() {
       final source = FakeReaderTiltMotionSource();
       var pixels = 0.0;
       final controller = ReaderTiltAutoScrollController(
+        preferences: const ReaderTiltPreferences(
+          reverseVerticalDirection: false,
+        ),
         motionSource: source,
         scrollTarget: CallbackReaderAutoScrollTarget()
           ..attach((delta) {
@@ -923,6 +975,7 @@ void main() {
     var chapter = 0;
     var pixels = 0.0;
     final controller = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: source,
       scrollTarget: CallbackReaderAutoScrollTarget()
         ..attach((delta) {
@@ -973,6 +1026,9 @@ void main() {
       const persistenceRequests = 0;
       var pixels = 0.0;
       final controller = ReaderTiltAutoScrollController(
+        preferences: const ReaderTiltPreferences(
+          reverseVerticalDirection: false,
+        ),
         motionSource: source,
         scrollTarget: CallbackReaderAutoScrollTarget()
           ..attach((delta) {
@@ -1022,6 +1078,7 @@ void main() {
     final source = FakeReaderTiltMotionSource();
     final pendingSave = Completer<void>();
     final controller = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: source,
       scrollTarget: CallbackReaderAutoScrollTarget(),
       settings: settings,
@@ -1080,7 +1137,10 @@ void main() {
         readerTiltSpeedForPreferences(
           angleFor(normalized),
           defaults,
-          ReaderTiltPreferences(speedMultiplier: multiplier),
+          ReaderTiltPreferences(
+            reverseVerticalDirection: false,
+            speedMultiplier: multiplier,
+          ),
         );
 
     for (final normalized in [0.25, 0.6, 1.0]) {
@@ -1112,7 +1172,10 @@ void main() {
         readerTiltSpeedForPreferences(
           neutral + span * normalized,
           defaults,
-          ReaderTiltPreferences(speedMultiplier: multiplier),
+          ReaderTiltPreferences(
+            reverseVerticalDirection: false,
+            speedMultiplier: multiplier,
+          ),
         );
 
     final samples = [
@@ -1158,6 +1221,7 @@ void main() {
     final librarySource = FakeReaderTiltMotionSource();
     var biblePixels = 0.0;
     final bible = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: bibleSource,
       scrollTarget: CallbackReaderAutoScrollTarget()
         ..attach((delta) {
@@ -1167,6 +1231,7 @@ void main() {
       settings: exact,
     );
     final library = ReaderTiltAutoScrollController(
+      preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
       motionSource: librarySource,
       scrollTarget: ScrollControllerReaderAutoScrollTarget(scroll),
       settings: exact,

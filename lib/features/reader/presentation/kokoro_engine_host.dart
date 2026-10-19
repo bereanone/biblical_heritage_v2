@@ -11,6 +11,7 @@ import '../../../core/audio/narration_media_session.dart';
 import '../../../core/audio/speech_engine.dart';
 import '../../../core/audio/synthesis_governor.dart';
 import '../../../core/audio/synthesis_health.dart';
+import '../../../core/audio/synthesis_thermal_gate.dart';
 import 'kokoro_speech_worker.dart';
 
 typedef SpeechEngineStarter = Future<SpeechEngine> Function();
@@ -233,6 +234,8 @@ class KokoroEngineHost {
   static Future<SpeechEngine> _startKokoro(
     SynthesisHealthMonitor health,
   ) async {
+    final thermal = SynthesisThermalGate.instance;
+    thermal.start();
     final root = await _stage('stage-assets', _stageAssets);
     await _stage('write-lexicon', () async {
       final contextLexicon = File('${root.path}/context-lexicon-v1.txt');
@@ -254,6 +257,8 @@ class KokoroEngineHost {
         // Pacing gives way when the listener's lead runs low; see the
         // governor.
         governor: SynthesisGovernor(
+          beforeJob: thermal.beforeJob,
+          afterJob: thermal.afterJob,
           isThrottled: () => NarrationMediaSession.instance.backgrounded.value,
           lead: NarrationLeadRegistry.instance.lead,
           log: NarrationDiagnostics.log,

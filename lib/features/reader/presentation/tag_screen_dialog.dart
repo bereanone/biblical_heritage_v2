@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/theme/app_settings_service.dart';
-import 'presentation_prep/presentation_ui_helpers.dart';
 import 'tag_dialog_header.dart';
 import 'tag_dialog_hash_tab.dart';
 import 'tag_dialog_models.dart';
@@ -81,6 +80,7 @@ class _HashTagDialogState extends State<HashTagDialog>
   TagSortMode _sortMode = TagSortMode.verseCount;
   bool _loading = true;
   bool _working = false;
+  String? _feedbackMessage;
   late final TabController _tabController;
 
   String get _tagSymbol =>
@@ -253,7 +253,6 @@ class _HashTagDialogState extends State<HashTagDialog>
     final newCategory = _selectedCategory?.trim();
     final oldCategory = _tagCategory?.trim();
     if ((oldCategory ?? '') == (newCategory ?? '')) {
-      _showSnack('Category already set for $tag.');
       return;
     }
     final saved = await _repository.saveTagCategory(
@@ -264,7 +263,7 @@ class _HashTagDialogState extends State<HashTagDialog>
     );
     if (!mounted) return;
     if (!saved) {
-      _showSnack('Could not save category for $tag.');
+      _showSnack('Could not save folder for $tag.');
       return;
     }
     await _reloadSelectedTag(tag, category: newCategory);
@@ -305,10 +304,6 @@ class _HashTagDialogState extends State<HashTagDialog>
         currentCategoryKnown: true,
       );
       await _reloadSelectedTag(result.tag!, category: _selectedCategory);
-      _showSnack(
-        'Tagged ${result.inserted} verse(s) with ${result.tag}'
-        '${result.skipped > 0 ? ' (${result.skipped} already in this tag)' : ''}.',
-      );
       return;
     }
     final targets = widget.selectionTargets;
@@ -347,10 +342,6 @@ class _HashTagDialogState extends State<HashTagDialog>
         currentCategoryKnown: true,
       );
       await _reloadSelectedTag(result.tag!, category: _selectedCategory);
-      _showSnack(
-        'Tagged ${result.inserted} verse(s) with ${result.tag}'
-        '${result.skipped > 0 ? ' (${result.skipped} already in this tag)' : ''}.',
-      );
       return;
     }
     setState(() => _working = true);
@@ -372,10 +363,6 @@ class _HashTagDialogState extends State<HashTagDialog>
       currentCategoryKnown: true,
     );
     await _reloadSelectedTag(result.tag!, category: _selectedCategory);
-    _showSnack(
-      'Tagged ${result.inserted} verse(s) with ${result.tag}'
-      '${result.skipped > 0 ? ' (${result.skipped} already in this tag)' : ''}.',
-    );
   }
 
   Future<void> _applySelection() async {
@@ -683,7 +670,6 @@ class _HashTagDialogState extends State<HashTagDialog>
       _defaultTag = tag;
     });
     await _reloadSelectedTag(tag, category: _tagCategory);
-    _showSnack('Default set to $tag');
   }
 
   Future<void> _renameCurrentTag() async {
@@ -778,9 +764,6 @@ class _HashTagDialogState extends State<HashTagDialog>
       return;
     }
     await _reloadSelectedTag(normalized, category: _tagCategory);
-    _showSnack(
-      'Renamed $current to $normalized ($count row${count == 1 ? '' : 's'}).',
-    );
   }
 
   Future<void> _showInstructions() async {
@@ -802,7 +785,10 @@ class _HashTagDialogState extends State<HashTagDialog>
             '$_tagLabel tags collect verse references into reusable lists. '
             'Use Tag Verse to add the current verse or range. '
             'Tap a tag line to open the verse list on the next screen. '
-            'Use Save to set the rapid-tag default. '
+            'Choose a folder, then use Folder filter ON to show only that folder; OFF shows all folders. Choosing a folder alone does not turn filtering on. The circular arrow beside Folder clears the selected list and folder filter and reloads the full view; it does not delete or reset saved data. '
+            'To move a list, open it and choose List settings, then Folder. List settings also sets the display aspect ratio for every scripture, note, and image slide in that list. '
+            'To copy an attached image between notes, use Copy Image on its thumbnail or right-click/long-press it, then Paste Image in the destination editor and Save. The original stays attached until you remove it separately. '
+            'Use Make Default to set the quick-tag destination. '
             'Use the Rapid Tag Session controls when you want to tag many verses without extra prompts. '
             'A verse can appear in multiple different $_tagName lists; duplicates are only blocked inside the same tag.',
             style: TagDialogStyles.bodyTextStyle(
@@ -1267,7 +1253,7 @@ class _HashTagDialogState extends State<HashTagDialog>
   }
 
   void _showSnack(String message) {
-    showReadableSnackBar(context, message, fontScale: widget.fontScale);
+    if (mounted) setState(() => _feedbackMessage = message);
   }
 
   Future<void> _showNoTagSelectedDialog() async {
@@ -1363,7 +1349,7 @@ class _HashTagDialogState extends State<HashTagDialog>
                 final value = controller.text.trim();
                 if (value.isEmpty) {
                   setDialogState(() {
-                    errorText = 'Enter a category name.';
+                    errorText = 'Enter a folder name.';
                   });
                   return;
                 }
@@ -1372,7 +1358,7 @@ class _HashTagDialogState extends State<HashTagDialog>
 
               return AlertDialog(
                 title: Text(
-                  'New Category',
+                  'New folder',
                   style: TagDialogStyles.titleTextStyle(
                     theme,
                     widget.fontScale,
@@ -1391,7 +1377,7 @@ class _HashTagDialogState extends State<HashTagDialog>
                   smartDashesType: SmartDashesType.disabled,
                   smartQuotesType: SmartQuotesType.disabled,
                   decoration: InputDecoration(
-                    labelText: 'Category name',
+                    labelText: 'Folder name',
                     border: const OutlineInputBorder(),
                     errorText: errorText,
                     labelStyle: TagDialogStyles.labelTextStyle(
@@ -1480,7 +1466,7 @@ class _HashTagDialogState extends State<HashTagDialog>
     final created = await _repository.createCategory(normalized);
     if (!mounted) return null;
     if (!created) {
-      _showSnack('Could not create category $normalized.');
+      _showSnack('Could not create folder $normalized.');
       return null;
     }
     final assigned = currentTag.isNotEmpty
@@ -1554,6 +1540,15 @@ class _HashTagDialogState extends State<HashTagDialog>
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (_feedbackMessage != null)
+            Semantics(
+              liveRegion: true,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(_feedbackMessage!, style: TextStyle(
+                  color: Theme.of(context).colorScheme.error)),
+              ),
+            ),
           TagDialogHeader(
             title: '$_tagLabel Tags for $_selectionLabel',
             fontScale: widget.fontScale,

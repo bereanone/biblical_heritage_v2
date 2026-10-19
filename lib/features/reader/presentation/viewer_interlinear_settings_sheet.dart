@@ -54,6 +54,17 @@ class _ViewerInterlinearSettingsScreenState
             children: [
               ChoiceChip(
                 label: const Text('English with linked phrases'),
+                selectedColor: chipSelectedColor,
+                backgroundColor: chipUnselectedColor,
+                checkmarkColor: chipSelectedTextColor,
+                labelStyle: TextStyle(
+                  color:
+                      _settings.displayStyle ==
+                          ViewerInterlinearDisplayStyle.englishPhrases
+                      ? chipSelectedTextColor
+                      : chipUnselectedTextColor,
+                  fontWeight: FontWeight.w600,
+                ),
                 selected:
                     _settings.displayStyle ==
                     ViewerInterlinearDisplayStyle.englishPhrases,
@@ -65,6 +76,17 @@ class _ViewerInterlinearSettingsScreenState
               ),
               ChoiceChip(
                 label: const Text('Full interlinear'),
+                selectedColor: chipSelectedColor,
+                backgroundColor: chipUnselectedColor,
+                checkmarkColor: chipSelectedTextColor,
+                labelStyle: TextStyle(
+                  color:
+                      _settings.displayStyle ==
+                          ViewerInterlinearDisplayStyle.fullInterlinear
+                      ? chipSelectedTextColor
+                      : chipUnselectedTextColor,
+                  fontWeight: FontWeight.w600,
+                ),
                 selected:
                     _settings.displayStyle ==
                     ViewerInterlinearDisplayStyle.fullInterlinear,

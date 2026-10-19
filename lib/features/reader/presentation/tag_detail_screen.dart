@@ -15,13 +15,19 @@ import '../../library/data/library_catalog_service.dart';
 import '../../library/data/library_citation_display_helper.dart';
 import '../../library/presentation/library_book_reader_screen.dart';
 import '../../library/presentation/library_item_open_guard.dart';
-import '../data/presentation/presentation_models.dart';
+import '../data/presentation/note_image_layout.dart';
+import 'note_image_layout_editor.dart';
+import 'note_image_clipboard.dart';
+import 'slide_link_control.dart';
 import '../data/presentation/presentation_text_format.dart';
 import 'presentation_prep/presentation_ui_helpers.dart';
 import 'tag_dialog_styles.dart';
+import 'study_export_clipboard.dart';
 import 'tag_playback/tag_playback_popup.dart';
 import 'tag_quick_apply_helper.dart';
 import 'viewer_presentation_launcher.dart';
+import 'viewer_presentation_settings.dart';
+import 'viewer_search_dialog.dart';
 
 part 'tag_detail_screen_dialogs.dart';
 
@@ -55,6 +61,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
   List<HashTagEntry> _entries = const <HashTagEntry>[];
   int _focusedIndex = 0;
   bool _hasChanges = false;
+  String? _feedbackMessage;
 
   @override
   void initState() {
@@ -91,6 +98,20 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         ..addAll(names);
       _loading = false;
     });
+  }
+
+  Future<void> _findTextForThisList() async {
+    await showViewerSearchDialog(
+      context,
+      fontScale: widget.fontScale,
+      currentTag: widget.tag,
+      onBibleResultAdded: (_) async {
+        if (!mounted) return;
+        _markChanged();
+        await _reload();
+        await _notifyParentChanged();
+      },
+    );
   }
 
   Future<void> _reload() async {
@@ -205,6 +226,33 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     return input.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
 
+  late final Future<String?> _thumbnailBasePath = _mediaBasePath();
+
+  Widget _mediaThumbnails(HashTagEntry entry) => FutureBuilder<String?>(
+    future: _thumbnailBasePath,
+    builder: (context, snapshot) {
+      final root = snapshot.data;
+      return Wrap(spacing: 8, runSpacing: 8, children: [
+        for (var index = 0; index < entry.mediaRefs.length; index++)
+          Semantics(
+            label: 'Attached image ${index + 1}',
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(width: 64, height: 64,
+                child: root == null
+                    ? const Icon(Icons.image_outlined)
+                    : Image.file(File(p.isAbsolute(entry.mediaRefs[index])
+                        ? entry.mediaRefs[index]
+                        : p.join(root, p.normalize(entry.mediaRefs[index]))),
+                      fit: BoxFit.contain, cacheWidth: 192,
+                      errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined)),
+              ),
+            ),
+          ),
+      ]);
+    },
+  );
+
   Future<String?> _mediaBasePath() async {
     final libraryRoot = await LibraryRootService.instance.libraryRootPath();
     if (libraryRoot != null && libraryRoot.trim().isNotEmpty) {
@@ -269,11 +317,6 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     if (onSelectTag != null) {
       await onSelectTag(widget.tag);
     }
-    _showSnack(
-      currentCategory == null || currentCategory.trim().isEmpty
-          ? 'Default set to ${widget.tag}'
-          : 'Default set to ${widget.tag} in $currentCategory',
-    );
   }
 
   Future<void> _showInstructions() async {
@@ -282,12 +325,19 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('How this screen works'),
-          content: const Text(
-            'Use the up and down arrows on each verse row to change slide order. '
-            'Tap the slide label to group rows onto the same presentation slide. '
-            'Tap the presentation button to open presentation mode, or a verse row to open that verse in the reader. '
-            'Use Make default to set the starting tag, Rename to change the tag name, and Erase to delete it.',
-          ),
+          content: const SingleChildScrollView(child: Text(
+            'Listen opens this list’s audio controls; the clock there opens its listening schedule. '
+            'Present opens your slides. The magnifying glass beside the entry count finds Bible text to add directly to this list. Add entry adds a note or content item.\n\n'
+            'In List settings, Folder lets you move this list to an existing folder or use Add new folder, enter its name, and choose Move. List settings includes the display aspect ratio. Change it once to resize all Bible, note, and image slides in this list for a different projector. '
+            'Export list copies the study for pasting into Word, including note formatting. List settings, the default list setting, and Delete list are visible in the header.\n\n'
+            'Edit a Bible entry to change its optional title, display citation, passage, and your note. '
+            'Select words before using Bold, Italic, or Underline. Reset restores the original passage and removes its formatting. '
+            'Alignment icons beside each text field offer Left, Center, Right, and Justified. Header/footer controls are inside Image Layout. Citations appear below Bible passages and default to right alignment. Unnamed Bible passages have no title above.\n\n'
+            'More options contains image attachments. Use Copy Image on a thumbnail, or right-click/long-press it, then use Paste Image in the destination note. Copying retains the original; removing an attachment takes effect when you Save. Image Layout lets you tap cells to select a solid rectangular image area; tap again to deselect. Rows and columns change the grid. Display size comes from List settings and applies to every slide, including Bible passages. Fill selected area may crop image edges; turn it off to show the whole image. Optional header/footer text uses space above/below the note. Text automatically fits around the image; the preview matches presentation proportions. Choose Use layout, then Save. Cancel leaves the note unchanged. Saving edits the entry, not the Bible source.\n\n'
+            'Use the up and down arrows on each row to change its order. Use the Link with next ON/OFF switch to combine adjacent entries on one slide; ON names the following entry sharing its slide; keep linking to extend the group. Turning a link off ends that group. Notes with images always get their own slide; linking is unavailable on them and immediately before them.\n\n'
+            'Recover an entry from Trash: close this list to return to the # Tags screen, choose View Trash, tap the entry you want, and choose Restore to original tag. '
+            'Restore/Move to another tag lets you choose a different destination instead.',
+          )),
           actions: [
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
@@ -415,7 +465,6 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     _markChanged();
     await _notifyParentChanged();
     await _reload();
-    _showSnack('Updated ${_isNoteOnlyEntry(entry) ? 'note' : 'link'}.');
   }
 
   Future<void> _addNoteSlide() async {
@@ -491,7 +540,58 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     setState(() {
       _focusedIndex = _entries.isEmpty ? 0 : _entries.length - 1;
     });
-    _showSnack('Added note slide to ${widget.tag}.');
+  }
+
+  Future<void> _showListSettings() async {
+    var preset=await AppSettingsService.instance.loadTagPresentationAspectRatioPreset(tagFamily:_isDollarRepository?'dollar':'hash',tag:widget.tag);
+    if(!mounted)return;
+    String? error;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(builder:(context, updateSettings)=>AlertDialog(
+        title: const Text('List settings'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('List name'),
+              subtitle: Text(widget.tag),
+              trailing: const Icon(Icons.edit_outlined),
+              onTap: () {
+                Navigator.of(dialogContext).pop();
+                _renameTag();
+              },
+            ),
+            ListTile(
+              title: const Text('Folder'),
+              subtitle: Text(_resolvedCategory ?? 'None'),
+              trailing: const Icon(Icons.arrow_drop_down),
+              onTap: () {
+                Navigator.of(dialogContext).pop();
+                _changeCategory();
+              },
+            ),
+            ListTile(title:const Text('Display aspect ratio'),subtitle:const Text('Applies to every slide in this list')),
+            DropdownButton<PresentationAspectRatioPreset>(value:preset,isExpanded:true,
+              items:[for(final value in PresentationAspectRatioPreset.values) DropdownMenuItem(value:value,child:Text(value.label))],
+              onChanged:(value) async {
+                if(value==null)return;
+                try {
+                  await AppSettingsService.instance.saveTagPresentationAspectRatioPreset(tagFamily:_isDollarRepository?'dollar':'hash',tag:widget.tag,preset:value);
+                  if(context.mounted)updateSettings((){preset=value;error=null;});
+                }catch(_){if(context.mounted)updateSettings(()=>error='Could not save the display size. Please try again.');}
+              }),
+            if(error!=null) Text(error!,style:TextStyle(color:Theme.of(context).colorScheme.error)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      )),
+    );
   }
 
   Future<void> _renameTag() async {
@@ -531,7 +631,6 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     if (chosenCategory == null) return;
     if ((currentCategory ?? '').toLowerCase() ==
         (normalizedTarget ?? '').toLowerCase()) {
-      _showSnack('No category change.');
       return;
     }
     if (chosenCategory.merged) {
@@ -545,16 +644,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
           ? currentCategory!.trim()
           : 'None';
       if (chosenCategory.addedCount > 0) {
-        _showSnack(
-          'Merged copy only: ${chosenCategory.addedCount} added to '
-          '${widget.tag} · $targetLabel, ${chosenCategory.skippedCount} '
-          'skipped as duplicates. Source tag was left unchanged.',
-        );
       } else {
-        _showSnack(
-          'No new cards added. All source cards already exist in '
-          '${widget.tag} · $targetLabel. Source tag was left unchanged.',
-        );
       }
       debugPrint(
         'Merge copy only completed for ${widget.tag}: '
@@ -611,32 +701,6 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     }
   }
 
-  Future<void> _deleteEntry(HashTagEntry entry) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Move to Trash?'),
-          content: const Text(
-            'Move this card to Trash? You can restore it later.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: TagDialogStyles.fittedButtonLabel('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: TagDialogStyles.fittedButtonLabel('Move to Trash'),
-            ),
-          ],
-        );
-      },
-    );
-    if (confirmed != true) return;
-    await _trashEntry(entry);
-  }
-
   final _trashingEntries = <String>{};
 
   Future<void> _trashEntry(HashTagEntry entry) async {
@@ -652,32 +716,6 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       await _notifyParentChanged();
       await _reload();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Verse moved to Trash.'),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () async {
-              try {
-                await widget.repository.restoreEntry(
-                  entry.id,
-                  normalized: entry.isNormalized,
-                );
-                if (!mounted) return;
-                _markChanged();
-                await _notifyParentChanged();
-                await _reload();
-              } catch (_) {
-                if (mounted) {
-                  _showSnack(
-                    'Could not restore this entry. Please try from Trash.',
-                  );
-                }
-              }
-            },
-          ),
-        ),
-      );
     } finally {
       _trashingEntries.remove(key);
     }
@@ -754,8 +792,11 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
 
   Future<void> _exportToClipboard() async {
     if (_entries.isEmpty) return;
+    final richLines = <int, String>{};
     final lines = <String>[
-      'Shared from the Biblical Heritage #StudyBible app. BiblicalHeritage.net',
+      'Shared from the Biblical Heritage #StudyBible app.',
+      '',
+      'For instructions on using the app, visit BiblicalHeritage.net.',
       '',
       '${widget.tag} (${_entries.length} item${_entries.length == 1 ? '' : 's'})',
       '',
@@ -771,7 +812,8 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         }
         final noteText = _entryNoteText(entry).trim();
         if (noteText.isNotEmpty) {
-          lines.addAll(noteText.split('\n'));
+          richLines[lines.length] = studyExportHtml(noteText, formatJson: entry.noteFormatJson);
+          lines.add(noteText);
         }
         lines.add('');
         continue;
@@ -827,6 +869,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
           ? entry.displayTextOverride!.trim()
           : entry.numberedVerseText;
       if (verseText.isNotEmpty) {
+        richLines[lines.length] = studyExportHtml(verseText,
+            formatJson: entry.displayTextOverride?.trim().isNotEmpty == true
+                ? entry.displayTextFormatJson : null);
         lines.add(verseText);
       } else {
         final fallback = await loadBibleRangeText(
@@ -846,20 +891,22 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
       }
       final noteText = _entryNoteText(entry).trim();
       if (noteText.isNotEmpty) {
+        richLines[lines.length] = 'Note: ${studyExportHtml(noteText, formatJson: entry.noteFormatJson)}';
         lines.add('Note: ${noteText.replaceAll('\n', ' ')}');
       }
       lines.add('');
     }
 
-    await Clipboard.setData(ClipboardData(text: lines.join('\n').trimRight()));
+    await copyStudyExport(
+      text: lines.join('\n').trimRight(),
+      html: List.generate(lines.length, (index) =>
+          '<div>${richLines[index] ?? studyExportHtml(lines[index])}</div>').join(),
+    );
     if (!mounted) return;
-    _showSnack('Copied to clipboard.');
   }
 
   void _showSnack(String message) {
-    ScaffoldMessenger.maybeOf(
-      context,
-    )?.showSnackBar(SnackBar(content: Text(message)));
+    if (mounted) setState(() => _feedbackMessage = message);
   }
 
   HashTagEntry? get _focusedEntry {
@@ -1117,130 +1164,40 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     return null;
   }
 
-  String _slideAssignmentLabel(HashTagEntry entry) {
-    final slideNumber = entry.presentationSlideNumber;
-    final placement = entry.presentationSlideRegion;
-    final regionLabel =
-        placement == null || placement == PresentationItemPlacement.auto
-        ? ''
-        : ' · ${presentationItemPlacementLabel(placement)}';
-    if (slideNumber == null || slideNumber <= 0) {
-      return 'Auto slide$regionLabel';
-    }
-    return 'Slide $slideNumber$regionLabel';
+  bool _canLinkNext(HashTagEntry entry) {
+    final index=_entries.indexWhere((e)=>e.id==entry.id && e.isNormalized==entry.isNormalized);
+    if(index<0 || index+1>=_entries.length)return false;
+    final next=_entries[index+1];
+    return !(_isNoteOnlyEntry(entry)&&entry.hasMedia) && !(_isNoteOnlyEntry(next)&&next.hasMedia);
   }
-
-  Future<void> _editSlideAssignment(HashTagEntry entry) async {
-    if (_isDollarRepository) return;
-    final controller = TextEditingController(
-      text: entry.presentationSlideNumber?.toString() ?? '',
-    );
-    var selectedPlacement =
-        entry.presentationSlideRegion ?? PresentationItemPlacement.auto;
-    final shouldSave = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Slide assignment'),
-          content: SizedBox(
-            width: 420,
-            child: StatefulBuilder(
-              builder: (context, setDialogState) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    TextField(
-                      controller: controller,
-                      autofocus: true,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(
-                        labelText: 'Slide number',
-                        hintText: 'Leave blank for automatic',
-                        helperText: 'Blank or 0 clears the slide number.',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<PresentationItemPlacement>(
-                      initialValue: selectedPlacement,
-                      decoration: const InputDecoration(
-                        labelText: 'Slide region',
-                        helperText: 'Use Auto unless you need a fixed region.',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: presentationItemPlacementOptions
-                          .map(
-                            (placement) =>
-                                DropdownMenuItem<PresentationItemPlacement>(
-                                  value: placement,
-                                  child: Text(
-                                    presentationItemPlacementLabel(placement),
-                                  ),
-                                ),
-                          )
-                          .toList(growable: false),
-                      onChanged: (value) {
-                        if (value == null) return;
-                        setDialogState(() {
-                          selectedPlacement = value;
-                        });
-                      },
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
-    );
-    final rawValue = controller.text.trim();
-    controller.dispose();
-    if (shouldSave != true) return;
-
-    int? slideNumber;
-    if (rawValue.isNotEmpty) {
-      final parsed = int.tryParse(rawValue);
-      if (parsed == null) {
-        _showSnack('Enter a whole slide number.');
-        return;
-      }
-      slideNumber = parsed > 0 ? parsed : null;
-    }
-
-    await widget.repository.updateEntry(
-      id: entry.id,
-      normalized: entry.isNormalized,
-      values: {
-        'presentation_slide_number': slideNumber,
-        'presentation_slide_region':
-            slideNumber == null ||
-                selectedPlacement == PresentationItemPlacement.auto
-            ? null
-            : presentationItemPlacementToJson(selectedPlacement),
-      },
-    );
-    if (!mounted) return;
-    _markChanged();
-    await _notifyParentChanged();
-    await _reload();
-    _showSnack(
-      slideNumber == null
-          ? 'Cleared slide assignment.'
-          : 'Assigned to slide $slideNumber.',
-    );
+  final _savingLinks=<String>{};
+  Future<void> _setLinkNext(HashTagEntry entry,bool linked) async {
+    final key='${entry.isNormalized}:${entry.id}';
+    if(!_canLinkNext(entry) || !_savingLinks.add(key))return;
+    setState((){});
+    try {
+      final inner=presentationFormatWithLink(entry.noteFormatJson,linked);
+      final format=_isNoteOnlyEntry(entry) ? inner : buildBibleItemOverlayJson(userTitle:entry.userTitle,
+        displayTextOverride:entry.displayTextOverride,noteFormatJson:inner,titleFormatJson:entry.titleFormatJson,displayTextFormatJson:entry.displayTextFormatJson);
+      await widget.repository.updateEntry(id:entry.id,normalized:entry.isNormalized,values:{
+        'note_format_json':format,'presentation_slide_number':null,'presentation_slide_region':null});
+      await _reload();
+      if(!mounted)return;
+      final saved=_entries.where((e)=>e.id==entry.id && e.isNormalized==entry.isNormalized).firstOrNull;
+      if(saved==null || presentationLinksWithNext(saved.noteFormatJson)!=linked)throw StateError('Link readback failed');
+      _markChanged();await _notifyParentChanged();
+    }catch(_){if(mounted)_showSnack('Could not save the slide link. Please try again.');}
+    finally{_savingLinks.remove(key);if(mounted)setState((){});}
+  }
+  Widget _slideLinkControl(HashTagEntry entry) {
+    final index=_entries.indexWhere((e)=>e.id==entry.id && e.isNormalized==entry.isNormalized);
+    final next=index>=0 && index+1<_entries.length ? _entries[index+1] : null;
+    final allowed=_canLinkNext(entry);
+    final nextTitle=next==null?null:_entryTitle(next,_bookNames[next.bookNumber]??'');
+    return SlideLinkControl(linked:allowed && presentationLinksWithNext(entry.noteFormatJson),
+      onChanged:allowed?(value)=>_setLinkNext(entry,value):null,nextTitle:nextTitle,
+      saving:_savingLinks.contains('${entry.isNormalized}:${entry.id}'),
+      disabledReason:allowed?null:next==null?'Last entry · no following entry.': 'Image notes use their own slide.');
   }
 
   Future<void> _editEntryNote(HashTagEntry entry) async {
@@ -1257,6 +1214,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                   verseEnd: entry.verseEnd,
                 ));
     final initialMedia = await _loadMediaAttachmentsForRefs(entry.mediaRefs);
+    final presentationAspect = await AppSettingsService.instance.loadTagPresentationAspectRatioPreset(tagFamily:_isDollarRepository?'dollar':'hash',tag:widget.tag);
     if (!mounted) return;
     final shouldSave = await showDialog<bool>(
       context: context,
@@ -1270,6 +1228,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
           verseEnd: entry.verseEnd,
         );
         return _EditEntryNoteDialog(
+          presentationAspect:presentationAspect,
           repository: widget.repository,
           entry: entry,
           fontScale: widget.fontScale,
@@ -1303,9 +1262,6 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     _markChanged();
     await _notifyParentChanged();
     await _reload();
-    _showSnack(
-      'Note saved for ${_isNoteOnlyEntry(entry) ? 'content item' : _entryTitle(entry, _bookNames[entry.bookNumber] ?? 'Book ${entry.bookNumber}')}.',
-    );
   }
 
   Future<void> _addContentItem() async {
@@ -1329,7 +1285,6 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
     setState(() {
       _focusedIndex = _entries.isEmpty ? 0 : _entries.length - 1;
     });
-    _showSnack('Added note item to ${widget.tag}.');
   }
 
   Future<void> _handleEntryTap(HashTagEntry entry) async {
@@ -1415,357 +1370,125 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
             padding: const EdgeInsets.fromLTRB(12, 6, 8, 4),
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final compactHeader = constraints.maxWidth < 700;
-                final displayTag = _resolvedCategory != null
-                    ? '${widget.tag} · ${_resolvedCategory!}'
-                    : widget.tag;
-                Widget buildTitle({bool includeCount = true}) => Text(
-                  includeCount
-                      ? '$displayTag · ${_entries.length}'
-                      : displayTag,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: presentationTextStyle(
-                    context,
-                    theme.textTheme.titleLarge,
-                    widget.fontScale,
-                    fontSize: 18,
-                    color: titleColor,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.2,
-                    height: 1.0,
-                    minFontSize: 18,
-                    maxFontSize: 26,
-                  ),
-                );
-                if (compactHeader) {
-                  const phoneActionSize = 44.0;
-                  Widget phoneAction({
-                    required IconData icon,
-                    required String label,
-                    required String tooltip,
-                    required VoidCallback? onPressed,
-                    Color? foregroundColor,
-                  }) => SizedBox(
-                    height: phoneActionSize,
-                    child: _HeaderActionChip(
-                      icon: icon,
-                      label: label,
-                      tooltip: tooltip,
-                      onPressed: onPressed,
-                      foregroundColor:
-                          foregroundColor ?? headerButtonForeground,
-                      phoneCompact: true,
-                    ),
-                  );
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(child: buildTitle(includeCount: false)),
-                          Text(
-                            '· ${_entries.length}',
-                            key: const ValueKey('phone-tag-item-count'),
-                            style: presentationTextStyle(
-                              context,
-                              theme.textTheme.titleLarge,
-                              widget.fontScale,
-                              fontSize: 18,
-                              color: titleColor,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.2,
-                              height: 1.0,
-                              minFontSize: 18,
-                              maxFontSize: 26,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: 'Close',
-                            onPressed: _closeDetail,
-                            icon: const Icon(Icons.close),
-                            color: titleColor,
-                            constraints: const BoxConstraints.tightFor(
-                              width: phoneActionSize,
-                              height: phoneActionSize,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Column(
-                        key: const ValueKey('phone-tag-toolbar-wrap'),
-                        children: [
-                          Wrap(
-                            spacing: 4,
-                            children: [
-                              phoneAction(
-                                icon: defaultActive
-                                    ? Icons.check_circle
-                                    : Icons.check_circle_outline,
-                                label: 'Default',
-                                tooltip: defaultActive
-                                    ? 'Current default tag'
-                                    : 'Set as default tag',
-                                onPressed: _makeDefault,
-                              ),
-                              phoneAction(
-                                icon: Icons.help_outline,
-                                label: 'Info',
-                                tooltip: 'Show instructions',
-                                onPressed: _showInstructions,
-                              ),
-                              phoneAction(
-                                icon: Icons.note_add_outlined,
-                                label: 'Add',
-                                tooltip: _isDollarRepository
-                                    ? 'Add Note Slide'
-                                    : 'Add Content Item',
-                                onPressed: _isDollarRepository
-                                    ? _addNoteSlide
-                                    : _addContentItem,
-                              ),
-                              phoneAction(
-                                icon: Icons.slideshow_rounded,
-                                label: 'Presentation',
-                                tooltip: 'Presentation Mode',
-                                onPressed: focusedEntry == null
-                                    ? null
-                                    : _openPresentationMode,
-                              ),
-                              phoneAction(
-                                icon: Icons.headphones_rounded,
-                                label: 'Listen',
-                                tooltip: 'Listen to this tag',
-                                onPressed: _entries.isEmpty
-                                    ? null
-                                    : _listenToTag,
-                              ),
-                            ],
-                          ),
-                          Wrap(
-                            spacing: 4,
-                            children: [
-                              phoneAction(
-                                icon: Icons.arrow_upward_rounded,
-                                label: 'Export',
-                                tooltip: 'Export to clipboard',
-                                onPressed: _entries.isEmpty
-                                    ? null
-                                    : _exportToClipboard,
-                              ),
-                              phoneAction(
-                                icon: Icons.edit_outlined,
-                                label: 'Rename',
-                                tooltip: 'Rename',
-                                onPressed: _renameTag,
-                              ),
-                              phoneAction(
-                                icon: Icons.drive_file_move_outline,
-                                label: 'Move',
-                                tooltip: 'Move to category',
-                                onPressed: _changeCategory,
-                              ),
-                              phoneAction(
-                                icon: Icons.delete_forever,
-                                label: 'Delete',
-                                tooltip: 'Delete entire tag',
-                                onPressed: _deleteTag,
-                                foregroundColor: theme.colorScheme.error,
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ],
-                  );
-                }
-                return Row(
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: Text(
-                        '$displayTag · ${_entries.length}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: presentationTextStyle(
-                          context,
-                          theme.textTheme.titleLarge,
-                          widget.fontScale,
-                          fontSize: 18,
-                          color: titleColor,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.2,
-                          height: 1.0,
-                          minFontSize: 18,
-                          maxFontSize: 26,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Wrap(
+                            spacing: 12,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(widget.tag, style: TagDialogStyles.titleTextStyle(
+                                theme, widget.fontScale, color: titleColor,
+                                fontWeight: FontWeight.w900)),
+                              Text('${_entries.length} entries${_resolvedCategory == null ? '' : ' · $_resolvedCategory'}',
+                                style: TagDialogStyles.bodyTextStyle(theme,
+                                  widget.fontScale, color: bodyColor)),
+                              if (!_isDollarRepository)
+                                IconButton(
+                                  tooltip: 'Find Bible text to add to this list',
+                                  onPressed: _findTextForThisList,
+                                  icon: const Icon(Icons.search),
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
+                        IconButton(
+                          tooltip: 'Instructions',
+                          onPressed: _showInstructions,
+                          icon: const Icon(Icons.help_outline),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: _closeDetail,
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          return FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerRight,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _HeaderActionChip(
-                                  icon: defaultActive
-                                      ? Icons.check_circle
-                                      : Icons.check_circle_outline,
-                                  label: defaultActive
-                                      ? 'Default'
-                                      : (compactHeader
-                                            ? 'Set default'
-                                            : 'Make default'),
-                                  tooltip: defaultActive
-                                      ? 'Current default tag'
-                                      : 'Set as default tag',
-                                  onPressed: _makeDefault,
-                                  foregroundColor: headerButtonForeground,
-                                ),
-                                const SizedBox(width: 6),
-                                IconButton(
-                                  tooltip: 'Show instructions',
-                                  onPressed: _showInstructions,
-                                  icon: const Icon(Icons.help_outline),
-                                  color: headerButtonForeground,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                if (!_isDollarRepository) ...[
-                                  IconButton(
-                                    tooltip: 'Add Content Item',
-                                    onPressed: _addContentItem,
-                                    icon: const Icon(Icons.note_add_outlined),
-                                    color: headerButtonForeground,
-                                    constraints: const BoxConstraints.tightFor(
-                                      width: 36,
-                                      height: 36,
-                                    ),
-                                    padding: const EdgeInsets.all(4),
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                  const SizedBox(width: 2),
-                                ],
-                                if (_isDollarRepository) ...[
-                                  IconButton(
-                                    tooltip: 'Add Note Slide',
-                                    onPressed: _addNoteSlide,
-                                    icon: const Icon(Icons.note_add_outlined),
-                                    color: headerButtonForeground,
-                                    constraints: const BoxConstraints.tightFor(
-                                      width: 36,
-                                      height: 36,
-                                    ),
-                                    padding: const EdgeInsets.all(4),
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                  const SizedBox(width: 2),
-                                ],
-                                IconButton(
-                                  tooltip: 'Presentation Mode',
-                                  onPressed: focusedEntry == null
-                                      ? null
-                                      : _openPresentationMode,
-                                  icon: const Icon(Icons.slideshow_rounded),
-                                  color: headerButtonForeground,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                IconButton(
-                                  tooltip: 'Listen to this tag',
-                                  onPressed: _entries.isEmpty
-                                      ? null
-                                      : _listenToTag,
-                                  icon: const Icon(Icons.headphones_rounded),
-                                  color: headerButtonForeground,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                IconButton(
-                                  tooltip: 'Export to clipboard',
-                                  onPressed: _entries.isEmpty
-                                      ? null
-                                      : _exportToClipboard,
-                                  icon: const Icon(Icons.arrow_upward_rounded),
-                                  color: headerButtonForeground,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                IconButton(
-                                  tooltip: 'Rename',
-                                  onPressed: _renameTag,
-                                  icon: const Icon(Icons.edit_outlined),
-                                  color: headerButtonForeground,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                const SizedBox(width: 2),
-                                _HeaderActionChip(
-                                  icon: Icons.drive_file_move_outline,
-                                  label: 'Move',
-                                  tooltip: 'Move to category',
-                                  onPressed: _changeCategory,
-                                  foregroundColor: headerButtonForeground,
-                                ),
-                                const SizedBox(width: 2),
-                                IconButton(
-                                  tooltip: 'Delete entire tag',
-                                  onPressed: _deleteTag,
-                                  icon: const Icon(Icons.delete_forever),
-                                  color: theme.colorScheme.error,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                IconButton(
-                                  tooltip: 'Close',
-                                  onPressed: _closeDetail,
-                                  icon: const Icon(Icons.close),
-                                  color: titleColor,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 36,
-                                    height: 36,
-                                  ),
-                                  padding: const EdgeInsets.all(4),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
+
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _HeaderActionChip(
+                          icon: Icons.headphones_rounded,
+                          label: 'Listen',
+                          tooltip: 'Listen to this list',
+                          onPressed: _entries.isEmpty ? null : _listenToTag,
+                          foregroundColor: headerButtonForeground,
+                          phoneCompact: constraints.maxWidth < 700,
+                        ),
+                        _HeaderActionChip(
+                          icon: Icons.slideshow_rounded,
+                          label: 'Present',
+                          tooltip: 'Present this list',
+                          onPressed: focusedEntry == null
+                              ? null
+                              : _openPresentationMode,
+                          foregroundColor: headerButtonForeground,
+                          phoneCompact: constraints.maxWidth < 700,
+                        ),
+                        _HeaderActionChip(
+                          icon: Icons.note_add_outlined,
+                          label: 'Add entry',
+                          tooltip: 'Add entry',
+                          onPressed: _isDollarRepository
+                              ? _addNoteSlide
+                              : _addContentItem,
+                          foregroundColor: headerButtonForeground,
+                          phoneCompact: constraints.maxWidth < 700,
+                        ),
+                        _HeaderActionChip(
+                          icon: Icons.ios_share,
+                          label: 'Export list',
+                          tooltip: 'Export list',
+                          onPressed: _entries.isEmpty ? null : _exportToClipboard,
+                          foregroundColor: headerButtonForeground,
+                          phoneCompact: constraints.maxWidth < 700,
+                        ),
+                        _HeaderActionChip(
+                          icon: Icons.settings_outlined,
+                          label: 'List settings',
+                          tooltip: 'List settings',
+                          onPressed: _showListSettings,
+                          foregroundColor: headerButtonForeground,
+                          phoneCompact: constraints.maxWidth < 700,
+                        ),
+                        _HeaderActionChip(
+                          icon: Icons.star_outline,
+                          label: '${defaultActive ? 'Current default list' : 'Set as default list'}',
+                          tooltip: 'Default list',
+                          onPressed: defaultActive ? null : _makeDefault,
+                          foregroundColor: headerButtonForeground,
+                          phoneCompact: constraints.maxWidth < 700,
+                        ),
+                        _HeaderActionChip(
+                          icon: Icons.delete_outline,
+                          label: 'Delete list',
+                          tooltip: 'Delete list',
+                          onPressed: _deleteTag,
+                          foregroundColor: headerButtonForeground,
+                          phoneCompact: constraints.maxWidth < 700,
+                        ),
+                      ],
                     ),
                   ],
                 );
               },
             ),
           ),
+          if (_feedbackMessage != null)
+            Semantics(
+              liveRegion: true,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(_feedbackMessage!, style: TextStyle(
+                  color: Theme.of(context).colorScheme.error)),
+              ),
+            ),
           if (_loading)
             const Expanded(child: Center(child: CircularProgressIndicator()))
           else
@@ -2159,7 +1882,27 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                             ),
                                           ),
                                         const SizedBox(height: 1),
-                                        if (entry.displayTextOverride
+                                        if (_isNoteOnlyEntry(entry) &&
+                                            entry.noteFormatJson?.trim().isNotEmpty == true)
+                                          RichText(
+                                            textAlign: TextAlign.left,
+                                            text: TextSpan(
+                                              children: buildPresentationTextSpans(
+                                                text: _entryNoteText(entry),
+                                                baseStyle: presentationTextStyle(
+                                                  context,
+                                                  theme.textTheme.bodyMedium,
+                                                  widget.fontScale,
+                                                  color: bodyColor,
+                                                  height: 1.25,
+                                                  minFontSize: 15,
+                                                  maxFontSize: 23,
+                                                ),
+                                                formatJson: entry.noteFormatJson,
+                                              ),
+                                            ),
+                                          )
+                                        else if (entry.displayTextOverride
                                                     ?.trim()
                                                     .isNotEmpty ==
                                                 true &&
@@ -2208,6 +1951,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                             softWrap: true,
                                           ),
                                         if (citationText.isNotEmpty &&
+                                            _entryTitle(entry, bookName).trim() != citationText.trim() &&
                                             entry.bookNumber > 0) ...[
                                           const SizedBox(height: 3),
                                           Text(
@@ -2227,57 +1971,9 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                         ],
                                         if (!_isDollarRepository) ...[
                                           const SizedBox(height: 8),
-                                          Align(
-                                            alignment: Alignment.centerLeft,
-                                            child: TextButton.icon(
-                                              onPressed: () =>
-                                                  _editSlideAssignment(entry),
-                                              icon: const Icon(
-                                                Icons.slideshow_rounded,
-                                                size: 16,
-                                              ),
-                                              label: Text(
-                                                _slideAssignmentLabel(entry),
-                                                style: presentationTextStyle(
-                                                  context,
-                                                  theme.textTheme.labelLarge,
-                                                  widget.fontScale,
-                                                  fontWeight: FontWeight.w700,
-                                                  minFontSize: 12.5,
-                                                  maxFontSize: 20,
-                                                ),
-                                              ),
-                                              style: TextButton.styleFrom(
-                                                visualDensity:
-                                                    VisualDensity.compact,
-                                                minimumSize: const Size(0, 36),
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 10,
-                                                      vertical: 6,
-                                                    ),
-                                              ),
-                                            ),
-                                          ),
+                                          _slideLinkControl(entry),
                                         ],
-                                        if (_isNoteOnlyEntry(entry))
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: 2,
-                                            ),
-                                            child: Text(
-                                              'Note-only item',
-                                              style: presentationTextStyle(
-                                                context,
-                                                theme.textTheme.bodySmall,
-                                                widget.fontScale,
-                                                color: bodyColor,
-                                                minFontSize: 12.5,
-                                                maxFontSize: 19,
-                                              ),
-                                            ),
-                                          ),
-                                        if (hasNote) ...[
+                                        if (hasNote && !_isNoteOnlyEntry(entry)) ...[
                                           const SizedBox(height: 6),
                                           Container(
                                             width: double.infinity,
@@ -2334,59 +2030,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                         ],
                                         if (entry.hasMedia) ...[
                                           const SizedBox(height: 6),
-                                          Container(
-                                            width: double.infinity,
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: TagDialogStyles.card(
-                                                theme,
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                              border: Border.all(
-                                                color:
-                                                    TagDialogStyles.outlineColor(
-                                                      theme,
-                                                    ).withValues(alpha: 0.35),
-                                              ),
-                                            ),
-                                            child: Row(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Icon(
-                                                  Icons.image_outlined,
-                                                  size: 16,
-                                                  color: TagDialogStyles.accent(
-                                                    theme,
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 6),
-                                                Expanded(
-                                                  child: Text(
-                                                    entry.mediaRefs.length == 1
-                                                        ? '1 image attached'
-                                                        : '${entry.mediaRefs.length} images attached',
-                                                    style:
-                                                        presentationTextStyle(
-                                                          context,
-                                                          theme
-                                                              .textTheme
-                                                              .bodySmall,
-                                                          widget.fontScale,
-                                                          color: bodyColor,
-                                                          height: 1.2,
-                                                          minFontSize: 12.5,
-                                                          maxFontSize: 19,
-                                                        ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
+                                          _mediaThumbnails(entry),
                                         ],
                                       ],
                                     ),
@@ -2481,8 +2125,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                               ? () => _trashEntry(entry)
                                               : null,
                                           child: IconButton(
-                                            onPressed: () =>
-                                                _deleteEntry(entry),
+                                            onPressed: () => _trashEntry(entry),
                                             icon: Icon(
                                               Icons.delete,
                                               color: theme.colorScheme.error,
@@ -2644,7 +2287,7 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
     );
 
     return AlertDialog(
-      title: Text('Change category', style: titleStyle),
+      title: Text('Change folder', style: titleStyle),
       content: SizedBox(
         width: 420,
         child: _loading
@@ -2659,10 +2302,37 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
                   Text('Tag: ${widget.tag}', style: bodyStyle),
                   const SizedBox(height: 4),
                   Text(
-                    'Current category: ${widget.currentCategory?.trim().isNotEmpty == true ? widget.currentCategory!.trim() : 'None'}',
+                    'Current folder: ${widget.currentCategory?.trim().isNotEmpty == true ? widget.currentCategory!.trim() : 'None'}',
                     style: bodyStyle,
                   ),
                   const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    decoration: const InputDecoration(
+                      labelText: 'Choose folder',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      const DropdownMenuItem(value: '', child: Text('None')),
+                      for (final category
+                          in _categoryOptions
+                              .where((c) => c.isNotEmpty)
+                              .toSet())
+                        DropdownMenuItem(
+                          value: category,
+                          child: Text(category),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setState(() {
+                        _catController.text = value;
+                        _typedCategory = value;
+                        _fieldEdited = true;
+                        _errorText = null;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 12),
                   Autocomplete<String>(
                     textEditingController: _catController,
                     focusNode: _catFocusNode,
@@ -2715,7 +2385,7 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
                             smartDashesType: SmartDashesType.disabled,
                             smartQuotesType: SmartQuotesType.disabled,
                             decoration: const InputDecoration(
-                              labelText: 'Move to category',
+                              labelText: 'Move to folder',
                               hintText: 'Type a name, or clear for None',
                               border: OutlineInputBorder(),
                             ),
@@ -2735,6 +2405,23 @@ class _MoveTagCategoryDialogState extends State<_MoveTagCategoryDialog> {
                       });
                     },
                   ),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add new folder'),
+                      onPressed: _loading ? null : () {
+                        setState(() {
+                          _typedCategory = '';
+                          _fieldEdited = true;
+                          _errorText = null;
+                          _catController.clear();
+                        });
+                        _catFocusNode.requestFocus();
+                      },
+                    ),
+                  ),
+                  const Text('Enter a new folder name, then choose Move to create it and move this list.'),
                   if (_errorText != null) ...[
                     const SizedBox(height: 10),
                     Text(

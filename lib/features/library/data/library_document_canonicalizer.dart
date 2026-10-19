@@ -18,6 +18,7 @@ import 'library_document_models.dart';
 import 'library_epub_text_styles.dart';
 import 'library_citation_links.dart';
 import 'library_xml_html_entities.dart';
+import 'optional_book_companions.dart';
 
 /// Separator between hash inputs, built via String.fromCharCode to avoid
 /// an unprintable literal in source.
@@ -245,6 +246,11 @@ class LibraryDocumentCanonicalizer {
   }) async {
     final bytes = await source.readAsBytes();
     final sourceHash = sha256.convert(bytes).toString();
+    await OptionalBookCompanions.apply(
+      db: db,
+      itemId: libraryItemId,
+      sourceHash: sourceHash,
+    );
     final current = await db.query(
       'library_document_conversion',
       where: 'library_item_id = ?',

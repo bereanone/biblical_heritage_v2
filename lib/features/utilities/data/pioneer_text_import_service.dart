@@ -11,6 +11,8 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/database/elibrary_database.dart';
+import '../../../core/database/user_database.dart';
+import 'downloaded_lessons_presentation.dart';
 import 'elibrary_folder_policy.dart';
 import 'pioneer_capture_folder_metadata.dart';
 import 'egw_copied_range_parser.dart';
@@ -1110,6 +1112,24 @@ class PioneerTextImportService {
             itemId: itemId,
             epubBytes: importBytes,
           );
+        }
+        if (result.isImported &&
+            DownloadedLessonsPresentation.matches(work.title)) {
+          // Only this verified-source download path promotes Lessons on Faith.
+          // Local file imports, startup and other Pioneer titles do not.
+          try {
+            await DownloadedLessonsPresentation.apply(
+              libraryDb: db,
+              settingsDb: await UserDatabase.instance.database,
+              itemId: result.libraryItemId,
+              title: work.title,
+              downloadSucceeded: true,
+            );
+          } catch (error) {
+            debugPrint(
+              'Lessons download presentation could not be saved: $error',
+            );
+          }
         }
       } catch (error, stackTrace) {
         final stage = _failureStageFor(error);

@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:studybible2/core/database/study_bible_database.dart';
+import 'package:studybible2/features/reader/presentation/tag_playback/tag_qwen_audio_cache.dart';
 import 'package:studybible2/features/reader/presentation/tag_playback/tag_playback_models.dart';
 import 'package:studybible2/features/reader/presentation/tag_playback/tag_playback_planner.dart';
 import 'package:studybible2/features/reader/presentation/tag_quick_apply_helper.dart';
@@ -191,7 +193,7 @@ void main() {
           ),
         ])).single;
         expect(texts(item.contentClips), [
-          'John 3, verses 16 to 18. Sixteen text.',
+          'John 3, verse 16. Sixteen text.',
           'Seventeen text.',
           'Eighteen text.',
         ]);
@@ -201,6 +203,18 @@ void main() {
           43 * 100000 + 3018,
         ]);
         expect(item.label, 'John 3:16-18');
+        for (var index = 0; index < item.contentClips.length; index++) {
+          final clip = item.contentClips[index];
+          final verse = BibleVerseRecord(
+            blockId: clip.blockId!, bookNumber: 43, bookName: 'John',
+            chapter: 3, verse: 16 + index, text: clip.body,
+          );
+          for (final announcements in [true, false]) {
+            expect(tagCanUseQwen(clip.resolved(speakReference: announcements)!, verse), isTrue,
+              reason: 'Every verse, including the first, keeps the recorded voice');
+          }
+        }
+
       },
     );
 

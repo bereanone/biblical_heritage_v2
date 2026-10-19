@@ -17,13 +17,13 @@ String tagNoteAudioKey({
   required String deferred,
   required double bakedSpeed,
   required String voiceRevision,
-}) => sha256.convert(utf8.encode(jsonEncode([
-  voiceRevision,
-  text,
-  pronunciation,
-  deferred,
-  bakedSpeed,
-]))).toString();
+}) => sha256
+    .convert(
+      utf8.encode(
+        jsonEncode([voiceRevision, text, pronunciation, deferred, bakedSpeed]),
+      ),
+    )
+    .toString();
 
 /// Persistent, content-addressed audio for locally narrated user notes.
 /// A text or pronunciation edit gets a new filename, so an older background
@@ -49,7 +49,8 @@ class TagNoteAudioCache {
     final pronunciation =
         await settings.loadRawSetting('narration_pronunciations_v1') ?? '';
     final deferred =
-        await settings.loadRawSetting('narration_deferred_pronunciations_v2') ?? '';
+        await settings.loadRawSetting('narration_deferred_pronunciations_v2') ??
+        '';
     final bakedSpeed = KokoroMacTestNarrator.synthesisSpeedFor(speed);
     return tagNoteAudioKey(
       voiceRevision: _voiceRevision,
@@ -135,10 +136,10 @@ class TagNoteAudioCache {
       narrator.pronunciationCorrections = rules;
       narrator.deferredPronunciationCorrections =
           await loadDeferredNarrationPronunciations(
-        rules: rules,
-        load: settings.loadRawSetting,
-        save: settings.saveRawSetting,
-      );
+            rules: rules,
+            load: settings.loadRawSetting,
+            save: settings.saveRawSetting,
+          );
       for (final chunk in chunks) {
         if (_entryRevision[entryKey] != revision) return;
         await renderOrGet(chunk, speed: 1, narrator: narrator);

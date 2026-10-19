@@ -61,7 +61,7 @@ class _LibraryPane extends StatelessWidget {
         key: const PageStorageKey('library-list'),
         padding: const EdgeInsets.only(bottom: 12),
         itemCount: books.length,
-        separatorBuilder: (context, index) => const SizedBox(height: 10),
+        separatorBuilder: (context, index) => const SizedBox(height: 2),
         itemBuilder: (context, index) {
           final item = books[index];
           return _BookListTile(
@@ -113,7 +113,7 @@ class _RecentPane extends StatelessWidget {
     return ListView.separated(
       padding: const EdgeInsets.only(bottom: 12),
       itemCount: books.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 10),
+      separatorBuilder: (_, _) => const SizedBox(height: 2),
       itemBuilder: (context, index) {
         final item = books[index];
         return _BookListTile(
@@ -482,21 +482,28 @@ class _TabSelector extends StatelessWidget {
   Widget build(BuildContext context) {
     return SegmentedButton<_LibraryTab>(
       style: _librarySegmentedButtonStyle(context),
+      showSelectedIcon: false,
       segments: [
         ButtonSegment(
           value: _LibraryTab.topShelf,
-          icon: Icon(Icons.star_outline),
-          label: const Text('Top Shelf'),
+          label: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('Top Shelf', maxLines: 1, softWrap: false),
+          ),
         ),
         ButtonSegment(
           value: _LibraryTab.books,
-          icon: Icon(Icons.auto_stories_outlined),
-          label: const Text('All Books'),
+          label: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('All Books', maxLines: 1, softWrap: false),
+          ),
         ),
         ButtonSegment(
           value: _LibraryTab.recent,
-          icon: Icon(Icons.history_rounded),
-          label: const Text('Recent'),
+          label: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('Recent', maxLines: 1, softWrap: false),
+          ),
         ),
       ],
       selected: {selectedTab},
@@ -1069,37 +1076,51 @@ class _BookListTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         onLongPress: onLongPress,
-        child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 8,
-          ),
-          leading: _MiniCover(item: item),
-          title: Text(
-            item.displayTitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: libraryControlTextStyle(
-              context,
-              Theme.of(context).textTheme.titleSmall,
-              fontWeight: FontWeight.w800,
-              color: textColor,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Row(
+              children: [
+                _MiniCover(item: item),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.displayTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: libraryControlTextStyle(
+                          context,
+                          theme.textTheme.titleSmall,
+                          fontWeight: FontWeight.w800,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        [
+                          item.displayAuthor,
+                          if (item.editionLabel != null) item.editionLabel!,
+                        ].join(' · '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: libraryCaptionTextStyle(
+                          context,
+                          theme.textTheme.bodySmall,
+                          color: subduedColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+              ],
             ),
           ),
-          subtitle: Text(
-            [
-              item.displayAuthor,
-              if (item.editionLabel != null) item.editionLabel!,
-            ].join(' · '),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: libraryCaptionTextStyle(
-              context,
-              Theme.of(context).textTheme.bodySmall,
-              color: subduedColor,
-            ),
-          ),
-          trailing: trailing,
         ),
       ),
     );
@@ -1114,8 +1135,8 @@ class _MiniCover extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 46,
-      height: 64,
+      width: 34,
+      height: 46,
       child: _BookThumbnail(
         item: item,
         borderRadius: BorderRadius.circular(10),

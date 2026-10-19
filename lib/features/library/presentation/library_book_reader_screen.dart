@@ -399,6 +399,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     _readerFocusNode.requestFocus();
   }
 
+  final _paragraphPlaybackKey = GlobalKey<LibrarySpeechControlsState>();
   String? _selectedRecordedCursor;
   String _initialSpeechCursor() {
     final section = _contentSectionForIndex(_selectedIndex);
@@ -442,11 +443,14 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     return null;
   }
 
+  bool _recordedFollowHeld = false;
+
   Future<void> _revealLibrarySpeechItem(
     LibrarySpeechItem item, {
     bool recorded = false,
   }) async {
     if (!mounted) return;
+    if (recorded && _recordedFollowHeld) return;
     final parts = item.sourceCursor.split(':');
     final sectionIndex = int.parse(parts[0]);
     final blockIndex = int.parse(parts[1]);
@@ -461,6 +465,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         unawaited(
           followSpeechInBlock(
             blockContext: context,
+            continuous: recorded,
             progress: librarySpeechProgress(
               item.startOffset,
               item.sourceLength,
@@ -475,7 +480,9 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     setState(() => _speechCursor = item.sourceCursor);
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted || (!recorded && !_steadyAutoScroll.isScrolling)) return;
-    if (changedSection && _itemScrollController.isAttached) {
+    if (recorded && _recordedFollowHeld) return;
+    if ((changedSection || item.showSectionStart) &&
+        _itemScrollController.isAttached) {
       _itemScrollController.jumpTo(
         index: _readableSectionIndices.indexOf(sectionIndex),
         alignment: 0,
@@ -483,14 +490,18 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       await WidgetsBinding.instance.endOfFrame;
     }
     if (!mounted || (!recorded && !_steadyAutoScroll.isScrolling)) return;
+    if (recorded && _recordedFollowHeld) return;
+    if (item.showSectionStart) return;
     final block = _contentSectionForIndex(sectionIndex)!.blocks[blockIndex];
     final target =
         _bodyBlockKeys[_blockTargetKey(block, blockIndex)]?.currentContext;
     if (target != null && target.mounted) {
-      await Scrollable.ensureVisible(
-        target,
-        alignment: .1,
-        duration: const Duration(milliseconds: 180),
+      // Align the spoken point, not the entire box: ensureVisible's alignment
+      // can hide the beginning when a paragraph is taller than the viewport.
+      await followSpeechInBlock(
+        blockContext: target,
+        progress: 0,
+        continuous: recorded,
       );
     }
   }
@@ -1008,12 +1019,23 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       );
     }
 
-    return _refCodeByLocation[_refCodeLocationKey(
+    final reference =
+        _refCodeByLocation[_refCodeLocationKey(
           libraryItemId: item.id,
           href: section?.entryName ?? '',
           paragraphIndex: paragraphIndex,
         )] ??
         sectionReferenceCodes[paragraphIndex];
+    // Restored Daniel sections share the work identity of the retained
+    // Revelation text; their imported capture label is not a work code.
+    if (item.id == 'library_item_research_pioneer_uriah_smith_DAR_US' &&
+        reference != null) {
+      return reference.replaceFirst(
+        RegExp(r'^CAPTURE(?=\s)', caseSensitive: false),
+        'DAR',
+      );
+    }
+    return reference;
   }
 
   String _buildLibrarySelectionReferenceLabel({
@@ -1147,11 +1169,26 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         ),
       ),
       fontScale: _fontScale,
+      showPlayFromHere: _paragraphPlaybackKey.currentState != null,
     );
     _librarySelectionActionsOpen = false;
     if (!mounted || action == null) return;
 
     switch (action) {
+      case LibrarySelectionRangeAction.playFromHere:
+        final first = _rangeSelection.lowerAnchor;
+        if (first == null) return;
+        final sectionIndex = section == null
+            ? _selectedIndex
+            : _sections.indexWhere((s) => s.entryName == section.entryName);
+        if (sectionIndex < 0) return;
+        final cursor = '$sectionIndex:${first.blockIndex}';
+        setState(() {
+          _selectedRecordedCursor = cursor;
+          _rangeSelection = _rangeSelection.clear();
+        });
+        await _paragraphPlaybackKey.currentState?.playFromParagraph(cursor);
+        return;
       case LibrarySelectionRangeAction.copyNoCitation:
         await _copyLibrarySelectionToClipboard(selectedText);
         return;
@@ -2082,6 +2119,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         );
       }
     });
+    if (!forNarration) _selectContentsPlayback();
     _stableLiveSectionIndex = _selectedIndex;
     _sectionVisibilityHysteresis.reset();
     _publishLiveSectionLocation(generation);
@@ -2303,6 +2341,21 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     );
     if (sectionChanged) {
       _selectedHeadingTargetIndex = null;
+    }
+    // Manual scrolling can cross a chapter boundary without a Contents click.
+    // The heading and text interaction must agree about the active section.
+    // Keep an in-progress range pinned until the user finishes or clears it.
+    if (_selectedIndex != visibleIndex &&
+        !_rangeSelection.hasSelection &&
+        !_librarySelectionActionsOpen) {
+      setState(() {
+        _bodyBlockKeys.clear();
+        _bodyTextKeys.clear();
+        _geometryRegistry.clear();
+        _selectedIndex = visibleIndex;
+        final navIndex = _navigationIndexForSectionIndex(visibleIndex);
+        if (navIndex != null) _selectedNavigationIndex = navIndex;
+      });
     }
   }
 
@@ -2882,6 +2935,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       }
       _pendingBodyScrollTargetKey = targetKey;
     });
+    _selectContentsPlayback();
     _publishLiveSectionLocation(generation);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || generation != _chapterGeneration) return;
@@ -3104,10 +3158,11 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     }
 
     _selectedHeadingTargetIndex = targetIndex;
+    _selectContentsPlayback(headingTargetKey: target.key);
 
     Scrollable.ensureVisible(
       targetContext,
-      alignment: 0.08,
+      alignment: 0,
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeInOut,
     );
@@ -3316,7 +3371,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       // the actual render object through its owning scrollable instead.
       final scroll = Scrollable.ensureVisible(
         targetContext,
-        alignment: 0.08,
+        alignment: widget.searchTarget == null ? 0 : 0.08,
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeInOut,
       );
@@ -4060,6 +4115,30 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     return p.normalize(value).toLowerCase();
   }
 
+  void _selectContentsPlayback({String? headingTargetKey}) {
+    final section = _contentSectionForIndex(_selectedIndex);
+    if (section == null) return;
+    final targetKey = headingTargetKey ?? _pendingBodyScrollTargetKey;
+    final blockIndex = targetKey == null
+        ? 0
+        : section.blocks.indexWhere(
+            (block) =>
+                _blockTargetKey(block, section.blocks.indexOf(block)) ==
+                targetKey,
+          );
+    final position = _readableSectionIndices.indexOf(_selectedIndex);
+    final next = position >= 0 && position + 1 < _readableSectionIndices.length
+        ? _readableSectionIndices[position + 1]
+        : null;
+    setState(() => _selectedRecordedCursor = null);
+    unawaited(
+      _paragraphPlaybackKey.currentState?.selectForPlayback(
+        '$_selectedIndex:${blockIndex < 0 ? 0 : blockIndex}',
+        endCursor: next == null ? null : '$next:0',
+      ),
+    );
+  }
+
   Future<void> _openContentsPopup() async {
     await _tiltAutoScroll.stop();
     if (!mounted) return;
@@ -4071,25 +4150,48 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (sheetContext) {
-        return LibraryFontScaleScope(
-          scale: _fontScale,
-          child: _ContentsPopupSheet(
-            itemTitle: widget.item.displayTitle,
-            itemSubtitle: '',
-            entries: entries,
-            sections: _sections,
-            currentSectionEntryName: _currentSection?.entryName,
-            currentSectionTitle: libraryReaderDisplaySectionTitle(
-              _currentSection?.title ?? '',
-            ),
-            currentSectionSpineIndex: _currentSection?.spineIndex,
-            selectedNavigationItemId: _selectedNavigationItem?.id,
-            selectedNavigationIndex: _selectedNavigationIndex,
-            selectedSectionIndex: _selectedIndex,
-            isNightMode: _nightMode,
-            isDevotionalNavigation: _isDevotionalNavigationBook,
-            isPeriodical: widget.item.isPeriodical,
-          ),
+        return ValueListenableBuilder<LibraryLiveSectionLocation?>(
+          valueListenable: _liveSection,
+          builder: (context, location, child) {
+            final navigationId = libraryLiveContentsNavigationId(
+              location: location,
+              labelsById: {
+                for (final entry in entries)
+                  entry.item.id: libraryReaderDisplaySectionTitle(
+                    entry.item.label,
+                  ),
+              },
+              fallbackId: _selectedNavigationItem?.id,
+            );
+            final liveEntryIndex = entries.indexWhere(
+              (entry) => entry.item.id == navigationId,
+            );
+            return LibraryFontScaleScope(
+              scale: _fontScale,
+              child: _ContentsPopupSheet(
+                itemTitle: widget.item.displayTitle,
+                itemSubtitle: '',
+                entries: entries,
+                sections: _sections,
+                currentSectionEntryName:
+                    location?.sectionEntryName ?? _currentSection?.entryName,
+                currentSectionTitle:
+                    location?.headingLabels.lastOrNull ??
+                    libraryReaderDisplaySectionTitle(
+                      _currentSection?.title ?? '',
+                    ),
+                currentSectionSpineIndex: _currentSection?.spineIndex,
+                selectedNavigationItemId: navigationId,
+                selectedNavigationIndex: liveEntryIndex >= 0
+                    ? entries[liveEntryIndex].displayIndex
+                    : _selectedNavigationIndex,
+                selectedSectionIndex: _stableLiveSectionIndex ?? _selectedIndex,
+                isNightMode: _nightMode,
+                isDevotionalNavigation: _isDevotionalNavigationBook,
+                isPeriodical: widget.item.isPeriodical,
+              ),
+            );
+          },
         );
       },
     );
@@ -4194,6 +4296,13 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                       referenceCodes[paragraphIndex] ??
                       block.referenceCode)
           : null;
+      final displayedReferenceCode =
+          item.id == 'library_item_research_pioneer_uriah_smith_DAR_US'
+          ? referenceCode?.replaceFirst(
+              RegExp(r'^CAPTURE(?=\s)', caseSensitive: false),
+              'DAR',
+            )
+          : referenceCode;
       if (item.isDevotional && referenceCode != null) {
         devotionalFallbackParagraphCount += 1;
       }
@@ -4229,7 +4338,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
             bottomPadding: block.isHeading ? 12 : 14,
             isNightMode: isNight,
             showRefCodes: _showRefCodes,
-            referenceCode: referenceCode,
+            referenceCode: displayedReferenceCode,
             hasUserMarkup: markups.isNotEmpty,
             selectionHighlightSpec: selectionSpec,
             rangeSelection: active
@@ -4238,13 +4347,22 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
             persistedHighlights: markups,
             onBlockTap:
                 active &&
-                    _rangeSelection.hasCompletedRange &&
+                    _rangeSelection.hasSelection &&
                     _rangeSelection.containsBlock(index)
-                ? () => _showLibrarySelectionActionsMenu(
-                    item: item,
-                    section: contentSection,
-                    sectionBlocks: blocks,
-                  )
+                ? () {
+                    final anchor = _rangeSelection.start;
+                    if (_rangeSelection.isPendingRange && anchor != null) {
+                      _completeLibraryRangeSelection(
+                        anchor.blockIndex,
+                        anchor.tokenIndex,
+                      );
+                    }
+                    _showLibrarySelectionActionsMenu(
+                      item: item,
+                      section: contentSection,
+                      sectionBlocks: blocks,
+                    );
+                  }
                 : null,
             onWordLongPress: active
                 ? (token) => _handleLibraryWordLongPress(
@@ -4283,16 +4401,16 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                     setState(
                       () => _selectedRecordedCursor = '$sectionIndex:$index',
                     );
-                    if (_rangeSelection.hasCompletedRange &&
-                        _rangeSelection.containsTokenPosition(index, token)) {
-                      _showLibrarySelectionActionsMenu(
-                        item: item,
-                        section: contentSection,
-                        sectionBlocks: blocks,
-                      );
-                    } else if (_rangeSelection.hasCompletedRange) {
-                      _clearLibraryRangeSelection();
+                    if (!_rangeSelection.hasCompletedRange ||
+                        !_rangeSelection.containsTokenPosition(index, token)) {
+                      _beginLibraryRangeSelection(index, token);
+                      _completeLibraryRangeSelection(index, token);
                     }
+                    _showLibrarySelectionActionsMenu(
+                      item: item,
+                      section: contentSection,
+                      sectionBlocks: blocks,
+                    );
                   }
                 : (_) {},
             textKey: active
@@ -4368,7 +4486,8 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     }
     final showElibrarySpeechControls =
         (defaultTargetPlatform == TargetPlatform.macOS ||
-            defaultTargetPlatform == TargetPlatform.iOS) &&
+            defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.android) &&
         _sections.isNotEmpty;
     final theme = Theme.of(context);
     final isNight = theme.brightness == Brightness.dark || _nightMode;
@@ -4715,8 +4834,20 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                                       ),
                                     )
                                   : Listener(
-                                      onPointerDown: (_) => _steadyAutoScroll
-                                          .pauseNarrationForInteraction(),
+                                      onPointerDown: (_) {
+                                        _recordedFollowHeld = true;
+                                        unawaited(
+                                          _paragraphPlaybackKey.currentState
+                                              ?.pauseForInteraction(),
+                                        );
+                                        _steadyAutoScroll
+                                            .pauseNarrationForInteraction();
+                                        final position = _bodyScrollPosition;
+                                        if (position != null &&
+                                            position.hasPixels) {
+                                          position.jumpTo(position.pixels);
+                                        }
+                                      },
                                       child: GestureDetector(
                                         behavior: HitTestBehavior.translucent,
                                         onTap: () {
@@ -4798,14 +4929,22 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                       ),
                       if (showElibrarySpeechControls)
                         LibrarySpeechControls(
+                          key: _paragraphPlaybackKey,
                           tiltController: _tiltAutoScroll,
                           controller: _steadyAutoScroll,
                           bookId: widget.item.id,
+                          bookSourceHash: widget.item.fileHash,
                           title: widget.item.title,
                           author: widget.item.author,
                           initialCursor: _initialSpeechCursor,
                           load: _loadLibrarySpeechItem,
                           reveal: _revealLibrarySpeechItem,
+                          onRecordedPlay: () {
+                            _recordedFollowHeld = false;
+                            if (_rangeSelection.hasSelection) {
+                              _clearLibraryRangeSelection();
+                            }
+                          },
                           revealRecorded: (item) =>
                               _revealLibrarySpeechItem(item, recorded: true),
                           recordedStartCursor:

@@ -162,7 +162,7 @@ void main() {
     expect(find.text('Show less'), findsOneWidget);
   });
 
-  testWidgets('word panel leaves the Bible visible above it', (tester) async {
+  testWidgets('word dialog shows the full entry and retains the Bible route', (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
@@ -232,10 +232,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Found in 42 verses'), findsOneWidget);
     expect(find.text('Brief definition'), findsOneWidget);
-    expect(find.text('Copy definition'), findsOneWidget);
+    expect(find.text('Copy entry'), findsOneWidget);
     expect(find.textContaining('Morphology tag:'), findsNothing);
     expect(find.textContaining('page 2'), findsNothing);
-    expect(tester.getTopLeft(find.byType(BottomSheet)).dy, greaterThan(350));
+    expect(find.byType(Dialog), findsOneWidget);
     expect(find.text('Hebrews 6:10'), findsOneWidget);
     await expectLater(
       find.byKey(const ValueKey('capture')),
@@ -380,7 +380,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(tester.takeException(), isNull);
     await tester.scrollUntilVisible(
-      find.text('Copy definition'),
+      find.text('Copy entry'),
       100,
       scrollable: find.byType(Scrollable).first,
     );

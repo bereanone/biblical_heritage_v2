@@ -144,7 +144,7 @@ void main() {
           ),
         ])).single;
         expect(item.clipsFor(includeNotes: false).map((c) => c.text), [
-          'John 3, verses 16 to 17. For God so loved the world.',
+          'John 3, verse 16. For God so loved the world.',
           'For God sent not his Son.',
         ]);
         expect(

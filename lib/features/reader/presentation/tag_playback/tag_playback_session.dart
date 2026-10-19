@@ -6,6 +6,7 @@ import '../kokoro_mac_test_narrator.dart';
 import '../narration_pronunciation.dart';
 import '../tag_quick_apply_helper.dart';
 import 'tag_playback_controller.dart';
+import 'tag_playback_models.dart';
 import 'tag_playback_kokoro_adapters.dart';
 import 'tag_playback_media_binding.dart';
 import 'tag_playback_planner.dart';
@@ -21,7 +22,16 @@ class TagPlaybackSession {
     required this.controller,
     this.media,
     Future<void> Function()? onDispose,
-  }) : _onDispose = onDispose;
+  }) : _onDispose = onDispose {
+    _openSessions.add(this);
+  }
+
+  static final Set<TagPlaybackSession> _openSessions = {};
+  void pauseOtherSessions() {
+    for (final session in _openSessions) {
+      if (!identical(session, this)) session.controller.pause();
+    }
+  }
 
   final String tag;
   final TagPlaybackController controller;
@@ -41,8 +51,6 @@ class TagPlaybackSession {
   }) async {
     final repository = isDollar ? DollarTagRepository() : HashTagRepository();
     final database = StudyBibleDatabase.instance;
-    final settings = AppSettingsService.instance;
-
     final entries = await repository.loadEntries(
       tag,
       category: category,
@@ -67,6 +75,16 @@ class TagPlaybackSession {
       );
     }
 
+    return openItems(tag: tag, items: items, settingsStore: settingsStore);
+  }
+
+  /// Reuses the tag audio pipeline for an already selected memory passage.
+  static Future<TagPlaybackSession> openItems({
+    required String tag,
+    required List<TagPlaybackItem> items,
+    TagPlaybackSettingsStore? settingsStore,
+  }) async {
+    final settings = AppSettingsService.instance;
     final store = settingsStore ?? AppTagPlaybackSettingsStore();
     final playback = await store.load();
     final preferences = await settings.loadMacAutoscrollPreferences();
@@ -111,6 +129,7 @@ class TagPlaybackSession {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _openSessions.remove(this);
     media?.dispose();
     controller.dispose();
     final onDispose = _onDispose;

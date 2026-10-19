@@ -435,10 +435,6 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         }
         return;
       }
-      _showRangeActionMessage(
-        'Tagged $inserted verse(s) with $defaultTag'
-        '${skipped > 0 ? ' ($skipped already in this tag)' : ''}.',
-      );
       if (mounted) {
         setState(() {
           _highlightRefreshTick += 1;
@@ -535,7 +531,6 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
     setState(() {
       _highlightRefreshTick += 1;
     });
-    _showRangeActionMessage('Markup cleared for selected range.');
   }
 
   Future<void> _addRangeToMemory(String bookName, List<VerseLine> lines) async {
@@ -553,12 +548,11 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       verseText: verseText,
     );
     if (!mounted) return;
-    _showRangeActionMessage('Added range to Bible Memory.');
   }
 
   void _showRangeActionMessage(String message) {
     if (!mounted) return;
-    showReadableSnackBar(context, message, fontScale: _fontScale);
+    _showReaderFeedback(context, message, fontScale: _fontScale);
   }
 
   String? _buildSelectedTokenPreview(

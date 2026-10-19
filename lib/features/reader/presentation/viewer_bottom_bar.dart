@@ -18,6 +18,7 @@ class ViewerBottomBar extends StatelessWidget {
     this.readerAllowsAutoscroll = true,
     required this.onToggleInterlinear,
     required this.onMode,
+    this.onMemory,
     required this.onHistory,
     required this.onLibrary,
     required this.onDecreaseFont,
@@ -41,6 +42,7 @@ class ViewerBottomBar extends StatelessWidget {
   final bool readerAllowsAutoscroll;
   final VoidCallback onToggleInterlinear;
   final VoidCallback onMode;
+  final VoidCallback? onMemory;
   final VoidCallback onHistory;
   final VoidCallback onLibrary;
   final VoidCallback onDecreaseFont;
@@ -168,6 +170,13 @@ class ViewerBottomBar extends StatelessWidget {
                           onToggleThemeMode: onToggleThemeMode,
                         ),
                         const SizedBox(width: 2),
+                        if (onMemory != null) ...[
+                          _MemoryButton(
+                            color: buttonColor,
+                            onPressed: onMemory!,
+                          ),
+                          const SizedBox(width: 2),
+                        ],
                         _BottomIconButton(
                           tooltip: 'Mode',
                           icon: Icons.settings_rounded,
@@ -276,6 +285,13 @@ class ViewerBottomBar extends StatelessWidget {
                                   onToggleThemeMode: onToggleThemeMode,
                                 ),
                                 const SizedBox(width: 2),
+                                if (onMemory != null) ...[
+                                  _MemoryButton(
+                                    color: buttonColor,
+                                    onPressed: onMemory!,
+                                  ),
+                                  const SizedBox(width: 2),
+                                ],
                                 _BottomIconButton(
                                   tooltip: 'Mode',
                                   icon: Icons.settings_rounded,
@@ -380,6 +396,13 @@ class ViewerBottomBar extends StatelessWidget {
                               onToggleThemeMode: onToggleThemeMode,
                             ),
                             const SizedBox(width: 2),
+                            if (onMemory != null) ...[
+                              _MemoryButton(
+                                color: buttonColor,
+                                onPressed: onMemory!,
+                              ),
+                              const SizedBox(width: 2),
+                            ],
                             _BottomIconButton(
                               tooltip: 'Mode',
                               icon: Icons.settings_rounded,
@@ -488,6 +511,13 @@ class ViewerBottomBar extends StatelessWidget {
                             onToggleThemeMode: onToggleThemeMode,
                           ),
                           const SizedBox(width: 2),
+                          if (onMemory != null) ...[
+                            _MemoryButton(
+                              color: buttonColor,
+                              onPressed: onMemory!,
+                            ),
+                            const SizedBox(width: 2),
+                          ],
                           _BottomIconButton(
                             tooltip: 'Mode',
                             icon: Icons.settings_rounded,

@@ -225,16 +225,43 @@ class _ViewerStrongsPageOneState extends State<ViewerStrongsPageOne> {
                         abbott?.related.isNotEmpty != true) {
                       return const SizedBox.shrink();
                     }
-                    final copyText = hasAbbott
+                    final definitionText = hasAbbott
                         ? [
                             for (final sense in abbott.senses)
                               '${sense.number} ${sense.parts.map((part) => part.text).join()}'
                                   .trim(),
                           ].join('\n')
                         : entry.shortDefinition;
+                    final copyText = [
+                      if (entry.lemma.trim().isNotEmpty) entry.lemma.trim(),
+                      "Strong's ${entry.strongsId}",
+                      if (entry.transliteration.trim().isNotEmpty)
+                        'Transliteration: ${entry.transliteration}',
+                      if (entry.pronunciation.trim().isNotEmpty)
+                        'Pronunciation: ${entry.pronunciation}',
+                      [
+                        entry.language,
+                        entry.partOfSpeech,
+                      ].where((value) => value.trim().isNotEmpty).join(' · '),
+                      if (definitionText.trim().isNotEmpty) definitionText,
+                    ].where((value) => value.trim().isNotEmpty).join('\n');
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            await Clipboard.setData(
+                              ClipboardData(text: copyText),
+                            );
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Entry copied')),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.copy, size: 18),
+                          label: const Text('Copy entry'),
+                        ),
                         const SizedBox(height: 12),
                         Divider(color: theme.colorScheme.outlineVariant),
                         Padding(
@@ -323,22 +350,6 @@ class _ViewerStrongsPageOneState extends State<ViewerStrongsPageOne> {
                               ),
                           ],
                         ],
-                        OutlinedButton.icon(
-                          onPressed: () async {
-                            await Clipboard.setData(
-                              ClipboardData(text: copyText),
-                            );
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Definition copied'),
-                                ),
-                              );
-                            }
-                          },
-                          icon: const Icon(Icons.copy, size: 18),
-                          label: const Text('Copy definition'),
-                        ),
                       ],
                     );
                   },

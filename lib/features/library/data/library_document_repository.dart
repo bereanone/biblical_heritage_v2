@@ -41,7 +41,7 @@ import 'library_section_heuristics.dart';
 }
 
 /// A Contents node whose target has been resolved directly to one canonical
-/// heading block.  Unlike the legacy EPUB navigation rows, this object cannot
+/// content block. Unlike the legacy EPUB navigation rows, this object cannot
 /// exist without a real persisted destination.
 class LibraryCanonicalNavigationDestination {
   const LibraryCanonicalNavigationDestination({
@@ -206,10 +206,10 @@ class LibraryDocumentRepository {
     return rows.map(LibraryDocumentBlock.fromRow).toList(growable: false);
   }
 
-  /// Resolves EPUB TOC rows to canonical headings exclusively by their
-  /// package-relative href and fragment identity. There is deliberately no
-  /// label, spine, file-level, or first-heading fallback: an unresolved row
-  /// is omitted rather than navigating the reader to the wrong content.
+  /// Resolves EPUB TOC rows by their package-relative source identity.
+  /// Explicit file-only links open that file's first block (scanned page EPUBs
+  /// often have no headings). A broken fragment never falls back to the file,
+  /// a matching label, or an unrelated heading.
   Future<List<LibraryCanonicalNavigationDestination>>
   loadCanonicalNavigationDestinations(String libraryItemId) async {
     final authoredTable = await db.rawQuery(
@@ -232,9 +232,29 @@ class LibraryDocumentRepository {
           (authored.length > 1 ||
               (authored.single['nav_anchor']?.toString() ?? '').isNotEmpty)) {
         final ids = authored.map((row) => row['nav_id'].toString()).toSet();
+        final authoredHeadings = await loadHeadings(libraryItemId);
         return authored
             .map((row) {
               final parent = row['nav_parent_id']?.toString();
+              var target = LibraryDocumentBlock.fromRow(row);
+              // A file-only authored destination may precede the chapter's
+              // actual heading (for example, editorial epigraphs). Preserve
+              // explicit fragments; refine only a unique same-file heading.
+              if ((row['nav_anchor']?.toString() ?? '').isEmpty &&
+                  !target.isHeading) {
+                final matching = authoredHeadings
+                    .where(
+                      (heading) =>
+                          _canonicalNavigationPath(heading.sourceHref) ==
+                              _canonicalNavigationPath(target.sourceHref) &&
+                          _normalizedCanonicalOpeningLabel(heading.plainText) ==
+                              _normalizedCanonicalOpeningLabel(
+                                row['nav_label'].toString(),
+                              ),
+                    )
+                    .toList(growable: false);
+                if (matching.length == 1) target = matching.single;
+              }
               return LibraryCanonicalNavigationDestination(
                 id: row['nav_id'].toString(),
                 parentId: ids.contains(parent) ? parent : null,
@@ -242,7 +262,7 @@ class LibraryDocumentRepository {
                 depth: parent != null && !ids.contains(parent)
                     ? 0
                     : (row['nav_depth'] as num).toInt(),
-                block: LibraryDocumentBlock.fromRow(row),
+                block: target,
               );
             })
             .toList(growable: false);
@@ -262,6 +282,20 @@ class LibraryDocumentRepository {
       whereArgs: <Object?>[libraryItemId],
       orderBy: 'sort_order ASC',
     );
+    final fileStarts = <String, LibraryDocumentBlock>{};
+    if (rows.any((row) => (row['anchor_id']?.toString() ?? '').isEmpty)) {
+      final blocks = await db.query(
+        'library_document_blocks',
+        where: 'library_item_id = ?',
+        whereArgs: [libraryItemId],
+        orderBy: 'display_order ASC',
+      );
+      for (final row in blocks) {
+        final block = LibraryDocumentBlock.fromRow(row);
+        final path = _canonicalNavigationPath(block.sourceHref);
+        if (path.isNotEmpty) fileStarts.putIfAbsent(path, () => block);
+      }
+    }
     final headings = await loadHeadings(libraryItemId);
     final headingByTarget = <String, LibraryDocumentBlock>{};
     final headingsByAnchor = <String, List<LibraryDocumentBlock>>{};
@@ -279,15 +313,16 @@ class LibraryDocumentRepository {
     for (final row in rows) {
       final href = _canonicalNavigationPath(row['href']?.toString());
       final anchor = row['anchor_id']?.toString().trim() ?? '';
-      if (href.isEmpty || anchor.isEmpty) continue;
+      if (href.isEmpty) continue;
       // Some producers write nav hrefs relative to the package while their
       // OPF/spine resolution stores a different-but-equivalent path prefix.
       // A fragment is still an exact canonical identity when unique within
       // the publication; ambiguity is rejected, never resolved by position.
       final byAnchor = headingsByAnchor[anchor] ?? const [];
-      final heading =
-          headingByTarget['$href#$anchor'] ??
-          (byAnchor.length == 1 ? byAnchor.single : null);
+      final heading = anchor.isEmpty
+          ? fileStarts[href]
+          : headingByTarget['$href#$anchor'] ??
+                (byAnchor.length == 1 ? byAnchor.single : null);
       if (heading == null) continue;
       final id = row['id']?.toString() ?? '';
       if (id.isEmpty) continue;

@@ -582,6 +582,26 @@ class AppSettingsService {
   }
 
   // Tag/list default only. Future slide- and range-level overrides can layer on top.
+  Future<PresentationAspectRatioPreset> loadTagPresentationAspectRatioPreset({required String tagFamily,required String tag}) async {
+    final key='${_tagPresentationLayoutKey(tagFamily:tagFamily,tag:tag)}.aspect_ratio';
+    final db=await UserDatabase.instance.database;
+    final rows=await db.query('app_settings',columns:['value'],where:'key = ?',whereArgs:[key],limit:1);
+    if(rows.isEmpty) return loadPresentationAspectRatioPreset();
+    return PresentationAspectRatioPreset.fromStorage(rows.first['value'] as String?);
+  }
+  Future<void> saveTagPresentationAspectRatioPreset({required String tagFamily,required String tag,required PresentationAspectRatioPreset preset}) async {
+    final key='${_tagPresentationLayoutKey(tagFamily:tagFamily,tag:tag)}.aspect_ratio';
+    final db=await UserDatabase.instance.database;
+    await db.transaction((txn) async {
+      await txn.insert('app_settings', {'key': key, 'value': preset.name},
+          conflictAlgorithm: ConflictAlgorithm.replace);
+      // Lists without their own saved ratio inherit the last explicit choice.
+      await txn.insert('app_settings',
+          {'key': _presentationAspectRatioKey, 'value': preset.name},
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+  }
+
   Future<PresentationLayoutPreference> loadTagPresentationLayoutPreference({
     required String tagFamily,
     required String tag,

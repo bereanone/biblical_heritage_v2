@@ -3,6 +3,18 @@ import 'dart:convert';
 import '../../../core/database/study_bible_database.dart';
 import 'viewer_strongs_models.dart';
 
+/// Prefer a unique content word while keeping ambiguous or missing mappings
+/// in the source chooser. This never drops alternate mapped entries.
+String? selectPrimaryStrongsSource(List<ViewerStrongsEntry?> entries) {
+  if (entries.any((entry) => entry == null)) return null;
+  final substantive = entries.where((entry) {
+    final pos = entry!.partOfSpeech.toLowerCase();
+    return pos.startsWith('noun') || pos.startsWith('proper noun') ||
+        pos.startsWith('verb') || pos == 'adjective' || pos == 'substantive';
+  }).toList();
+  return substantive.length == 1 ? substantive.single!.strongsId : null;
+}
+
 class ViewerStrongsRepository {
   const ViewerStrongsRepository();
 

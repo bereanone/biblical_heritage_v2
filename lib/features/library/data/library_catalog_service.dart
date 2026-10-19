@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'optional_book_companions.dart';
 
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
@@ -1976,6 +1977,32 @@ class LibraryCatalogService {
   }
 }
 
+// Internet Archive collection metadata is not the title of an individual book.
+bool _isGenericPioneerTitle(String title) => RegExp(
+  r'^adventist pioneer authors?\s*[-–—:]\s*.+$',
+  caseSensitive: false,
+).hasMatch(title.trim());
+
+/// Collapse catalog aliases of the exact same file for browsing only. Keep the
+/// full catalog elsewhere so saved reading positions and Top Shelf IDs resolve.
+/// Different paths remain separate, even when their titles match.
+List<LibraryCatalogItem> selectDistinctLibraryFiles(
+  Iterable<LibraryCatalogItem> items,
+) {
+  final selected = <String, LibraryCatalogItem>{};
+  for (final item in items) {
+    final path = item.relativePath.trim().replaceAll('\\', '/');
+    final key = path.isEmpty ? 'id:${item.id}' : 'file:$path';
+    final existing = selected[key];
+    if (existing == null ||
+        (_isGenericPioneerTitle(existing.title) &&
+            !_isGenericPioneerTitle(item.title))) {
+      selected[key] = item;
+    }
+  }
+  return selected.values.toList(growable: false);
+}
+
 class LibraryCatalogItem {
   const LibraryCatalogItem({
     required this.id,
@@ -2016,7 +2043,13 @@ class LibraryCatalogItem {
     Map<String, Object?> row, {
     String? rootPath,
   }) {
-    final coverPathValue = row['cover_path']?.toString().trim();
+    final sourceFingerprint = OptionalBookCompanions.sourceFingerprint(
+      row['file_hash']?.toString(),
+      row['source_work_id']?.toString(),
+    );
+    final coverPathValue = OptionalBookCompanions.matchesWor(sourceFingerprint)
+        ? 'assets/library_covers/thumbs/WOR.png'
+        : row['cover_path']?.toString().trim();
     final resolvedCoverPath = _resolveCoverPath(
       coverPathValue,
       rootPath: rootPath,
@@ -2026,7 +2059,7 @@ class LibraryCatalogItem {
       title: row['title']?.toString() ?? '',
       author: row['author']?.toString(),
       fileName: row['file_name']?.toString() ?? '',
-      fileHash: row['file_hash']?.toString(),
+      fileHash: sourceFingerprint ?? row['file_hash']?.toString(),
       relativePath: row['relative_path']?.toString() ?? '',
       fileFormat: row['file_format']?.toString(),
       folderType: row['folder_type']?.toString(),
@@ -2200,6 +2233,9 @@ class LibraryCatalogItem {
   String get _rawDisplayTitle {
     final trimmed = title.trim();
     if (_isWaggonerOnRomansEdition(this)) return 'Waggoner on Romans';
+    if (_isGenericPioneerTitle(trimmed) && fileName.trim().isNotEmpty) {
+      return p.basenameWithoutExtension(fileName).replaceAll('_', ' ').trim();
+    }
     if (trimmed.isEmpty) {
       return _humanizeFileName(fileName);
     }

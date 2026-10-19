@@ -249,3 +249,28 @@ class _FontScaleButton extends StatelessWidget {
     );
   }
 }
+
+class _MemoryButton extends StatelessWidget {
+  const _MemoryButton({required this.color, required this.onPressed});
+
+  final Color color;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: 'Bible Memory',
+      onPressed: onPressed,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 36, height: 44),
+      icon: Text(
+        'M',
+        style: TextStyle(
+          color: color,
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}

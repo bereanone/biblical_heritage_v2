@@ -1,0 +1,120 @@
+{
+  "revision": "core-six-20261018-v1",
+  "catalog_asset": "assets/bundled_library/catalog.db",
+  "catalog_sha256": "7cb6206aa6efaf1bcf20cf61917c3ea8bf0d58265166ad55147514b97aeea24c",
+  "books": [
+    {
+      "id": "library_item_research_pioneer_uriah_smith_DAR_US",
+      "title": "Daniel and the Revelation",
+      "source_mode": "stored_text_blocks"
+    },
+    {
+      "id": "library_item_research_pioneer_stephen_nelson_haskell_CIS",
+      "title": "The Cross and Its Shadow",
+      "source_mode": "file"
+    },
+    {
+      "id": "library_item_research_pioneer_james_white_FP187",
+      "title": "Fundamental Principles",
+      "source_mode": "file"
+    },
+    {
+      "id": "library_item_research_pioneer_stephen_nelson_haskell_SSP",
+      "title": "The Story of the Seer of Patmos",
+      "source_mode": "file"
+    },
+    {
+      "id": "library_item_research_epubs_egw_egw_books_en_sc_epub",
+      "title": "Steps to Christ",
+      "source_mode": "file"
+    },
+    {
+      "id": "library_item_research_pioneer_stephen_n_haskell_the_story_of_daniel_the_prophet",
+      "title": "The Story of Daniel the Prophet",
+      "source_mode": "file"
+    }
+  ],
+  "resources": [
+    {
+      "asset": "assets/bundled_library/files/33fff50aab49ef3dfdf89fa5bc72ff29ef7a113e508daf22fb3285c5850078bd",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/books/CIS-Complete.epub",
+      "sha256": "33fff50aab49ef3dfdf89fa5bc72ff29ef7a113e508daf22fb3285c5850078bd",
+      "bytes": 6134747
+    },
+    {
+      "asset": "assets/bundled_library/files/1f98a712bb38d602fd7cd15cd6e306b3166939b5712b12cdf12b8c1a6d3e2624",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/books/FP187/metadata.json",
+      "sha256": "1f98a712bb38d602fd7cd15cd6e306b3166939b5712b12cdf12b8c1a6d3e2624",
+      "bytes": 327
+    },
+    {
+      "asset": "assets/bundled_library/files/4827f08032272fadcefe6350984ac0ee18490b93c9dad42efca43b8159884915",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/books/FP187/capture.html",
+      "sha256": "4827f08032272fadcefe6350984ac0ee18490b93c9dad42efca43b8159884915",
+      "bytes": 17184
+    },
+    {
+      "asset": "assets/bundled_library/files/17e4c1c40c48bf31d36b3d6d97b2c3b5fa6adc54bb42782023368f331b2b429c",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/books/FP187/manifest.json",
+      "sha256": "17e4c1c40c48bf31d36b3d6d97b2c3b5fa6adc54bb42782023368f331b2b429c",
+      "bytes": 542
+    },
+    {
+      "asset": "assets/bundled_library/files/bde5a968e1ebfcc5dabadb4fa1ab840d9044356f6effab9cac9aea17d4ce271b",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/books/FP187/images/image_0001.png",
+      "sha256": "bde5a968e1ebfcc5dabadb4fa1ab840d9044356f6effab9cac9aea17d4ce271b",
+      "bytes": 2139144
+    },
+    {
+      "asset": "assets/bundled_library/files/5bae00bf89e6b60278d57974d68d1624f8816dc1d62cad621ebaa0010997ba37",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/books/SSP/metadata.json",
+      "sha256": "5bae00bf89e6b60278d57974d68d1624f8816dc1d62cad621ebaa0010997ba37",
+      "bytes": 340
+    },
+    {
+      "asset": "assets/bundled_library/files/b9f2f5dfe0518d18c2eb4028009b04b55df7ba10129b3779868aca904d15c0ce",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/books/SSP/capture.html",
+      "sha256": "b9f2f5dfe0518d18c2eb4028009b04b55df7ba10129b3779868aca904d15c0ce",
+      "bytes": 675421
+    },
+    {
+      "asset": "assets/bundled_library/files/7deaadb231fcf7240866f1f79683eb3b2ac81a729bcdeacb73c5e21a834f50e9",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/books/SSP/manifest.json",
+      "sha256": "7deaadb231fcf7240866f1f79683eb3b2ac81a729bcdeacb73c5e21a834f50e9",
+      "bytes": 558
+    },
+    {
+      "asset": "assets/bundled_library/files/27a5e6e439094075c0eaab84ff3bb5ad7b923861f3af46b94ad3d816fa7c5154",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/books/SSP/images/image_0001.png",
+      "sha256": "27a5e6e439094075c0eaab84ff3bb5ad7b923861f3af46b94ad3d816fa7c5154",
+      "bytes": 2669099
+    },
+    {
+      "asset": "assets/bundled_library/files/86155b5e089849e0d5bbcc9c64601755cbd4cd443103c2df62df8d2d3631f067",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/books/en_SC.epub",
+      "sha256": "86155b5e089849e0d5bbcc9c64601755cbd4cd443103c2df62df8d2d3631f067",
+      "bytes": 450210
+    },
+    {
+      "asset": "assets/bundled_library/files/385a92f37a8b279fd7029bd4f9a4d09cff28dffe8bf976d24d50619f0ea19711",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/covers/library_item_research_epubs_egw_egw_books_en_sc_epub.jpg",
+      "sha256": "385a92f37a8b279fd7029bd4f9a4d09cff28dffe8bf976d24d50619f0ea19711",
+      "bytes": 378701
+    },
+    {
+      "asset": "assets/bundled_library/files/34c70889e0e7827b6d0aa69d6307d8a45ddea594d63cb35684d47afed2dba13b",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/books/library_item_research_pioneer_stephen_n_haskell_the_story_of_daniel_the_prophet.epub",
+      "sha256": "34c70889e0e7827b6d0aa69d6307d8a45ddea594d63cb35684d47afed2dba13b",
+      "bytes": 3520548
+    },
+    {
+      "asset": "assets/bundled_library/files/3ca44bf4c62a830ac8681d4959ce2d167d2ee361c03ef6699d61f011dd11d667",
+      "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/covers/SDP-square-titled-20261013.png",
+      "sha256": "3ca44bf4c62a830ac8681d4959ce2d167d2ee361c03ef6699d61f011dd11d667",
+      "bytes": 2489230
+    }
+  ],
+  "optional_download_only": [
+    "Lessons on Faith"
+  ]
+}

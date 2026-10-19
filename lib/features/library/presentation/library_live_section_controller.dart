@@ -22,6 +22,29 @@ class LibraryLiveSectionLocation {
       listEquals(headingLabels, other.headingLabels);
 }
 
+/// Resolve the visible heading before falling back to a file-level navigation
+/// ID. Several chapters may share one EPUB file and therefore the same fallback.
+String? libraryLiveContentsNavigationId({
+  required LibraryLiveSectionLocation? location,
+  required Map<String, String> labelsById,
+  String? fallbackId,
+}) {
+  String normalize(String value) =>
+      value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+  for (final heading in location?.headingLabels.reversed ?? const <String>[]) {
+    final label = normalize(heading);
+    if (label.isEmpty) continue;
+    final matches = labelsById.entries
+        .where((entry) => normalize(entry.value) == label)
+        .map((entry) => entry.key)
+        .toList();
+    if (matches.length == 1) return matches.single;
+    if (matches.contains(location?.navigationId)) return location!.navigationId;
+  }
+  final liveId = location?.navigationId;
+  return labelsById.containsKey(liveId) ? liveId : fallbackId;
+}
+
 class LibraryLiveSectionController
     extends ValueNotifier<LibraryLiveSectionLocation?> {
   LibraryLiveSectionController() : super(null);

@@ -55,7 +55,7 @@ void main() {
     // whether or not the keyboard is open, so a focused text field inside
     // it is never torn down and recreated when the keyboard appears.
     expect(find.byKey(const ValueKey('library-standard-layout')), findsOne);
-    expect(find.text('Books'), findsOne);
+    expect(find.text('All Books'), findsOne);
     expect(find.text('Recent'), findsOne);
     expect(find.text('Shelf'), findsOne);
     expect(find.text('List'), findsOne);

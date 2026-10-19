@@ -371,6 +371,12 @@ class _TagPresentationRunScreenState extends State<TagPresentationRunScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              IconButton(
+                tooltip: 'First slide',
+                onPressed: isFirst ? null : () => _goTo(0),
+                icon: const Icon(Icons.first_page),
+                color: const Color(0xFFF3EFE4),
+              ),
               Padding(
                 padding: const EdgeInsets.only(left: 8),
                 child: Material(
@@ -412,6 +418,12 @@ class _TagPresentationRunScreenState extends State<TagPresentationRunScreen> {
                     tooltip: 'Next slide',
                   ),
                 ),
+              ),
+              IconButton(
+                tooltip: 'Last slide',
+                onPressed: isLast ? null : () => _goTo(_slides.length - 1),
+                icon: const Icon(Icons.last_page),
+                color: const Color(0xFFF3EFE4),
               ),
             ],
           ),

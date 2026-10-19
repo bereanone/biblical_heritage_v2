@@ -4,7 +4,7 @@ enum ReaderTiltStatusBannerMode { alwaysVisible, autoHide, alwaysHidden }
 
 class ReaderTiltPreferences {
   const ReaderTiltPreferences({
-    this.reverseVerticalDirection = false,
+    this.reverseVerticalDirection = true,
     this.neutralZoneFraction = 0.05,
     this.speedMultiplier = 1.0,
     this.horizontalChapterTiltEnabled = false,
@@ -78,7 +78,7 @@ class ReaderTiltPreferences {
     bool boolean(String key, bool fallback) =>
         value[key] is bool ? value[key] as bool : fallback;
     return defaults.copyWith(
-      reverseVerticalDirection: boolean('reverse_vertical_direction', false),
+      reverseVerticalDirection: boolean('reverse_vertical_direction', true),
       neutralZoneFraction: number('neutral_zone_fraction', 0.05),
       speedMultiplier: number('speed_multiplier', 1.0),
       horizontalChapterTiltEnabled: boolean(

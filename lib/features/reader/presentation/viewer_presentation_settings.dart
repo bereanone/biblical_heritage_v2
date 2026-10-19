@@ -1,5 +1,7 @@
 enum PresentationAspectRatioPreset {
   auto('Auto', null),
+  phonePortrait('Phone portrait', 9 / 16),
+  tabletPortrait('Tablet portrait', 3 / 4),
   fourByThree('4:3', 4 / 3),
   sixteenByTen('16:10', 16 / 10),
   sixteenByNine('16:9', 16 / 9),

@@ -15,6 +15,22 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
   private var timeObserver: Any?
   private var endObserver: NSObjectProtocol?
   private var lastReportedVerse: Int?
+  var nativePlaybackChanged: ((Bool) -> Void)?
+  var hasNativePlayback: Bool { player != nil }
+
+  /// Headsets remain connected to the phone. Route system transport commands
+  /// to its native recording while that recording owns playback.
+  func handleMediaCommand(_ command: String) -> Bool {
+    guard player != nil else { return false }
+    let nativeCommand = command == "play" ? "start" : command
+    do { try performNative(nativeCommand) }
+    catch {
+      state["error"] = error.localizedDescription
+      store(state)
+    }
+    return true
+  }
+
 
   override init() {
     state = UserDefaults.standard.dictionary(forKey: Self.savedStateKey) ?? [
@@ -379,12 +395,13 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
     guard let url = assetPath(chapter.asset).map(URL.init(fileURLWithPath:)) else {
       throw WatchRemoteError.missingRecording
     }
+    stopNativePlayer()
     try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
     try AVAudioSession.sharedInstance().setActive(true)
-    stopNativePlayer()
     let item = AVPlayerItem(url: url)
     let newPlayer = AVPlayer(playerItem: item)
     player = newPlayer
+    nativePlaybackChanged?(true)
     state["playing"] = false
     state["pending"] = true
     state.removeValue(forKey: "error")
@@ -475,10 +492,13 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
     player?.pause()
     player = nil
     lastReportedVerse = nil
+    nativePlaybackChanged?(false)
   }
 
   private func updateNowPlaying() {
     guard player != nil else { return }
+    MPNowPlayingInfoCenter.default().playbackState =
+      (state["playing"] as? Bool ?? false) ? .playing : .paused
     MPNowPlayingInfoCenter.default().nowPlayingInfo = [
       MPMediaItemPropertyTitle: state["title"] as? String ?? "Bible",
       MPMediaItemPropertyArtist: "Biblical Heritage Bible",

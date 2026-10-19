@@ -10,6 +10,7 @@ import 'mac_reader_autoscroll_controller.dart';
 import 'library_narration_media_controls.dart';
 import 'library_speech_queue.dart';
 import 'recorded_library_audio_controls.dart';
+import '../data/bundled_audio_setup.dart';
 import 'speech_tilt_binding.dart';
 import 'reader_tilt_autoscroll_controller.dart';
 import 'dart:io';
@@ -24,14 +25,17 @@ class LibrarySpeechControls extends StatefulWidget {
     required this.load,
     required this.reveal,
     this.revealRecorded,
+    this.onRecordedPlay,
     this.recordedStartCursor,
     this.selectedRecordedCursor,
     required this.onPaused,
     required this.bookId,
     this.title = 'Book narration',
     this.author,
+    this.bookSourceHash,
     this.tiltController,
   });
+  final VoidCallback? onRecordedPlay;
   final MacReaderAutoScrollController controller;
   final String Function() initialCursor;
   final Future<LibrarySpeechItem?> Function(String) load;
@@ -45,13 +49,103 @@ class LibrarySpeechControls extends StatefulWidget {
   /// Shown on the lock screen while narrating.
   final String title;
   final String? author;
+  final String? bookSourceHash;
   final ReaderTiltAutoScrollController? tiltController;
   @override
-  State<LibrarySpeechControls> createState() => _LibrarySpeechControlsState();
+  State<LibrarySpeechControls> createState() => LibrarySpeechControlsState();
 }
 
-class _LibrarySpeechControlsState extends State<LibrarySpeechControls>
+class LibrarySpeechControlsState extends State<LibrarySpeechControls>
     with WidgetsBindingObserver {
+  final _recordedKey = GlobalKey<RecordedLibraryAudioControlsState>();
+  String? _requestedParagraph;
+
+  Future<void> pauseForInteraction() async {
+    widget.controller.pauseNarrationForInteraction();
+    await _recordedKey.currentState?.pauseForInteraction();
+  }
+
+  int _navigationRevision = 0;
+
+  /// Move the next Play destination without starting narration.
+  Future<void> selectForPlayback(String cursor, {String? endCursor}) async {
+    final revision = ++_navigationRevision;
+    _requestedParagraph = cursor;
+    widget.controller.stopForManualInteraction();
+    // Register the destination before any await so Play and audio-follow cannot
+    // race the Contents selection with the previous saved position.
+    final recorded = _recordedKey.currentState;
+    final navigation = recorded?.selectForPlayback(
+      cursor,
+      endCursor: endCursor,
+    );
+    await _queue.stop();
+    if (recorded != null) {
+      await navigation;
+      return;
+    }
+    await _ready;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || revision != _navigationRevision) return;
+    await _recordedKey.currentState?.selectForPlayback(
+      cursor,
+      endCursor: endCursor,
+    );
+  }
+
+  Future<void> playMarginNotesFromParagraph(String cursor) async {
+    await _ready;
+    if (!mounted) return;
+    final recorded = _recordedKey.currentState;
+    if (recorded == null) return;
+    await recorded.playMarginNotesFromParagraph(cursor);
+  }
+
+  Future<void> playMarginNoteFromParagraph(
+    String cursor, {
+    required int noteOrder,
+    required int lineIndex,
+  }) async {
+    await _ready;
+    if (!mounted) return;
+    final recorded = _recordedKey.currentState;
+    if (recorded == null) return;
+    await recorded.playMarginNoteFromParagraph(
+      cursor,
+      noteOrder: noteOrder,
+      lineIndex: lineIndex,
+    );
+  }
+
+  Future<void> playFromParagraph(String cursor) async {
+    await _ready;
+    if (!mounted) return;
+    final recorded = _recordedKey.currentState;
+    if (recorded != null) {
+      await recorded.playFromParagraph(cursor);
+      return;
+    }
+    await _queue.stop();
+    if (!mounted) return;
+    final c = widget.controller;
+    c.stopForManualInteraction();
+    _requestedParagraph = cursor;
+    c.updatePreferences(
+      MacAutoscrollPreferences(
+        baseSpeed: c.baseSpeed,
+        lastNonzeroStep: c.lastNonzeroStep,
+        maximumStep: c.maximumStep,
+        statusBannerMode: c.statusBannerMode,
+        audioEnabled: true,
+        announceChapter: c.announceChapter,
+        announceVerseNumbers: c.announceVerseNumbers,
+        speechRate: c.speechRate,
+      ),
+    );
+    c.setSignedStep(1);
+    await _start();
+  }
+
   KokoroMacTestNarrator? _speechEngine;
   SpeechTiltBinding? _speechTilt;
   Map<String, String> _rules = {};
@@ -137,6 +231,7 @@ class _LibrarySpeechControlsState extends State<LibrarySpeechControls>
       previous: () => unawaited(_skip(next: false)),
     );
     _ready = _loadRules();
+    BundledAudioSetup.instance.addListener(_recordingsChanged);
     widget.controller.addListener(_changed);
     WidgetsBinding.instance.addPostFrameCallback((_) => _changed());
   }
@@ -161,12 +256,31 @@ class _LibrarySpeechControlsState extends State<LibrarySpeechControls>
     }
   }
 
+  void _recordingsChanged() {
+    if (mounted &&
+        _recordedPackage == null &&
+        BundledAudioSetup.instance.complete) {
+      unawaited(_refreshRecordedPackage());
+    }
+  }
+
+  Future<void> _refreshRecordedPackage() async {
+    final package = await RecordedLibraryAudioPackage.find(
+      widget.title,
+      sourceHash: widget.bookSourceHash,
+    );
+    if (mounted) setState(() => _recordedPackage = package);
+  }
+
   Future<void> _loadRules() async {
     final store = AppSettingsService.instance;
     final rules = decodeNarrationPronunciations(
       await store.loadRawSetting('narration_pronunciations_v1'),
     );
-    final package = await RecordedLibraryAudioPackage.find(widget.title);
+    final package = await RecordedLibraryAudioPackage.find(
+      widget.title,
+      sourceHash: widget.bookSourceHash,
+    );
     if (mounted) setState(() => _recordedPackage = package);
     _rules = rules;
     _deferredRules = await loadDeferredNarrationPronunciations(
@@ -203,7 +317,9 @@ class _LibrarySpeechControlsState extends State<LibrarySpeechControls>
       }
       ++_session;
       _firstSegment = true;
-      await _queue.start(widget.initialCursor());
+      final cursor = _requestedParagraph ?? widget.initialCursor();
+      _requestedParagraph = null;
+      await _queue.start(cursor);
     } catch (error) {
       _failed(error.toString());
     }
@@ -291,6 +407,7 @@ class _LibrarySpeechControlsState extends State<LibrarySpeechControls>
 
   @override
   void dispose() {
+    BundledAudioSetup.instance.removeListener(_recordingsChanged);
     _speechTilt?.dispose();
     _media.dispose();
     widget.controller.removeListener(_changed);
@@ -306,13 +423,16 @@ class _LibrarySpeechControlsState extends State<LibrarySpeechControls>
     final package = _recordedPackage;
     if (package != null) {
       return RecordedLibraryAudioControls(
+        key: _recordedKey,
         package: package,
         bookId: widget.bookId,
         load: widget.load,
         reveal: widget.revealRecorded ?? widget.reveal,
         startCursor: widget.recordedStartCursor ?? widget.initialCursor(),
         selectedCursor: widget.selectedRecordedCursor ?? () => null,
+        readerCursor: widget.initialCursor,
         beforePlay: () async {
+          widget.onRecordedPlay?.call();
           c.stopForManualInteraction();
           await _queue.stop();
           await _speechEngine?.stop();

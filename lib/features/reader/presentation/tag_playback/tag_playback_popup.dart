@@ -1,5 +1,9 @@
 import 'dart:async';
 
+import '../memory_schedule/memory_schedule.dart';
+import '../memory_schedule/memory_schedule_editor.dart';
+import '../memory_schedule/memory_schedule_reminder.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../../../core/audio/narration_media_session.dart';
@@ -15,6 +19,7 @@ Future<void> showTagPlaybackPopup(
   String? category,
   bool isDollar = false,
   double fontScale = 1,
+  bool autoStart = false,
 }) {
   final navigator = Navigator.of(context, rootNavigator: true);
   return showDialog<void>(
@@ -40,6 +45,20 @@ Future<void> showTagPlaybackPopup(
           child: TagPlaybackDialog(
             tag: tag,
             fontScale: fontScale,
+            autoStart: autoStart,
+            onSchedule: () {
+              final target = MemoryAudioTarget(
+                label: tag,
+                tag: tag,
+                category: category,
+                isDollar: isDollar,
+              );
+              return showMemoryScheduleEditor(
+                dialogContext,
+                target,
+                preview: () => showMemoryAudioReminder(dialogContext, target),
+              );
+            },
             open: () => TagPlaybackSession.open(
               tag: tag,
               category: category,
@@ -59,11 +78,15 @@ class TagPlaybackDialog extends StatefulWidget {
     required this.tag,
     required this.open,
     this.fontScale = 1,
+    this.autoStart = false,
+    this.onSchedule,
   });
 
   final String tag;
   final Future<TagPlaybackSession> Function() open;
   final double fontScale;
+  final bool autoStart;
+  final Future<void> Function()? onSchedule;
 
   @override
   State<TagPlaybackDialog> createState() => _TagPlaybackDialogState();
@@ -87,6 +110,10 @@ class _TagPlaybackDialogState extends State<TagPlaybackDialog>
           return;
         }
         setState(() => _session = session);
+        if (widget.autoStart) {
+          session.pauseOtherSessions();
+          session.controller.play();
+        }
       },
       onError: (Object error) {
         if (!_closed && mounted) setState(() => _error = error);
@@ -141,6 +168,12 @@ class _TagPlaybackDialogState extends State<TagPlaybackDialog>
                   ),
                 ),
               ),
+              if (widget.onSchedule != null)
+                IconButton(
+                  tooltip: 'Listening schedule',
+                  icon: const Icon(Icons.schedule),
+                  onPressed: widget.onSchedule,
+                ),
               IconButton(
                 key: const Key('tag_playback_close'),
                 tooltip: 'Close',

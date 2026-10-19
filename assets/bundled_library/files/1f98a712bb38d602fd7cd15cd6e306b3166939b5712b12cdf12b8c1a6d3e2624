@@ -1,0 +1,12 @@
+{
+  "title": "Fundamental Principles",
+  "abbreviation": "FP1872",
+  "display_abbreviation": "FP187",
+  "work_id": "FP187",
+  "source_type": "egw_html_capture",
+  "source_site": "CaptureClipper",
+  "cover_image": "images/image_0001.png",
+  "contributors": [
+    {"name": "James White", "role": "author", "primary": true}
+  ]
+}

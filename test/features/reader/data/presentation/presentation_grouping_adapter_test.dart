@@ -30,6 +30,7 @@ HashTagEntry _entry({
   String? contentHtml,
   String? noteText,
   String? noteFormatJson,
+  List<String> mediaRefs=const [],
 }) {
   return HashTagEntry(
     id: id,
@@ -52,6 +53,7 @@ HashTagEntry _entry({
     contentHtml: contentHtml,
     noteText: noteText,
     noteFormatJson: noteFormatJson,
+    mediaRefs:mediaRefs,
   );
 }
 
@@ -121,6 +123,20 @@ void main() {
     expect(slides.last.items.single.displayText, 'First verse text');
   });
 
+  test('note presentation preserves legacy and explicit user titles', () async {
+    for (final legacy in [true, false]) {
+      final slides = await const PresentationGroupingAdapter().adaptEntries([
+        _entry(id: 931, bookNumber: 0, chapter: 0, verse: 0,
+          verseRef: 'note:931', verseText: '', createdAt: 1, sortOrder: 1,
+          noteText: 'Formatted note body',
+          referenceCode: legacy ? 'MyNote' : null,
+          userTitle: legacy ? null : 'MyNote'),
+      ]);
+      expect(slides.single.slideTitle, 'MyNote');
+      expect(slides.single.items.single.displayTitle, 'MyNote');
+    }
+  });
+
   test(
     'maps note-only rows to note slides without exposing placeholders',
     () async {
@@ -150,7 +166,8 @@ void main() {
       expect(item.itemKind, PresentationItemKind.note);
       expect(item.layoutRegion, PresentationLayoutRegion.full);
       expect(item.layoutOrder, 0);
-      expect(item.displayTitle, 'Note');
+      expect(item.displayTitle, isEmpty);
+      expect(slide.slideTitle, isNull);
       expect(item.displayText, 'Standalone note text');
       expect(item.displayText, isNot(startsWith('note:')));
     },
@@ -385,6 +402,24 @@ void main() {
     );
 
     expect(slides, hasLength(1));
-    expect(slides.single.slideTitle, 'John 3:16');
+    expect(slides.single.slideTitle, isNull);
+    expect(slides.single.items.single.citationText, 'John 3:16');
+  });
+
+  test('adjacent links form a chain and an unlinked entry ends it',()async{
+    final entries=[for(var i=0;i<4;i++)_entry(id:100+i,bookNumber:43,chapter:3,verse:16+i,
+      verseRef:'43:3:${16+i}',verseText:'Verse $i',createdAt:i,sortOrder:i,
+      noteFormatJson:i<2?'{"link_with_next":true}':null)];
+    final slides=await const PresentationGroupingAdapter().adaptEntries(entries);
+    expect(slides.map((s)=>s.items.length),[3,1]);
+  });
+  test('image note blocks incoming/outgoing links and old number grouping',()async{
+    final entries=[
+      _entry(id:201,bookNumber:43,chapter:3,verse:16,verseRef:'43:3:16',verseText:'Before',createdAt:1,sortOrder:1,noteFormatJson:'{"link_with_next":true}',presentationSlideNumber:7),
+      _entry(id:202,bookNumber:0,chapter:0,verse:0,verseRef:'note:image',verseText:'',noteText:'Image note',createdAt:2,sortOrder:2,noteFormatJson:'{"link_with_next":true}',mediaRefs:['image.png'],presentationSlideNumber:7),
+      _entry(id:203,bookNumber:43,chapter:3,verse:17,verseRef:'43:3:17',verseText:'After',createdAt:3,sortOrder:3),
+    ];
+    final slides=await const PresentationGroupingAdapter().adaptEntries(entries);
+    expect(slides.length,3);expect(slides.every((s)=>s.items.length==1),true);
   });
 }

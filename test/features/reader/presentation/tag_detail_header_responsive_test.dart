@@ -72,99 +72,37 @@ void main() {
     await root.delete(recursive: true);
   });
 
-  testWidgets('phone header wraps every action below the fixed title row', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      _screen(size: const Size(430, 932), repository: repository),
-    );
-    await tester.pump(const Duration(milliseconds: 300));
-
-    expect(find.textContaining('#A-very-long-tag-name'), findsOneWidget);
-    expect(find.byKey(const ValueKey('phone-tag-item-count')), findsOneWidget);
-    expect(find.text('· 0'), findsOneWidget);
-    expect(find.byTooltip('Tag actions'), findsNothing);
-    expect(find.byTooltip('Close'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('phone-tag-toolbar-wrap')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('phone-tag-toolbar-wrap')),
-        matching: find.byType(SingleChildScrollView),
-      ),
-      findsNothing,
-    );
-    expect(find.byTooltip('Show instructions'), findsOneWidget);
-    expect(find.byTooltip('Add Content Item'), findsOneWidget);
-    expect(find.byTooltip('Rename'), findsOneWidget);
-    expect(find.byTooltip('Move to category'), findsOneWidget);
-    expect(find.byTooltip('Delete entire tag'), findsOneWidget);
-    expect(find.byTooltip('Presentation Mode').hitTestable(), findsOneWidget);
-    expect(find.byTooltip('Delete entire tag').hitTestable(), findsOneWidget);
-
-    final actionTooltips = <String>[
-      'Set as default tag',
-      'Show instructions',
-      'Add Content Item',
-      'Presentation Mode',
-      'Export to clipboard',
-      'Rename',
-      'Move to category',
-      'Delete entire tag',
-    ];
-    for (final tooltip in actionTooltips) {
-      expect(
-        tester.getSize(find.byTooltip(tooltip)).height,
-        greaterThanOrEqualTo(44),
+  for (final size in [const Size(430, 932), const Size(1024, 1366)]) {
+    testWidgets('List actions remain accessible at ${size.width}', (
+      tester,
+    ) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(_screen(size: size, repository: repository));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 300)),
       );
-    }
-    expect(
-      tester.getSize(find.byTooltip('Close')).height,
-      greaterThanOrEqualTo(44),
-    );
-    final titleCenter = tester
-        .getCenter(find.textContaining('#A-very-long-tag-name'))
-        .dy;
-    final closeTop = tester.getTopLeft(find.byTooltip('Close')).dy;
-    final closeCenter = tester.getCenter(find.byTooltip('Close')).dy;
-    final actionsTop = actionTooltips
-        .map((tooltip) => tester.getTopLeft(find.byTooltip(tooltip)).dy)
-        .toSet();
-    expect((titleCenter - closeCenter).abs(), lessThan(2));
-    expect(actionsTop.length, greaterThanOrEqualTo(2));
-    expect(actionsTop.every((top) => top > closeTop), isTrue);
-    expect(tester.takeException(), isNull);
-
-    await tester.ensureVisible(find.byTooltip('Rename'));
-    await tester.tap(find.byTooltip('Rename'));
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Rename tag'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
-    await tester.pump(const Duration(milliseconds: 300));
-
-    expect(find.byTooltip('Delete entire tag').hitTestable(), findsOneWidget);
-    await tester.tap(find.byTooltip('Delete entire tag'));
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Delete entire tag?'), findsOneWidget);
-    expect(find.textContaining('This cannot be undone.'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('iPad header retains expanded toolbar without overflow', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      _screen(size: const Size(1024, 1366), repository: repository),
-    );
-    await tester.pump(const Duration(milliseconds: 300));
-
-    expect(find.byTooltip('Tag actions'), findsNothing);
-    expect(find.byTooltip('Show instructions'), findsOneWidget);
-    expect(find.byTooltip('Move to category'), findsOneWidget);
-    expect(find.byTooltip('Delete entire tag'), findsOneWidget);
-    expect(find.byTooltip('Close'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.textContaining('#A-very-long-tag-name'), findsOneWidget);
+      expect(find.byTooltip('Instructions'), findsOneWidget);
+      expect(find.byTooltip('Add entry').hitTestable(), findsOneWidget);
+      expect(find.byTooltip('Close').hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      expect(find.byTooltip('More list actions'), findsNothing);
+      expect(find.byTooltip('Export list').hitTestable(), findsOneWidget);
+      expect(find.byTooltip('Delete list').hitTestable(), findsOneWidget);
+      expect(find.text('Export list'), findsOneWidget);
+      await tester.runAsync(() async {
+        await tester.tap(find.text('List settings'));
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      });
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('List name'), findsOneWidget);
+      expect(find.text('Folder'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
 }

@@ -68,8 +68,9 @@ void main() {
       where: 'id = ?',
       whereArgs: [verses[1].blockId],
     )).single['plain_text'];
-    expect(badCopy, startsWith('causeth'));
-    expect(displayed(verses[1]), isNot(badCopy));
+    // The shipped Bible database now also preserves the opening pronoun.
+    expect(badCopy, startsWith('He causeth'));
+    expect(displayed(verses[1]), badCopy);
     final addedWords =
         spans(
               verses[2].buildSpan(

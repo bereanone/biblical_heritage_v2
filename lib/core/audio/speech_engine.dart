@@ -40,3 +40,17 @@ class SpeechEngineException implements Exception {
 class SpeechEngineUnavailableException extends SpeechEngineException {
   const SpeechEngineUnavailableException(super.message);
 }
+
+/// Optional cancellation while a job is queued or cooling; native inference
+/// already in flight finishes its bounded chunk and can still be saved.
+abstract interface class CancellableSpeechEngine {
+  Future<sherpa.GeneratedAudio> generateCancellable(
+    String text,
+    double speed,
+    bool Function() cancelled,
+  );
+}
+
+class SpeechSynthesisCancelled implements Exception {
+  const SpeechSynthesisCancelled();
+}

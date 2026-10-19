@@ -17,6 +17,7 @@ import '../presentation/canonical_scroll_diagnostics.dart';
 import '../presentation/library_document_controller.dart';
 import '../presentation/reader_tilt_autoscroll_controller.dart';
 import '../presentation/reader_tilt_motion_source.dart';
+import '../presentation/reader_tilt_preferences.dart';
 
 const canonicalSspProofItemId =
     'library_item_research_pioneer_stephen_nelson_haskell_SSP';
@@ -241,6 +242,8 @@ Future<CanonicalProofStressOutcome> runCanonicalSspDeterministicStress({
   var navigationCallbacks = 0;
   final controller = ReaderTiltAutoScrollController(
     motionSource: source,
+    // The deterministic proof drives positive pitch; do not inherit UI defaults.
+    preferences: const ReaderTiltPreferences(reverseVerticalDirection: false),
     scrollTarget: target,
     settings: ReaderTiltAutoScrollSettings(
       maximumSpeedPixelsPerSecond: speed.pixelsPerSecond,

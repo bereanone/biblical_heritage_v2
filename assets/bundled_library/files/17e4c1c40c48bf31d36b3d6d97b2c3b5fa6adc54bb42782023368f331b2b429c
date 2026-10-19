@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "workId": "FP187",
+  "packageId": "captureclipper:FP187",
+  "createdAt": "2026-07-03T20:19:00.983769Z",
+  "updatedAt": "2026-07-10T14:03:28.746012Z",
+  "contentHash": "dbe0799940c617318864417d50dd8452522b1def5f44084c065232cf8917975e",
+  "captureApp": "CaptureClipper",
+  "captureMode": "clipboard-html",
+  "title": "Fundamental Principles",
+  "author": "James White",
+  "shortCode": "FP187",
+  "fromRef": "3",
+  "toRef": "5",
+  "coverImage": "images/image_0001.png",
+  "imageCount": 1,
+  "htmlFile": "capture.html"
+}

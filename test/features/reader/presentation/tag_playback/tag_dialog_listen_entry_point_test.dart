@@ -6,8 +6,10 @@ import 'package:studybible2/features/reader/presentation/tag_quick_apply_helper.
 
 Widget tab(
   List<HashTagSummary> summaries,
-  ValueChanged<HashTagSummary> onOpen,
-) {
+  ValueChanged<HashTagSummary> onOpen, {
+  String? categoryFilter,
+  VoidCallback? onToggleFilter,
+}) {
   return MaterialApp(
     home: Scaffold(
       body: TagDialogHashTab(
@@ -23,13 +25,13 @@ Widget tab(
         searchController: TextEditingController(),
         selectedCategory: null,
         categoryOptions: const [],
-        categoryFilter: null,
+        categoryFilter: categoryFilter,
         sortMode: TagSortMode.categoryAlpha,
         working: false,
         onTagSubmitted: (_) async {},
         onApplySelection: () {},
         onCategoryChanged: (_) {},
-        onToggleSelectedCategoryBrowseFilter: () {},
+        onToggleSelectedCategoryBrowseFilter: onToggleFilter ?? () {},
         onResetBrowseState: () {},
         onSearchSelected: (_) async {},
         onSortModeChanged: (_) {},
@@ -40,6 +42,23 @@ Widget tab(
 }
 
 void main() {
+  testWidgets('folder filter states and toggle are visible on a narrow screen', (tester) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var toggles = 0;
+    await tester.pumpWidget(tab(const [], (_) {}, onToggleFilter: () => toggles++));
+    expect(find.text('Folder filter: OFF'), findsOneWidget);
+    expect(find.text('Showing all folders'), findsOneWidget);
+    await tester.tap(find.byType(SwitchListTile));
+    expect(toggles, 1);
+    await tester.pumpWidget(tab(const [], (_) {}, categoryFilter: 'Sabbath'));
+    expect(find.text('Folder filter: ON'), findsOneWidget);
+    expect(find.text('Showing only the selected folder'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('every tag row offers Listen next to Open verses', (
     tester,
   ) async {

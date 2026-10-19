@@ -158,7 +158,12 @@ void main() {
         if (find.byType(CircularProgressIndicator).evaluate().isEmpty) break;
       }
       expect(find.byType(CircularProgressIndicator), findsNothing);
-      await tester.tap(find.byTooltip('Export to clipboard'));
+      await tester.runAsync(() async {
+        await tester.tap(find.byTooltip('Export list'));
+        for (var attempt = 0; attempt < 30 && copied == null; attempt++) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+      });
       await tester.pumpAndSettle();
       expect(copied, contains('Revelation 12:1-3'));
       expect(copied, contains('1 And there appeared'));

@@ -5,8 +5,10 @@ import UniformTypeIdentifiers
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+  private var richClipboardChannel: FlutterMethodChannel?
   private var libraryRootBridge: LibraryRootFolderBridge?
   private var readerTiltMotionBridge: ReaderTiltMotionBridge?
+  private var narrationThermalBridge: NarrationThermalBridge?
   private var narrationMediaBridge: NarrationMediaBridge?
   private let watchRemoteBridge = WatchRemoteBridge()
 
@@ -19,6 +21,32 @@ import UniformTypeIdentifiers
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "RichClipboardBridge") {
+      let clipboard = FlutterMethodChannel(name: "studybible/rich_clipboard", binaryMessenger: registrar.messenger())
+      clipboard.setMethodCallHandler { call, result in
+        if call.method == "writeImage" {
+          guard let args = call.arguments as? [String:Any],let bytes = args["bytes"] as? FlutterStandardTypedData,
+            let image = UIImage(data:bytes.data) else {result(FlutterError(code:"invalid_image",message:"Could not read image",details:nil)); return}
+          UIPasteboard.general.image = image
+          result(nil); return
+        }
+        if call.method == "readImage" {
+          if let png = UIPasteboard.general.image?.pngData() {result(FlutterStandardTypedData(bytes:png))} else {result(nil)}
+          return
+        }
+        guard call.method == "write" else { result(FlutterMethodNotImplemented); return }
+        guard let args = call.arguments as? [String: String], let text = args["text"], let html = args["html"] else {
+          result(FlutterError(code: "invalid_arguments", message: "Missing clipboard text or HTML", details: nil)); return
+        }
+        UIPasteboard.general.items = [[UTType.utf8PlainText.identifier: text, UTType.html.identifier: Data(html.utf8)]]
+        result(nil)
+      }
+      richClipboardChannel = clipboard
+    }
+
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NarrationThermalBridge") {
+      narrationThermalBridge = NarrationThermalBridge(registrar: registrar)
+    }
     if let registrar = engineBridge.pluginRegistry.registrar(
       forPlugin: "LibraryRootFolderBridge"
     ) {
@@ -29,7 +57,15 @@ import UniformTypeIdentifiers
     }
     // After plugin registration, so its audio session wins over audioplayers'.
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NarrationMediaBridge") {
-      narrationMediaBridge = NarrationMediaBridge(registrar: registrar)
+      let media = NarrationMediaBridge(registrar: registrar)
+      narrationMediaBridge = media
+      media.nativeCommandHandler = { [weak self] command in
+        self?.watchRemoteBridge.handleMediaCommand(command) ?? false
+      }
+      watchRemoteBridge.nativePlaybackChanged = { [weak media] active in
+        media?.setNativePlaybackActive(active)
+      }
+      media.setNativePlaybackActive(watchRemoteBridge.hasNativePlayback)
       watchRemoteBridge.attach(messenger: registrar.messenger())
     }
   }
@@ -653,4 +689,49 @@ final class LibraryRootFolderBridge: NSObject, UIDocumentPickerDelegate {
     }
     return topViewController
   }
+}
+
+// Kept in the registered source file so no Xcode project-file mutation is needed.
+final class NarrationThermalBridge: NSObject, FlutterStreamHandler {
+  private var sink: FlutterEventSink?
+  private var observer: NSObjectProtocol?
+  init(registrar: FlutterPluginRegistrar) {
+    super.init()
+    FlutterMethodChannel(name: "studybible/narration_thermal", binaryMessenger: registrar.messenger())
+      .setMethodCallHandler { [weak self] call, result in
+        if call.method == "snapshot" { result(self?.snapshot()) }
+        else { result(FlutterMethodNotImplemented) }
+      }
+    FlutterEventChannel(name: "studybible/narration_thermal_events", binaryMessenger: registrar.messenger())
+      .setStreamHandler(self)
+  }
+  private func snapshot() -> [String: Any] {
+    let state = ProcessInfo.processInfo.thermalState
+    let level: Int
+    switch state {
+    case .nominal: level = 0
+    case .fair: level = 1
+    case .serious, .critical: level = 2
+    @unknown default: return [:]
+    }
+    return ["level": level, "status": state.rawValue]
+  }
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    sink = events
+    events(snapshot())
+    observer = NotificationCenter.default.addObserver(
+      forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      guard let self = self else { return }
+      self.sink?(self.snapshot())
+    }
+    return nil
+  }
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    if let observer = observer { NotificationCenter.default.removeObserver(observer) }
+    observer = nil
+    sink = nil
+    return nil
+  }
+  deinit { if let observer = observer { NotificationCenter.default.removeObserver(observer) } }
 }

@@ -7,7 +7,22 @@ class LibrarySpeechItem {
     String? sourceCursor,
     this.startOffset = 0,
     this.sourceLength,
+    this.showSectionStart = false,
+    this.showMarginNotes = false,
+    this.marginNoteIndex,
+    this.marginNoteProgress,
   }) : sourceCursor = sourceCursor ?? cursor;
+
+  /// Show the chapter heading while its opening announcement is spoken.
+  final bool showSectionStart;
+
+  /// Expand the notes attached to this paragraph while their recording plays.
+  final bool showMarginNotes;
+
+  /// Which linked note group is being spoken, and progress through that group.
+  /// Readers use this to keep long expanded notes aligned with recorded audio.
+  final int? marginNoteIndex;
+  final double? marginNoteProgress;
   final String sourceCursor;
   final int startOffset;
 

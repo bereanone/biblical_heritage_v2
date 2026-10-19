@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
@@ -110,6 +111,12 @@ bool shouldUseSteadyReaderAutoscroll({
   bool? override,
 }) => override ?? (!isIOS && !isAndroid && !isProofHarness);
 
+bool canonicalReaderNeedsNarrationController({
+  required bool steadyScrolling,
+  required bool isIOS,
+  required bool isAndroid,
+}) => steadyScrolling || isIOS || isAndroid;
+
 bool canonicalReaderSupportsLink(String sourceHref, String href) =>
     href.startsWith('studybible-citation:') ||
     resolveLibrarySourceLinkPath(sourceHref, href) != null;
@@ -184,6 +191,30 @@ TextSpan _linkedCanonicalSpan(
       )
       .toList(),
 );
+
+@visibleForTesting
+List<InlineSpan> canonicalMarginNoteTextSpans({
+  required String text,
+  required TextStyle bodyStyle,
+  required TextStyle linkStyle,
+  GestureRecognizer? Function(String href)? linkRecognizer,
+  bool Function(String book, String locator)? citationResolves,
+}) {
+  return [
+    for (final node in linkLibraryCitations([
+      <String, Object?>{'type': 'text', 'text': text},
+    ], resolves: citationResolves))
+      if ((node['text']?.toString() ?? '').isNotEmpty)
+        TextSpan(
+          text: node['text']?.toString() ?? '',
+          style: node['link'] == null ? bodyStyle : linkStyle,
+          recognizer: node['link'] == null
+              ? null
+              : linkRecognizer?.call(node['link']!.toString()),
+          mouseCursor: node['link'] == null ? null : SystemMouseCursors.click,
+        ),
+  ];
+}
 
 List<InlineSpan> canonicalInlineTextSpans({
   required LibraryDocumentBlock block,
@@ -468,7 +499,13 @@ Future<CanonicalReaderPreparation?> prepareCanonicalCaptureClipperReader(
   if (await repository.isComplete(item.id) && !repairZipText) {
     return CanonicalReaderPreparation(
       repository: repository,
-      sourceRoot: source.parent,
+      sourceRoot:
+          await LibraryDocumentAssets.restore(
+            db: db,
+            itemId: item.id,
+            libraryRoot: Directory(rootPath),
+          ) ??
+          source.parent,
     );
   }
   if (!await source.exists()) return null;
@@ -481,7 +518,13 @@ Future<CanonicalReaderPreparation?> prepareCanonicalCaptureClipperReader(
   if (!outcome.isReady) return null;
   return CanonicalReaderPreparation(
     repository: LibraryDocumentRepository(db),
-    sourceRoot: source.parent,
+    sourceRoot:
+        await LibraryDocumentAssets.restore(
+          db: db,
+          itemId: item.id,
+          libraryRoot: Directory(rootPath),
+        ) ??
+        source.parent,
   );
 }
 
@@ -780,6 +823,7 @@ class _CanonicalLibraryReaderScreenState
     extends State<CanonicalLibraryReaderScreen>
     with WidgetsBindingObserver {
   late final LibraryDocumentController _controller;
+  late final Future<void> _documentReady;
   final CallbackReaderAutoScrollTarget _scrollTarget =
       CallbackReaderAutoScrollTarget();
   late final ReaderTiltAutoScrollController _autoScroll;
@@ -797,8 +841,12 @@ class _CanonicalLibraryReaderScreenState
   Timer? _positionSaveTimer;
   Future<void> _positionSave = Future<void>.value();
   int _latestVisibleOrder = 0;
+  int? _pendingNavigationOrder;
+  int _navigationRequestRevision = 0;
+  final _paragraphPlaybackKey = GlobalKey<LibrarySpeechControlsState>();
   String? _selectedRecordedCursor;
   String? _spokenBlockId;
+  String? _spokenMarginNotesBlockId;
   double _fontScale = 1;
   bool _showRefCodes = false;
   bool Function(String book, String locator)? _citationResolves;
@@ -838,13 +886,14 @@ class _CanonicalLibraryReaderScreenState
       isProofHarness: widget.proofLabel != null,
       override: widget.macosAutoscroll,
     );
-    // iOS never gets continuous pixel autoscroll (shouldUseSteadyReaderAuto-
-    // scroll deliberately excludes it, see its test coverage), but it can
-    // still host narration-only mode: narrationControlsPacing forces
-    // isPixelScrolling false, so this controller only tracks play/pause,
-    // speed, and speech-driven block advancement — no scroll-motion UI.
-    final usesNarrationOnly = !_usesMacAutoscroll && Platform.isIOS;
-    if (_usesMacAutoscroll || usesNarrationOnly) {
+    // Mobile narration needs its controller even when pixel scrolling is off.
+    final needsNarrationController = canonicalReaderNeedsNarrationController(
+      steadyScrolling: _usesMacAutoscroll,
+      isIOS: Platform.isIOS,
+      isAndroid: Platform.isAndroid,
+    );
+    final usesNarrationOnly = !_usesMacAutoscroll && needsNarrationController;
+    if (needsNarrationController) {
       _macAutoScroll = MacReaderAutoScrollController(
         scrollTarget: _scrollTarget,
         narrationControlsPacing:
@@ -854,7 +903,7 @@ class _CanonicalLibraryReaderScreenState
         if (mounted) _macAutoScroll?.updatePreferences(value);
       });
     }
-    _initializeAtSearchTarget();
+    _documentReady = _initializeAtSearchTarget();
     LocalSettingsStore.instance
         .loadLibraryReaderShowRefCodes()
         .then((value) {
@@ -1037,6 +1086,14 @@ class _CanonicalLibraryReaderScreenState
         _macAutoScroll!.isScrolling) {
       return;
     }
+    final pendingNavigationOrder = _pendingNavigationOrder;
+    if (pendingNavigationOrder != null) {
+      // The old list can report one last visible row while an authored
+      // Contents destination is being loaded and remounted. Do not let that
+      // stale callback replace the destination used by the section arrows.
+      if (order != pendingNavigationOrder) return;
+      _pendingNavigationOrder = null;
+    }
     _latestVisibleOrder = order;
     _controller.ensureWindow(order);
     // Desktop termination does not guarantee widget disposal. Save progress
@@ -1167,9 +1224,20 @@ class _CanonicalLibraryReaderScreenState
                       _macAutoScroll?.pauseNarrationForInteraction();
                     },
                     narrationBlockId: _spokenBlockId,
+                    narrationMarginNotesBlockId: _spokenMarginNotesBlockId,
                     onParagraphTap: (order) {
                       setState(() => _selectedRecordedCursor = '$order');
                     },
+                    onPlayMarginNotes: (block) =>
+                        unawaited(_playCanonicalMarginNotes(block)),
+                    onPlayMarginNote: (block, noteOrder, lineIndex) =>
+                        unawaited(
+                          _playCanonicalMarginNotes(
+                            block,
+                            noteOrder: noteOrder,
+                            lineIndex: lineIndex,
+                          ),
+                        ),
                     sourceRoot: widget.sourceRoot,
                     diagnostics: widget.diagnostics,
                     proofCommands: _commands,
@@ -1208,12 +1276,14 @@ class _CanonicalLibraryReaderScreenState
                   ),
                 ),
               ),
-              if ((Platform.isMacOS || Platform.isIOS) &&
+              if ((Platform.isMacOS || Platform.isIOS || Platform.isAndroid) &&
                   _macAutoScroll != null)
                 LibrarySpeechControls(
+                  key: _paragraphPlaybackKey,
                   tiltController: _autoScroll,
                   controller: _macAutoScroll!,
                   bookId: widget.item.id,
+                  bookSourceHash: widget.item.fileHash,
                   title: widget.item.title,
                   author: widget.item.author,
                   initialCursor: () => '$_latestVisibleOrder',
@@ -1377,6 +1447,10 @@ class _CanonicalLibraryReaderScreenState
   }
 
   Future<LibrarySpeechItem?> _loadSpeechItem(String cursor) async {
+    // Recorded audio indexes the whole book as soon as its controls mount.
+    // An uninitialized block count is not an empty/end-of-book result.
+    await _documentReady;
+    if (!mounted) return null;
     for (
       var order = int.parse(cursor);
       order < _controller.blockCount;
@@ -1418,7 +1492,65 @@ class _CanonicalLibraryReaderScreenState
   }) async {
     if (!mounted) return;
     final order = int.parse(item.sourceCursor);
-    if (recorded) await _controller.ensureNavigationWindow(order);
+    if (recorded) {
+      await _controller.ensureNavigationWindow(order);
+      if (!mounted) return;
+      final block = _controller.blockAt(order);
+      final marginNotesBlockId = item.showMarginNotes ? block?.id : null;
+      final marginNotesChanged =
+          _spokenMarginNotesBlockId != marginNotesBlockId;
+      if (_spokenBlockId != block?.id ||
+          _spokenMarginNotesBlockId != marginNotesBlockId) {
+        setState(() {
+          _spokenBlockId = block?.id;
+          _spokenMarginNotesBlockId = marginNotesBlockId;
+          _latestVisibleOrder = order;
+        });
+        unawaited(_saveCurrentLocation());
+      }
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      if (item.showMarginNotes) {
+        // ExpansionTile animates after the narration state changes. Follow the
+        // bottom of the owning block after that expansion so the spoken note,
+        // rather than the paragraph start, is kept in view.
+        if (marginNotesChanged) {
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+          if (!mounted) return;
+          await WidgetsBinding.instance.endOfFrame;
+          if (!mounted) return;
+        }
+        final formatted = block == null
+            ? null
+            : LibraryFormattedContent.fromJson(block.formattedContent);
+        final notes = formatted?.metadata['margin_notes'];
+        final noteLengths = notes is List
+            ? [
+                for (final note in notes)
+                  if (note is Map && note['text'] is String)
+                    (note['text'] as String).length,
+              ]
+            : const <int>[];
+        await _speechFollow.follow(
+          order,
+          canonicalMarginNoteFollowProgress(
+            bodyLength: block?.plainText.length ?? 0,
+            noteLengths: noteLengths,
+            noteIndex: item.marginNoteIndex ?? 0,
+            noteProgress: item.marginNoteProgress ?? 0,
+          ),
+        );
+        return;
+      }
+      final heading = item.showSectionStart
+          ? _controller.headingAtOrBefore(order)
+          : null;
+      await _speechFollow.follow(
+        heading?.displayOrder ?? order,
+        librarySpeechProgress(item.startOffset, item.sourceLength),
+      );
+      return;
+    }
     if (!mounted) return;
     if (item.startOffset > 0) {
       // Later slices of a long paragraph: keep the spoken part on screen.
@@ -1555,7 +1687,8 @@ class _CanonicalLibraryReaderScreenState
     await LocalSettingsStore.instance.saveLibraryReaderShowRefCodes(next);
   }
 
-  Future<void> _openContents() async {
+  Future<List<LibraryCanonicalNavigationDestination>>
+  _loadNavigationDestinations() async {
     final destinations = await widget.repository
         .loadCanonicalNavigationDestinations(widget.item.id);
     // EPUBs with no usable nav document still expose their semantic headings;
@@ -1577,6 +1710,17 @@ class _CanonicalLibraryReaderScreenState
                 ),
               )
               .toList(growable: false);
+    return entries..sort(
+      (left, right) =>
+          left.block.displayOrder.compareTo(right.block.displayOrder),
+    );
+  }
+
+  Future<void> _openContents() async {
+    await _autoScroll.stop();
+    await _paragraphPlaybackKey.currentState?.pauseForInteraction();
+    if (!mounted) return;
+    final entries = await _loadNavigationDestinations();
     if (!mounted) return;
     // Use the synchronously-tracked scroll position rather than `_location`,
     // which is only updated after a 400ms debounce and can still point at
@@ -1622,7 +1766,21 @@ class _CanonicalLibraryReaderScreenState
                       ),
                       onTap: () {
                         Navigator.of(context).pop();
-                        unawaited(_jumpToBlock(entry.block));
+                        final next = entries
+                            .where(
+                              (candidate) =>
+                                  candidate.block.displayOrder >
+                                  entry.block.displayOrder,
+                            )
+                            .firstOrNull;
+                        unawaited(
+                          _jumpToBlock(
+                            entry.block,
+                            endCursor: next == null
+                                ? null
+                                : '${next.block.displayOrder}',
+                          ),
+                        );
                       },
                     ),
                   ),
@@ -1638,12 +1796,34 @@ class _CanonicalLibraryReaderScreenState
       CanonicalLibraryProofCommands();
   final LibrarySpeechFollowHandle _speechFollow = LibrarySpeechFollowHandle();
 
-  Future<void> _jumpToBlock(LibraryDocumentBlock block) async {
+  Future<void> _jumpToBlock(
+    LibraryDocumentBlock block, {
+    String? endCursor,
+  }) async {
+    final requestRevision = ++_navigationRequestRevision;
+    await _autoScroll.stop();
+    await _paragraphPlaybackKey.currentState?.pauseForInteraction();
+    if (!mounted || requestRevision != _navigationRequestRevision) return;
+    setState(() {
+      _selectedRecordedCursor = null;
+      _latestVisibleOrder = block.displayOrder;
+      _pendingNavigationOrder = block.displayOrder;
+    });
+    unawaited(
+      _paragraphPlaybackKey.currentState?.selectForPlayback(
+        '${block.displayOrder}',
+        endCursor: endCursor,
+      ),
+    );
     await _controller.ensureNavigationWindow(block.displayOrder);
     // `ensureWindow` settles only after any coalesced pending request has
     // loaded, so this check prevents a virtualized-list jump into a
     // zero-height placeholder while its real row is still arriving.
-    if (!mounted || _controller.blockAt(block.displayOrder) == null) return;
+    if (!mounted || requestRevision != _navigationRequestRevision) return;
+    if (_controller.blockAt(block.displayOrder) == null) {
+      _pendingNavigationOrder = null;
+      return;
+    }
     // Decode an image destination before positioning its virtualized row.
     // Otherwise its initial zero-height layout can move the saved reading
     // location to the following paragraph before the illustration arrives.
@@ -1677,9 +1857,14 @@ class _CanonicalLibraryReaderScreenState
     // index. `ScrollablePositionedList` cannot derive a stable absolute
     // offset through a long run of zero-height cache placeholders, even once
     // a later imperative jump is issued.
-    setState(() => _contentsJumpOrder = block.displayOrder);
+    if (requestRevision != _navigationRequestRevision) return;
+    setState(() {
+      _contentsJumpOrder = block.displayOrder;
+      _explicitTargetMountRevision++;
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _commands.jumpToOrder(block.displayOrder);
+      if (mounted && requestRevision == _navigationRequestRevision)
+        _commands.jumpToOrder(block.displayOrder);
     });
   }
 
@@ -1722,15 +1907,46 @@ class _CanonicalLibraryReaderScreenState
 
   Future<void> _jumpHeading(bool forward) async {
     final current = _latestVisibleOrder;
-    final headings = (await widget.repository.loadHeadings(widget.item.id))
+    final entries = await _loadNavigationDestinations();
+    if (!mounted) return;
+    final candidates = entries
         .where(
-          (block) => forward
-              ? block.displayOrder > current
-              : block.displayOrder < current,
+          (entry) => forward
+              ? entry.block.displayOrder > current
+              : entry.block.displayOrder < current,
         )
         .toList(growable: false);
-    if (headings.isEmpty) return;
-    await _jumpToBlock(forward ? headings.first : headings.last);
+    if (candidates.isEmpty) return;
+    final destination = forward ? candidates.first : candidates.last;
+    final next = entries
+        .where(
+          (entry) => entry.block.displayOrder > destination.block.displayOrder,
+        )
+        .firstOrNull;
+    await _jumpToBlock(
+      destination.block,
+      endCursor: next == null ? null : '${next.block.displayOrder}',
+    );
+  }
+
+  Future<void> _playCanonicalMarginNotes(
+    LibraryDocumentBlock block, {
+    int? noteOrder,
+    int? lineIndex,
+  }) async {
+    final cursor = '${block.displayOrder}';
+    setState(() => _selectedRecordedCursor = cursor);
+    if (noteOrder != null && lineIndex != null) {
+      await _paragraphPlaybackKey.currentState?.playMarginNoteFromParagraph(
+        cursor,
+        noteOrder: noteOrder,
+        lineIndex: lineIndex,
+      );
+      return;
+    }
+    await _paragraphPlaybackKey.currentState?.playMarginNotesFromParagraph(
+      cursor,
+    );
   }
 
   Future<void> _loadCanonicalHighlights() async {
@@ -1802,11 +2018,17 @@ class _CanonicalLibraryReaderScreenState
             false,
       ),
       fontScale: _fontScale,
+      showPlayFromHere: _paragraphPlaybackKey.currentState != null,
       showRichCopy: false,
       showUnderline: true,
     );
     if (!mounted || action == null) return;
     switch (action) {
+      case LibrarySelectionRangeAction.playFromHere:
+        final cursor = '${block.displayOrder}';
+        setState(() => _selectedRecordedCursor = cursor);
+        await _paragraphPlaybackKey.currentState?.playFromParagraph(cursor);
+        return;
       case LibrarySelectionRangeAction.copyNoCitation:
       case LibrarySelectionRangeAction.copyWithMarkup:
         await Clipboard.setData(
@@ -1899,6 +2121,45 @@ class _CanonicalLibraryReaderScreenState
         return;
     }
   }
+}
+
+@visibleForTesting
+double canonicalMarginNoteFollowProgress({
+  required int bodyLength,
+  required List<int> noteLengths,
+  required int noteIndex,
+  required double noteProgress,
+}) {
+  if (noteLengths.isEmpty) return 1;
+  final index = noteIndex.clamp(0, noteLengths.length - 1);
+  final body = bodyLength.clamp(0, 1 << 30);
+  final notes = noteLengths.map((length) => length.clamp(0, 1 << 30)).toList();
+  final total = body + notes.fold<int>(0, (sum, length) => sum + length);
+  if (total <= 0) return 1;
+  final before =
+      body + notes.take(index).fold<int>(0, (sum, length) => sum + length);
+  final within = notes[index] * noteProgress.clamp(0.0, 1.0);
+  return ((before + within) / total).clamp(0.0, 1.0);
+}
+
+@visibleForTesting
+({String text, int offset}) canonicalSpeechSegmentForProgress({
+  required String bodyText,
+  required List<String> marginNotes,
+  required double progress,
+}) {
+  final segments = <String>[bodyText, ...marginNotes];
+  final total = segments.fold<int>(0, (sum, text) => sum + text.length);
+  if (total <= 0) return (text: bodyText, offset: 0);
+  var remaining = (progress.clamp(0.0, 1.0) * total).round();
+  for (final segment in segments) {
+    if (remaining <= segment.length) {
+      return (text: segment, offset: remaining.clamp(0, segment.length));
+    }
+    remaining -= segment.length;
+  }
+  final last = segments.last;
+  return (text: last, offset: last.length);
 }
 
 class _CanonicalProductionHeader extends StatelessWidget {
@@ -2138,7 +2399,10 @@ class CanonicalLibraryDocumentBody extends StatefulWidget {
     this.onInitialScrollCompleted,
     this.highlightedBlockIds = const <String>{},
     this.narrationBlockId,
+    this.narrationMarginNotesBlockId,
     this.onParagraphTap,
+    this.onPlayMarginNotes,
+    this.onPlayMarginNote,
     this.markupsByBlockId = const <String, List<ElibraryMarkupRecord>>{},
     this.onSelectionChanged,
     this.onOpenSelectionMenu,
@@ -2170,7 +2434,11 @@ class CanonicalLibraryDocumentBody extends StatefulWidget {
   final VoidCallback? onInitialScrollCompleted;
   final Set<String> highlightedBlockIds;
   final String? narrationBlockId;
+  final String? narrationMarginNotesBlockId;
   final ValueChanged<int>? onParagraphTap;
+  final ValueChanged<LibraryDocumentBlock>? onPlayMarginNotes;
+  final void Function(LibraryDocumentBlock block, int noteOrder, int lineIndex)?
+  onPlayMarginNote;
   final Map<String, List<ElibraryMarkupRecord>> markupsByBlockId;
   final void Function(LibraryDocumentBlock block, TextSelection selection)?
   onSelectionChanged;
@@ -2260,68 +2528,222 @@ class _CanonicalLibraryDocumentBodyState
     );
   }
 
-  Future<bool> _followSpeech(int order, double progress) async {
-    final position = _position;
-    if (position == null || !position.hasPixels) return false;
-    for (final item in _positions.itemPositions.value) {
-      if (item.index != order) continue;
-      final sliceDelta = librarySpeechFollowDelta(
-        sliceTop:
-            (item.itemLeadingEdge +
-                progress * (item.itemTrailingEdge - item.itemLeadingEdge)) *
-            position.viewportDimension,
-        viewportHeight: position.viewportDimension,
-      );
-      final spokenTop =
-          (item.itemLeadingEdge +
-              progress * (item.itemTrailingEdge - item.itemLeadingEdge)) *
-          position.viewportDimension;
-      final delta = spokenTop - position.viewportDimension * .35;
-      return delta > 1
-          ? await animateSpeechFollow(
-              position,
-              delta,
-              duration: const Duration(milliseconds: 400),
-              curve: Curves.linear,
-            )
-          : sliceDelta != null && sliceDelta < 0
-          ? await animateSpeechFollow(position, sliceDelta)
-          : false;
+  ({int order, double progress})? _pendingSpeechFollow;
+  Completer<bool>? _speechFollowCompletion;
+  int? _lastSpeechOrder;
+  double _lastSpeechProgress = 0;
+
+  Future<bool> _followSpeech(int order, double progress) {
+    _pendingSpeechFollow = (order: order, progress: progress);
+    final running = _speechFollowCompletion;
+    if (running != null) return running.future;
+    final completion = _speechFollowCompletion = Completer<bool>();
+    unawaited(_drainSpeechFollow(completion));
+    return completion.future;
+  }
+
+  Future<void> _drainSpeechFollow(Completer<bool> completion) async {
+    var moved = false;
+    try {
+      while (mounted && _pendingSpeechFollow != null) {
+        final next = _pendingSpeechFollow!;
+        _pendingSpeechFollow = null;
+        moved = await _performSpeechFollow(next.order, next.progress) || moved;
+      }
+      completion.complete(moved);
+    } catch (error, stack) {
+      completion.completeError(error, stack);
+    } finally {
+      _speechFollowCompletion = null;
     }
-    // A phrase may begin in a block that is not currently on screen.
-    // Bring that block into view instead of silently dropping the update.
-    _itemController.jumpTo(
-      index: order.clamp(0, widget.controller.blockCount - 1),
-      alignment: librarySpeechAnchor,
+  }
+
+  /// Follow the rendered spoken line and its owning list, not a nested
+  /// selectable-text scroller or a fraction of the whole paragraph height.
+  ({ScrollPosition position, double top, double viewportHeight, bool tableRow})?
+  _renderedSpeechLine(int order, double progress, double expectedLeading) {
+    final source = widget.controller.blockAt(order);
+    final root = _visibleListKey.currentContext;
+    final viewport = root?.findRenderObject();
+    if (source == null ||
+        root is! Element ||
+        viewport is! RenderBox ||
+        !viewport.hasSize) {
+      return null;
+    }
+    final origin = viewport.localToGlobal(Offset.zero).dy;
+    final height = viewport.size.height;
+    ({
+      ScrollPosition position,
+      double top,
+      double viewportHeight,
+      bool tableRow,
+    })?
+    result;
+    var bestDistance = double.infinity;
+    void inspect(Element element) {
+      if (element.widget.key == ValueKey(source.id)) {
+        final box = element.findRenderObject();
+        final outer = Scrollable.maybeOf(element)?.position;
+        if (box is RenderBox &&
+            box.hasSize &&
+            outer != null &&
+            outer.hasPixels) {
+          final distance =
+              (box.localToGlobal(Offset.zero).dy -
+                      origin -
+                      expectedLeading * height)
+                  .abs();
+          final formatted = LibraryFormattedContent.fromJson(
+            source.formattedContent,
+          );
+          final rawNotes = formatted.metadata['margin_notes'];
+          final marginNotes = canonicalMarginNoteParagraphs(
+            rawNotes,
+          ).map((entry) => entry.text).toList(growable: false);
+          final segment = canonicalSpeechSegmentForProgress(
+            bodyText: source.plainText,
+            marginNotes: marginNotes,
+            progress: progress,
+          );
+          final sourceOffset = segment.offset;
+          final tableRow = source.plainText.contains('\t');
+          RenderEditable? editable;
+          var editableOffset = sourceOffset;
+          var cellCursor = 0;
+          void findText(Element child) {
+            if (child is RenderObjectElement &&
+                child.renderObject is RenderEditable) {
+              final candidate = child.renderObject as RenderEditable;
+              final raw = candidate.text?.toPlainText() ?? '';
+              if (raw.startsWith(segment.text)) {
+                editable = candidate;
+                editableOffset = sourceOffset;
+                return;
+              }
+              if (tableRow && raw.trim().isNotEmpty) {
+                final text = raw.trim();
+                final start = source.plainText.indexOf(text, cellCursor);
+                if (start >= 0) {
+                  final end = start + text.length;
+                  cellCursor = end;
+                  if (sourceOffset >= start && sourceOffset <= end) {
+                    editable = candidate;
+                    editableOffset = sourceOffset - start + raw.indexOf(text);
+                    return;
+                  }
+                }
+              }
+            }
+            if (editable == null) child.visitChildElements(findText);
+          }
+
+          element.visitChildElements(findText);
+          if (editable != null && distance < bestDistance) {
+            final caret = editable!.getLocalRectForCaret(
+              TextPosition(offset: editableOffset),
+            );
+            var top = editable!.localToGlobal(caret.center).dy - origin;
+            if (tableRow) {
+              RenderObject? ancestor = editable!.parent;
+              while (ancestor != null && ancestor != box) {
+                if (ancestor is RenderFlex &&
+                    ancestor.direction == Axis.horizontal &&
+                    ancestor.hasSize) {
+                  top =
+                      ancestor
+                          .localToGlobal(ancestor.size.center(Offset.zero))
+                          .dy -
+                      origin;
+                  break;
+                }
+                ancestor = ancestor.parent;
+              }
+            }
+            bestDistance = distance;
+            result = (
+              position: outer,
+              top: top,
+              viewportHeight: height,
+              tableRow: tableRow,
+            );
+          }
+        }
+        return;
+      }
+      element.visitChildElements(inspect);
+    }
+
+    root.visitChildElements(inspect);
+    return result;
+  }
+
+  Future<bool> _performSpeechFollow(int order, double progress) async {
+    final backwardSeek =
+        _lastSpeechOrder != null &&
+        (order < _lastSpeechOrder! ||
+            (order == _lastSpeechOrder && progress < _lastSpeechProgress));
+    _lastSpeechOrder = order;
+    _lastSpeechProgress = progress;
+    final source = widget.controller.blockAt(order);
+    if (progress == 0 &&
+        source?.blockType == LibraryDocumentBlockType.heading &&
+        RegExp(
+          r'^(Chapter|Section)\s',
+          caseSensitive: false,
+        ).hasMatch(source!.plainText)) {
+      if (!_itemController.isAttached) return false;
+      _itemController.jumpTo(index: order, alignment: 0);
+      await WidgetsBinding.instance.endOfFrame;
+      return mounted;
+    }
+    var items = _positions.itemPositions.value.where(
+      (item) => item.index == order,
     );
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return false;
-    for (final item in _positions.itemPositions.value) {
-      if (item.index != order) continue;
-      final sliceDelta = librarySpeechFollowDelta(
-        sliceTop:
-            (item.itemLeadingEdge +
-                progress * (item.itemTrailingEdge - item.itemLeadingEdge)) *
-            position.viewportDimension,
-        viewportHeight: position.viewportDimension,
+    final visible =
+        items.isNotEmpty &&
+        items.first.itemTrailingEdge > 0 &&
+        items.first.itemLeadingEdge < 1;
+    if (!visible || backwardSeek) {
+      if (!_itemController.isAttached || widget.controller.blockCount == 0) {
+        return false;
+      }
+      _itemController.jumpTo(
+        index: order.clamp(0, widget.controller.blockCount - 1),
+        alignment: librarySpeechAnchor,
       );
-      final spokenTop =
-          (item.itemLeadingEdge +
-              progress * (item.itemTrailingEdge - item.itemLeadingEdge)) *
-          position.viewportDimension;
-      final delta = spokenTop - position.viewportDimension * .35;
-      return delta > 1
-          ? await animateSpeechFollow(
-              position,
-              delta,
-              duration: const Duration(milliseconds: 400),
-              curve: Curves.linear,
-            )
-          : sliceDelta != null && sliceDelta < 0
-          ? await animateSpeechFollow(position, sliceDelta)
-          : false;
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return false;
+      items = _positions.itemPositions.value.where(
+        (item) => item.index == order,
+      );
     }
-    return false;
+    final position = _position;
+    if (position == null || !position.hasPixels || items.isEmpty) return false;
+    final item = items.first;
+    final height =
+        (item.itemTrailingEdge - item.itemLeadingEdge) *
+        position.viewportDimension;
+    final line = _renderedSpeechLine(order, progress, item.itemLeadingEdge);
+    final spokenTop =
+        line?.top ??
+        (item.itemLeadingEdge * position.viewportDimension + progress * height);
+    final followPosition = line?.position ?? position;
+    _position = followPosition;
+    final delta = line?.tableRow == true
+        ? (spokenTop - line!.viewportHeight * .5)
+        : recordedSpeechFollowDelta(
+            spokenTop: spokenTop,
+            paragraphHeight: height,
+            viewportHeight: line?.viewportHeight ?? position.viewportDimension,
+          );
+    if (delta == null) return false;
+    return animateSpeechFollow(
+      followPosition,
+      delta,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.linear,
+    );
   }
 
   bool _scrollByPixels(double delta) {
@@ -2488,6 +2910,8 @@ class _CanonicalLibraryDocumentBodyState
                           : null,
                       child: _CanonicalBlockView(
                         block: block,
+                        expandMarginNotes:
+                            widget.narrationMarginNotesBlockId == block.id,
                         color: widget.textColor,
                         sourceRoot: widget.sourceRoot,
                         fontScale: widget.fontScale,
@@ -2499,6 +2923,17 @@ class _CanonicalLibraryDocumentBodyState
                         onSelectionChanged: (selection) =>
                             widget.onSelectionChanged?.call(block, selection),
                         onOpenSelectionMenu: widget.onOpenSelectionMenu,
+                        onPlayMarginNotes: widget.onPlayMarginNotes == null
+                            ? null
+                            : () => widget.onPlayMarginNotes!(block),
+                        onPlayMarginNote: widget.onPlayMarginNote == null
+                            ? null
+                            : (noteOrder, lineIndex) =>
+                                  widget.onPlayMarginNote!(
+                                    block,
+                                    noteOrder,
+                                    lineIndex,
+                                  ),
                         onFollowLink: widget.onFollowLink == null
                             ? null
                             : (href) => widget.onFollowLink!(block, href),
@@ -2513,9 +2948,32 @@ class _CanonicalLibraryDocumentBodyState
       );
 }
 
+@visibleForTesting
+List<({int noteOrder, int lineIndex, String text})>
+canonicalMarginNoteParagraphs(Object? rawNotes) {
+  final result = <({int noteOrder, int lineIndex, String text})>[];
+  if (rawNotes is! List) return result;
+  for (var noteOrder = 0; noteOrder < rawNotes.length; noteOrder++) {
+    final note = rawNotes[noteOrder];
+    if (note is! Map || note['text'] is! String) continue;
+    final lines = (note['text'] as String)
+        .replaceFirst(RegExp(r'^Margin notes\.\s*', caseSensitive: false), '')
+        .split(RegExp(r'\r?\n'));
+    var lineIndex = 0;
+    for (final rawLine in lines) {
+      final text = rawLine.trim();
+      if (text.isEmpty) continue;
+      result.add((noteOrder: noteOrder, lineIndex: lineIndex, text: text));
+      lineIndex++;
+    }
+  }
+  return result;
+}
+
 class _CanonicalBlockView extends StatefulWidget {
   const _CanonicalBlockView({
     required this.block,
+    required this.expandMarginNotes,
     required this.color,
     required this.sourceRoot,
     required this.fontScale,
@@ -2526,9 +2984,12 @@ class _CanonicalBlockView extends StatefulWidget {
     this.markups = const [],
     required this.onSelectionChanged,
     required this.onOpenSelectionMenu,
+    this.onPlayMarginNotes,
+    this.onPlayMarginNote,
     this.onFollowLink,
   });
   final LibraryDocumentBlock block;
+  final bool expandMarginNotes;
   final Color color;
   final Directory? sourceRoot;
   final double fontScale;
@@ -2539,6 +3000,8 @@ class _CanonicalBlockView extends StatefulWidget {
   final List<ElibraryMarkupRecord> markups;
   final ValueChanged<TextSelection>? onSelectionChanged;
   final VoidCallback? onOpenSelectionMenu;
+  final VoidCallback? onPlayMarginNotes;
+  final void Function(int noteOrder, int lineIndex)? onPlayMarginNote;
   final ValueChanged<String>? onFollowLink;
 
   @override
@@ -2548,6 +3011,57 @@ class _CanonicalBlockView extends StatefulWidget {
 class _CanonicalBlockViewState extends State<_CanonicalBlockView> {
   final _linkRecognizers = <String, TapGestureRecognizer>{};
   var _hasSelection = false;
+  final _selectableKey = GlobalKey();
+  TextSelection? _rangeForMenu;
+  final ExpansibleController _marginNotesController = ExpansibleController();
+
+  @override
+  void initState() {
+    super.initState();
+    // A virtualized paragraph can be mounted for the first time after its
+    // margin-note cue has already become active. In that case there is no
+    // didUpdateWidget transition, so open the disclosure after its first
+    // frame as well.
+    if (widget.expandMarginNotes) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _marginNotesController.expand();
+      });
+    }
+  }
+
+  void _selectTappedWordAndOpenMenu() {
+    EditableTextState? editable;
+    void visit(Element element) {
+      if (element is StatefulElement && element.state is EditableTextState) {
+        editable = element.state as EditableTextState;
+      } else {
+        element.visitChildren(visit);
+      }
+    }
+
+    (_selectableKey.currentContext as Element?)?.visitChildren(visit);
+    final state = editable;
+    if (state == null) return;
+    final current = state.widget.controller.selection;
+    final previous = _rangeForMenu;
+    // Keep a dragged range when tapping inside it; a tap elsewhere selects
+    // the word in that paragraph, including after recorded playback pauses.
+    if (current.isCollapsed &&
+        previous != null &&
+        current.extentOffset >= previous.start &&
+        current.extentOffset < previous.end) {
+      state.userUpdateTextEditingValue(
+        state.widget.controller.value.copyWith(selection: previous),
+        SelectionChangedCause.tap,
+      );
+    } else if (current.isCollapsed) {
+      state.renderEditable.selectWord(cause: SelectionChangedCause.tap);
+    }
+    final selected = state.widget.controller.selection;
+    if (!selected.isValid || selected.isCollapsed) return;
+    widget.onSelectionChanged?.call(selected);
+    widget.onOpenSelectionMenu?.call();
+  }
 
   GestureRecognizer? _recognizer(String href) {
     if (widget.onFollowLink == null ||
@@ -2568,6 +3082,11 @@ class _CanonicalBlockViewState extends State<_CanonicalBlockView> {
   @override
   void didUpdateWidget(covariant _CanonicalBlockView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.expandMarginNotes && !oldWidget.expandMarginNotes) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _marginNotesController.expand();
+      });
+    }
     if (oldWidget.block.id != widget.block.id ||
         oldWidget.block.formattedContent != widget.block.formattedContent) {
       for (final recognizer in _linkRecognizers.values) {
@@ -2575,6 +3094,7 @@ class _CanonicalBlockViewState extends State<_CanonicalBlockView> {
       }
       _linkRecognizers.clear();
       _hasSelection = false;
+      _rangeForMenu = null;
     }
   }
 
@@ -2606,6 +3126,10 @@ class _CanonicalBlockViewState extends State<_CanonicalBlockView> {
       );
     }
     final formatted = LibraryFormattedContent.fromJson(block.formattedContent);
+    // Keep archived source fragments addressable without rendering duplicates.
+    if (formatted.metadata['content_role'] == 'superseded_source_fragment') {
+      return const SizedBox.shrink();
+    }
     if (block.blockType == LibraryDocumentBlockType.image) {
       Map<String, Object?>? imageNode;
       for (final node in formatted.nodes) {
@@ -2803,6 +3327,7 @@ class _CanonicalBlockViewState extends State<_CanonicalBlockView> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             SelectableText.rich(
+              key: _selectableKey,
               TextSpan(
                 style: base,
                 children: canonicalInlineTextSpans(
@@ -2827,10 +3352,108 @@ class _CanonicalBlockViewState extends State<_CanonicalBlockView> {
               style: poem ? base.copyWith(fontFamily: 'monospace') : base,
               onSelectionChanged: (selection, _) {
                 _hasSelection = !selection.isCollapsed;
+                if (_hasSelection) _rangeForMenu = selection;
                 widget.onSelectionChanged?.call(selection);
               },
-              onTap: widget.onOpenSelectionMenu,
+              onTap: _selectTappedWordAndOpenMenu,
             ),
+            if (formatted.metadata['margin_notes'] is List &&
+                (formatted.metadata['margin_notes'] as List).isNotEmpty)
+              Theme(
+                data: Theme.of(
+                  context,
+                ).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  controller: _marginNotesController,
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  iconColor: color,
+                  collapsedIconColor: color,
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Margin notes · ${block.sourceRefcode ?? ''}',
+                          style: base.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      if (widget.onPlayMarginNotes != null)
+                        IconButton(
+                          tooltip: 'Play margin notes',
+                          icon: const Icon(Icons.play_arrow),
+                          color: color,
+                          onPressed: widget.onPlayMarginNotes,
+                        ),
+                    ],
+                  ),
+                  children: [
+                    for (final entry in canonicalMarginNoteParagraphs(
+                      formatted.metadata['margin_notes'],
+                    ).indexed)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 14),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (widget.onPlayMarginNote != null)
+                              IconButton(
+                                tooltip: 'Play this margin note',
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.only(right: 6),
+                                constraints: const BoxConstraints(
+                                  minWidth: 34,
+                                  minHeight: 34,
+                                ),
+                                icon: const Icon(Icons.play_arrow, size: 20),
+                                color: color,
+                                onPressed: () => widget.onPlayMarginNote!(
+                                  entry.$2.noteOrder,
+                                  entry.$2.lineIndex,
+                                ),
+                              ),
+                            Expanded(
+                              child: SelectableText.rich(
+                                TextSpan(
+                                  children: [
+                                    ...canonicalMarginNoteTextSpans(
+                                      text: entry.$2.text,
+                                      bodyStyle: base,
+                                      linkStyle: base.copyWith(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primary,
+                                        decoration: TextDecoration.underline,
+                                        decorationColor: Theme.of(
+                                          context,
+                                        ).colorScheme.primary,
+                                      ),
+                                      linkRecognizer:
+                                          widget.referenceLinkingEnabled
+                                          ? _recognizer
+                                          : null,
+                                      citationResolves: widget.citationResolves,
+                                    ),
+                                    if (showRefCode)
+                                      TextSpan(
+                                        text:
+                                            '  MN · ${block.sourceRefcode ?? 'Unnumbered'} · ${entry.$1 + 1}',
+                                        style: base.copyWith(
+                                          fontSize: base.fontSize! * .72,
+                                          fontWeight: FontWeight.w600,
+                                          color: color.withValues(alpha: .62),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                style: base,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),

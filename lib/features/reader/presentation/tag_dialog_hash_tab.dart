@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'memory_schedule/memory_schedule.dart';
+import 'memory_schedule/memory_schedule_editor.dart';
+import 'memory_schedule/memory_schedule_reminder.dart';
 import 'tag_dialog_models.dart';
 import 'tag_dialog_styles.dart';
 import 'tag_playback/tag_playback_popup.dart';
@@ -176,6 +179,18 @@ class TagDialogHashTab extends StatelessWidget {
           },
         ),
         const SizedBox(height: 6),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text(categoryFilter == null
+              ? 'Folder filter: OFF'
+              : 'Folder filter: ON'),
+          subtitle: Text(categoryFilter == null
+              ? 'Showing all folders'
+              : 'Showing only the selected folder'),
+          value: categoryFilter != null,
+          onChanged: (_) => onToggleSelectedCategoryBrowseFilter(),
+        ),
         Row(
           children: [
             Expanded(
@@ -186,7 +201,7 @@ class TagDialogHashTab extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(left: 2, bottom: 5),
                     child: Text(
-                      'Category',
+                      'Folder',
                       style: TagDialogStyles.labelTextStyle(
                         theme,
                         fontScale,
@@ -251,43 +266,7 @@ class TagDialogHashTab extends StatelessWidget {
               width: 40,
               height: 40,
               child: Tooltip(
-                message: categoryFilter == null
-                    ? 'Filter by selected category'
-                    : 'Show all categories',
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: onToggleSelectedCategoryBrowseFilter,
-                    child: Container(
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: categoryFilter == null
-                            ? TagDialogStyles.surface(theme)
-                            : TagDialogStyles.surfaceHigh(theme),
-                        border: Border.all(
-                          color: TagDialogStyles.outlineColor(theme),
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(
-                        categoryFilter == null
-                            ? Icons.filter_alt_outlined
-                            : Icons.filter_alt,
-                        size: 18,
-                        color: TagDialogStyles.title(theme),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            SizedBox(
-              width: 40,
-              height: 40,
-              child: Tooltip(
-                message: 'Reset to all tags and categories',
+                message: 'Show all lists and folders',
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
@@ -314,7 +293,7 @@ class TagDialogHashTab extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             PopupMenuButton<HashTagSummary>(
-              tooltip: 'Search within category',
+              tooltip: 'Search within folder',
               initialValue: null,
               onSelected: (summary) async {
                 await onSearchSelected(summary);
@@ -408,7 +387,7 @@ class TagDialogHashTab extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 20),
             child: Text(
-              'No tags in this category yet.',
+              'No lists in this folder yet.',
               textAlign: TextAlign.center,
               style: TagDialogStyles.bodyTextStyle(
                 theme,
@@ -462,6 +441,15 @@ class TagDialogHashTab extends StatelessWidget {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            _TagReminderIndicator(
+                              target: MemoryAudioTarget(
+                                label: summary.displayLabel,
+                                tag: summary.tag,
+                                category: summary.category,
+                                isDollar: tagSymbol == r'$',
+                              ),
+                              color: TagDialogStyles.title(theme),
+                            ),
                             IconButton(
                               onPressed: summary.count == 0
                                   ? null
@@ -508,4 +496,65 @@ class TagDialogHashTab extends StatelessWidget {
   }
 
   static const String _addNewCategoryValue = '__add_new_category__';
+}
+
+class _TagReminderIndicator extends StatefulWidget {
+  const _TagReminderIndicator({required this.target, required this.color});
+  final MemoryAudioTarget target;
+  final Color color;
+  @override
+  State<_TagReminderIndicator> createState() => _TagReminderIndicatorState();
+}
+
+class _TagReminderIndicatorState extends State<_TagReminderIndicator> {
+  bool _enabled = false;
+  int _request = 0;
+  @override
+  void initState() {
+    super.initState();
+    MemoryAudioScheduleStore.instance.changes.addListener(_refresh);
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final request = ++_request;
+    final key = widget.target.key;
+    try {
+      final schedules = await MemoryAudioScheduleStore.instance.load();
+      if (!mounted || request != _request || key != widget.target.key) return;
+      final enabled = schedules.any((s) => s.target.key == key && s.enabled);
+      if (_enabled != enabled) setState(() => _enabled = enabled);
+    } catch (_) {
+      // A failed read must not imply a reminder is enabled.
+      if (mounted && request == _request) setState(() => _enabled = false);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _TagReminderIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.target.key != widget.target.key) {
+      _enabled = false;
+      _refresh();
+    }
+  }
+
+  @override
+  void dispose() {
+    MemoryAudioScheduleStore.instance.changes.removeListener(_refresh);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => !_enabled
+      ? const SizedBox.shrink()
+      : IconButton(
+          tooltip: 'Reminder enabled · edit schedule',
+          icon: Icon(Icons.schedule, color: widget.color),
+          onPressed: () => showMemoryScheduleEditor(
+            context,
+            widget.target,
+            preview: () => showMemoryAudioReminder(context, widget.target),
+          ),
+        );
 }

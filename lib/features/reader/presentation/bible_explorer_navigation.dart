@@ -195,7 +195,8 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
         strongs.map((id) => const ViewerStrongsRepository().loadEntry(id)),
       );
       if (!mounted) return;
-      chosen = await showDialog<String>(
+      chosen = selectPrimaryStrongsSource(entries);
+      chosen ??= await showDialog<String>(
         context: context,
         builder: (dialogContext) => SimpleDialog(
           title: Text('Sources for “${phrase.text}”'),
@@ -231,18 +232,28 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
       phrase: phrase.text,
       tokenIndex: phrase.tokenIndex,
       strongsId: chosen,
+      alternateStrongsIds: strongs,
       morphologyTag: morphology,
       readerPosition: _latestReaderScrollPosition,
     );
     await _showLexicalSource(source);
+    if (!mounted) return;
+    setState(() {
+      _selectedMappedBlockId = null;
+      _selectedMappedTokenIndex = null;
+    });
   }
 
   Future<void> _showLexicalSource(
     _LexicalSourceContext source, {
     bool startOnOccurrences = false,
-  }) => showViewerStrongsPageOne(
+  }) {
+    var activeSource = source;
+    return showViewerStrongsPageOne(
     context,
     strongsId: source.strongsId,
+    alternateStrongsIds: source.alternateStrongsIds,
+    onStrongsChanged: (id) => activeSource = source.withStrongsId(id),
     mappedPhrase: source.phrase,
     morphologyTag: source.morphologyTag,
     startOnOccurrences: startOnOccurrences,
@@ -250,15 +261,16 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
     initialPanelScrollOffset: source.panelScrollOffset,
     onSelectCitation: (blockId, panelScrollOffset) => unawaited(
       _openLexicalCitation(
-        source.withPanelScrollOffset(panelScrollOffset),
+        activeSource.withPanelScrollOffset(panelScrollOffset),
         blockId,
       ),
     ),
     onSelectBlockId: (blockId) => unawaited(_openBlockId(blockId)),
     onSelectOccurrence: (blockId, state) => unawaited(
-      _openLexicalOccurrence(source.withOccurrenceState(state), blockId),
+      _openLexicalOccurrence(activeSource.withOccurrenceState(state), blockId),
     ),
   );
+  }
 
   Future<void> _openLexicalOccurrence(
     _LexicalSourceContext source,
@@ -288,6 +300,7 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
     );
     if (!mounted) return;
     setState(() {
+      _lexicalReturnContext = null;
       _interlinearEnabled = true;
       _selectedMappedBlockId = source.blockId;
       _selectedMappedTokenIndex = source.tokenIndex;
@@ -296,6 +309,11 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
       source,
       startOnOccurrences: source.returnToOccurrences,
     );
+    if (!mounted) return;
+    setState(() {
+      _selectedMappedBlockId = null;
+      _selectedMappedTokenIndex = null;
+    });
   }
 
   Future<void> _openReferencePicker(BuildContext context) async {

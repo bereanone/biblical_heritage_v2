@@ -24,6 +24,8 @@ class SynthesisGovernor {
     this.refillTo = const Duration(seconds: 45),
     this.pollEvery = const Duration(seconds: 1),
     this.log,
+    this.beforeJob,
+    this.afterJob,
     DateTime Function()? now,
     Future<void> Function(Duration)? delay,
   }) : assert(duty > 0 && duty <= 1),
@@ -32,6 +34,8 @@ class SynthesisGovernor {
        _delay = delay ?? ((wait) => Future<void>.delayed(wait));
 
   final bool Function() isThrottled;
+  final Future<void> Function(bool Function()? cancelled)? beforeJob;
+  final void Function(Duration busy)? afterJob;
 
   /// Largest share of wall time synthesis may be busy while throttled.
   final double duty;
@@ -88,7 +92,7 @@ class SynthesisGovernor {
   /// Runs [job] when it is its turn and, if paced, when its share of the
   /// budget allows. Errors from [job] reach the caller; they never stall the
   /// queue behind it.
-  Future<T> run<T>(Future<T> Function() job) {
+  Future<T> run<T>(Future<T> Function() job, {bool Function()? cancelled}) {
     final done = Completer<T>();
     _tail = _tail.then((_) async {
       final waitStart = _now();
@@ -103,6 +107,12 @@ class SynthesisGovernor {
         paced = _paced();
       }
       final waited = _now().difference(waitStart);
+      try {
+        await beforeJob?.call(cancelled);
+      } catch (error, stack) {
+        done.completeError(error, stack);
+        return;
+      }
       final started = _now();
       try {
         done.complete(await job());
@@ -111,6 +121,7 @@ class SynthesisGovernor {
       }
       final finished = _now();
       final busy = finished.difference(started);
+      afterJob?.call(busy);
       // Idle time is owed only for work done under the throttle, so a burst
       // that ran flat out to keep ahead of playback does not delay the next.
       _notBefore = paced ? finished.add(busy * (1 / duty - 1)) : finished;

@@ -10,6 +10,7 @@ import 'package:studybible2/features/library/data/library_citation_display_helpe
 import 'package:studybible2/features/reader/presentation/tag_quick_apply_helper.dart';
 
 import 'presentation_models.dart';
+import 'note_image_layout.dart';
 
 const bool _enablePresentationGroupingDebugLogs = false;
 
@@ -36,6 +37,21 @@ class PresentationGroupingAdapter {
     for (var index = 0; index < sourceEntries.length; index++) {
       final entry = sourceEntries[index];
       final displayData = displayDataByEntryId[entry.id];
+      bool isolated(HashTagEntry item) => item.bookNumber==0 && item.hasMedia;
+      final canJoinNext=index+1<sourceEntries.length && !isolated(entry) && !isolated(sourceEntries[index+1]);
+      if (isolated(entry) || (presentationLinksWithNext(entry.noteFormatJson) && canJoinNext)) {
+        final draft=_PresentationSlideDraft.implicit(entry.id);
+        draft.addEntry(entry,displayData:displayData);
+        if(!isolated(entry)) {
+          while(index+1<sourceEntries.length && presentationLinksWithNext(sourceEntries[index].noteFormatJson) && !isolated(sourceEntries[index+1])) {
+            index++;
+            final next=sourceEntries[index];
+            draft.addEntry(next,displayData:displayDataByEntryId[next.id]);
+          }
+        }
+        implicitSlides.add(draft);
+        continue;
+      }
       final slideNumber = entry.presentationSlideNumber;
       if (slideNumber != null && slideNumber > 0) {
         final draft = assignedGroups.putIfAbsent(
@@ -201,8 +217,8 @@ class PresentationGroupingAdapter {
     final userTitle = entry.userTitle?.trim() ?? '';
     if (userTitle.isNotEmpty) return userTitle;
     final referenceCode = _referenceCodeForEntry(entry);
-    if (_isNoteOnlyEntry(entry)) return 'Note';
     if (referenceCode.isNotEmpty) return referenceCode;
+    if (_isNoteOnlyEntry(entry)) return '';
     final verseRef = entry.verseRef.trim();
     if (verseRef.isNotEmpty &&
         !_isInternalNotePlaceholder(verseRef) &&
@@ -333,6 +349,11 @@ class PresentationGroupingAdapter {
         return displayTitle;
       }
       final entry = groupedEntry.entry;
+      if (_isBibleVerseEntry(entry)) {
+        final title=entry.userTitle?.trim()??'';
+        if(title.isNotEmpty) return title;
+        continue;
+      }
       final bibleTitle = _displayTitleForEntry(
         entry,
         bookNames: bookNames,

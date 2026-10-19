@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme_mode.dart';
 import 'viewer_presentation_settings.dart';
+import 'watch_instructions_screen.dart';
 
 Future<void> showViewerModePopup(
   BuildContext context, {
@@ -15,6 +16,7 @@ Future<void> showViewerModePopup(
   required ValueChanged<PresentationAspectRatioPreset>
   onPresentationAspectRatioChanged,
 }) {
+  final ownerNavigator = Navigator.of(context);
   return showDialog<void>(
     context: context,
     barrierDismissible: true,
@@ -34,6 +36,19 @@ Future<void> showViewerModePopup(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    _ModeRow(
+                      title: 'Bible Remote Instructions',
+                      subtitle: 'Apple Watch help',
+                      trailing: const Icon(Icons.help_outline),
+                      onTap: () {
+                        Navigator.of(dialogContext).pop();
+                        ownerNavigator.push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const WatchInstructionsScreen(),
+                          ),
+                        );
+                      },
+                    ),
                     _ModeRow(
                       title: 'Bible Memory',
                       subtitle: 'Open',

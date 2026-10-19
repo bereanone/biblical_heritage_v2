@@ -11,6 +11,8 @@ import '../../../core/audio/narration_diagnostics.dart';
 import '../../../core/audio/narration_lead.dart';
 import '../../../core/audio/narration_media_session.dart';
 import '../../../core/audio/speech_engine.dart';
+import '../../../core/audio/durable_speech_cache.dart';
+import '../../../core/audio/synthesis_thermal_gate.dart';
 import 'bible_pronunciation_map.dart';
 import '../../../core/database/study_bible_database.dart';
 import 'kokoro_engine_host.dart';
@@ -160,8 +162,6 @@ class KokoroMacTestNarrator {
       // audioplayers deactivates the audio session whenever nothing is
       // playing, so a resume after a pause finds it inactive.
       await NarrationMediaSession.instance.activateAudioSession('speak');
-      clock.enter('engine');
-      await _ensureEngine();
       clock.enter('synthesize');
       final output = await prepare(
         text: text,
@@ -313,7 +313,8 @@ class KokoroMacTestNarrator {
   static Future<void> _deleteQuietly(Future<File> file) async {
     try {
       // Unlinking a file the player still has open is safe on iOS and macOS.
-      await (await file).delete();
+      final resolved = await file;
+      if (!DurableSpeechCache.owns(resolved.path)) await resolved.delete();
     } catch (_) {
       /* Already gone, or the clip never rendered. */
     }
@@ -338,7 +339,8 @@ class KokoroMacTestNarrator {
     Map<String, Object?>? databaseEntry;
     if (blockId != null && preferDictionary) {
       try {
-        databaseEntry = await StudyBibleDatabase.instance.loadVersePronunciation(blockId);
+        databaseEntry = await StudyBibleDatabase.instance
+            .loadVersePronunciation(blockId);
       } catch (error) {
         debugPrint('Database pronunciation unavailable: $error');
       }
@@ -365,12 +367,23 @@ class KokoroMacTestNarrator {
     int? blockId,
     bool preferDictionary = true,
   }) async {
+    final generation = _generation;
     final spoken = await _spokenText(
       text,
       blockId: blockId,
       preferDictionary: preferDictionary,
     );
-    return _generateClip(spoken, synthesisSpeedFor(speed), trackLead: false);
+    final saved = await _generateClip(
+      spoken,
+      synthesisSpeedFor(speed),
+      trackLead: false,
+      cancellationGeneration: generation,
+    );
+    // Existing renderClip callers own and delete the returned file.
+    final temporary = await getTemporaryDirectory();
+    return saved.copy(
+      '${temporary.path}/narration-export-${DateTime.now().microsecondsSinceEpoch}-${++_fileId}.wav',
+    );
   }
 
   Future<File> prepare({
@@ -379,6 +392,7 @@ class KokoroMacTestNarrator {
     int? blockId,
     bool preferDictionary = true,
   }) async {
+    final generation = _generation;
     final spoken = await _spokenText(
       text,
       blockId: blockId,
@@ -405,7 +419,11 @@ class KokoroMacTestNarrator {
     if (_prepared.length >= _preparedCapacity) {
       unawaited(_evict(_prepared.remove(_prepared.keys.first)!));
     }
-    final result = _generateClip(spoken, synthesisSpeed);
+    final result = _generateClip(
+      spoken,
+      synthesisSpeed,
+      cancellationGeneration: generation,
+    );
     _prepared[key] = result;
     // A failed clip must not stay cached: replaying the same text would hand
     // back the same failure forever.
@@ -425,41 +443,77 @@ class KokoroMacTestNarrator {
     String text,
     double speed, {
     bool trackLead = true,
+    int? cancellationGeneration,
   }) async {
-    // While something is audible iOS keeps the app running; otherwise this is
-    // the silent stretch that needs borrowed background time.
-    final releaseBackgroundTime = _isPlaying
-        ? null
-        : NarrationMediaSession.instance.holdBackgroundTime();
-    try {
-      final audio = await _synthesize(text, speed);
-      final temporary = await getTemporaryDirectory();
-      final output = File(
-        '${temporary.path}/narration-${DateTime.now().microsecondsSinceEpoch}-${++_fileId}.wav',
-      );
+    final generation = cancellationGeneration ?? _generation;
+    final output = await DurableSpeechCache.instance.renderOrGet(
+      text,
+      speed,
+      // Spoken text already includes pronunciation edits/database cues.
+      // Keep platform dictionary behavior and the model voice in the key.
+      pronunciationMode: (Platform.isIOS || Platform.isMacOS)
+          ? 'apple-lexicon-sid16-v1'
+          : 'espeak-sid16-v1',
+      render: (chunk) async {
+        if (_disposed) throw StateError('Narrator disposed');
+        final release = _isPlaying
+            ? null
+            : NarrationMediaSession.instance.holdBackgroundTime();
+        try {
+          final audio = await _synthesize(
+            chunk,
+            speed,
+            () => _disposed || generation != _generation,
+          );
+          final temporary = await getTemporaryDirectory();
+          final file = File(
+            '${temporary.path}/narration-${DateTime.now().microsecondsSinceEpoch}-${++_fileId}.wav',
+          );
+          await _writeWave(file, audio);
+          return file;
+        } finally {
+          release?.call();
+        }
+      },
+    );
+    if (trackLead) {
+      final handle = await output.open();
       try {
-        await _writeWave(output, audio);
-      } catch (error) {
-        throw SpeechEngineException('Could not write the audio file: $error');
+        final header = ByteData.sublistView(await handle.read(44));
+        _lead.ready(
+          output.path,
+          header.getUint32(40, Endian.little) /
+              (header.getUint32(24, Endian.little) * 2),
+        );
+      } finally {
+        await handle.close();
       }
-      // Clips rendered for someone else to play (see [renderClip]) are not
-      // this narrator's lead.
-      if (trackLead) {
-        _lead.ready(output.path, audio.samples.length / audio.sampleRate);
-      }
-      return output;
-    } finally {
-      releaseBackgroundTime?.call();
     }
+    return output;
   }
 
   /// Synthesizes on a confirmed-live engine. If the engine turns out to be
   /// dead or hung, asks the host for a fresh one and tries once more.
-  Future<sherpa.GeneratedAudio> _synthesize(String text, double speed) async {
+  Future<sherpa.GeneratedAudio> _synthesize(
+    String text,
+    double speed,
+    bool Function() cancelled,
+  ) async {
+    // Check before allocating the model as well as before every inference.
+    final thermal = SynthesisThermalGate.instance;
+    thermal.start();
+    await thermal.beforeJob(cancelled);
     for (var attempt = 1; ; attempt++) {
       final engine = await _ensureEngine();
       try {
-        return await engine.generate(text, speed);
+        if (cancelled()) throw const SpeechSynthesisCancelled();
+        return engine is CancellableSpeechEngine
+            ? await (engine as CancellableSpeechEngine).generateCancellable(
+                text,
+                speed,
+                cancelled,
+              )
+            : await engine.generate(text, speed);
       } on SpeechEngineUnavailableException catch (error) {
         NarrationDiagnostics.log(
           'synthesis found the engine unavailable (attempt $attempt): $error',

@@ -11,6 +11,7 @@ import '../../utilities/data/epub_download_validator.dart';
 import 'library_epub_metadata.dart';
 import 'library_source_type.dart';
 import 'library_item_identity.dart';
+import 'optional_book_companions.dart';
 
 class UserEpubImportResult {
   const UserEpubImportResult({
@@ -203,6 +204,11 @@ class UserEpubImportService {
       );
     }
 
+    await OptionalBookCompanions.apply(
+      db: db,
+      itemId: libraryItemId,
+      sourceHash: inspection.sourceSha256,
+    );
     return UserEpubImportResult(
       libraryItemId: libraryItemId,
       relativePath: relativePath,

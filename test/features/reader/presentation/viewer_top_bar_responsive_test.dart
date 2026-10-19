@@ -88,7 +88,7 @@ void main() {
     },
   );
 
-  testWidgets('phone toolbar uses two rows and exposes every reader action', (
+  testWidgets('phone toolbar keeps reader actions without old presentation shortcuts', (
     tester,
   ) async {
     await setViewport(tester, size: const Size(430, 932));
@@ -119,23 +119,21 @@ void main() {
 
     expect(find.byIcon(Icons.arrow_back), findsOneWidget);
     expect(find.byIcon(Icons.search), findsOneWidget);
-    expect(find.byTooltip('Saved Presentations'), findsOneWidget);
-    expect(find.byIcon(Icons.folder_open_outlined), findsOneWidget);
+    expect(find.byTooltip('Saved Presentations'), findsNothing);
+    expect(find.byIcon(Icons.folder_open_outlined), findsNothing);
     expect(find.byIcon(Icons.connected_tv), findsNothing);
-    expect(find.byTooltip('Presentation Setup'), findsOneWidget);
+    expect(find.byTooltip('Presentation Setup'), findsNothing);
     expect(find.byTooltip('# Tags'), findsOneWidget);
     expect(find.byIcon(Icons.list_alt), findsOneWidget);
     expect(find.byTooltip('! Rapid tag'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.search));
-    await tester.tap(find.byTooltip('Saved Presentations'));
-    await tester.tap(find.byTooltip('Presentation Setup'));
     await tester.tap(find.byTooltip('# Tags'));
     await tester.tap(find.byTooltip('Topics'));
     await tester.tap(find.byTooltip('! Rapid tag'));
     expect(searchCount, 1);
-    expect(savedCount, 1);
-    expect(setupCount, 1);
+    expect(savedCount, 0);
+    expect(setupCount, 0);
     expect(standardTagCount, 1);
     expect(topicsCount, 1);
     expect(rapidTagCount, 1);
@@ -174,8 +172,6 @@ void main() {
     for (final finder in <Finder>[
       find.byKey(const ValueKey('viewer-back-button')),
       find.byKey(const ValueKey('viewer-search-button')),
-      find.byKey(const ValueKey('viewer-saved-presentations-button')),
-      find.byKey(const ValueKey('viewer-presentation-setup-button')),
       find.byTooltip('# Tags'),
       find.byKey(const ValueKey('viewer-topics-button')),
       find.byTooltip('! Rapid tag'),
@@ -186,8 +182,6 @@ void main() {
     }
 
     final actionCellKeys = <String>[
-      'viewer-phone-action-cell-saved-presentations',
-      'viewer-phone-action-cell-presentation-setup',
       'viewer-phone-action-cell-standard-tag',
       'viewer-phone-action-cell-topics',
       'viewer-phone-action-cell-rapid-tag',
@@ -257,10 +251,10 @@ void main() {
       find.byKey(const ValueKey('viewer-phone-two-row-toolbar')),
       findsNothing,
     );
-    expect(find.byTooltip('Saved Presentations'), findsOneWidget);
-    expect(find.byIcon(Icons.folder_open_outlined), findsOneWidget);
+    expect(find.byTooltip('Saved Presentations'), findsNothing);
+    expect(find.byIcon(Icons.folder_open_outlined), findsNothing);
     expect(find.byIcon(Icons.connected_tv), findsNothing);
-    expect(find.byTooltip('Presentation Setup'), findsOneWidget);
+    expect(find.byTooltip('Presentation Setup'), findsNothing);
     expect(tester.getSize(find.byType(ViewerTopBar)).height, kToolbarHeight);
     expect(tester.takeException(), isNull);
   });

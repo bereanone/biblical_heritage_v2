@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../data/bible_memory_repository.dart';
+import 'bible_memory_support.dart';
+import 'bible_memory_audio.dart';
 
 class BibleMemoryPracticeScreen extends StatefulWidget {
   const BibleMemoryPracticeScreen({
@@ -259,7 +261,21 @@ class _BibleMemoryPracticeScreenState extends State<BibleMemoryPracticeScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.memoryVerse.reference)),
+      appBar: AppBar(
+        title: Text(widget.memoryVerse.reference),
+        actions: [
+          IconButton(
+            tooltip: 'Listen to memory passage',
+            icon: const Icon(Icons.headphones_rounded),
+            onPressed: () => showMemoryAudioPopup(context, widget.memoryVerse),
+          ),
+          IconButton(
+            tooltip: 'Memory Instructions',
+            icon: const Icon(Icons.help_outline),
+            onPressed: () => BibleMemorySupport.showInstructions(context),
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(

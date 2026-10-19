@@ -21,32 +21,58 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
-  testWidgets(
-    'clean install without persisted permission stops at one recovery gate',
-    (tester) async {
-      var validationCalls = 0;
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(channel, (call) async {
-            expect(call.method, 'validateAndroidLibraryTree');
-            validationCalls += 1;
-            return <String, Object?>{
-              'authorized': false,
-              'persistedRead': false,
-              'persistedWrite': false,
-              'enumerates': false,
-              'authorizationState': 'libraryRootAuthorizationMissing',
-              'validationError': 'No saved Android document-tree URI.',
-            };
-          });
+  testWidgets('clean Android install opens with its private library', (
+    tester,
+  ) async {
+    var validationCalls = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          expect(call.method, 'validateAndroidLibraryTree');
+          validationCalls += 1;
+          return <String, Object?>{
+            'authorized': true,
+            'path': '/private/StudyBibleMirror_Private',
+            'displayName': 'StudyBible2 private library',
+            'persistedRead': true,
+            'persistedWrite': true,
+            'enumerates': true,
+            'validFolder': true,
+            'expectedMarkersFound': true,
+            'authorizationState': 'privateStorage',
+          };
+        });
 
-      await tester.pumpWidget(const BootstrapGate());
-      await tester.pump();
-      await tester.pump();
+    await tester.pumpWidget(const BootstrapGate());
+    await tester.pump();
+    await tester.pump();
 
-      expect(find.text('Library Access Required'), findsOneWidget);
-      expect(find.text('Reconnect Existing StudyBible Folder'), findsOneWidget);
-      expect(find.textContaining('not been deleted'), findsOneWidget);
-      expect(validationCalls, 1);
-    },
-  );
+    expect(find.text('Library Access Required'), findsNothing);
+    expect(find.text('Reconnect Existing StudyBible Folder'), findsNothing);
+    expect(validationCalls, 1);
+  });
+
+  testWidgets('unavailable Android private storage stops at the recovery gate', (
+    tester,
+  ) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          expect(call.method, 'validateAndroidLibraryTree');
+          return <String, Object?>{
+            'authorized': false,
+            'persistedRead': false,
+            'persistedWrite': false,
+            'enumerates': false,
+            'authorizationState': 'privateStorageUnavailable',
+            'validationError':
+                'App storage is unavailable. Free device space and try again.',
+          };
+        });
+
+    await tester.pumpWidget(const BootstrapGate());
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Library Access Required'), findsOneWidget);
+    expect(find.text('Reconnect Existing StudyBible Folder'), findsOneWidget);
+  });
 }

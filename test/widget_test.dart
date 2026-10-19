@@ -44,6 +44,11 @@ void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
   installFakeAudioplayers();
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(
+        const MethodChannel('studybible/recorded_audio'),
+        (call) async => null,
+      );
 
   late Directory supportDir;
   late Directory documentsDir;

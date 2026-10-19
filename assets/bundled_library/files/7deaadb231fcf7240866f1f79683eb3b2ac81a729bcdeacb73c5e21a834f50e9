@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "workId": "SSP",
+  "packageId": "captureclipper:SSP",
+  "createdAt": "2026-07-03T11:18:21.103974Z",
+  "updatedAt": "2026-07-10T14:03:28.746012Z",
+  "contentHash": "7bf02b1fcf5dd723977bbdcf57f32d6a5ee49786d5cbf1f87209577a4542c306",
+  "captureApp": "CaptureClipper",
+  "captureMode": "clipboard-html",
+  "title": "The Story of the Seer of Patmos",
+  "author": "Stephen Nelson Haskell",
+  "shortCode": "SSP",
+  "fromRef": "15",
+  "toRef": "17",
+  "coverImage": "images/image_0001.png",
+  "imageCount": 1,
+  "htmlFile": "capture.html"
+}

@@ -64,6 +64,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
     private var pendingLibraryTreeResult: MethodChannel.Result? = null
     private var pendingLibraryTreeRequiresExisting = false
     private val storageExecutor = Executors.newSingleThreadExecutor()
+    private var narrationThermalBridge: NarrationThermalBridge? = null
     private var recordedAudioBridge: RecordedBibleAudioBridge? = null
 
     override fun onFlutterSurfaceViewCreated(flutterSurfaceView: FlutterSurfaceView) {
@@ -73,6 +74,52 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "studybible/rich_clipboard")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "writeImage") {
+                    try {
+                        val bytes = call.argument<ByteArray>("bytes") ?: throw IllegalArgumentException("Missing image")
+                        val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw IllegalArgumentException("Invalid image")
+                        val folder = File(cacheDir, "note_clipboard").apply { mkdirs() }
+                        val file = File(folder, java.util.UUID.randomUUID().toString() + ".png")
+                        file.outputStream().use { output -> check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)) }
+                        bitmap.recycle()
+                        val uri = androidx.core.content.FileProvider.getUriForFile(this, packageName + ".note_clipboard", file)
+                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newUri(contentResolver, "Image", uri))
+                        result.success(null)
+                    } catch (error: Exception) { result.error("clipboard_failed", "Could not copy image", null) }
+                } else if (call.method == "readImage") {
+                    try {
+                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        val clip = clipboard.primaryClip
+                        val uri = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).uri else null
+                        if (uri == null || contentResolver.getType(uri)?.startsWith("image/") != true) result.success(null)
+                        else contentResolver.openInputStream(uri).use { input ->
+                            val bitmap = android.graphics.BitmapFactory.decodeStream(input)
+                            if (bitmap == null) result.success(null) else {
+                                val output = java.io.ByteArrayOutputStream()
+                                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)
+                                bitmap.recycle(); result.success(output.toByteArray())
+                            }
+                        }
+                    } catch (error: Exception) { result.error("clipboard_failed", "Could not read image", null) }
+                } else if (call.method != "write") {
+                    result.notImplemented()
+                } else {
+                    val text = call.argument<String>("text")
+                    val html = call.argument<String>("html")
+                    if (text == null || html == null) {
+                        result.error("invalid_arguments", "Missing clipboard text or HTML", null)
+                    } else {
+                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newHtmlText("Study", text, html))
+                        result.success(null)
+                    }
+                }
+            }
+
+        narrationThermalBridge = NarrationThermalBridge(this, flutterEngine)
         recordedAudioBridge = RecordedBibleAudioBridge(flutterEngine)
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
@@ -854,6 +901,8 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        narrationThermalBridge?.close()
+        narrationThermalBridge = null
         sensorManager?.unregisterListener(this)
         eventSink = null
         sensorHandler = null
@@ -866,4 +915,69 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
         storageExecutor.shutdown()
         super.cleanUpFlutterEngine(flutterEngine)
     }
+}
+
+private class NarrationThermalBridge(context: Context, engine: FlutterEngine) : EventChannel.StreamHandler {
+    private val power = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+    private val handler = Handler(android.os.Looper.getMainLooper())
+    private val methods = MethodChannel(engine.dartExecutor.binaryMessenger, "studybible/narration_thermal")
+    private val events = EventChannel(engine.dartExecutor.binaryMessenger, "studybible/narration_thermal_events")
+    private var listener: android.os.PowerManager.OnThermalStatusChangedListener? = null
+    private var sink: EventChannel.EventSink? = null
+    private var lastHeadroomAt = 0L
+    private var headroom: Float? = null
+    private var observedPressure = false
+    init {
+        methods.setMethodCallHandler { call, result ->
+            if (call.method == "snapshot") result.success(snapshot()) else result.notImplemented()
+        }
+        events.setStreamHandler(this)
+    }
+    private fun snapshot(): Map<String, Any> {
+        if (Build.VERSION.SDK_INT < 29) return emptyMap()
+        return try {
+            val status = power.currentThermalStatus
+            if (status > android.os.PowerManager.THERMAL_STATUS_NONE) observedPressure = true
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (Build.VERSION.SDK_INT >= 30 && (lastHeadroomAt == 0L || now - lastHeadroomAt >= 10_000L)) {
+                lastHeadroomAt = now
+                val value = power.getThermalHeadroom(10)
+                headroom = if (value.isFinite() && value >= 0) value else null
+            }
+            // Some devices report NONE even when thermal sensing is absent.
+            // Require useful headroom before calling NONE positively cool.
+            val predicted = headroom
+            val level = when {
+                status >= android.os.PowerManager.THERMAL_STATUS_MODERATE || (predicted != null && predicted >= .85f) -> 2
+                status >= android.os.PowerManager.THERMAL_STATUS_LIGHT || (predicted != null && predicted >= .65f) -> 1
+                predicted != null || observedPressure -> 0
+                else -> null
+            }
+            val result = mutableMapOf<String, Any>("status" to status)
+            if (level != null) result["level"] = level
+            if (predicted != null) result["headroom"] = predicted.toDouble()
+            result
+        } catch (_: RuntimeException) { emptyMap() }
+    }
+    private val poll = object : Runnable {
+        override fun run() { sink?.success(snapshot()); handler.postDelayed(this, 10_000L) }
+    }
+    override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+        sink = events
+        if (Build.VERSION.SDK_INT >= 29) {
+            val callback = android.os.PowerManager.OnThermalStatusChangedListener { sink?.success(snapshot()) }
+            try {
+                power.addThermalStatusListener(java.util.concurrent.Executor { handler.post(it) }, callback)
+                listener = callback
+            } catch (_: RuntimeException) { /* Unknown sensors keep the conservative duty. */ }
+        }
+        poll.run()
+    }
+    override fun onCancel(arguments: Any?) {
+        if (Build.VERSION.SDK_INT >= 29) listener?.let { power.removeThermalStatusListener(it) }
+        listener = null
+        handler.removeCallbacks(poll)
+        sink = null
+    }
+    fun close() { onCancel(null); methods.setMethodCallHandler(null); events.setStreamHandler(null) }
 }

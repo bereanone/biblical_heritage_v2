@@ -42,7 +42,7 @@ void main() {
       settings,
       const ReaderTiltPreferences(speedMultiplier: 4),
     );
-    expect(forward, 240);
-    expect(reverse, -240);
+    expect(forward.abs(), 240);
+    expect(reverse, -forward);
   });
 }

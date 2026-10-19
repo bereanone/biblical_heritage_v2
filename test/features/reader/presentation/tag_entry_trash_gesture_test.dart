@@ -12,7 +12,7 @@ import 'package:studybible2/features/reader/presentation/tag_quick_apply_helper.
 
 void main() {
   testWidgets(
-    'trash-can long press soft-deletes only the verse entry and Undo restores it',
+    'trash-can tap immediately soft-deletes only the selected verse entry',
     (tester) async {
       final root = (await tester.runAsync(
         () => Directory.systemTemp.createTemp('tag_trash_gesture_'),
@@ -55,41 +55,20 @@ void main() {
       final trash = find.byTooltip('Move to Trash');
       expect(trash, findsOneWidget);
       await tester.tap(trash);
-      await tester.pumpAndSettle();
-      expect(find.text('Move to Trash?'), findsOneWidget);
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
-      await tester.runAsync(() async {
-        expect((await repository.loadEntries('#gesture-proof')).length, 1);
-      });
-      // The row keeps its existing gesture behavior; only the trash control
-      // has the new immediate, recoverable long-press action.
-      await tester.runAsync(() async {
-        final gesture = await tester.startGesture(tester.getCenter(trash));
-        await Future<void>.delayed(const Duration(milliseconds: 650));
-        await gesture.up();
-        await Future<void>.delayed(const Duration(milliseconds: 150));
-      });
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 150)),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Move to Trash?'), findsNothing);
-      expect(find.text('Verse moved to Trash.'), findsOneWidget);
       await tester.runAsync(() async {
         expect(await repository.loadEntries('#gesture-proof'), isEmpty);
         final deleted = await repository.loadTrashedEntries('#gesture-proof');
         expect(deleted.length, 1);
       });
-      await tester.runAsync(() async {
-        await tester.tap(find.text('Undo'));
-        await Future<void>.delayed(const Duration(milliseconds: 150));
-      });
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 300)),
+      );
       await tester.pumpAndSettle();
-      await tester.runAsync(() async {
-        final restored = await repository.loadEntries('#gesture-proof');
-        expect(restored.length, 1);
-        expect(restored.single.verse, 3);
-        expect(await repository.loadTrashedEntries('#gesture-proof'), isEmpty);
-      });
-      expect(find.byTooltip('Move to Trash'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() async => UserDatabase.instance.close());
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(

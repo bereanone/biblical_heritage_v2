@@ -8,6 +8,8 @@ import 'package:path/path.dart' as p;
 import '../data/presentation/presentation_models.dart';
 import '../data/presentation/note_image_layout.dart';
 import 'note_image_flow.dart';
+import 'presentation_fit.dart';
+import 'presentation_element.dart';
 import '../data/presentation/presentation_slide_settings.dart';
 import '../data/presentation/presentation_text_format.dart';
 import 'viewer_presentation_settings.dart';
@@ -21,6 +23,7 @@ class PresentationSlideCanvas extends StatefulWidget {
     required this.bookNames,
     required this.settings,
     required this.mediaRootPaths,
+    this.onBodyFontSizeResolved,
   });
 
   final PresentationSlide slide;
@@ -28,6 +31,7 @@ class PresentationSlideCanvas extends StatefulWidget {
   final Map<int, String> bookNames;
   final PresentationSlideSettings settings;
   final List<String> mediaRootPaths;
+  final ValueChanged<double>? onBodyFontSizeResolved;
 
   @override
   State<PresentationSlideCanvas> createState() =>
@@ -52,7 +56,9 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
   PresentationSlide get _slide => widget.slide;
 
   PresentationBlockAlignments _alignments(PresentationSlide slide) =>
-      PresentationBlockAlignments.fromFormat(slide.items.firstOrNull?.noteFormatJson);
+      PresentationBlockAlignments.fromFormat(
+        slide.items.firstOrNull?.noteFormatJson,
+      );
 
   String _slideTitle(PresentationSlide slide) {
     return slide.slideTitle?.trim() ?? '';
@@ -70,61 +76,6 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
         ? '${item.verse}-${item.verseEnd}'
         : '${item.verse}';
     return '${_bookNameFor(item.bookNumber)} ${item.chapter}:$verseLabel';
-  }
-
-  String _primaryMeasurementText(PresentationSlide slide) {
-    final blocks = <String>[];
-    for (final item in slide.items) {
-      if (item.itemKind == PresentationItemKind.note) {
-        final text = item.displayText.trim();
-        if (text.isNotEmpty) {
-          blocks.add(text);
-        }
-        continue;
-      }
-
-      final verseText = item.displayText.trim();
-      final citationText = item.citationText?.trim().isNotEmpty == true
-          ? item.citationText!.trim()
-          : _referenceHeadingForItem(item);
-      final parts = <String>[];
-      if (verseText.isNotEmpty) parts.add(verseText);
-      if (citationText.isNotEmpty) parts.add(citationText);
-      if (parts.isNotEmpty) {
-        blocks.add(parts.join('\n'));
-      }
-    }
-    return blocks.join('\n\n');
-  }
-
-  double _attachedNoteReserveHeight({
-    required PresentationSlide slide,
-    required TextStyle noteStyle,
-    required double bodyWidth,
-    required TextDirection textDirection,
-    required TextAlign bodyTextAlign,
-  }) {
-    var total = 0.0;
-    final noteMeasureWidth = math.max(0.0, bodyWidth - 24.0);
-
-    for (final item in _verseItems(slide)) {
-      final verseText = item.displayText.trim();
-      final noteText = item.noteText?.trim() ?? '';
-      if (noteText.isEmpty || noteText == verseText) {
-        continue;
-      }
-
-      final textHeight = _measureTextHeight(
-        text: noteText,
-        style: noteStyle.copyWith(fontSize: 24.0),
-        maxWidth: noteMeasureWidth,
-        textDirection: textDirection,
-        textAlign: bodyTextAlign,
-      );
-      total += textHeight + 28.0;
-    }
-
-    return total;
   }
 
   bool _hasVerseItems(PresentationSlide slide) {
@@ -167,19 +118,35 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
     return _hasMediaItems(slide);
   }
 
-  NoteImageLayout? _noteImageLayout(PresentationSlide slide) {
-    if (slide.items.length != 1) return null;
-    final item = slide.items.single;
-    if (item.itemKind != PresentationItemKind.note) return null;
-    final layout = noteImageLayoutFromFormat(item.noteFormatJson);
-    if (layout == null || layout.imageIndex >= (item.mediaRefs?.length ?? 0)) return null;
+  NoteImageLayout? _itemImageLayout(PresentationSlideItem item) {
+    final layout = resolveNoteImageLayout(
+      noteImageLayoutFromFormat(item.noteFormatJson),
+      widget.settings.imageLayouts[presentationElementKey(item.id, 'image')],
+    );
+    if (layout == null || layout.imageIndex >= (item.mediaRefs?.length ?? 0))
+      return null;
+    if (item.itemKind == PresentationItemKind.verse &&
+        layout.footer.trim().isEmpty) {
+      return NoteImageLayout.fromJson({
+        ...layout.toJson(),
+        'footer': item.citationText?.trim().isNotEmpty == true
+            ? item.citationText!.trim()
+            : _referenceHeadingForItem(item),
+      });
+    }
     return layout;
   }
+
+  NoteImageLayout? _noteImageLayout(PresentationSlide slide) =>
+      slide.items.length == 1 ? _itemImageLayout(slide.items.single) : null;
+
+  bool _hasImageZones(PresentationSlide slide) =>
+      slide.items.any((item) => _itemImageLayout(item) != null);
 
   PresentationLayoutPreference _effectiveLayoutPreference(
     PresentationSlide slide,
   ) {
-    if (_noteImageLayout(slide) != null) return PresentationLayoutPreference.textOnly;
+    if (_hasImageZones(slide)) return PresentationLayoutPreference.textOnly;
     final override = _layoutPreferenceForSlide(slide);
     if (override != PresentationLayoutPreference.auto) return override;
     final hasText = _slideHasText(slide);
@@ -517,6 +484,58 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
     );
   }
 
+  Widget _headingViewport(
+    String text,
+    TextStyle style,
+    double width,
+    double height,
+    Widget child,
+  ) {
+    final limit = math.max(60.0, height * .35);
+    final measured = _measureTextHeight(
+      text: text,
+      style: style,
+      maxWidth: math.max(1, width),
+      textDirection: Directionality.of(context),
+    );
+    if (measured <= limit) return child;
+    return SizedBox(
+      height: limit,
+      child: PresentationOverflowFrame(
+        overflow: true,
+        area: 'the heading',
+        child: SingleChildScrollView(child: child),
+      ),
+    );
+  }
+
+  double _elementSize(String key, double fallback) =>
+      widget.settings.fontSizeFor(key, fallback);
+
+  Widget _element(
+    PresentationSlideItem item,
+    String part,
+    double base,
+    Widget child,
+  ) {
+    final number =
+        _slide.items.indexWhere((candidate) => candidate.id == item.id) + 1;
+    final label = switch (part) {
+      'citation' => 'Reference $number',
+      'note' => 'Note $number',
+      _ =>
+        item.itemKind == PresentationItemKind.note
+            ? 'Note $number'
+            : 'Passage $number',
+    };
+    return PresentationElement(
+      elementKey: presentationElementKey(item.id, part),
+      label: label,
+      defaultFontSize: base,
+      child: child,
+    );
+  }
+
   Widget _slideItemWidget({
     required PresentationSlideItem item,
     required String slideTitle,
@@ -529,84 +548,127 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
     TextAlign? attachedNoteAlign,
     bool includeMedia = false,
   }) {
+    final bodyKey = presentationElementKey(item.id, 'body');
     if (item.itemKind == PresentationItemKind.note) {
-      final noteFontSize = item.mediaRefs?.isNotEmpty == true
+      final base = item.mediaRefs?.isNotEmpty == true
           ? math.min(bodyFontSize, 30.0)
           : bodyFontSize;
-      return _presentationNoteSection(
-        noteText: item.displayText,
-        textStyle: noteTextStyle.copyWith(fontSize: noteFontSize),
-        noteFormatJson: item.noteFormatJson,
-        mediaRefs: item.mediaRefs ?? const <String>[],
-        textAlign: bodyTextAlign,
+      return _element(
+        item,
+        'body',
+        base,
+        _presentationNoteSection(
+          noteText: item.displayText,
+          textStyle: noteTextStyle.copyWith(
+            fontSize: _elementSize(bodyKey, base),
+          ),
+          noteFormatJson: item.noteFormatJson,
+          mediaRefs: item.mediaRefs ?? const <String>[],
+          textAlign: widget.settings.alignmentFor(bodyKey, bodyTextAlign),
+        ),
       );
     }
-
     final verseText = item.displayText.trim();
     final noteText = item.noteText?.trim() ?? '';
     final citationText = item.citationText?.trim().isNotEmpty == true
         ? item.citationText!.trim()
         : _referenceHeadingForItem(item);
-    final showAttachedNote =
+    String normalized(String text) =>
+        text.trim().replaceAll('–', '-').replaceAll('—', '-');
+    final showCitation =
+        citationText.isNotEmpty &&
+        normalized(citationText) != normalized(slideTitle);
+    final noteBase = math.min(bodyFontSize, 24.0);
+    final citationBase = math.max(13.0, bodyFontSize * .36);
+    final bodySize = _elementSize(bodyKey, bodyFontSize);
+    final showNote =
         includeAttachedNote && noteText.isNotEmpty && noteText != verseText;
-    // The slide title already supplies this citation when it matches. Keep
-    // distinct item citations on grouped slides and beneath custom titles.
-    String normalizedCitation(String text) => text.trim().replaceAll('–', '-').replaceAll('—', '-');
-    final showCitation = citationText.isNotEmpty &&
-        normalizedCitation(citationText) != normalizedCitation(slideTitle);
-    final attachedNoteFontSize = math.min(bodyFontSize, 24.0);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (verseText.isNotEmpty)
-          Padding(
-            padding: EdgeInsets.only(top: 0),
-            child: item.displayTextFormatJson?.trim().isNotEmpty == true
+          _element(
+            item,
+            'body',
+            bodyFontSize,
+            item.displayTextFormatJson?.trim().isNotEmpty == true
                 ? RichText(
-                    textAlign: bodyTextAlign,
+                    textAlign: widget.settings.alignmentFor(
+                      bodyKey,
+                      bodyTextAlign,
+                    ),
                     text: TextSpan(
                       children: buildPresentationTextSpans(
                         text: verseText,
-                        baseStyle: bodyStyle.copyWith(fontSize: bodyFontSize),
+                        baseStyle: bodyStyle.copyWith(fontSize: bodySize),
                         formatJson: item.displayTextFormatJson,
                       ),
                     ),
                   )
                 : Text(
                     verseText,
-                    style: bodyStyle.copyWith(fontSize: bodyFontSize),
-                    textAlign: bodyTextAlign,
+                    style: bodyStyle.copyWith(fontSize: bodySize),
+                    textAlign: widget.settings.alignmentFor(
+                      bodyKey,
+                      bodyTextAlign,
+                    ),
                     softWrap: true,
                   ),
           ),
         if (showCitation) ...[
           const SizedBox(height: 8),
-          Text(
-            citationText,
-            textAlign: PresentationBlockAlignments.fromFormat(item.noteFormatJson).citation,
-            style: headingStyle.copyWith(
-              fontSize: math.max(13, bodyFontSize * 0.36),
+          _element(
+            item,
+            'citation',
+            citationBase,
+            Text(
+              citationText,
+              textAlign: widget.settings.alignmentFor(
+                presentationElementKey(item.id, 'citation'),
+                PresentationBlockAlignments.fromFormat(
+                  item.noteFormatJson,
+                ).citation,
+              ),
+              style: headingStyle.copyWith(
+                fontSize: _elementSize(
+                  presentationElementKey(item.id, 'citation'),
+                  citationBase,
+                ),
+              ),
+              softWrap: true,
             ),
-            softWrap: true,
           ),
         ],
-        if (showAttachedNote) ...[
+        if (showNote) ...[
           const SizedBox(height: 12),
-          _presentationNoteSection(
-            noteText: noteText,
-            textStyle: noteTextStyle.copyWith(fontSize: attachedNoteFontSize),
-            noteFormatJson: item.noteFormatJson,
-            mediaRefs: item.mediaRefs ?? const <String>[],
-            textAlign: attachedNoteAlign ?? bodyTextAlign,
+          _element(
+            item,
+            'note',
+            noteBase,
+            _presentationNoteSection(
+              noteText: noteText,
+              textStyle: noteTextStyle.copyWith(
+                fontSize: _elementSize(
+                  presentationElementKey(item.id, 'note'),
+                  noteBase,
+                ),
+              ),
+              noteFormatJson: item.noteFormatJson,
+              mediaRefs: item.mediaRefs ?? const <String>[],
+              textAlign: widget.settings.alignmentFor(
+                presentationElementKey(item.id, 'note'),
+                attachedNoteAlign ?? bodyTextAlign,
+              ),
+            ),
           ),
         ],
         if (includeMedia &&
             item.mediaRefs?.isNotEmpty == true &&
-            !showAttachedNote) ...[
+            !showNote) ...[
           const SizedBox(height: 12),
           _presentationNoteSection(
             noteText: '',
-            textStyle: noteTextStyle.copyWith(fontSize: attachedNoteFontSize),
+            textStyle: noteTextStyle.copyWith(fontSize: noteBase),
             noteFormatJson: null,
             mediaRefs: item.mediaRefs ?? const <String>[],
             textAlign: attachedNoteAlign ?? bodyTextAlign,
@@ -637,17 +699,33 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
           textStyle: noteTextStyle.copyWith(fontSize: bodyFontSize),
           noteFormatJson: null,
           mediaRefs: item.mediaRefs ?? const <String>[],
-          textAlign: bodyTextAlign,
+          textAlign: widget.settings.alignmentFor(
+            presentationElementKey(item.id, 'body'),
+            bodyTextAlign,
+          ),
         );
       }
-      return _presentationNoteSection(
-        noteText: noteText,
-        textStyle: noteTextStyle.copyWith(fontSize: bodyFontSize),
-        noteFormatJson: item.noteFormatJson,
-        mediaRefs: renderMedia
-            ? item.mediaRefs ?? const <String>[]
-            : const <String>[],
-        textAlign: bodyTextAlign,
+      return _element(
+        item,
+        'body',
+        bodyFontSize,
+        _presentationNoteSection(
+          noteText: noteText,
+          textStyle: noteTextStyle.copyWith(
+            fontSize: _elementSize(
+              presentationElementKey(item.id, 'body'),
+              bodyFontSize,
+            ),
+          ),
+          noteFormatJson: item.noteFormatJson,
+          mediaRefs: renderMedia
+              ? item.mediaRefs ?? const <String>[]
+              : const <String>[],
+          textAlign: widget.settings.alignmentFor(
+            presentationElementKey(item.id, 'body'),
+            bodyTextAlign,
+          ),
+        ),
       );
     }
 
@@ -657,7 +735,10 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
         textStyle: noteTextStyle.copyWith(fontSize: bodyFontSize),
         noteFormatJson: null,
         mediaRefs: item.mediaRefs ?? const <String>[],
-        textAlign: bodyTextAlign,
+        textAlign: widget.settings.alignmentFor(
+          presentationElementKey(item.id, 'body'),
+          bodyTextAlign,
+        ),
       );
     }
 
@@ -742,12 +823,14 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
   }
 
   TextAlign _bodyTextAlign(PresentationSlide slide) {
-    if (widget.settings.alignmentOverride == null) return _alignments(slide).body;
+    if (widget.settings.alignmentOverride == null)
+      return _alignments(slide).body;
     final alignment = _defaultBodyAlignment(slide);
     return switch (alignment) {
       PresentationAlignmentPreference.left => TextAlign.left,
       PresentationAlignmentPreference.center => TextAlign.center,
       PresentationAlignmentPreference.right => TextAlign.right,
+      PresentationAlignmentPreference.justify => TextAlign.justify,
     };
   }
 
@@ -762,41 +845,66 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
     required TextDirection textDirection,
     required TextAlign bodyTextAlign,
   }) {
-    final override = widget.settings.fontSizeOverride;
-    if (override != null) return override;
-    if (!widget.settings.autoFitEnabled) return bodyMinFontSize;
+    double resolved(double size) {
+      widget.onBodyFontSizeResolved?.call(size);
+      return size;
+    }
 
-    final slideBodyText = _primaryMeasurementText(slide);
-    final isNoteOnlySlide = _hasNoteItems(slide) && !_hasVerseItems(slide);
-    final bodyTextStyle = isNoteOnlySlide ? noteTextStyle : bodyStyle;
-    final horizontalInset = isNoteOnlySlide ? 22.0 : 16.0;
-    final verticalInset = isNoteOnlySlide ? 36.0 : 28.0;
-    final reservedNoteHeight = isNoteOnlySlide
-        ? 0.0
-        : _attachedNoteReserveHeight(
-            slide: slide,
-            noteStyle: noteTextStyle,
-            bodyWidth: bodyWidth,
-            textDirection: textDirection,
-            bodyTextAlign: bodyTextAlign,
-          );
-    final fitWidth = math.max(0.0, bodyWidth - horizontalInset);
-    final fitHeight = math.max(
-      0.0,
-      bodyHeight - verticalInset - reservedNoteHeight,
+    final override = widget.settings.fontSizeOverride;
+    if (override != null) return resolved(override);
+    if (!widget.settings.autoFitEnabled) return resolved(bodyMinFontSize);
+
+    double height(double size) => _renderedTextHeight(
+      slide,
+      bodyWidth,
+      size,
+      bodyStyle,
+      noteTextStyle,
+      _fitHeadingStyle,
+      bodyTextAlign,
     );
-    return _fitFontSize(
-      text: slideBodyText,
-      style: bodyTextStyle,
-      maxWidth: fitWidth,
-      maxHeight: fitHeight,
-      minFontSize: bodyMinFontSize,
-      maxFontSize: bodyMaxFontSize,
-      textDirection: textDirection,
-      textAlign: bodyTextAlign,
-      safetyBuffer: isNoteOnlySlide ? 24.0 : 24.0,
-    );
+    var low = bodyMinFontSize;
+    var high = math.max(low, bodyMaxFontSize);
+    if (height(low) > bodyHeight) return resolved(low);
+    while (high - low > .25) {
+      final mid = (low + high) / 2;
+      if (height(mid) <= bodyHeight - 2) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+    return resolved(low);
   }
+
+  TextStyle get _fitHeadingStyle =>
+      (Theme.of(context).textTheme.titleSmall ?? const TextStyle()).copyWith(
+        fontWeight: FontWeight.w800,
+        height: 1.12,
+        letterSpacing: .08,
+      );
+
+  double _renderedTextHeight(
+    PresentationSlide slide,
+    double width,
+    double size,
+    TextStyle body,
+    TextStyle note,
+    TextStyle heading,
+    TextAlign alignment,
+  ) => presentationTextHeight(
+    settings: widget.settings,
+    slide: slide,
+    bookNames: widget.bookNames,
+    width: width,
+    fontSize: size,
+    bodyStyle: body,
+    noteStyle: note,
+    headingStyle: heading,
+    direction: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+    alignment: alignment,
+  );
 
   Widget _buildFullWidthSlideBody({
     required BuildContext context,
@@ -808,8 +916,40 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
     required double bodyMaxFontSize,
   }) {
     final bodyTextAlign = _bodyTextAlign(slide);
+    if (slide.items.length > 1 && _hasImageZones(slide)) {
+      // A linked slide still owns separate entry layouts. Do not discard those
+      // reservations or substitute the list-wide two-column media layout.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final item in slide.items)
+            Expanded(
+              flex: math.max(
+                120,
+                item.displayText.length + (item.noteText?.length ?? 0),
+              ),
+              child: PresentationSlideCanvas(
+                key: ValueKey('image-zone:${item.id}'),
+                slide: PresentationSlide(
+                  id: slide.id,
+                  settingsKey: slide.settingsKey,
+                  slideNumber: slide.slideNumber,
+                  layoutType: PresentationLayoutType.fullWidth,
+                  items: [item],
+                ),
+                aspectRatioPreset: PresentationAspectRatioPreset.auto,
+                bookNames: widget.bookNames,
+                settings: widget.settings,
+                mediaRootPaths: widget.mediaRootPaths,
+              ),
+            ),
+        ],
+      );
+    }
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 0, 10, 36),
+      padding: _hasMediaItems(slide)
+          ? const EdgeInsets.fromLTRB(10, 0, 10, 36)
+          : EdgeInsets.zero,
       child: LayoutBuilder(
         builder: (context, bodyConstraints) {
           final bodyWidth = math.max(0.0, bodyConstraints.maxWidth);
@@ -817,14 +957,79 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
           final imageLayout = _noteImageLayout(slide);
           if (imageLayout != null) {
             final item = slide.items.single;
-            final path = _resolveMediaPath(item.mediaRefs![imageLayout.imageIndex]);
-            return NoteImageFlow(text: item.displayText,
-              formatJson: item.noteFormatJson, layout: imageLayout,
-              aspectRatio: widget.aspectRatioPreset.aspectRatio ?? 16 / 9,
-              style: noteTextStyle.copyWith(fontSize: bodyMaxFontSize),
-              image: path == null ? const Icon(Icons.broken_image_outlined)
-                : Image.file(File(path), fit: imageLayout.fill ? BoxFit.cover : BoxFit.contain,
-                    errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined)),
+            final path = _resolveMediaPath(
+              item.mediaRefs![imageLayout.imageIndex],
+            );
+            final isVerse = item.itemKind == PresentationItemKind.verse;
+            final attachedNote = isVerse ? (item.noteText?.trim() ?? '') : '';
+            final flow = NoteImageFlow(
+              footerElementPart: isVerse ? 'citation' : 'footer',
+              minimumDisplayedFontSize: 18,
+              elementItemId: item.id,
+              elementFontSizes: widget.settings.elementFontSizes,
+              elementAlignments: widget.settings.elementAlignments,
+              displayedFontSizeOverride: widget.settings.fontSizeOverride,
+              onDisplayedFontSizeResolved: widget.onBodyFontSizeResolved,
+              text: item.displayText,
+              formatJson: isVerse
+                  ? PresentationBlockAlignments.fromFormat(
+                      item.noteFormatJson,
+                    ).withFormat(item.displayTextFormatJson)
+                  : item.noteFormatJson,
+              layout: imageLayout,
+              aspectRatio:
+                  widget.aspectRatioPreset.aspectRatio ??
+                  bodyWidth / math.max(1.0, bodyHeight),
+              style: (isVerse ? bodyStyle : noteTextStyle).copyWith(
+                fontSize: bodyMaxFontSize,
+              ),
+              image: path == null
+                  ? const Icon(Icons.broken_image_outlined)
+                  : Image.file(
+                      File(path),
+                      fit: imageLayout.fill ? BoxFit.cover : BoxFit.contain,
+                      errorBuilder: (_, _, _) =>
+                          const Icon(Icons.broken_image_outlined),
+                    ),
+            );
+            if (attachedNote.isEmpty || attachedNote == item.displayText.trim())
+              return flow;
+            final noteBase = math.min(
+              widget.settings.fontSizeOverride ?? bodyMaxFontSize,
+              24.0,
+            );
+            final noteKey = presentationElementKey(item.id, 'note');
+            // The attached explanation remains independently editable and takes
+            // real space away from the Scripture/image region before fitting.
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: flow),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: bodyHeight * .4),
+                  child: SingleChildScrollView(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: _element(
+                        item,
+                        'note',
+                        noteBase,
+                        _presentationNoteSection(
+                          noteText: attachedNote,
+                          textStyle: noteTextStyle.copyWith(
+                            fontSize: _elementSize(noteKey, noteBase),
+                          ),
+                          noteFormatJson: item.noteFormatJson,
+                          textAlign: widget.settings.alignmentFor(
+                            noteKey,
+                            bodyTextAlign,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             );
           }
           final chosenSlideBodySize = _chosenBodyFontSize(
@@ -848,67 +1053,50 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
               bodyHeight: bodyHeight,
             );
           }
-          final bodyTextStyle = isNoteOnlySlide ? noteTextStyle : bodyStyle;
-          final bodyMeasurementText = _primaryMeasurementText(slide);
-          final reservedNoteHeight = isNoteOnlySlide
-              ? 0.0
-              : _attachedNoteReserveHeight(
-                  slide: slide,
-                  noteStyle: noteTextStyle,
-                  bodyWidth: bodyWidth,
-                  textDirection: Directionality.of(context),
-                  bodyTextAlign: bodyTextAlign,
-                );
           final needsInnerScroll =
-              isNoteOnlySlide ||
-              _measureTextHeight(
-                    text: bodyMeasurementText,
-                    style: bodyTextStyle.copyWith(
-                      fontSize: chosenSlideBodySize,
-                    ),
-                    maxWidth: math.max(
-                      0.0,
-                      bodyWidth - (isNoteOnlySlide ? 22.0 : 0.0),
-                    ),
-                    textDirection: Directionality.of(context),
-                    textAlign: bodyTextAlign,
-                  ) >
-                  math.max(
-                    0.0,
-                    bodyHeight -
-                        (isNoteOnlySlide ? 36.0 : 28.0) -
-                        reservedNoteHeight,
-                  );
+              _renderedTextHeight(
+                slide,
+                bodyWidth,
+                chosenSlideBodySize,
+                bodyStyle,
+                noteTextStyle,
+                headingStyle,
+                bodyTextAlign,
+              ) >
+              bodyHeight;
 
-          return SingleChildScrollView(
-            controller: _scrollController,
-            primary: false,
-            physics: needsInnerScroll
-                ? const ClampingScrollPhysics()
-                : const NeverScrollableScrollPhysics(),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: bodyHeight),
-              child: Align(
-                alignment: Alignment.topLeft,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (var i = 0; i < slide.items.length; i++) ...[
-                      _slideItemWidget(
-                        item: slide.items[i],
-                        slideTitle: slide.slideTitle?.trim() ?? '',
-                        bodyStyle: bodyStyle,
-                        noteTextStyle: noteTextStyle,
-                        headingStyle: headingStyle,
-                        bodyFontSize: chosenSlideBodySize,
-                        bodyTextAlign: bodyTextAlign,
-                        attachedNoteAlign: bodyTextAlign,
-                        includeMedia: true,
-                      ),
-                      if (i < slide.items.length - 1)
-                        const SizedBox(height: 16),
+          return PresentationOverflowFrame(
+            overflow: needsInnerScroll,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              primary: false,
+              physics: needsInnerScroll
+                  ? const ClampingScrollPhysics()
+                  : const NeverScrollableScrollPhysics(),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: bodyHeight),
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var i = 0; i < slide.items.length; i++) ...[
+                        _slideItemWidget(
+                          item: slide.items[i],
+                          slideTitle: slide.slideTitle?.trim() ?? '',
+                          bodyStyle: bodyStyle,
+                          noteTextStyle: noteTextStyle,
+                          headingStyle: headingStyle,
+                          bodyFontSize: chosenSlideBodySize,
+                          bodyTextAlign: bodyTextAlign,
+                          attachedNoteAlign: bodyTextAlign,
+                          includeMedia: true,
+                        ),
+                        if (i < slide.items.length - 1)
+                          const SizedBox(height: 16),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -933,11 +1121,13 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
     }
 
     final primaryMediaRef = mediaRefs.first;
-    final captionText = slide.items
-        .where((item) => item.itemKind == PresentationItemKind.note)
-        .map((item) => item.displayText.trim())
-        .where((text) => text.isNotEmpty)
-        .join('\n\n');
+    final captions = slide.items
+        .where(
+          (item) =>
+              item.itemKind == PresentationItemKind.note &&
+              item.displayText.trim().isNotEmpty,
+        )
+        .toList();
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -951,49 +1141,81 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
                   height: 1.18,
                   fontSize: 22,
                 );
-        final captionHeight = captionText.isEmpty
-            ? 0.0
-            : _measureTextHeight(
-                text: captionText,
-                style: captionStyle,
-                maxWidth: math.max(0.0, availableWidth * 0.92),
-                textDirection: Directionality.of(context),
-                textAlign: TextAlign.center,
-              );
-        final reservedGap = captionText.isEmpty ? 0.0 : 14.0;
+        const captionBase = 22.0;
+        final captionHeight =
+            captions.fold<double>(
+              0,
+              (height, item) =>
+                  height +
+                  _measureTextHeight(
+                    text: item.displayText.trim(),
+                    style: captionStyle.copyWith(
+                      fontSize: _elementSize(
+                        presentationElementKey(item.id, 'body'),
+                        captionBase,
+                      ),
+                    ),
+                    maxWidth: math.max(1.0, availableWidth * .9),
+                    textDirection: Directionality.of(context),
+                    textAlign: widget.settings.alignmentFor(
+                      presentationElementKey(item.id, 'body'),
+                      TextAlign.center,
+                    ),
+                  ),
+            ) +
+            math.max(0, captions.length - 1) * 12;
+        final reservedGap = captions.isEmpty ? 0.0 : 14.0;
         final imageHeight = math.max(
           120.0,
           availableHeight - captionHeight - reservedGap,
         );
         final imageWidth = math.max(120.0, availableWidth);
 
-        return ConstrainedBox(
-          constraints: BoxConstraints(minHeight: bodyHeight),
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                _buildPresentationHeroImage(
-                  primaryMediaRef,
-                  width: imageWidth,
-                  height: imageHeight,
-                ),
-                if (captionText.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: availableWidth * 0.9),
-                    child: Text(
-                      captionText,
-                      textAlign: TextAlign.center,
-                      style: captionStyle,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
+        return PresentationOverflowFrame(
+          overflow: imageHeight + captionHeight + reservedGap > availableHeight,
+          child: SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: bodyHeight),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    _buildPresentationHeroImage(
+                      primaryMediaRef,
+                      width: imageWidth,
+                      height: imageHeight,
                     ),
-                  ),
-                ],
-              ],
+                    for (final item in captions) ...[
+                      const SizedBox(height: 12),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: availableWidth * .9,
+                        ),
+                        child: _element(
+                          item,
+                          'body',
+                          captionBase,
+                          Text(
+                            item.displayText.trim(),
+                            textAlign: widget.settings.alignmentFor(
+                              presentationElementKey(item.id, 'body'),
+                              TextAlign.center,
+                            ),
+                            style: captionStyle.copyWith(
+                              fontSize: _elementSize(
+                                presentationElementKey(item.id, 'body'),
+                                captionBase,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ),
         );
@@ -1200,9 +1422,79 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
             bodyTextAlign: bodyTextAlign,
           ),
           if (includeSpacing && i < entries.length - 1)
-            const SizedBox(height: 18),
+            const SizedBox(height: 16),
         ],
       ],
+    );
+  }
+
+  Widget _placementZone(
+    List<_PlacementRenderEntry> entries, {
+    required PresentationSlide slide,
+    required TextStyle bodyStyle,
+    required TextStyle noteTextStyle,
+    required TextStyle headingStyle,
+    required double minFontSize,
+    required double maxFontSize,
+    required TextAlign alignment,
+    required ScrollController controller,
+    required String area,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final textItems = entries
+            .where((e) => e.renderText)
+            .map((e) => e.item)
+            .toList();
+        final textSlide = PresentationSlide(
+          id: slide.id,
+          settingsKey: slide.settingsKey,
+          slideNumber: slide.slideNumber,
+          layoutType: slide.layoutType,
+          slideTitle: slide.slideTitle,
+          items: textItems,
+        );
+        final size = _chosenBodyFontSize(
+          slide: textSlide,
+          bodyStyle: bodyStyle,
+          noteTextStyle: noteTextStyle,
+          bodyMinFontSize: minFontSize,
+          bodyMaxFontSize: maxFontSize,
+          bodyWidth: constraints.maxWidth,
+          bodyHeight: constraints.maxHeight,
+          textDirection: Directionality.of(context),
+          bodyTextAlign: alignment,
+        );
+        final overflow =
+            _renderedTextHeight(
+              textSlide,
+              constraints.maxWidth,
+              size,
+              bodyStyle,
+              noteTextStyle,
+              headingStyle,
+              alignment,
+            ) >
+            constraints.maxHeight;
+        return PresentationOverflowFrame(
+          overflow: overflow,
+          area: area,
+          child: SingleChildScrollView(
+            controller: controller,
+            primary: false,
+            child: _renderPlacementEntries(
+              entries,
+              slideTitle: slide.slideTitle?.trim() ?? '',
+              bodyStyle: bodyStyle,
+              noteTextStyle: noteTextStyle,
+              headingStyle: headingStyle,
+              bodyFontSize: size,
+              bodyTextAlign: alignment,
+              includeSpacing: true,
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1227,39 +1519,10 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
       layoutPreference,
       forLeftRegion: false,
     );
-    final leftText = _primaryMeasurementText(
-      PresentationSlide(
-        id: slide.id,
-        settingsKey: slide.settingsKey,
-        slideNumber: slide.slideNumber,
-        layoutType: slide.layoutType,
-        slideTitle: slide.slideTitle,
-        slideTitleFormatJson: slide.slideTitleFormatJson,
-        legacyGroupKey: slide.legacyGroupKey,
-        customLayoutJson: slide.customLayoutJson,
-        items: leftEntries.map((entry) => entry.item).toList(growable: false),
-      ),
-    );
-    final rightText = _primaryMeasurementText(
-      PresentationSlide(
-        id: slide.id,
-        settingsKey: slide.settingsKey,
-        slideNumber: slide.slideNumber,
-        layoutType: slide.layoutType,
-        slideTitle: slide.slideTitle,
-        slideTitleFormatJson: slide.slideTitleFormatJson,
-        legacyGroupKey: slide.legacyGroupKey,
-        customLayoutJson: slide.customLayoutJson,
-        items: rightEntries.map((entry) => entry.item).toList(growable: false),
-      ),
-    );
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 0, 0, 22),
       child: LayoutBuilder(
         builder: (context, bodyConstraints) {
-          final bodyWidth = math.max(0.0, bodyConstraints.maxWidth);
-          final bodyHeight = math.max(0.0, bodyConstraints.maxHeight);
-          final gap = 18.0;
           final leftShare = switch (layoutPreference) {
             PresentationLayoutPreference
                 .textLeftThreeQuarterImageRightOneQuarter =>
@@ -1269,35 +1532,6 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
             PresentationLayoutPreference.imageLeftTextRight => 0.35,
             _ => 0.70,
           };
-          final leftWidth = math.max(0.0, (bodyWidth - gap) * leftShare);
-          final rightWidth = math.max(0.0, bodyWidth - gap - leftWidth);
-          final leftFontSize = _fitFontSize(
-            text: leftText.isEmpty ? slide.slideTitle?.trim() ?? '' : leftText,
-            style: bodyStyle,
-            maxWidth: math.max(0.0, leftWidth - 36.0),
-            maxHeight: math.max(0.0, bodyHeight - 32.0),
-            minFontSize: bodyMinFontSize,
-            maxFontSize: bodyMaxFontSize,
-            textDirection: Directionality.of(context),
-            textAlign: bodyTextAlign,
-            safetyBuffer: 18.0,
-          );
-          final rightFontSize = _fitFontSize(
-            text: rightText,
-            style: noteTextStyle,
-            maxWidth: math.max(0.0, rightWidth - 36.0),
-            maxHeight: math.max(0.0, bodyHeight - 32.0),
-            minFontSize: 16.0,
-            maxFontSize: math.min(56.0, math.max(32.0, rightWidth * 0.12)),
-            textDirection: Directionality.of(context),
-            textAlign: bodyTextAlign,
-            safetyBuffer: 18.0,
-          );
-          final sharedFontSize =
-              widget.settings.fontSizeOverride ??
-              (widget.settings.autoFitEnabled
-                  ? math.min(leftFontSize, rightFontSize)
-                  : bodyMinFontSize);
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -1312,20 +1546,17 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
                     ),
                   ),
                   padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-                  child: SingleChildScrollView(
+                  child: _placementZone(
+                    leftEntries,
+                    slide: slide,
+                    bodyStyle: bodyStyle,
+                    noteTextStyle: noteTextStyle,
+                    headingStyle: headingStyle,
+                    minFontSize: bodyMinFontSize,
+                    maxFontSize: bodyMaxFontSize,
+                    alignment: bodyTextAlign,
                     controller: _leftScrollController,
-                    primary: false,
-                    physics: const ClampingScrollPhysics(),
-                    child: _renderPlacementEntries(
-                      leftEntries,
-                      slideTitle: slide.slideTitle?.trim() ?? '',
-                      bodyStyle: bodyStyle,
-                      noteTextStyle: noteTextStyle,
-                      headingStyle: headingStyle,
-                      bodyFontSize: sharedFontSize,
-                      bodyTextAlign: bodyTextAlign,
-                      includeSpacing: true,
-                    ),
+                    area: 'the left text area',
                   ),
                 ),
               ),
@@ -1341,20 +1572,17 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
                     ),
                   ),
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                  child: SingleChildScrollView(
+                  child: _placementZone(
+                    rightEntries,
+                    slide: slide,
+                    bodyStyle: bodyStyle,
+                    noteTextStyle: noteTextStyle,
+                    headingStyle: headingStyle,
+                    minFontSize: bodyMinFontSize,
+                    maxFontSize: bodyMaxFontSize,
+                    alignment: bodyTextAlign,
                     controller: _rightScrollController,
-                    primary: false,
-                    physics: const ClampingScrollPhysics(),
-                    child: _renderPlacementEntries(
-                      rightEntries,
-                      slideTitle: slide.slideTitle?.trim() ?? '',
-                      bodyStyle: bodyStyle,
-                      noteTextStyle: noteTextStyle,
-                      headingStyle: headingStyle,
-                      bodyFontSize: sharedFontSize,
-                      bodyTextAlign: bodyTextAlign,
-                      includeSpacing: true,
-                    ),
+                    area: 'the right text area',
                   ),
                 ),
               ),
@@ -1385,74 +1613,16 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
       layoutPreference,
       forTopRegion: false,
     );
-    final topText = _primaryMeasurementText(
-      PresentationSlide(
-        id: slide.id,
-        settingsKey: slide.settingsKey,
-        slideNumber: slide.slideNumber,
-        layoutType: slide.layoutType,
-        slideTitle: slide.slideTitle,
-        slideTitleFormatJson: slide.slideTitleFormatJson,
-        legacyGroupKey: slide.legacyGroupKey,
-        customLayoutJson: slide.customLayoutJson,
-        items: topEntries.map((entry) => entry.item).toList(growable: false),
-      ),
-    );
-    final bottomText = _primaryMeasurementText(
-      PresentationSlide(
-        id: slide.id,
-        settingsKey: slide.settingsKey,
-        slideNumber: slide.slideNumber,
-        layoutType: slide.layoutType,
-        slideTitle: slide.slideTitle,
-        slideTitleFormatJson: slide.slideTitleFormatJson,
-        legacyGroupKey: slide.legacyGroupKey,
-        customLayoutJson: slide.customLayoutJson,
-        items: bottomEntries.map((entry) => entry.item).toList(growable: false),
-      ),
-    );
     final bodyTextAlign = _bodyTextAlign(slide);
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 0, 10, 36),
       child: LayoutBuilder(
         builder: (context, bodyConstraints) {
-          final bodyWidth = math.max(0.0, bodyConstraints.maxWidth);
-          final bodyHeight = math.max(0.0, bodyConstraints.maxHeight);
           final topWeight = switch (layoutPreference) {
             PresentationLayoutPreference.textTopImageBottom => 0.68,
             PresentationLayoutPreference.imageTopTextBottom => 0.32,
             _ => 0.65,
           };
-          final topHeight = math.max(0.0, (bodyHeight - 18.0) * topWeight);
-          final bottomHeight = math.max(0.0, bodyHeight - 18.0 - topHeight);
-          final topFontSize = _fitFontSize(
-            text: topText.isEmpty ? slide.slideTitle?.trim() ?? '' : topText,
-            style: bodyStyle,
-            maxWidth: math.max(0.0, bodyWidth - 32.0),
-            maxHeight: math.max(0.0, topHeight - 24.0),
-            minFontSize: bodyMinFontSize,
-            maxFontSize: bodyMaxFontSize,
-            textDirection: Directionality.of(context),
-            textAlign: bodyTextAlign,
-            safetyBuffer: 18.0,
-          );
-          final bottomFontSize = _fitFontSize(
-            text: bottomText,
-            style: noteTextStyle,
-            maxWidth: math.max(0.0, bodyWidth - 32.0),
-            maxHeight: math.max(0.0, bottomHeight - 24.0),
-            minFontSize: 16.0,
-            maxFontSize: math.min(56.0, math.max(32.0, bodyWidth * 0.12)),
-            textDirection: Directionality.of(context),
-            textAlign: bodyTextAlign,
-            safetyBuffer: 18.0,
-          );
-          final sharedFontSize =
-              widget.settings.fontSizeOverride ??
-              (widget.settings.autoFitEnabled
-                  ? math.min(topFontSize, bottomFontSize)
-                  : bodyMinFontSize);
-
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -1467,20 +1637,17 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
                     ),
                   ),
                   padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-                  child: SingleChildScrollView(
+                  child: _placementZone(
+                    topEntries,
+                    slide: slide,
+                    bodyStyle: bodyStyle,
+                    noteTextStyle: noteTextStyle,
+                    headingStyle: headingStyle,
+                    minFontSize: bodyMinFontSize,
+                    maxFontSize: bodyMaxFontSize,
+                    alignment: bodyTextAlign,
                     controller: _leftScrollController,
-                    primary: false,
-                    physics: const ClampingScrollPhysics(),
-                    child: _renderPlacementEntries(
-                      topEntries,
-                      slideTitle: slide.slideTitle?.trim() ?? '',
-                      bodyStyle: bodyStyle,
-                      noteTextStyle: noteTextStyle,
-                      headingStyle: headingStyle,
-                      bodyFontSize: sharedFontSize,
-                      bodyTextAlign: bodyTextAlign,
-                      includeSpacing: true,
-                    ),
+                    area: 'the top text area',
                   ),
                 ),
               ),
@@ -1496,20 +1663,17 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
                     ),
                   ),
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                  child: SingleChildScrollView(
+                  child: _placementZone(
+                    bottomEntries,
+                    slide: slide,
+                    bodyStyle: bodyStyle,
+                    noteTextStyle: noteTextStyle,
+                    headingStyle: headingStyle,
+                    minFontSize: bodyMinFontSize,
+                    maxFontSize: bodyMaxFontSize,
+                    alignment: bodyTextAlign,
                     controller: _rightScrollController,
-                    primary: false,
-                    physics: const ClampingScrollPhysics(),
-                    child: _renderPlacementEntries(
-                      bottomEntries,
-                      slideTitle: slide.slideTitle?.trim() ?? '',
-                      bodyStyle: bodyStyle,
-                      noteTextStyle: noteTextStyle,
-                      headingStyle: headingStyle,
-                      bodyFontSize: sharedFontSize,
-                      bodyTextAlign: bodyTextAlign,
-                      includeSpacing: true,
-                    ),
+                    area: 'the bottom text area',
                   ),
                 ),
               ),
@@ -1821,18 +1985,34 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         for (var i = 0; i < noteItems.length; i++) ...[
-                          _presentationNoteSection(
-                            noteText:
-                                (noteItems[i].noteText ??
-                                        noteItems[i].displayText)
-                                    .trim(),
-                            textStyle: noteTextStyle.copyWith(
-                              fontSize: sharedFontSize,
+                          _element(
+                            noteItems[i],
+                            noteItems[i].itemKind == PresentationItemKind.note
+                                ? 'body'
+                                : 'note',
+                            sharedFontSize,
+                            _presentationNoteSection(
+                              noteText:
+                                  (noteItems[i].noteText ??
+                                          noteItems[i].displayText)
+                                      .trim(),
+                              textStyle: noteTextStyle.copyWith(
+                                fontSize: _elementSize(
+                                  presentationElementKey(
+                                    noteItems[i].id,
+                                    noteItems[i].itemKind ==
+                                            PresentationItemKind.note
+                                        ? 'body'
+                                        : 'note',
+                                  ),
+                                  sharedFontSize,
+                                ),
+                              ),
+                              noteFormatJson: noteItems[i].noteFormatJson,
+                              mediaRefs:
+                                  noteItems[i].mediaRefs ?? const <String>[],
+                              textAlign: bodyTextAlign,
                             ),
-                            noteFormatJson: noteItems[i].noteFormatJson,
-                            mediaRefs:
-                                noteItems[i].mediaRefs ?? const <String>[],
-                            textAlign: bodyTextAlign,
                           ),
                           if (i < noteItems.length - 1)
                             const SizedBox(height: 16),
@@ -1878,14 +2058,17 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
               height: 1.08,
             );
         final referenceWidth = math.max(0.0, constraints.maxWidth - 56);
-        final titleSize = _fitFontSize(
-          text: slideTitle,
-          style: titleStyle,
-          maxWidth: referenceWidth,
-          maxHeight: 52,
-          minFontSize: 14,
-          maxFontSize: 24,
-          textDirection: Directionality.of(context),
+        final titleSize = _elementSize(
+          'slide:title',
+          _fitFontSize(
+            text: slideTitle,
+            style: titleStyle,
+            maxWidth: referenceWidth,
+            maxHeight: 52,
+            minFontSize: 14,
+            maxFontSize: 24,
+            textDirection: Directionality.of(context),
+          ),
         );
         final bodyStyle = (theme.textTheme.headlineSmall ?? const TextStyle())
             .copyWith(
@@ -1902,7 +2085,10 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
               letterSpacing: 0.08,
             );
         final bodyMinFontSize = 18.0;
-        final bodyMaxFontSize = math.max(56.0, math.min(constraints.maxWidth, constraints.maxHeight) * 0.7);
+        final bodyMaxFontSize = math.max(
+          56.0,
+          math.min(constraints.maxWidth, constraints.maxHeight) * 0.7,
+        );
         final noteTextStyle = bodyStyle.copyWith(
           color: const Color(0xFFEADCC2),
           height: 1.22,
@@ -1957,30 +2143,43 @@ class _PresentationSlideCanvasState extends State<PresentationSlideCanvas> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           if (titleIsVisible) ...[
-                            titleFormatJson.isNotEmpty
-                                ? RichText(
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: _alignments(slide).title,
-                                    text: TextSpan(
-                                      children: buildPresentationTextSpans(
-                                        text: slideTitle,
-                                        baseStyle: titleStyle.copyWith(
+                            PresentationElement(
+                              elementKey: 'slide:title',
+                              label: 'Heading',
+                              defaultFontSize: titleSize,
+                              child: _headingViewport(
+                                slideTitle,
+                                titleStyle.copyWith(fontSize: titleSize),
+                                panelWidth - 56,
+                                panelHeight,
+                                titleFormatJson.isNotEmpty
+                                    ? RichText(
+                                        textAlign: widget.settings.alignmentFor(
+                                          'slide:title',
+                                          _alignments(slide).title,
+                                        ),
+                                        text: TextSpan(
+                                          children: buildPresentationTextSpans(
+                                            text: slideTitle,
+                                            baseStyle: titleStyle.copyWith(
+                                              fontSize: titleSize,
+                                            ),
+                                            formatJson: titleFormatJson,
+                                          ),
+                                        ),
+                                      )
+                                    : Text(
+                                        slideTitle,
+                                        textAlign: widget.settings.alignmentFor(
+                                          'slide:title',
+                                          _alignments(slide).title,
+                                        ),
+                                        style: titleStyle.copyWith(
                                           fontSize: titleSize,
                                         ),
-                                        formatJson: titleFormatJson,
                                       ),
-                                    ),
-                                  )
-                                : Text(
-                                    slideTitle,
-                                    textAlign: _alignments(slide).title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: titleStyle.copyWith(
-                                      fontSize: titleSize,
-                                    ),
-                                  ),
+                              ),
+                            ),
                             const SizedBox(height: 18),
                           ],
                           Expanded(

@@ -63,6 +63,13 @@ int normalizeMacAutoscrollRememberedStep(int? value, int maximumStep) {
 double normalizeSpeechRate(double value) =>
     value.isFinite ? (value.clamp(0.75, 1.5) * 20).round() / 20 : 1.0;
 
+/// New Android and iOS readers offer narration immediately. A saved choice,
+/// including Audio Off, always wins; other platforms keep their existing default.
+bool resolveStoredReaderAudioEnabled(String? value, TargetPlatform platform) =>
+    value == null
+    ? platform == TargetPlatform.android || platform == TargetPlatform.iOS
+    : value == 'true';
+
 class MacAutoscrollPreferences {
   const MacAutoscrollPreferences({
     this.baseSpeed = defaultMacAutoscrollBaseSpeed,

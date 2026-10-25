@@ -38,6 +38,7 @@ class LibraryCatalogSearchPanel extends StatefulWidget {
 
 const List<({String value, String label})> _kEgwCollectionFilters = [
   (value: 'all', label: 'All Collections'),
+  (value: 'top_shelf', label: 'Top Shelf'),
   (value: 'egw_books', label: 'Books'),
   (value: 'egw_devotionals', label: 'Devotionals'),
   (value: 'egw_commentaries', label: 'Commentaries'),
@@ -295,7 +296,7 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
           child: Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              'Searches the indexed eLibrary text and opens the selected hit.',
+              'Searches book text, titles, and authors within the selected collection.',
               style: libraryCaptionTextStyle(
                 context,
                 theme.textTheme.bodySmall,
@@ -404,7 +405,9 @@ class _LibraryCatalogSearchPanelState extends State<LibraryCatalogSearchPanel> {
                         selectedTileColor: scheme.secondaryContainer.withValues(
                           alpha: 0.45,
                         ),
-                        leading: widget.onQuickApplyItem == null
+                        leading:
+                            widget.onQuickApplyItem == null ||
+                                result.fullParagraph == null
                             ? Icon(
                                 item.isPdf
                                     ? Icons.picture_as_pdf_outlined

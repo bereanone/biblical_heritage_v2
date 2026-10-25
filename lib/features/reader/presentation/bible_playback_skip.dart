@@ -3,6 +3,12 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'bible_loop_announcement_settings.dart';
 import 'bible_visible_location_controller.dart';
 
+/// Idle reader arrows always navigate chapters; playback follows its loop.
+BibleLoopUnit bibleNavigationUnit({
+  required bool audioPlaying,
+  required BibleLoopUnit? loop,
+}) => audioPlaying ? (loop ?? BibleLoopUnit.chapter) : BibleLoopUnit.chapter;
+
 /// Resolve from canonical rows, not the currently loaded reader window.
 /// At the beginning/end of the Bible there is no destination (no wrapping).
 Future<BibleVisibleLocation?> loadBiblePlaybackSkipTarget(

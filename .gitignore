@@ -141,3 +141,10 @@ source-data/
 
 # Generated iOS build products
 /ios/build/
+
+# Generated install-time Play asset pack staging (original assets stay intact).
+/android/play_assetpacks/*/src/main/assets/
+/android/play_assetpacks/staging-manifest.json
+
+# Local Play purchase-verification configuration (no signing passwords).
+/android/play-purchases.properties

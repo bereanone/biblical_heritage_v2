@@ -7,6 +7,20 @@ import 'package:studybible2/features/reader/data/presentation/note_image_layout.
 import 'package:studybible2/features/reader/presentation/note_image_flow.dart';
 
 void main() {
+  test('new authored grid and position invalidate stale presentation adjustments', () {
+    const original = NoteImageLayout(rows: 3, columns: 3, row: 0, column: 2, rowSpan: 1, columnSpan: 1);
+    final adjusted = NoteImageLayout.fromJson({...original.toJson(),
+      'row': 1, 'column': 1, 'text_gap': 42, 'source_layout': original.signature})!;
+    expect(resolveNoteImageLayout(original, adjusted)!.row, 1);
+    expect(resolveNoteImageLayout(original, adjusted)!.textGap, 42);
+    final newGrid = NoteImageLayout.fromJson({...original.toJson(), 'rows':4, 'columns':4})!;
+    expect(resolveNoteImageLayout(newGrid, adjusted)!.rows, 4);
+    expect(resolveNoteImageLayout(newGrid, adjusted)!.textGap, 10);
+    final newPosition = NoteImageLayout.fromJson({...original.toJson(), 'column':0})!;
+    expect(resolveNoteImageLayout(newPosition, adjusted)!.column, 0);
+    expect(resolveNoteImageLayout(null, adjusted), isNull);
+    expect(resolveNoteImageLayout(newGrid, adjusted)!.sourceLayout, newGrid.signature);
+  });
   test('only solid rectangular selections are accepted', () {
     expect(
       NoteImageLayout.fromCells(rows: 3, columns: 3, cells: {0, 1, 3}),
@@ -120,4 +134,40 @@ void main() {
     }
     plan.dispose();
   });
+  testWidgets('narrow image slots never split a word to claim text fits', (tester) async {
+    const text = 'Remember, Sabbath';
+    final plan = planNoteImageFlow(
+      text: text,
+      formatJson: null,
+      style: const TextStyle(fontSize: 40),
+      size: const Size(400, 400),
+      imageRect: const Rect.fromLTWH(85, 0, 230, 200),
+    );
+    expect(plan.fits, true);
+    for (final line in plan.lines) {
+      if (line.end < text.length && line.end > 0) {
+        expect(text[line.end - 1] == ' ' || text[line.end] == ' ', true,
+          reason: 'A word was split between image slots');
+      }
+    }
+    expect(plan.lines.first.offset.dy, greaterThanOrEqualTo(200));
+    plan.dispose();
+  });
+
+  testWidgets('all four alignments preserve complete text and image exclusion', (tester) async {
+    const text = 'Remember the sabbath day, to keep it holy. Six days shalt thou labour, and do all thy work. More words continue around the image without clipping.';
+    const image = Rect.fromLTWH(230, 0, 140, 140);
+    for (final alignment in [TextAlign.left, TextAlign.center, TextAlign.right, TextAlign.justify]) {
+      final plan = planNoteImageFlow(text: text, formatJson: null,
+        style: const TextStyle(fontSize: 18), size: const Size(600, 500), imageRect: image, alignment: alignment);
+      expect(plan.fits, true);
+      expect(plan.lines.map((line) => text.substring(line.start, line.end)).join(), text);
+      for (final line in plan.lines) {
+        expect(line.painter.textAlign, alignment);
+        expect((line.offset & line.painter.size).overlaps(image), false);
+      }
+      plan.dispose();
+    }
+  });
+
 }

@@ -11,8 +11,10 @@ class ViewerMarkupSegment {
     required this.style,
     this.tokenIndex,
     this.strongs,
+    this.wordIndex,
   });
 
+  final int? wordIndex;
   final String text;
   final TextStyle style;
   final int? tokenIndex;
@@ -88,6 +90,7 @@ InlineSpan buildViewerMarkupSpan({
   required TextStyle baseStyle,
   required Color redLetterColor,
   bool isNightMode = false,
+  bool wordSelection = false,
   bool startsInRedLetter = false,
   int? blockId,
   ViewerRangeSelection? rangeSelection,
@@ -107,6 +110,8 @@ InlineSpan buildViewerMarkupSpan({
     baseStyle: baseStyle,
     redLetterColor: redLetterColor,
     startsInRedLetter: startsInRedLetter,
+    splitWords:
+        wordSelection || persistedHighlights.any((h) => h.startWord != null),
   );
   final spans = <InlineSpan>[];
   final selectedColor =
@@ -116,19 +121,61 @@ InlineSpan buildViewerMarkupSpan({
   final readerBackground = isNightMode
       ? const Color(0xFF121212)
       : const Color(0xFFF6EEDD);
-  for (final segment in segments) {
-    final tokenIndex = segment.tokenIndex;
-    final isSelected =
-        blockId != null &&
-        tokenIndex != null &&
-        rangeSelection?.containsTokenPosition(blockId, tokenIndex) == true;
+  int? coordinate(ViewerMarkupSegment segment) =>
+      rangeSelection?.usesWordIndices == true
+      ? segment.wordIndex
+      : segment.tokenIndex;
+  bool selected(ViewerMarkupSegment segment) {
+    final index = coordinate(segment);
+    return blockId != null &&
+        index != null &&
+        rangeSelection?.containsTokenPosition(blockId, index) == true;
+  }
+
+  VerseHighlightRecord? saved(ViewerMarkupSegment segment) =>
+      _tokenHighlightForIndex(
+        persistedHighlights,
+        segment.tokenIndex,
+        segment.wordIndex,
+      );
+  final previous = List<int?>.filled(segments.length, null);
+  final following = List<int?>.filled(segments.length, null);
+  int? last;
+  for (var i = 0; i < segments.length; i++) {
+    previous[i] = last;
+    if (segments[i].text.trim().isNotEmpty) last = i;
+  }
+  last = null;
+  for (var i = segments.length - 1; i >= 0; i--) {
+    following[i] = last;
+    if (segments[i].text.trim().isNotEmpty) last = i;
+  }
+  for (var i = 0; i < segments.length; i++) {
+    final segment = segments[i];
+    final sourceToken = segment.tokenIndex;
+    final tokenIndex = wordSelection ? segment.wordIndex : sourceToken;
+    final selectedIndex = coordinate(segment);
+    final whitespace = segment.text.trim().isEmpty;
+    final left = previous[i] == null ? null : segments[previous[i]!];
+    final right = following[i] == null ? null : segments[following[i]!];
+    // Only bridge an interior gap. Never spill into an unselected word or
+    // join two independently saved highlight ranges.
+    final isSelected = whitespace
+        ? left != null && right != null && selected(left) && selected(right)
+        : selected(segment);
     final isPendingAnchor =
+        !whitespace &&
         blockId != null &&
-        tokenIndex != null &&
-        rangeSelection?.containsPendingTokenAnchor(blockId, tokenIndex) == true;
-    final persisted = tokenIndex == null
-        ? null
-        : _tokenHighlightForIndex(persistedHighlights, tokenIndex);
+        selectedIndex != null &&
+        rangeSelection?.containsPendingTokenAnchor(blockId, selectedIndex) ==
+            true;
+    final leftSaved = left == null ? null : saved(left);
+    final rightSaved = right == null ? null : saved(right);
+    final persisted = whitespace
+        ? leftSaved != null && rightSaved?.id == leftSaved.id
+              ? leftSaved
+              : null
+        : saved(segment);
     final isStrongsMatch =
         segment.strongs != null &&
         segment.strongs!.any(highlightedStrongs.contains);
@@ -137,7 +184,7 @@ InlineSpan buildViewerMarkupSpan({
     final isSelectedMappedPhrase =
         isMappedPhrase &&
         tokenIndex != null &&
-        tokenIndex == selectedMappedTokenIndex;
+        sourceToken == selectedMappedTokenIndex;
     final sourceHighlight = (isSelected || isPendingAnchor)
         ? selectedColor
         : isSelectedMappedPhrase
@@ -203,6 +250,7 @@ int? hitTestViewerMarkupTokenIndex({
   required TextDirection textDirection,
   required TextAlign textAlign,
   bool startsInRedLetter = false,
+  bool wordSelection = false,
 }) {
   final segments = parseViewerMarkupSegments(
     html: html,
@@ -210,6 +258,7 @@ int? hitTestViewerMarkupTokenIndex({
     baseStyle: baseStyle,
     redLetterColor: redLetterColor,
     startsInRedLetter: startsInRedLetter,
+    splitWords: wordSelection,
   );
   if (segments.isEmpty) return null;
 
@@ -232,9 +281,9 @@ int? hitTestViewerMarkupTokenIndex({
   for (final segment in segments) {
     final start = cursor;
     final end = cursor + segment.text.length;
-    final tokenIndex = segment.tokenIndex;
+    final tokenIndex = wordSelection ? segment.wordIndex : segment.tokenIndex;
     if (tokenIndex != null && segment.text.isNotEmpty) {
-      if (textOffset >= start && textOffset <= end) {
+      if (textOffset >= start && textOffset < end) {
         return tokenIndex;
       }
       final center = (start + end) / 2.0;
@@ -278,13 +327,15 @@ TextStyle _applyViewerSpanStyle(
 
 VerseHighlightRecord? _tokenHighlightForIndex(
   List<VerseHighlightRecord> highlights,
-  int tokenIndex,
+  int? tokenIndex,
+  int? wordIndex,
 ) {
   for (final highlight in highlights) {
-    final start = highlight.startToken;
-    final end = highlight.endToken;
-    if (start == null || end == null) continue;
-    if (tokenIndex >= start && tokenIndex <= end) {
+    final start = highlight.startWord ?? highlight.startToken;
+    final end = highlight.endWord ?? highlight.endToken;
+    final index = highlight.startWord != null ? wordIndex : tokenIndex;
+    if (start == null || end == null || index == null) continue;
+    if (index >= start && index <= end) {
       return highlight;
     }
   }
@@ -297,11 +348,13 @@ List<ViewerMarkupSegment> parseViewerMarkupSegments({
   required TextStyle baseStyle,
   required Color redLetterColor,
   bool startsInRedLetter = false,
+  bool splitWords = false,
 }) {
   if (html.trim().isEmpty) {
-    return <ViewerMarkupSegment>[
+    final fallback = <ViewerMarkupSegment>[
       ViewerMarkupSegment(text: fallbackText, style: baseStyle),
     ];
+    return splitWords ? splitViewerWords(fallback) : fallback;
   }
 
   final normalized = html
@@ -429,7 +482,7 @@ List<ViewerMarkupSegment> parseViewerMarkupSegments({
   }
 
   flush();
-  return segments;
+  return splitWords ? splitViewerWords(segments) : segments;
 }
 
 bool computeViewerRedLetterContinuation(
@@ -511,4 +564,39 @@ Set<String>? _extractCanonicalStrongs(String rawTag) {
     strongs.add('$prefix${digits.padLeft(4, '0')}');
   }
   return strongs.isEmpty ? null : strongs;
+}
+
+/// Independent visible-word coordinates; source token and Strong's identity
+/// remain intact, including words that span an italic/red-letter boundary.
+List<ViewerMarkupSegment> splitViewerWords(List<ViewerMarkupSegment> source) {
+  final text = source.map((s) => s.text).join();
+  final words = RegExp(r"[^\s]+", unicode: true).allMatches(text).toList();
+  final result = <ViewerMarkupSegment>[];
+  var cursor = 0;
+  var wordCursor = 0;
+  for (final segment in source) {
+    var local = 0;
+    while (local < segment.text.length) {
+      final absolute = cursor + local;
+      while (wordCursor < words.length && words[wordCursor].end <= absolute) {
+        wordCursor++;
+      }
+      final word = wordCursor < words.length ? words[wordCursor] : null;
+      final inWord = word != null && absolute >= word.start;
+      final boundary = inWord ? word.end : (word?.start ?? text.length);
+      final end = (boundary - cursor).clamp(local + 1, segment.text.length);
+      result.add(
+        ViewerMarkupSegment(
+          text: segment.text.substring(local, end),
+          style: segment.style,
+          tokenIndex: segment.tokenIndex,
+          strongs: segment.strongs,
+          wordIndex: inWord ? wordCursor + 1 : null,
+        ),
+      );
+      local = end;
+    }
+    cursor += segment.text.length;
+  }
+  return result;
 }

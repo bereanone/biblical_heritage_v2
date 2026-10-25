@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme_mode.dart';
 import 'viewer_presentation_settings.dart';
 import 'watch_instructions_screen.dart';
+import 'reader_selection_help.dart';
 
 Future<void> showViewerModePopup(
   BuildContext context, {
   required AppThemeMode themeMode,
   required ValueChanged<AppThemeMode> onThemeChanged,
   required VoidCallback onOpenBibleMemory,
+  VoidCallback? onOpenAudioSettings,
   required VoidCallback onOpenInterlinearSettings,
   required VoidCallback onOpenColorSetup,
   required VoidCallback onApplyDefaultMarkup,
@@ -33,215 +35,233 @@ Future<void> showViewerModePopup(
             builder: (context, setStateDialog) {
               return Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _ModeRow(
-                      title: 'Bible Remote Instructions',
-                      subtitle: 'Apple Watch help',
-                      trailing: const Icon(Icons.help_outline),
-                      onTap: () {
-                        Navigator.of(dialogContext).pop();
-                        ownerNavigator.push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const WatchInstructionsScreen(),
-                          ),
-                        );
-                      },
-                    ),
-                    _ModeRow(
-                      title: 'Bible Memory',
-                      subtitle: 'Open',
-                      onTap: () {
-                        Navigator.of(dialogContext).pop();
-                        onOpenBibleMemory();
-                      },
-                    ),
-                    Divider(
-                      height: 8,
-                      color: theme.dividerColor.withValues(alpha: 0.55),
-                    ),
-                    _ModeRow(
-                      title: 'Interlinear Settings',
-                      subtitle: 'Open',
-                      trailing: IconButton(
-                        tooltip: 'Interlinear Settings',
-                        onPressed: () {
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (onOpenAudioSettings != null)
+                        _ModeRow(
+                          title: 'Bible Audio Settings',
+                          subtitle: 'Read aloud, speed and announcements',
+                          trailing: const Icon(Icons.volume_up_outlined),
+                          onTap: () {
+                            Navigator.of(dialogContext).pop();
+                            onOpenAudioSettings();
+                          },
+                        ),
+                      _ModeRow(
+                        title: 'Bible Remote Instructions',
+                        subtitle: 'Apple Watch help',
+                        trailing: const Icon(Icons.help_outline),
+                        onTap: () {
+                          Navigator.of(dialogContext).pop();
+                          ownerNavigator.push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const WatchInstructionsScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                      _ModeRow(
+                        title: 'Bible Memory',
+                        subtitle: 'Open',
+                        onTap: () {
+                          Navigator.of(dialogContext).pop();
+                          onOpenBibleMemory();
+                        },
+                      ),
+                      Divider(
+                        height: 8,
+                        color: theme.dividerColor.withValues(alpha: 0.55),
+                      ),
+                      _ModeRow(
+                        title: 'Interlinear Settings',
+                        subtitle: 'Open',
+                        trailing: IconButton(
+                          tooltip: 'Interlinear Settings',
+                          onPressed: () {
+                            Navigator.of(dialogContext).pop();
+                            onOpenInterlinearSettings();
+                          },
+                          icon: const Icon(Icons.settings),
+                        ),
+                        onTap: () {
                           Navigator.of(dialogContext).pop();
                           onOpenInterlinearSettings();
                         },
-                        icon: const Icon(Icons.settings),
                       ),
-                      onTap: () {
-                        Navigator.of(dialogContext).pop();
-                        onOpenInterlinearSettings();
-                      },
-                    ),
-                    Divider(
-                      height: 8,
-                      color: theme.dividerColor.withValues(alpha: 0.55),
-                    ),
-                    _ModeRow(
-                      title: 'Apply Markup',
-                      subtitle: 'Highlight selection',
-                      onTap: () {
-                        Navigator.of(dialogContext).pop();
-                        onApplyDefaultMarkup();
-                      },
-                    ),
-                    Divider(
-                      height: 8,
-                      color: theme.dividerColor.withValues(alpha: 0.55),
-                    ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Theme',
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  _themeLabel(themeMode),
-                                  style: theme.textTheme.bodySmall,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        PopupMenuButton<AppThemeMode>(
-                          tooltip: 'Choose theme',
-                          initialValue: themeMode,
-                          onSelected: (nextTheme) {
+                      Divider(
+                        height: 8,
+                        color: theme.dividerColor.withValues(alpha: 0.55),
+                      ),
+                      _ModeRow(
+                        title: 'Apply Markup',
+                        subtitle: 'Highlight selection',
+                        trailing: IconButton(
+                          tooltip: 'Selection and highlighting help',
+                          icon: const Icon(Icons.help_outline),
+                          onPressed: () {
                             Navigator.of(dialogContext).pop();
-                            onThemeChanged(nextTheme);
+                            showReaderSelectionHelp(context);
                           },
-                          itemBuilder: (context) => const [
-                            PopupMenuItem<AppThemeMode>(
-                              value: AppThemeMode.sepia,
-                              child: Text('Sepia'),
-                            ),
-                            PopupMenuItem<AppThemeMode>(
-                              value: AppThemeMode.night,
-                              child: Text('Night'),
-                            ),
-                          ],
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: theme.dividerColor),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  _themeLabel(themeMode),
-                                  style: theme.textTheme.bodyMedium,
-                                ),
-                                const SizedBox(width: 6),
-                                const Icon(Icons.arrow_drop_down),
-                              ],
-                            ),
-                          ),
                         ),
-                      ],
-                    ),
-                    Divider(
-                      height: 8,
-                      color: theme.dividerColor.withValues(alpha: 0.55),
-                    ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Presentation Ratio',
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w700,
+                        onTap: () {
+                          Navigator.of(dialogContext).pop();
+                          onApplyDefaultMarkup();
+                        },
+                      ),
+                      Divider(
+                        height: 8,
+                        color: theme.dividerColor.withValues(alpha: 0.55),
+                      ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Theme',
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.w700),
                                   ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  currentPresentationAspectRatio.label,
-                                  style: theme.textTheme.bodySmall,
-                                ),
-                              ],
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _themeLabel(themeMode),
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                        PopupMenuButton<PresentationAspectRatioPreset>(
-                          tooltip: 'Choose presentation ratio',
-                          initialValue: currentPresentationAspectRatio,
-                          onSelected: (preset) {
-                            setStateDialog(
-                              () => currentPresentationAspectRatio = preset,
-                            );
-                            onPresentationAspectRatioChanged(preset);
-                          },
-                          itemBuilder: (context) =>
-                              PresentationAspectRatioPreset.values
-                                  .map(
-                                    (preset) =>
-                                        PopupMenuItem<
-                                          PresentationAspectRatioPreset
-                                        >(
-                                          value: preset,
-                                          child: Text(preset.label),
-                                        ),
-                                  )
-                                  .toList(growable: false),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: theme.dividerColor),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  currentPresentationAspectRatio.label,
-                                  style: theme.textTheme.bodyMedium,
-                                ),
-                                const SizedBox(width: 6),
-                                const Icon(Icons.arrow_drop_down),
-                              ],
+                          PopupMenuButton<AppThemeMode>(
+                            tooltip: 'Choose theme',
+                            initialValue: themeMode,
+                            onSelected: (nextTheme) {
+                              Navigator.of(dialogContext).pop();
+                              onThemeChanged(nextTheme);
+                            },
+                            itemBuilder: (context) => const [
+                              PopupMenuItem<AppThemeMode>(
+                                value: AppThemeMode.sepia,
+                                child: Text('Sepia'),
+                              ),
+                              PopupMenuItem<AppThemeMode>(
+                                value: AppThemeMode.night,
+                                child: Text('Night'),
+                              ),
+                            ],
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: theme.dividerColor),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _themeLabel(themeMode),
+                                    style: theme.textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  const Icon(Icons.arrow_drop_down),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                    Divider(
-                      height: 8,
-                      color: theme.dividerColor.withValues(alpha: 0.55),
-                    ),
-                    _ModeRow(
-                      title: 'Color Setup',
-                      subtitle: 'Highlight groups',
-                      onTap: () {
-                        Navigator.of(dialogContext).pop();
-                        onOpenColorSetup();
-                      },
-                    ),
-                  ],
+                        ],
+                      ),
+                      Divider(
+                        height: 8,
+                        color: theme.dividerColor.withValues(alpha: 0.55),
+                      ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Presentation Ratio',
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    currentPresentationAspectRatio.label,
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          PopupMenuButton<PresentationAspectRatioPreset>(
+                            tooltip: 'Choose presentation ratio',
+                            initialValue: currentPresentationAspectRatio,
+                            onSelected: (preset) {
+                              setStateDialog(
+                                () => currentPresentationAspectRatio = preset,
+                              );
+                              onPresentationAspectRatioChanged(preset);
+                            },
+                            itemBuilder: (context) =>
+                                PresentationAspectRatioPreset.values
+                                    .map(
+                                      (preset) =>
+                                          PopupMenuItem<
+                                            PresentationAspectRatioPreset
+                                          >(
+                                            value: preset,
+                                            child: Text(preset.label),
+                                          ),
+                                    )
+                                    .toList(growable: false),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: theme.dividerColor),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    currentPresentationAspectRatio.label,
+                                    style: theme.textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  const Icon(Icons.arrow_drop_down),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Divider(
+                        height: 8,
+                        color: theme.dividerColor.withValues(alpha: 0.55),
+                      ),
+                      _ModeRow(
+                        title: 'Color Setup',
+                        subtitle: 'Highlight groups',
+                        onTap: () {
+                          Navigator.of(dialogContext).pop();
+                          onOpenColorSetup();
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               );
             },

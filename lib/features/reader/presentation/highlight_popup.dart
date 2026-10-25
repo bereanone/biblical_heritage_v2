@@ -46,10 +46,14 @@ class _HighlightPopupState extends State<_HighlightPopup> {
 
   Future<void> _load() async {
     final groups = await _repository.loadGroups();
+    final defaultId = await AppSettingsService.instance
+        .loadDefaultHighlightGroupId();
     if (!mounted) return;
     setState(() {
       _groups = groups;
-      _selectedGroupId = groups.isEmpty ? null : groups.first.id;
+      _selectedGroupId =
+          groups.where((group) => group.id == defaultId).firstOrNull?.id ??
+          groups.firstOrNull?.id;
       _loading = false;
     });
   }

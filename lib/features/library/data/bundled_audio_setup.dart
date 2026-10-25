@@ -72,8 +72,8 @@ class BundledAudioSetup extends ChangeNotifier {
           .map((p) => Map<String, dynamic>.from(p as Map))
           .toList();
       if (packages.where((p) => p['requires_source_sha256'] == null).length !=
-              6 ||
-          packages.any((p) => p['url'] == null)) {
+              (manifest['core_package_count'] as int? ?? 6) ||
+          packages.any((p) => p['url'] == null && p['delivery'] != 'assets')) {
         throw const FormatException(
           'Recording download manifest is incomplete',
         );
@@ -109,6 +109,16 @@ class BundledAudioSetup extends ChangeNotifier {
         var lastUpdate = DateTime.fromMillisecondsSinceEpoch(0);
         if (_testInstall != null) {
           await _testInstall!(package);
+        } else if (package['delivery'] == 'assets') {
+          await installer.installAssets(
+            package,
+            rootBundle,
+            onProgress: (received, total) {
+              progress = (i + received / total) / packages.length;
+              message = 'Preparing included ${package['title']}…';
+              notifyListeners();
+            },
+          );
         } else {
           await installer.install(
             package,

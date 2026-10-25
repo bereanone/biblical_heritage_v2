@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/highlight_groups_repository.dart';
+import '../../../core/theme/app_settings_service.dart';
 import 'highlight_render.dart';
 import 'viewer_search_dialog.dart';
 
@@ -31,6 +32,7 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
   final TextEditingController _nameController = TextEditingController();
 
   bool _loading = true;
+  int? _defaultGroupId;
   List<HighlightGroupRecord> _groups = const <HighlightGroupRecord>[];
   Map<int, int> _usageCounts = const <int, int>{};
   _PaletteChoice _selected = _palette.first;
@@ -50,6 +52,8 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final groups = await _repository.loadGroups();
+    final defaultId = await AppSettingsService.instance
+        .loadDefaultHighlightGroupId();
     final counts = <int, int>{};
     for (final group in groups) {
       counts[group.id] = await _repository.countHighlightsForGroup(group.id);
@@ -57,6 +61,7 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
     if (!mounted) return;
     setState(() {
       _groups = groups;
+      _defaultGroupId = defaultId ?? groups.firstOrNull?.id;
       _usageCounts = counts;
       _loading = false;
     });
@@ -272,6 +277,21 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
                                 ),
                               ],
                             ),
+                          ),
+                          IconButton(
+                            tooltip: 'Use as default highlight color',
+                            icon: Icon(
+                              _defaultGroupId == group.id
+                                  ? Icons.check_circle
+                                  : Icons.radio_button_unchecked,
+                            ),
+                            onPressed: () async {
+                              await AppSettingsService.instance
+                                  .saveDefaultHighlightGroupId(group.id);
+                              if (mounted) {
+                                setState(() => _defaultGroupId = group.id);
+                              }
+                            },
                           ),
                           IconButton(
                             tooltip: 'Review highlights',

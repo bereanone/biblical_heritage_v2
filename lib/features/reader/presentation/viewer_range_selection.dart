@@ -4,12 +4,14 @@ class ViewerRangeSelection {
     this.endBlockId,
     this.startTokenIndex,
     this.endTokenIndex,
+    this.usesWordIndices = false,
   });
 
   final int? startBlockId;
   final int? endBlockId;
   final int? startTokenIndex;
   final int? endTokenIndex;
+  final bool usesWordIndices;
 
   bool get hasSelection => startBlockId != null;
 
@@ -36,6 +38,7 @@ class ViewerRangeSelection {
     bool clearEndTokenIndex = false,
   }) {
     return ViewerRangeSelection(
+      usesWordIndices: usesWordIndices,
       startBlockId: clearStartBlockId
           ? null
           : (startBlockId ?? this.startBlockId),
@@ -74,9 +77,14 @@ class ViewerRangeSelection {
     );
   }
 
-  ViewerRangeSelection beginTokenRange(int blockId, int tokenIndex) {
+  ViewerRangeSelection beginTokenRange(
+    int blockId,
+    int tokenIndex, {
+    bool wordIndices = false,
+  }) {
     return ViewerRangeSelection(
       startBlockId: blockId,
+      usesWordIndices: wordIndices,
       startTokenIndex: tokenIndex,
     );
   }
@@ -84,9 +92,38 @@ class ViewerRangeSelection {
   ViewerRangeSelection completeTokenRange(int blockId, int tokenIndex) {
     return ViewerRangeSelection(
       startBlockId: startBlockId ?? blockId,
+      usesWordIndices: usesWordIndices,
       endBlockId: blockId,
       startTokenIndex: startTokenIndex ?? tokenIndex,
       endTokenIndex: tokenIndex,
+    );
+  }
+
+  /// Move one visible endpoint, clamping at its counterpart rather than
+  /// flipping handles mid-drag. Source token IDs remain unchanged.
+  ViewerRangeSelection moveEndpoint({
+    required bool start,
+    required int blockId,
+    required int tokenIndex,
+  }) {
+    if (!hasCompletedRange || !hasTokenSelection) return this;
+    var block = blockId;
+    var token = tokenIndex;
+    final fixedBlock = start ? upperBlockId! : lowerBlockId!;
+    final fixedToken = (start ? upperTokenIndex : lowerTokenIndex)!;
+    final comparison = block == fixedBlock
+        ? token.compareTo(fixedToken)
+        : block.compareTo(fixedBlock);
+    if ((start && comparison > 0) || (!start && comparison < 0)) {
+      block = fixedBlock;
+      token = fixedToken;
+    }
+    return ViewerRangeSelection(
+      usesWordIndices: usesWordIndices,
+      startBlockId: start ? block : lowerBlockId,
+      startTokenIndex: start ? token : lowerTokenIndex,
+      endBlockId: start ? upperBlockId : block,
+      endTokenIndex: start ? upperTokenIndex : token,
     );
   }
 

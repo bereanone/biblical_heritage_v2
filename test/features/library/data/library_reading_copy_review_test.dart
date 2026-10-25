@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +12,11 @@ import 'package:studybible2/features/library/data/library_catalog_service.dart';
 import 'package:studybible2/features/library/data/library_reading_copy_review.dart';
 
 void main() {
+  // This fixture owns its complete catalog. Mobile provisioning adds shipped
+  // books automatically and is verified in the dedicated delivery tests.
+  setUp(() => debugDefaultTargetPlatformOverride = TargetPlatform.macOS);
+  tearDown(() => debugDefaultTargetPlatformOverride = null);
+
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;

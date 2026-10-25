@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../../core/audio/local_narration_policy.dart';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -366,6 +367,7 @@ class KokoroMacTestNarrator {
     required double speed,
     int? blockId,
     bool preferDictionary = true,
+    bool allowGeneration = true,
   }) async {
     final generation = _generation;
     final spoken = await _spokenText(
@@ -377,6 +379,7 @@ class KokoroMacTestNarrator {
       spoken,
       synthesisSpeedFor(speed),
       trackLead: false,
+      allowGeneration: allowGeneration,
       cancellationGeneration: generation,
     );
     // Existing renderClip callers own and delete the returned file.
@@ -443,6 +446,7 @@ class KokoroMacTestNarrator {
     String text,
     double speed, {
     bool trackLead = true,
+    bool allowGeneration = true,
     int? cancellationGeneration,
   }) async {
     final generation = cancellationGeneration ?? _generation;
@@ -455,6 +459,11 @@ class KokoroMacTestNarrator {
           ? 'apple-lexicon-sid16-v1'
           : 'espeak-sid16-v1',
       render: (chunk) async {
+        if (!allowGeneration) {
+          throw const SavedAudioUnavailable(
+            'A saved recording is not available for this passage.',
+          );
+        }
         if (_disposed) throw StateError('Narrator disposed');
         final release = _isPlaying
             ? null

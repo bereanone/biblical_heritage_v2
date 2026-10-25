@@ -32,8 +32,10 @@ class TagDialogHashTab extends StatelessWidget {
     required this.onSearchSelected,
     required this.onSortModeChanged,
     required this.onOpenSummaryDetails,
+    this.onAddNote,
   });
 
+  final VoidCallback? onAddNote;
   final String tagSymbol;
   final double fontScale;
   final bool loading;
@@ -85,10 +87,10 @@ class TagDialogHashTab extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
       children: [
-        const SizedBox(height: 10),
         LayoutBuilder(
           builder: (context, constraints) {
-            final isNarrow = constraints.maxWidth < 460;
+            final hasAddNote = onAddNote != null && tagSymbol == '#';
+            final isNarrow = constraints.maxWidth < (hasAddNote ? 600 : 460);
             final tagField = TextField(
               controller: tagController,
               autocorrect: false,
@@ -121,11 +123,16 @@ class TagDialogHashTab extends StatelessWidget {
               ),
               onSubmitted: (_) => onTagSubmitted(tagController.text),
             );
-            final tagButton = SizedBox(
+            Widget actionButton(
+              String label,
+              VoidCallback? callback, {
+              Key? key,
+            }) => SizedBox(
               width: isNarrow ? 92 : 112,
               height: isNarrow ? 60 : 62,
               child: FilledButton(
-                onPressed: working ? null : onApplySelection,
+                key: key,
+                onPressed: working ? null : callback,
                 style: FilledButton.styleFrom(
                   backgroundColor: TagDialogStyles.accent(theme),
                   foregroundColor: theme.brightness == Brightness.dark
@@ -145,7 +152,7 @@ class TagDialogHashTab extends StatelessWidget {
                   elevation: 0,
                 ),
                 child: TagDialogStyles.fittedButtonLabel(
-                  'Tag\nVerse',
+                  label,
                   maxLines: 2,
                   style: TagDialogStyles.buttonTextStyle(
                     theme,
@@ -158,13 +165,27 @@ class TagDialogHashTab extends StatelessWidget {
                 ),
               ),
             );
+            final actions = Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                actionButton('Tag\nVerse', onApplySelection),
+                if (hasAddNote) ...[
+                  const SizedBox(width: 8),
+                  actionButton(
+                    'Add\nNote',
+                    onAddNote,
+                    key: const Key('tag_add_note'),
+                  ),
+                ],
+              ],
+            );
             if (isNarrow) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   tagField,
                   const SizedBox(height: 8),
-                  Align(alignment: Alignment.centerRight, child: tagButton),
+                  Align(alignment: Alignment.centerRight, child: actions),
                 ],
               );
             }
@@ -173,7 +194,7 @@ class TagDialogHashTab extends StatelessWidget {
               children: [
                 Expanded(child: tagField),
                 const SizedBox(width: 8),
-                tagButton,
+                actions,
               ],
             );
           },
@@ -182,12 +203,14 @@ class TagDialogHashTab extends StatelessWidget {
         SwitchListTile.adaptive(
           contentPadding: EdgeInsets.zero,
           dense: true,
-          title: Text(categoryFilter == null
-              ? 'Folder filter: OFF'
-              : 'Folder filter: ON'),
-          subtitle: Text(categoryFilter == null
-              ? 'Showing all folders'
-              : 'Showing only the selected folder'),
+          title: Text(
+            categoryFilter == null ? 'Folder filter: OFF' : 'Folder filter: ON',
+          ),
+          subtitle: Text(
+            categoryFilter == null
+                ? 'Showing all folders'
+                : 'Showing only the selected folder',
+          ),
           value: categoryFilter != null,
           onChanged: (_) => onToggleSelectedCategoryBrowseFilter(),
         ),

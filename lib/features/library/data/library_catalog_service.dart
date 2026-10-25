@@ -9,6 +9,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
+import '../../../core/theme/app_settings_service.dart';
 import '../../../core/database/elibrary_database.dart';
 import '../../../core/database/elibrary_read_resolver.dart';
 import 'library_citation_display_helper.dart';
@@ -594,6 +595,178 @@ class LibraryCatalogService {
     args.addAll(ids);
   }
 
+  Future<Set<String>> _loadTopShelfIds() async {
+    final raw = await AppSettingsService.instance.loadRawSetting(
+      'elibrary_top_shelf_v1',
+    );
+    if (raw == null) return {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return {};
+      return decoded.whereType<String>().where((id) => id.isNotEmpty).toSet();
+    } on FormatException {
+      // An empty or damaged shelf must never broaden a scoped search.
+      return {};
+    }
+  }
+
+  Future<void> _addCollectionSearchFilter(
+    List<String> where,
+    List<Object?> args,
+    String collection,
+  ) async {
+    if (collection == 'top_shelf') {
+      final ids = await _loadTopShelfIds();
+      if (ids.isEmpty) {
+        where.add('0 = 1');
+      } else {
+        where.add('li.id IN (${List.filled(ids.length, '?').join(',')})');
+        args.addAll(ids);
+      }
+    } else if (collection.isNotEmpty &&
+        collection != _libraryAllCollectionsFilterValue) {
+      where.add(_libraryCollectionSearchClause(collection));
+      args.addAll(_libraryCollectionSearchArgs(collection));
+    }
+  }
+
+  /// Catalog matches open the book normally. They must not pretend that an
+  /// unrelated paragraph contains the query, or repeat once per paragraph.
+  Future<List<LibraryCatalogSearchResult>> _metadataSearchResults({
+    required String query,
+    String? collectionFilter,
+  }) async {
+    final terms = extractLibrarySearchHighlightTerms(query)
+        .map(_normalizedLibrarySearchText)
+        .where((term) => term.isNotEmpty)
+        .toList(growable: false);
+    if (terms.isEmpty) return const [];
+    final collection = _normalizeLibraryCollectionFilterValue(
+      collectionFilter ?? '',
+    );
+    final shelf = collection == 'top_shelf' ? await _loadTopShelfIds() : null;
+    if (shelf != null && shelf.isEmpty) return const [];
+    final patterns = terms.map(_buildLibrarySearchSnippetPattern).toList();
+    final items = (await loadItems(hydrateMetadata: false))
+        .where((item) {
+          if (item.indexStatus?.toLowerCase() == 'needs_attention')
+            return false;
+          if (shelf != null && !shelf.contains(item.id)) return false;
+          if (shelf == null &&
+              collection.isNotEmpty &&
+              collection != _libraryAllCollectionsFilterValue &&
+              !libraryItemMatchesCollectionFilter(item, collection))
+            return false;
+          final fields = [
+            item.displayTitle,
+            item.title,
+            item.displayAuthor,
+            item.author ?? '',
+            item.collectionName ?? '',
+            item.fileName,
+            item.relativePath,
+            item.sourceSite ?? '',
+            item.sourceUrl ?? '',
+          ];
+          return patterns.every((pattern) => fields.any(pattern.hasMatch));
+        })
+        .toList(growable: false);
+    if (items.isEmpty) return const [];
+
+    // When actual paragraph hits already represent a book, keep those exact
+    // navigation targets instead of adding a redundant book-level result.
+    final where = <String>[
+      'li.deleted_at IS NULL',
+      "LOWER(COALESCE(li.index_status, '')) != 'needs_attention'",
+      'li.id IN (${List.filled(items.length, '?').join(',')})',
+    ];
+    final args = <Object?>[...items.map((item) => item.id)];
+    for (final term in terms) {
+      where.add('(${_librarySearchTermClause()})');
+      args.addAll(
+        List<Object?>.filled(
+          _librarySearchClauseFields.length,
+          _librarySearchLikePattern(term),
+        ),
+      );
+    }
+    _addLibrarySearchBodyCandidateFilter(where, args, terms);
+    final bodyIds = await _readResolver.readWithFallback<Set<String>>(
+      read: (db) async {
+        final source = await _searchTextCte(db);
+        final rows = await db.rawQuery('''
+          WITH $source
+          SELECT DISTINCT li.id
+          FROM library_items li
+          INNER JOIN search_text ltb ON ltb.library_item_id = li.id
+          WHERE ${where.join(' AND ')}
+        ''', args);
+        return rows.map((row) => row['id'] as String).toSet();
+      },
+      hasData: (ids) => ids.isNotEmpty,
+    );
+    return [
+      for (final item in items)
+        if (!bodyIds.value.contains(item.id))
+          LibraryCatalogSearchResult(
+            item: item,
+            snippet: '${item.displayTitle} — ${item.displayAuthor}',
+            locationText: 'Title or catalog match',
+            score: _scoreLibrarySearchResult(
+              item: item,
+              referenceText: null,
+              fullParagraph: null,
+              queryTerms: terms,
+            ),
+          ),
+    ];
+  }
+
+  Future<int> countSearchContentResults({
+    required String query,
+    String? collectionFilter,
+  }) async {
+    final paragraphs = await _countParagraphSearchResults(
+      query: query,
+      collectionFilter: collectionFilter,
+    );
+    final catalog = await _metadataSearchResults(
+      query: query,
+      collectionFilter: collectionFilter,
+    );
+    return paragraphs + catalog.length;
+  }
+
+  Future<List<LibraryCatalogSearchResult>> searchContent({
+    required String query,
+    int limit = 50,
+    String? collectionFilter,
+  }) async {
+    if (limit <= 0) return const [];
+    final paragraphs = await _searchParagraphs(
+      query: query,
+      limit: limit,
+      collectionFilter: collectionFilter,
+    );
+    final catalog = await _metadataSearchResults(
+      query: query,
+      collectionFilter: collectionFilter,
+    );
+    final results = [...paragraphs, ...catalog];
+    results.sort((left, right) {
+      final score = left.score.compareTo(right.score);
+      if (score != 0) return score;
+      final title = left.item.displayTitle.toLowerCase().compareTo(
+        right.item.displayTitle.toLowerCase(),
+      );
+      if (title != 0) return title;
+      return left.item.displayAuthor.toLowerCase().compareTo(
+        right.item.displayAuthor.toLowerCase(),
+      );
+    });
+    return results.take(limit).toList(growable: false);
+  }
+
   Future<int> countIndexedSearchableItems({String? collectionFilter}) async {
     final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
       collectionFilter ?? '',
@@ -603,11 +776,7 @@ class LibraryCatalogService {
       "LOWER(COALESCE(li.index_status, '')) != 'needs_attention'",
     ];
     final args = <Object?>[];
-    if (normalizedCollectionFilter.isNotEmpty &&
-        normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
-      where.add(_libraryCollectionSearchClause(normalizedCollectionFilter));
-      args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
-    }
+    await _addCollectionSearchFilter(where, args, normalizedCollectionFilter);
 
     await _excludeReviewedAlternates(where, args);
     final result = await _readResolver.readWithFallback<int>(
@@ -636,11 +805,7 @@ class LibraryCatalogService {
       "LOWER(COALESCE(li.index_status, '')) != 'needs_attention'",
     ];
     final args = <Object?>[];
-    if (normalizedCollectionFilter.isNotEmpty &&
-        normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
-      where.add(_libraryCollectionSearchClause(normalizedCollectionFilter));
-      args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
-    }
+    await _addCollectionSearchFilter(where, args, normalizedCollectionFilter);
 
     await _excludeReviewedAlternates(where, args);
     final result = await _readResolver.readWithFallback<int>(
@@ -657,7 +822,7 @@ class LibraryCatalogService {
     return result.value;
   }
 
-  Future<int> countSearchContentResults({
+  Future<int> _countParagraphSearchResults({
     required String query,
     String? collectionFilter,
   }) async {
@@ -674,11 +839,7 @@ class LibraryCatalogService {
     final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
       collectionFilter ?? '',
     );
-    if (normalizedCollectionFilter.isNotEmpty &&
-        normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
-      where.add(_libraryCollectionSearchClause(normalizedCollectionFilter));
-      args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
-    }
+    await _addCollectionSearchFilter(where, args, normalizedCollectionFilter);
 
     var termAdded = false;
     for (final term in normalizedTerms) {
@@ -790,7 +951,7 @@ class LibraryCatalogService {
     return <String>[humanizedFilter, normalizedCollectionFilter];
   }
 
-  Future<List<LibraryCatalogSearchResult>> searchContent({
+  Future<List<LibraryCatalogSearchResult>> _searchParagraphs({
     required String query,
     int limit = 50,
     String? collectionFilter,
@@ -811,11 +972,7 @@ class LibraryCatalogService {
     final normalizedCollectionFilter = _normalizeLibraryCollectionFilterValue(
       collectionFilter ?? '',
     );
-    if (normalizedCollectionFilter.isNotEmpty &&
-        normalizedCollectionFilter != _libraryAllCollectionsFilterValue) {
-      where.add(_libraryCollectionSearchClause(normalizedCollectionFilter));
-      args.addAll(_libraryCollectionSearchArgs(normalizedCollectionFilter));
-    }
+    await _addCollectionSearchFilter(where, args, normalizedCollectionFilter);
     // Keep every matching paragraph independently navigable, including
     // multiple hits in the same Pioneer book.
     var termAdded = false;
@@ -1025,6 +1182,7 @@ class LibraryCatalogService {
         .whereType<LibraryCatalogSearchResult>()
         .where((result) {
           if (normalizedCollectionFilter.isEmpty ||
+              normalizedCollectionFilter == 'top_shelf' ||
               normalizedCollectionFilter == _libraryAllCollectionsFilterValue) {
             return true;
           }

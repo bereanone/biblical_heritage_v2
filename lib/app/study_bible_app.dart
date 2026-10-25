@@ -1,4 +1,12 @@
+import '../features/purchases/data/android_purchase_service.dart';
+import '../features/purchases/presentation/android_access_gate.dart';
 import 'package:flutter/material.dart';
+import '../core/app_info/store_update_notice.dart';
+import '../features/purchases/data/apple_purchase_service.dart';
+import '../features/purchases/presentation/apple_access_gate.dart';
+import 'package:flutter/foundation.dart';
+import '../features/partners/data/ministry_enrollment_service.dart';
+import '../features/partners/presentation/ministry_enrollment_gate.dart';
 import '../core/audio/synthesis_thermal_gate.dart';
 import '../features/reader/presentation/memory_schedule/memory_schedule_reminder.dart';
 
@@ -108,6 +116,18 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
     await ThemePreferences.instance.saveThemeMode(mode);
   }
 
+  Widget _entry() {
+    final entry = EntryScreen(
+      themeMode: _themeMode,
+      onThemeChanged: _setThemeMode,
+    );
+    if (defaultTargetPlatform != TargetPlatform.android) return entry;
+    return MinistryEnrollmentGate(
+      service: MinistryEnrollmentService.instance,
+      child: entry,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -117,13 +137,27 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(_themeMode, settings: _visualSettings),
       navigatorObservers: [appRouteObserver],
+      builder: (context, child) {
+        final apple =
+            !kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.iOS ||
+                defaultTargetPlatform == TargetPlatform.macOS);
+        final content = child ?? const SizedBox.shrink();
+        if (applePurchasesEnabled && apple) {
+          return AppleAccessGate(child: content);
+        }
+        if (androidPurchasesEnabled &&
+            !kIsWeb &&
+            defaultTargetPlatform == TargetPlatform.android) {
+          return MinistryEnrollmentGate(
+            service: MinistryEnrollmentService.instance,
+            child: AndroidAccessGate(child: content),
+          );
+        }
+        return content;
+      },
       home: _loadedTheme
-          ? EntryScreen(
-              themeMode: _themeMode,
-              onThemeChanged: (mode) {
-                _setThemeMode(mode);
-              },
-            )
+          ? StoreUpdateNotice(child: _entry())
           : const Scaffold(body: Center(child: CircularProgressIndicator())),
     );
   }

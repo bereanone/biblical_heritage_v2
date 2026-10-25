@@ -33,6 +33,7 @@ void main() {
         defaultNarrationPronunciations,
       );
       expect(decodeNarrationPronunciations('{"word":"spoken"}'), {
+        ...defaultNarrationPronunciations,
         'word': 'spoken',
       });
     },
@@ -64,4 +65,58 @@ void main() {
     );
     expect(source, 'Sodom and the Sodomites. Thou hast made haste.');
   });
+
+  test(
+    'saved custom rules receive defaults and override them case-insensitively',
+    () {
+      final rules = decodeNarrationPronunciations(
+        '{" HAST ":"custom", "example":"spoken"}',
+      );
+      expect(
+        prepareNarrationPronunciation('hast example Sodom', corrections: rules),
+        'custom spoken Soddum',
+      );
+      expect(
+        rules.keys.where((key) => key.toLowerCase() == 'hast'),
+        hasLength(1),
+      );
+    },
+  );
+
+  test('intentional removals survive save and reload', () {
+    final edited = {...defaultNarrationPronunciations, 'example': 'spoken'}
+      ..remove('hast');
+    final reloaded = decodeNarrationPronunciations(
+      encodeNarrationPronunciations(edited),
+    );
+    expect(reloaded, edited);
+    expect(
+      decodeNarrationPronunciations(encodeNarrationPronunciations({})),
+      isEmpty,
+    );
+  });
+
+  test(
+    'future defaults merge under versioned edits without reviving disabled defaults',
+    () {
+      final rules = decodeNarrationPronunciations(
+        '{"version":2,"rules":{"example":"spoken"},"disabledDefaults":["hast"]}',
+      );
+      expect(rules['example'], 'spoken');
+      expect(rules['Sodom'], defaultNarrationPronunciations['Sodom']);
+      expect(rules.containsKey('hast'), isFalse);
+    },
+  );
+
+  test(
+    'deferred snapshots stay exact instead of acquiring new defaults',
+    () async {
+      final rules = await loadDeferredNarrationPronunciations(
+        rules: defaultNarrationPronunciations,
+        load: (_) async => '{"old":"fallback"}',
+        save: (_, __) async {},
+      );
+      expect(rules, {'old': 'fallback'});
+    },
+  );
 }

@@ -69,6 +69,7 @@ class BibleLoopPicker extends StatefulWidget {
     required this.selectedTargetLabel,
     required this.announcements,
     required this.onAnnouncementChanged,
+    this.showAnnouncements = true,
   });
 
   final String bookName;
@@ -77,6 +78,7 @@ class BibleLoopPicker extends StatefulWidget {
   final BibleLoopUnit? selectedLoop;
   final String selectedTargetLabel;
   final BibleLoopAnnouncementSettings announcements;
+  final bool showAnnouncements;
   final void Function(BibleLoopUnit unit, bool enabled) onAnnouncementChanged;
 
   @override
@@ -149,14 +151,16 @@ class _BibleLoopPickerState extends State<BibleLoopPicker> {
             widget.bookName,
             Icons.menu_book_outlined,
           ),
-          const Divider(height: 1),
-          const ListTile(
-            title: Text('Announce'),
-            subtitle: Text('Speak labels during reading'),
-          ),
-          _announcementChoice(BibleLoopUnit.book),
-          _announcementChoice(BibleLoopUnit.chapter),
-          _announcementChoice(BibleLoopUnit.verse),
+          if (widget.showAnnouncements) ...[
+            const Divider(height: 1),
+            const ListTile(
+              title: Text('Announce'),
+              subtitle: Text('Speak labels during reading'),
+            ),
+            _announcementChoice(BibleLoopUnit.book),
+            _announcementChoice(BibleLoopUnit.chapter),
+            _announcementChoice(BibleLoopUnit.verse),
+          ],
         ],
       ),
     ),

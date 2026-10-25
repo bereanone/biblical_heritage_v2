@@ -15,11 +15,18 @@ class NoteImageLayout {
     this.header = '',
     this.footer = '',
     this.fill = true,
+    this.textGap = 10,
+    this.sourceLayout,
   });
   final int rows, columns, row, column, rowSpan, columnSpan, imageIndex;
   final double aspectRatio;
   final String header, footer;
   final bool fill;
+  final double textGap;
+  final String? sourceLayout;
+
+  /// Stable authored geometry, excluding the presentation override's witness.
+  String get signature => jsonEncode({...toJson()}..remove('source_layout'));
 
   bool get isValid =>
       rows >= 1 &&
@@ -34,7 +41,10 @@ class NoteImageLayout {
       column + columnSpan <= columns &&
       imageIndex >= 0 &&
       aspectRatio.isFinite &&
-      aspectRatio > 0;
+      aspectRatio > 0 &&
+      textGap.isFinite &&
+      textGap >= 0 &&
+      textGap <= 160;
 
   Set<int> get cells => {
     for (var r = row; r < row + rowSpan; r++)
@@ -100,6 +110,8 @@ class NoteImageLayout {
     'header': header,
     'footer': footer,
     'fill': fill,
+    'text_gap': textGap,
+    if (sourceLayout != null) 'source_layout': sourceLayout!,
   };
 
   static NoteImageLayout? fromJson(Object? raw) {
@@ -124,6 +136,9 @@ class NoteImageLayout {
     final ratio = raw['aspect_ratio'];
     if (ratio is! num) return null;
     final result = NoteImageLayout(
+      sourceLayout: raw['source_layout'] is String ? raw['source_layout'] as String : null,      textGap: raw['text_gap'] is num
+          ? (raw['text_gap'] as num).toDouble()
+          : 10,
       rows: values[0]!,
       columns: values[1]!,
       row: values[2]!,
@@ -238,9 +253,23 @@ class PresentationBlockAlignments {
 }
 
 bool presentationLinksWithNext(String? raw) {
-  try {return (jsonDecode(raw??'{}') as Map)['link_with_next']==true;} catch(_){return false;}
+  try {
+    return (jsonDecode(raw ?? '{}') as Map)['link_with_next'] == true;
+  } catch (_) {
+    return false;
+  }
 }
-String presentationFormatWithLink(String? raw,bool linked) {
-  final data=Map<String,dynamic>.from(jsonDecode(raw??'{}') as Map);
-  data['link_with_next']=linked;return jsonEncode(data);
+
+String presentationFormatWithLink(String? raw, bool linked) {
+  final data = Map<String, dynamic>.from(jsonDecode(raw ?? '{}') as Map);
+  data['link_with_next'] = linked;
+  return jsonEncode(data);
+}
+
+/// A final presentation adjustment belongs only to the authored layout it was
+/// made against. Entry edits must never be masked by a stale saved override.
+NoteImageLayout? resolveNoteImageLayout(NoteImageLayout? authored, NoteImageLayout? adjustment) {
+  if (authored == null) return null;
+  final chosen = adjustment?.sourceLayout == authored.signature ? adjustment! : authored;
+  return NoteImageLayout.fromJson({...chosen.toJson(), 'source_layout': authored.signature});
 }

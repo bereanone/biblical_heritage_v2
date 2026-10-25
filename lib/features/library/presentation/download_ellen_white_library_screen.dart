@@ -27,7 +27,10 @@ class _DownloadEllenWhiteLibraryScreenState
 
   Future<void> _openSelectionThenPrepare() async {
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const ELibrarySetupScreen()),
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            const ELibrarySetupScreen(selectAllEpubsInitially: true),
+      ),
     );
     if (!mounted) return;
     await _prepare();
@@ -97,16 +100,16 @@ class _DownloadEllenWhiteLibraryScreenState
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          'Choose which official Ellen White writings '
-                          'collections you want. We will download them and '
-                          'get them ready to read automatically.',
+                          'All official Ellen White collections are selected as EPUBs. '
+                          'Continue, then select Download Selected Books. '
+                          'You can change the selection before downloading.',
                           style: Theme.of(context).textTheme.bodyLarge,
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 24),
                         FilledButton(
                           onPressed: _openSelectionThenPrepare,
-                          child: const Text('Choose Books to Download'),
+                          child: const Text('Continue with All EPUBs Selected'),
                         ),
                       ],
                     ),

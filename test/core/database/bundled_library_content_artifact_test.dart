@@ -21,7 +21,7 @@ void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
   test(
-    'real bundled artifact installs six complete books and preserves an existing import',
+    'real bundled artifact installs seven complete books and preserves an existing import',
     () async {
       final temp = await Directory.systemTemp.createTemp('actual-bundle-');
       final db = await openDatabase(
@@ -55,7 +55,7 @@ void main() {
             libraryRoot: temp.path,
             assets: FileAssets(),
           ),
-          6,
+          7,
         );
         expect(
           await db.query(
@@ -64,6 +64,12 @@ void main() {
             whereArgs: ['personal'],
           ),
           [before],
+        );
+        expect(
+          (manifest['books'] as List).map((book) => book['id']),
+          contains(
+            'library_item_research_pioneer_bible_readings_home_circle_1914',
+          ),
         );
         for (final book in manifest['books'] as List) {
           final id = book['id'];
@@ -119,7 +125,7 @@ void main() {
           ),
           0,
         );
-        expect((await db.query('library_items')).length, 7);
+        expect((await db.query('library_items')).length, 8);
       } finally {
         await db.close();
         await temp.delete(recursive: true);

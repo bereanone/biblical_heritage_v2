@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'package:studybible2/core/theme/app_settings_service.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +23,7 @@ void main() {
   const stamp = '2026-09-09T00:00:00Z';
 
   setUp(() async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     sandbox = await Directory.systemTemp.createTemp('library_search_reading_');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (_) async => sandbox.path);
@@ -38,6 +42,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
     await sandbox.delete(recursive: true);
+    debugDefaultTargetPlatformOverride = null;
   });
 
   Future<void> item(
@@ -325,6 +330,197 @@ void main() {
         await LibraryCatalogService.instance.countIndexedSearchableItems(),
         1,
       );
+    },
+  );
+
+  test(
+    'title and author matches open a book without inventing a paragraph hit',
+    () async {
+      for (final field in ['title', 'author']) {
+        final id = '$field-only';
+        await item(id);
+        await canonical(id, 'A paragraph about hope.');
+        await db.update(
+          'library_items',
+          {field: 'Second Coming'},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      }
+      final hits = await LibraryCatalogService.instance.searchContent(
+        query: 'Second Coming',
+      );
+      expect(hits.map((hit) => hit.item.id).toSet(), {
+        'title-only',
+        'author-only',
+      });
+      expect(
+        hits.every((hit) => hit.target == null && hit.fullParagraph == null),
+        isTrue,
+      );
+      expect(
+        await LibraryCatalogService.instance.countSearchContentResults(
+          query: 'Second Coming',
+        ),
+        2,
+      );
+      final quoted = await LibraryCatalogService.instance.searchContent(
+        query: '"Second Coming"',
+      );
+      expect(quoted.map((hit) => hit.item.id).toSet(), {
+        'title-only',
+        'author-only',
+      });
+    },
+  );
+
+  test(
+    'catalog matches do not duplicate real passage hits or leak another collection',
+    () async {
+      await item('matching');
+      await canonical('matching', 'The Second Coming gives hope.');
+      await db.update(
+        'library_items',
+        {'title': 'Second Coming'},
+        where: 'id = ?',
+        whereArgs: ['matching'],
+      );
+      final hits = await LibraryCatalogService.instance.searchContent(
+        query: 'Second Coming',
+      );
+      expect(hits, hasLength(1));
+      expect(hits.single.target, isNotNull);
+      expect(
+        await LibraryCatalogService.instance.countSearchContentResults(
+          query: 'Second Coming',
+        ),
+        1,
+      );
+      expect(
+        await LibraryCatalogService.instance.searchContent(
+          query: 'Second Coming',
+          collectionFilter: 'egw_books',
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'Top Shelf limits text and catalog matches, counts, and a changed shelf',
+    () async {
+      for (final id in [
+        'shelf-body',
+        'other-body',
+        'shelf-title',
+        'other-title',
+      ]) {
+        await item(id);
+        await canonical(
+          id,
+          id.endsWith('body')
+              ? 'The Second Coming gives hope.'
+              : 'A paragraph about hope.',
+        );
+        if (id.endsWith('title')) {
+          await db.update(
+            'library_items',
+            {'title': 'Second Coming'},
+            where: 'id = ?',
+            whereArgs: [id],
+          );
+        }
+      }
+      final service = LibraryCatalogService.instance;
+      await AppSettingsService.instance.saveRawSetting(
+        'elibrary_top_shelf_v1',
+        jsonEncode(['shelf-body', 'shelf-title']),
+      );
+      final hits = await service.searchContent(
+        query: 'Second Coming',
+        collectionFilter: 'top_shelf',
+      );
+      expect(hits.map((hit) => hit.item.id).toSet(), {
+        'shelf-body',
+        'shelf-title',
+      });
+      expect(
+        await service.countSearchContentResults(
+          query: 'Second Coming',
+          collectionFilter: 'top_shelf',
+        ),
+        2,
+      );
+      expect(
+        await service.countIndexedSearchableItems(
+          collectionFilter: 'top_shelf',
+        ),
+        2,
+      );
+      expect(
+        await service.countCatalogItemsInScope(collectionFilter: 'top_shelf'),
+        2,
+      );
+      await AppSettingsService.instance.saveRawSetting(
+        'elibrary_top_shelf_v1',
+        jsonEncode(['other-title']),
+      );
+      expect(
+        (await service.searchContent(
+          query: 'Second Coming',
+          collectionFilter: 'top_shelf',
+        )).single.item.id,
+        'other-title',
+      );
+      expect(
+        await service.countSearchContentResults(
+          query: 'Second Coming',
+          collectionFilter: 'all',
+        ),
+        4,
+      );
+    },
+  );
+
+  test(
+    'empty and malformed Top Shelf never broaden to the whole library',
+    () async {
+      await item('match');
+      await canonical('match', 'The Second Coming gives hope.');
+      for (final raw in ['[]', '{broken', '{}', '[null, 4]']) {
+        await AppSettingsService.instance.saveRawSetting(
+          'elibrary_top_shelf_v1',
+          raw,
+        );
+        expect(
+          await LibraryCatalogService.instance.searchContent(
+            query: 'Second Coming',
+            collectionFilter: 'top_shelf',
+          ),
+          isEmpty,
+        );
+        expect(
+          await LibraryCatalogService.instance.countSearchContentResults(
+            query: 'Second Coming',
+            collectionFilter: 'top_shelf',
+          ),
+          0,
+        );
+      }
+    },
+  );
+
+  test(
+    'metadata-only catalog entries are discoverable but retired and unreadable entries are not',
+    () async {
+      await item('catalog-only', status: 'metadata_only');
+      await item('retired-catalog', deleted: true);
+      await item('unreadable-catalog', status: 'needs_attention');
+      final hits = await LibraryCatalogService.instance.searchContent(
+        query: 'Jones',
+      );
+      expect(hits.map((hit) => hit.item.id), ['catalog-only']);
+      expect(hits.single.target, isNull);
     },
   );
 }

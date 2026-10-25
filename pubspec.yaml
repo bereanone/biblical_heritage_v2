@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.0.5+131
+version: 2.0.6+155
 
 environment:
   sdk: ^3.11.1
@@ -45,8 +45,12 @@ dependencies:
   scrollable_positioned_list: ^0.3.8
   sqflite: ^2.4.1
   sqflite_common_ffi: ^2.3.6
+  url_launcher: ^6.3.3
+  upgrader: ^13.7.0
 
 dev_dependencies:
+  # Test-only path isolation; pin the already resolved platform interface.
+  path_provider_platform_interface: 2.1.2
   flutter_test:
     sdk: flutter
   integration_test:
@@ -60,6 +64,8 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.13.1
   vm_service: ^15.0.2
+  version: ^3.0.2
+  shared_preferences: ^2.5.5
 
 flutter_launcher_icons:
   android: true
@@ -105,6 +111,8 @@ flutter:
     - assets/library_covers/templates/
     - assets/icons/GoldLogo.png
     - assets/icons/Logo2.png
+    - assets/partners/adl_welcome.png
+    - assets/partners/heritage_hope_welcome.png
     - assets/audio/kokoro/models/kokoro-v1.0.onnx
     - assets/audio/kokoro/models/voices-v1.0.bin
     - assets/audio/kokoro/sherpa/kokoro-multi-lang-v1_0/

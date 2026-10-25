@@ -11,6 +11,8 @@ class VerseHighlightRecord {
     required this.colorHex,
     this.startToken,
     this.endToken,
+    this.startWord,
+    this.endWord,
   });
 
   final int id;
@@ -19,6 +21,8 @@ class VerseHighlightRecord {
   final String colorHex;
   final int? startToken;
   final int? endToken;
+  final int? startWord;
+  final int? endWord;
 
   bool get isTokenLevel => startToken != null && endToken != null;
 
@@ -84,14 +88,24 @@ class HighlightsRepository {
       batch.delete(
         'highlights',
         where:
-            'verse_ref = ? AND start_token IS NOT NULL AND end_token IS NOT NULL AND start_token <= ? AND end_token >= ?',
-        whereArgs: [item.verseRef, item.endToken, item.startToken],
+            'verse_ref = ? AND start_token IS NOT NULL AND end_token IS NOT NULL AND ((? IS NOT NULL AND start_word IS NOT NULL AND start_word <= ? AND end_word >= ?) OR ((? IS NULL OR start_word IS NULL) AND start_token <= ? AND end_token >= ?))',
+        whereArgs: [
+          item.verseRef,
+          item.startWord,
+          item.endWord,
+          item.startWord,
+          item.startWord,
+          item.endToken,
+          item.startToken,
+        ],
       );
       batch.insert('highlights', {
         'group_id': groupId,
         'verse_ref': item.verseRef,
         'start_token': item.startToken,
         'end_token': item.endToken,
+        'start_word': item.startWord,
+        'end_word': item.endWord,
       });
     }
     await batch.commit(noResult: true);
@@ -153,7 +167,7 @@ class HighlightsRepository {
     final db = await UserDatabase.instance.database;
     final placeholders = List.filled(verseRefs.length, '?').join(',');
     final rows = await db.rawQuery('''
-      SELECT h.id, h.group_id, h.verse_ref, h.start_token, h.end_token, g.color_hex
+      SELECT h.id, h.group_id, h.verse_ref, h.start_token, h.end_token, h.start_word, h.end_word, g.color_hex
       FROM highlights h
       JOIN highlight_groups g ON g.id = h.group_id
       WHERE h.verse_ref IN ($placeholders)
@@ -178,6 +192,8 @@ class HighlightsRepository {
               colorHex: row['color_hex']?.toString() ?? '#E8DCC8',
               startToken: (row['start_token'] as num?)?.toInt(),
               endToken: (row['end_token'] as num?)?.toInt(),
+              startWord: (row['start_word'] as num?)?.toInt(),
+              endWord: (row['end_word'] as num?)?.toInt(),
             ),
           );
     }
@@ -202,8 +218,16 @@ class HighlightsRepository {
       batch.delete(
         'highlights',
         where:
-            'verse_ref = ? AND start_token IS NOT NULL AND end_token IS NOT NULL AND start_token <= ? AND end_token >= ?',
-        whereArgs: [item.verseRef, item.endToken, item.startToken],
+            'verse_ref = ? AND start_token IS NOT NULL AND end_token IS NOT NULL AND ((? IS NOT NULL AND start_word IS NOT NULL AND start_word <= ? AND end_word >= ?) OR ((? IS NULL OR start_word IS NULL) AND start_token <= ? AND end_token >= ?))',
+        whereArgs: [
+          item.verseRef,
+          item.startWord,
+          item.endWord,
+          item.startWord,
+          item.startWord,
+          item.endToken,
+          item.startToken,
+        ],
       );
     }
     await batch.commit(noResult: true);
@@ -215,9 +239,13 @@ class TokenHighlightSelection {
     required this.verseRef,
     this.startToken,
     this.endToken,
+    this.startWord,
+    this.endWord,
   });
 
   final String verseRef;
   final int? startToken;
   final int? endToken;
+  final int? startWord;
+  final int? endWord;
 }

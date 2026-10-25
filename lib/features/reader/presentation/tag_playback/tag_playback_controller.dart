@@ -522,7 +522,9 @@ class TagPlaybackController extends ChangeNotifier {
       // later, that file is discarded on arrival.
       _releaseGate(slot);
       if (slot.isSettled || slot.cancelled || _disposed) return;
-      slot.error = TimeoutException('Speech synthesis timed out');
+      slot.error = TimeoutException(
+        'Audio preparation timed out. Try playing again.',
+      );
       _slotSettled(slot);
     });
     Future<String>.sync(() => _renderer.render(slot.clip)).then(

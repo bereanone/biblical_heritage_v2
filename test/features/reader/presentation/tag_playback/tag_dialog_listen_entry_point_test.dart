@@ -9,6 +9,7 @@ Widget tab(
   ValueChanged<HashTagSummary> onOpen, {
   String? categoryFilter,
   VoidCallback? onToggleFilter,
+  VoidCallback? onAddNote,
 }) {
   return MaterialApp(
     home: Scaffold(
@@ -36,28 +37,61 @@ Widget tab(
         onSearchSelected: (_) async {},
         onSortModeChanged: (_) {},
         onOpenSummaryDetails: onOpen,
+        onAddNote: onAddNote,
       ),
     ),
   );
 }
 
 void main() {
-  testWidgets('folder filter states and toggle are visible on a narrow screen', (tester) async {
+  testWidgets('empty hashtag exposes Add note on a phone-sized screen', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(430, 932);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    var toggles = 0;
-    await tester.pumpWidget(tab(const [], (_) {}, onToggleFilter: () => toggles++));
-    expect(find.text('Folder filter: OFF'), findsOneWidget);
-    expect(find.text('Showing all folders'), findsOneWidget);
-    await tester.tap(find.byType(SwitchListTile));
-    expect(toggles, 1);
-    await tester.pumpWidget(tab(const [], (_) {}, categoryFilter: 'Sabbath'));
-    expect(find.text('Folder filter: ON'), findsOneWidget);
-    expect(find.text('Showing only the selected folder'), findsOneWidget);
+    var opened = 0;
+    await tester.pumpWidget(tab(const [], (_) {}, onAddNote: () => opened++));
+    final addNote = find.byKey(const Key('tag_add_note'));
+    final tagVerse = find.widgetWithText(FilledButton, 'Tag\nVerse');
+    expect(addNote.hitTestable(), findsOneWidget);
+    expect(tagVerse.hitTestable(), findsOneWidget);
+    final noteRect = tester.getRect(addNote);
+    final verseRect = tester.getRect(tagVerse);
+    expect(noteRect.top, verseRect.top);
+    expect(noteRect.height, verseRect.height);
+    expect(noteRect.left - verseRect.right, closeTo(8, .01));
+    expect(
+      noteRect.top,
+      greaterThan(tester.getRect(find.byType(TextField).first).bottom),
+    );
+    await tester.tap(find.byKey(const Key('tag_add_note')));
+    expect(opened, 1);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'folder filter states and toggle are visible on a narrow screen',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 932);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      var toggles = 0;
+      await tester.pumpWidget(
+        tab(const [], (_) {}, onToggleFilter: () => toggles++),
+      );
+      expect(find.text('Folder filter: OFF'), findsOneWidget);
+      expect(find.text('Showing all folders'), findsOneWidget);
+      await tester.tap(find.byType(SwitchListTile));
+      expect(toggles, 1);
+      await tester.pumpWidget(tab(const [], (_) {}, categoryFilter: 'Sabbath'));
+      expect(find.text('Folder filter: ON'), findsOneWidget);
+      expect(find.text('Showing only the selected folder'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('every tag row offers Listen next to Open verses', (
     tester,

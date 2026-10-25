@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'package:flutter/services.dart';
 import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
@@ -39,6 +40,74 @@ class BundledAudioInstaller {
     await Isolate.run(
       () => _unpack(rootPath, cachePath, destinationPath, id, hash, files),
     );
+    await _writeReceipt(destination, files);
+    await _select(id, destination);
+    return destination;
+  }
+
+  /// Install packaged recordings one track at a time to bound mobile memory.
+  /// The package becomes playable only after every member passes validation.
+  Future<Directory> installAssets(
+    Map<String, dynamic> spec,
+    AssetBundle assets, {
+    void Function(int, int)? onProgress,
+  }) async {
+    final id = spec['id'] as String;
+    final hash = spec['sha256'] as String;
+    final (destination, files) = _package(spec);
+    if (await _receiptMatches(destination, files) ||
+        await _complete(destination, files)) {
+      await _writeReceipt(destination, files);
+      await _select(id, destination);
+      return destination;
+    }
+    final staging = Directory(p.join(root.path, '.installing-$id-$hash'));
+    await staging.create(recursive: true);
+    final total = files.values.fold<int>(
+      0,
+      (n, file) => n + (file['bytes'] as int),
+    );
+    var received = 0;
+    for (final entry in files.entries) {
+      final asset = entry.value['asset'];
+      if (asset is! String ||
+          !RegExp(
+            r'^assets/bundled_library/files/[a-f0-9]{64}$',
+          ).hasMatch(asset)) {
+        throw const FormatException('Invalid bundled recording asset');
+      }
+      final data = await assets.load(asset);
+      final bytes = data.buffer.asUint8List(
+        data.offsetInBytes,
+        data.lengthInBytes,
+      );
+      if (bytes.length != entry.value['bytes'] ||
+          sha256.convert(bytes).toString() != entry.value['sha256']) {
+        throw const FormatException('Bundled recording failed integrity check');
+      }
+      await File(
+        p.join(staging.path, entry.key),
+      ).writeAsBytes(bytes, flush: true);
+      assets.evict(asset);
+      received += bytes.length;
+      onProgress?.call(received, total);
+    }
+    if (!await _complete(staging, files)) {
+      throw const FormatException('Bundled recording package is incomplete');
+    }
+    final manifest =
+        jsonDecode(
+              await File(
+                p.join(staging.path, 'audio-manifest.json'),
+              ).readAsString(),
+            )
+            as Map;
+    final tracks = manifest['tracks'] as List;
+    if (tracks.isEmpty || tracks.any((t) => !files.containsKey(t['file']))) {
+      throw const FormatException('Audio manifest references missing tracks');
+    }
+    if (await destination.exists()) await destination.delete(recursive: true);
+    await staging.rename(destination.path);
     await _writeReceipt(destination, files);
     await _select(id, destination);
     return destination;
@@ -123,8 +192,9 @@ class BundledAudioInstaller {
     for (final entry in files.entries) {
       final stat = await File(p.join(directory.path, entry.key)).stat();
       if (stat.type != FileSystemEntityType.file ||
-          stat.size != entry.value['bytes'])
+          stat.size != entry.value['bytes']) {
         return null;
+      }
       result[entry.key] = [
         stat.size,
         stat.modified.microsecondsSinceEpoch,
@@ -146,8 +216,10 @@ class BundledAudioInstaller {
                 ).readAsString(),
               )
               as Map;
-      if (receipt['schema'] != 1 || receipt['fileSet'] != _fileSetDigest(files))
+      if (receipt['schema'] != 1 ||
+          receipt['fileSet'] != _fileSetDigest(files)) {
         return false;
+      }
       final stats = await _fileStats(directory, files);
       return stats != null && jsonEncode(stats) == jsonEncode(receipt['stats']);
     } on FileSystemException {
@@ -164,10 +236,11 @@ class BundledAudioInstaller {
     Map<String, Map<String, dynamic>> files,
   ) async {
     final stats = await _fileStats(directory, files);
-    if (stats == null)
+    if (stats == null) {
       throw const FormatException(
         'Verified audio files changed during installation',
       );
+    }
     final receipt = File(p.join(directory.path, '.verified.json'));
     final temporary = File('${receipt.path}.new');
     await temporary.writeAsString(

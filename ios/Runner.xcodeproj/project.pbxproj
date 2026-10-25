@@ -526,7 +526,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" build";
+			shellScript = "set -e\n/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" build\n/usr/bin/python3 \"$SRCROOT/../tool/generate_apple_billing_config.py\" \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/StudyBibleBilling.plist\"";
 		};
 		ACAD88A864AEE60B907A8D6C /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -668,8 +668,8 @@
 		249021D3217E4FDB00AE95B9 /* Profile */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				FLUTTER_BUILD_NAME = 2.0.5;
-				FLUTTER_BUILD_NUMBER = 131;
+				FLUTTER_BUILD_NAME = 2.0.6;
+				FLUTTER_BUILD_NUMBER = 155;
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -823,8 +823,8 @@
 		97C147031CF9000F007C117D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				FLUTTER_BUILD_NAME = 2.0.5;
-				FLUTTER_BUILD_NUMBER = 131;
+				FLUTTER_BUILD_NAME = 2.0.6;
+				FLUTTER_BUILD_NUMBER = 155;
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -882,8 +882,8 @@
 		97C147041CF9000F007C117D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				FLUTTER_BUILD_NAME = 2.0.5;
-				FLUTTER_BUILD_NUMBER = 131;
+				FLUTTER_BUILD_NAME = 2.0.6;
+				FLUTTER_BUILD_NUMBER = 155;
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;

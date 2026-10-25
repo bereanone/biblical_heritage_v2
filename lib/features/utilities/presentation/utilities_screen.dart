@@ -1,10 +1,16 @@
 import 'dart:math' as math;
+import '../../purchases/data/apple_purchase_service.dart';
+import '../../purchases/presentation/apple_purchase_details_screen.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme_mode.dart';
+import '../../partners/data/ministry_enrollment_service.dart';
+import '../../partners/data/ministry_profile.dart';
+import '../../partners/presentation/ministry_setup_screen.dart';
 import '../../library/data/library_setup_invitation_service.dart';
 import '../../library/presentation/set_up_my_library_screen.dart';
 import '../../library/presentation/import_pioneer_library_screen.dart';
@@ -21,10 +27,124 @@ class UtilitiesScreen extends StatelessWidget {
     super.key,
     required this.themeMode,
     required this.onThemeChanged,
+    this.enrollmentService,
   });
+
+  final MinistryEnrollmentService? enrollmentService;
+  MinistryEnrollmentService get _enrollment =>
+      enrollmentService ?? MinistryEnrollmentService.instance;
 
   final AppThemeMode themeMode;
   final ValueChanged<AppThemeMode> onThemeChanged;
+
+  MinistryProfile get _ministry =>
+      _enrollment.state.value?.displayProfile ?? MinistryProfile.biblicalHeritage;
+
+  String? get _bibleReadingsStoreUrl {
+    if (kIsWeb) return null;
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.android =>
+        'https://play.google.com/store/apps/details?id=com.biblicalheritage.brhc',
+      TargetPlatform.iOS =>
+        'https://apps.apple.com/us/app/bible-readings-1914/id6757504303',
+      _ => null,
+    };
+  }
+
+  Future<void> _openCommunityUrl(BuildContext context, String url) async {
+    var opened = false;
+    try {
+      final uri = Uri.parse(url);
+      if (uri.scheme == 'https' && uri.host.isNotEmpty) {
+        opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {
+      // Keep a copyable destination when the browser or store is unavailable.
+    }
+    if (!opened && context.mounted) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Open Community Link'),
+          content: SelectableText(url),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: url));
+                if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+              },
+              child: const Text('Copy Link'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  List<Widget> _communityAppActions(BuildContext context) => [
+    if (_bibleReadingsStoreUrl case final String url)
+      TextButton.icon(
+        onPressed: () => _openCommunityUrl(context, url),
+        icon: const Icon(Icons.open_in_new),
+        label: const Text('Bible Readings 1914'),
+      ),
+    for (final link in _ministry.communityLinks)
+      TextButton(
+        onPressed: () => _openCommunityUrl(context, link.url),
+        child: Text(link.label),
+      ),
+  ];
+
+  Future<void> _showMinistryLinks(
+    BuildContext context, {
+    required bool support,
+  }) async {
+    final ministry = _ministry;
+    final website = ministry.websiteUrl;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        scrollable: true,
+        title: Text(
+          support ? 'Support ${ministry.name}' : '${ministry.name} Community',
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              support
+                  ? 'Visit ${ministry.name} for information about supporting their work.'
+                  : 'Visit ${ministry.name} for their resources and community information.',
+            ),
+            if (website != null) ...[
+              const SizedBox(height: 12),
+              SelectableText(website),
+            ],
+          ],
+        ),
+        actions: [
+          if (!support) ..._communityAppActions(context),
+          if (website != null)
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: website));
+                if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+              },
+              child: const Text('Copy Website'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _openBibleExplorer(BuildContext context) {
     Navigator.of(context).push(
@@ -324,11 +444,16 @@ class UtilitiesScreen extends StatelessWidget {
   }
 
   Future<void> _showCommunityLinksDialog(BuildContext context) async {
+    if (_ministry != MinistryProfile.biblicalHeritage) {
+      await _showMinistryLinks(context, support: false);
+      return;
+    }
     const websiteUrl = 'https://BiblicalHeritage.net';
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Community Links'),
+        scrollable: true,
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -359,6 +484,7 @@ class UtilitiesScreen extends StatelessWidget {
           ],
         ),
         actions: [
+          ..._communityAppActions(context),
           TextButton(
             onPressed: () {
               Clipboard.setData(const ClipboardData(text: websiteUrl));
@@ -394,458 +520,511 @@ class UtilitiesScreen extends StatelessWidget {
   }
 
   Future<void> _showSupportDialog(BuildContext context) async {
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Support Biblical Heritage'),
-        content: const Text(
-          'Biblical Heritage is intended to remain free. If God has blessed you and you want to support this work, your gift helps make wider translation possible and helps carry the gospel to more lost souls through the app store.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
+    final website = _ministry.websiteUrl;
+    var opened = false;
+    try {
+      if (website != null) {
+        opened = await launchUrl(
+          Uri.parse(website),
+          mode: LaunchMode.externalApplication,
+        );
+      }
+    } catch (_) {
+      // Retain a copyable address if the device has no available browser.
+    }
+    if (!opened && context.mounted) {
+      await _showMinistryLinks(context, support: true);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        centerTitle: true,
-        title: Text(
-          'Utilities',
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        leading: _setupLeading(context),
-        leadingWidth: _setupLeadingWidth(),
-      ),
-      body: SafeArea(
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: _utilitiesBackgroundGradient(theme.colorScheme),
+    return ValueListenableBuilder<MinistryEnrollment?>(
+      valueListenable: _enrollment.state,
+      builder: (context, enrollment, child) => Scaffold(
+        appBar: AppBar(
+          centerTitle: true,
+          title: Text(
+            'Utilities',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
             ),
           ),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final isTwoColumn =
-                  constraints.maxWidth >= _wideUtilitiesBreakpoint;
-              final horizontalPadding = isTwoColumn ? 32.0 : 20.0;
-              final contentWidth = isTwoColumn
-                  ? math.min(constraints.maxWidth, _wideUtilitiesMaxWidth)
-                  : constraints.maxWidth;
+          leading: _setupLeading(context),
+          leadingWidth: _setupLeadingWidth(),
+        ),
+        body: SafeArea(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: _utilitiesBackgroundGradient(theme.colorScheme),
+              ),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isTwoColumn =
+                    constraints.maxWidth >= _wideUtilitiesBreakpoint;
+                final horizontalPadding = isTwoColumn ? 32.0 : 20.0;
+                final contentWidth = isTwoColumn
+                    ? math.min(constraints.maxWidth, _wideUtilitiesMaxWidth)
+                    : constraints.maxWidth;
 
-              return SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(
-                  horizontalPadding,
-                  14,
-                  horizontalPadding,
-                  28,
-                ),
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  child: SizedBox(
-                    width: contentWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          'Setup and sharing tools for Biblical Heritage #StudyBible.',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                        const SizedBox(height: 16),
-                        Card(
-                          key: const Key('utilities-set-up-my-library'),
-                          clipBehavior: Clip.antiAlias,
-                          child: InkWell(
-                            onTap: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => const SetUpMyLibraryScreen(),
-                                ),
-                              );
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.all(18),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.auto_stories_outlined,
-                                    size: 32,
-                                    color: theme.colorScheme.primary,
+                return SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                    horizontalPadding,
+                    14,
+                    horizontalPadding,
+                    28,
+                  ),
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: SizedBox(
+                      width: contentWidth,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'Setup and sharing tools for Biblical Heritage #StudyBible.',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodyLarge,
+                          ),
+                          const SizedBox(height: 16),
+                          Card(
+                            key: const Key('utilities-set-up-my-library'),
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        const SetUpMyLibraryScreen(),
                                   ),
-                                  const SizedBox(width: 16),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'Set Up My Library',
-                                          style: theme.textTheme.titleMedium
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          'Download books, import a Pioneer '
-                                          'collection, or add your own EPUB.',
-                                          style: theme.textTheme.bodySmall,
-                                        ),
-                                      ],
+                                );
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.all(18),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.auto_stories_outlined,
+                                      size: 32,
+                                      color: theme.colorScheme.primary,
                                     ),
-                                  ),
-                                  const Icon(Icons.chevron_right),
-                                ],
+                                    const SizedBox(width: 16),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Set Up My Library',
+                                            style: theme.textTheme.titleMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            'Download books, import a Pioneer '
+                                            'collection, or add your own EPUB.',
+                                            style: theme.textTheme.bodySmall,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const Icon(Icons.chevron_right),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 20),
-                        if (isTwoColumn)
-                          _UtilitiesTwoColumnDashboard(
-                            leftSections: [
-                              _UtilitiesSectionCard(
-                                key: const Key('utilities-section-app-tools'),
-                                title: 'App Tools',
-                                helperText:
-                                    'Manage common app settings and protect your personal data.',
-                                actions: [
-                                  _UtilityActionButton(
-                                    label: 'Remove Added Data',
-                                    icon: Icons.delete_outline,
-                                    filled: false,
-                                    onPressed: () => Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (_) =>
-                                            const UserContentRemovalScreen(),
-                                      ),
-                                    ),
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Backup User Data',
-                                    icon: Icons.cloud,
-                                    filled: true,
-                                    onPressed: () =>
-                                        _showBackupUserDataDialog(context),
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Restore Backup',
-                                    icon: Icons.restore,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _showRestoreBackupDialog(context),
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Show Library Setup Again',
-                                    icon: Icons.replay_outlined,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _showLibrarySetupAgain(context),
-                                  ),
-                                ],
+                          const SizedBox(height: 12),
+                          Card(
+                            child: ListTile(
+                              leading: const Icon(Icons.groups_outlined),
+                              title: const Text('Ministry branding'),
+                              subtitle: const Text(
+                                'Enter a ministry code or keep Biblical Heritage. Your access and books stay with you.',
                               ),
-                              _UtilitiesSectionCard(
-                                key: const Key('utilities-section-elibrary'),
-                                title: 'Existing eLibrary Tools (Advanced)',
-                                helperText:
-                                    'Technical tools for storage, downloads, imports, and indexing. Most people should use Set Up My Library above instead.',
-                                actions: [
-                                  _UtilityActionButton(
-                                    label: 'eLibrary Setup',
-                                    icon: Icons.library_books_outlined,
-                                    filled: true,
-                                    onPressed: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute<void>(
-                                          builder: (_) =>
-                                              const ELibrarySetupScreen(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Download Books',
-                                    icon: Icons.download_rounded,
-                                    filled: false,
-                                    onPressed: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute<void>(
-                                          builder: (_) =>
-                                              const ELibraryDownloadScreen(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Pioneer Library',
-                                    icon: Icons.menu_book_outlined,
-                                    filled: false,
-                                    onPressed: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute<void>(
-                                          builder: (_) =>
-                                              const ImportPioneerLibraryScreen(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Library Storage',
-                                    icon: Icons.library_books_outlined,
-                                    filled: false,
-                                    onPressed: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute<void>(
-                                          builder: (_) =>
-                                              const LibraryRootSetupScreen(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Storage & Index Report',
-                                    icon: Icons.storage_rounded,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _showStorageAndIndexReport(context),
-                                  ),
-                                ],
-                              ),
-                            ],
-                            rightSections: [
-                              _UtilitiesSectionCard(
-                                key: const Key(
-                                  'utilities-section-commentary-sharing',
-                                ),
-                                title: 'Commentary & Sharing',
-                                helperText:
-                                    'Learn how commentary blocks work and share them with others.',
-                                actions: [
-                                  _UtilityActionButton(
-                                    label: 'Commentary Instructions',
-                                    icon: Icons.help_outline,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _showCommentaryInstructionsDialog(
-                                          context,
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () async {
+                                final service = _enrollment;
+                                await service.initialize();
+                                if (!context.mounted) return;
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (routeContext) =>
+                                        MinistrySetupScreen(
+                                          service: service,
+                                          initialSetup: false,
+                                          onCompleted: () =>
+                                              Navigator.of(routeContext).pop(),
                                         ),
                                   ),
-                                  _UtilityActionButton(
-                                    label: 'Community Links',
-                                    icon: Icons.public,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _showCommunityLinksDialog(context),
-                                  ),
-                                ],
-                              ),
-                              _UtilitiesSectionCard(
-                                key: const Key('utilities-section-support'),
-                                title: 'Support & More',
-                                helperText:
-                                    'Support the project and open additional study tools.',
-                                actions: [
-                                  _UtilityActionButton(
-                                    label: 'Support Biblical Heritage',
-                                    icon: Icons.volunteer_activism_outlined,
-                                    filled: true,
-                                    onPressed: () =>
-                                        _showSupportDialog(context),
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Open Bible Explorer',
-                                    icon: Icons.menu_book,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _openBibleExplorer(context),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          )
-                        else
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              _UtilitiesSectionCard(
-                                key: const Key('utilities-section-app-tools'),
-                                title: 'App Tools',
-                                helperText:
-                                    'Manage common app settings and protect your personal data.',
-                                actions: [
-                                  _UtilityActionButton(
-                                    label: 'Remove Added Data',
-                                    icon: Icons.delete_outline,
-                                    filled: false,
-                                    onPressed: () => Navigator.of(context).push(
-                                      MaterialPageRoute<void>(
-                                        builder: (_) =>
-                                            const UserContentRemovalScreen(),
-                                      ),
-                                    ),
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Backup User Data',
-                                    icon: Icons.cloud,
-                                    filled: true,
-                                    onPressed: () =>
-                                        _showBackupUserDataDialog(context),
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Restore Backup',
-                                    icon: Icons.restore,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _showRestoreBackupDialog(context),
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Show Library Setup Again',
-                                    icon: Icons.replay_outlined,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _showLibrarySetupAgain(context),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              _UtilitiesSectionCard(
-                                key: const Key('utilities-section-elibrary'),
-                                title: 'Existing eLibrary Tools (Advanced)',
-                                helperText:
-                                    'Technical tools for storage, downloads, imports, and indexing. Most people should use Set Up My Library above instead.',
-                                actions: [
-                                  _UtilityActionButton(
-                                    label: 'eLibrary Setup',
-                                    icon: Icons.library_books_outlined,
-                                    filled: true,
-                                    onPressed: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute<void>(
-                                          builder: (_) =>
-                                              const ELibrarySetupScreen(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Download Books',
-                                    icon: Icons.download_rounded,
-                                    filled: false,
-                                    onPressed: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute<void>(
-                                          builder: (_) =>
-                                              const ELibraryDownloadScreen(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Pioneer Library',
-                                    icon: Icons.menu_book_outlined,
-                                    filled: false,
-                                    onPressed: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute<void>(
-                                          builder: (_) =>
-                                              const ImportPioneerLibraryScreen(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Library Storage',
-                                    icon: Icons.library_books_outlined,
-                                    filled: false,
-                                    onPressed: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute<void>(
-                                          builder: (_) =>
-                                              const LibraryRootSetupScreen(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Storage & Index Report',
-                                    icon: Icons.storage_rounded,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _showStorageAndIndexReport(context),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              _UtilitiesSectionCard(
-                                key: const Key(
-                                  'utilities-section-commentary-sharing',
-                                ),
-                                title: 'Commentary & Sharing',
-                                helperText:
-                                    'Learn how commentary blocks work and share them with others.',
-                                actions: [
-                                  _UtilityActionButton(
-                                    label: 'Commentary Instructions',
-                                    icon: Icons.help_outline,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _showCommentaryInstructionsDialog(
-                                          context,
-                                        ),
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Community Links',
-                                    icon: Icons.public,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _showCommunityLinksDialog(context),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              _UtilitiesSectionCard(
-                                key: const Key('utilities-section-support'),
-                                title: 'Support & More',
-                                helperText:
-                                    'Support the project and open additional study tools.',
-                                actions: [
-                                  _UtilityActionButton(
-                                    label: 'Support Biblical Heritage',
-                                    icon: Icons.volunteer_activism_outlined,
-                                    filled: true,
-                                    onPressed: () =>
-                                        _showSupportDialog(context),
-                                  ),
-                                  _UtilityActionButton(
-                                    label: 'Open Bible Explorer',
-                                    icon: Icons.menu_book,
-                                    filled: false,
-                                    onPressed: () =>
-                                        _openBibleExplorer(context),
-                                  ),
-                                ],
-                              ),
-                            ],
+                                );
+                              },
+                            ),
                           ),
-                      ],
+                          if (applePurchasesEnabled &&
+                              !kIsWeb &&
+                              (defaultTargetPlatform == TargetPlatform.iOS ||
+                                  defaultTargetPlatform ==
+                                      TargetPlatform.macOS))
+                            Card(
+                              child: ListTile(
+                                leading: const Icon(
+                                  Icons.verified_user_outlined,
+                                ),
+                                title: const Text('StudyBible access'),
+                                subtitle: const Text(
+                                  'Purchase status, offer codes, and Restore Purchases',
+                                ),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        const ApplePurchaseDetailsScreen(),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          const SizedBox(height: 20),
+                          if (isTwoColumn)
+                            _UtilitiesTwoColumnDashboard(
+                              leftSections: [
+                                _UtilitiesSectionCard(
+                                  key: const Key('utilities-section-app-tools'),
+                                  title: 'App Tools',
+                                  helperText:
+                                      'Manage common app settings and protect your personal data.',
+                                  actions: [
+                                    _UtilityActionButton(
+                                      label: 'Remove Added Data',
+                                      icon: Icons.delete_outline,
+                                      filled: false,
+                                      onPressed: () => Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) =>
+                                              const UserContentRemovalScreen(),
+                                        ),
+                                      ),
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Backup User Data',
+                                      icon: Icons.cloud,
+                                      filled: true,
+                                      onPressed: () =>
+                                          _showBackupUserDataDialog(context),
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Restore Backup',
+                                      icon: Icons.restore,
+                                      filled: false,
+                                      onPressed: () =>
+                                          _showRestoreBackupDialog(context),
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Show Library Setup Again',
+                                      icon: Icons.replay_outlined,
+                                      filled: false,
+                                      onPressed: () =>
+                                          _showLibrarySetupAgain(context),
+                                    ),
+                                  ],
+                                ),
+                                _UtilitiesSectionCard(
+                                  key: const Key('utilities-section-elibrary'),
+                                  title: 'Existing eLibrary Tools (Advanced)',
+                                  helperText:
+                                      'Technical tools for storage, downloads, imports, and indexing. Most people should use Set Up My Library above instead.',
+                                  actions: [
+                                    _UtilityActionButton(
+                                      label: 'eLibrary Setup',
+                                      icon: Icons.library_books_outlined,
+                                      filled: true,
+                                      onPressed: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                const ELibrarySetupScreen(),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Download Books',
+                                      icon: Icons.download_rounded,
+                                      filled: false,
+                                      onPressed: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                const ELibraryDownloadScreen(),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Pioneer Library',
+                                      icon: Icons.menu_book_outlined,
+                                      filled: false,
+                                      onPressed: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                const ImportPioneerLibraryScreen(),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Library Storage',
+                                      icon: Icons.library_books_outlined,
+                                      filled: false,
+                                      onPressed: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                const LibraryRootSetupScreen(),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Storage & Index Report',
+                                      icon: Icons.storage_rounded,
+                                      filled: false,
+                                      onPressed: () =>
+                                          _showStorageAndIndexReport(context),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                              rightSections: [
+                                _UtilitiesSectionCard(
+                                  key: const Key(
+                                    'utilities-section-commentary-sharing',
+                                  ),
+                                  title: 'Commentary & Sharing',
+                                  helperText:
+                                      'Learn how commentary blocks work and share them with others.',
+                                  actions: [
+                                    _UtilityActionButton(
+                                      label: 'Commentary Instructions',
+                                      icon: Icons.help_outline,
+                                      filled: false,
+                                      onPressed: () =>
+                                          _showCommentaryInstructionsDialog(
+                                            context,
+                                          ),
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Community Links',
+                                      icon: Icons.public,
+                                      filled: false,
+                                      onPressed: () =>
+                                          _showCommunityLinksDialog(context),
+                                    ),
+                                  ],
+                                ),
+                                _UtilitiesSectionCard(
+                                  key: const Key('utilities-section-support'),
+                                  title: 'Support & More',
+                                  helperText:
+                                      'Support the project and open additional study tools.',
+                                  actions: [
+                                    _UtilityActionButton(
+                                      label: 'Support ${_ministry.name}',
+                                      icon: Icons.volunteer_activism_outlined,
+                                      filled: true,
+                                      onPressed: () =>
+                                          _showSupportDialog(context),
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Open Bible Explorer',
+                                      icon: Icons.menu_book,
+                                      filled: false,
+                                      onPressed: () =>
+                                          _openBibleExplorer(context),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            )
+                          else
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                _UtilitiesSectionCard(
+                                  key: const Key('utilities-section-app-tools'),
+                                  title: 'App Tools',
+                                  helperText:
+                                      'Manage common app settings and protect your personal data.',
+                                  actions: [
+                                    _UtilityActionButton(
+                                      label: 'Remove Added Data',
+                                      icon: Icons.delete_outline,
+                                      filled: false,
+                                      onPressed: () => Navigator.of(context).push(
+                                        MaterialPageRoute<void>(
+                                          builder: (_) =>
+                                              const UserContentRemovalScreen(),
+                                        ),
+                                      ),
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Backup User Data',
+                                      icon: Icons.cloud,
+                                      filled: true,
+                                      onPressed: () =>
+                                          _showBackupUserDataDialog(context),
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Restore Backup',
+                                      icon: Icons.restore,
+                                      filled: false,
+                                      onPressed: () =>
+                                          _showRestoreBackupDialog(context),
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Show Library Setup Again',
+                                      icon: Icons.replay_outlined,
+                                      filled: false,
+                                      onPressed: () =>
+                                          _showLibrarySetupAgain(context),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                _UtilitiesSectionCard(
+                                  key: const Key('utilities-section-elibrary'),
+                                  title: 'Existing eLibrary Tools (Advanced)',
+                                  helperText:
+                                      'Technical tools for storage, downloads, imports, and indexing. Most people should use Set Up My Library above instead.',
+                                  actions: [
+                                    _UtilityActionButton(
+                                      label: 'eLibrary Setup',
+                                      icon: Icons.library_books_outlined,
+                                      filled: true,
+                                      onPressed: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                const ELibrarySetupScreen(),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Download Books',
+                                      icon: Icons.download_rounded,
+                                      filled: false,
+                                      onPressed: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                const ELibraryDownloadScreen(),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Pioneer Library',
+                                      icon: Icons.menu_book_outlined,
+                                      filled: false,
+                                      onPressed: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                const ImportPioneerLibraryScreen(),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Library Storage',
+                                      icon: Icons.library_books_outlined,
+                                      filled: false,
+                                      onPressed: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                const LibraryRootSetupScreen(),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Storage & Index Report',
+                                      icon: Icons.storage_rounded,
+                                      filled: false,
+                                      onPressed: () =>
+                                          _showStorageAndIndexReport(context),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                _UtilitiesSectionCard(
+                                  key: const Key(
+                                    'utilities-section-commentary-sharing',
+                                  ),
+                                  title: 'Commentary & Sharing',
+                                  helperText:
+                                      'Learn how commentary blocks work and share them with others.',
+                                  actions: [
+                                    _UtilityActionButton(
+                                      label: 'Commentary Instructions',
+                                      icon: Icons.help_outline,
+                                      filled: false,
+                                      onPressed: () =>
+                                          _showCommentaryInstructionsDialog(
+                                            context,
+                                          ),
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Community Links',
+                                      icon: Icons.public,
+                                      filled: false,
+                                      onPressed: () =>
+                                          _showCommunityLinksDialog(context),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                _UtilitiesSectionCard(
+                                  key: const Key('utilities-section-support'),
+                                  title: 'Support & More',
+                                  helperText:
+                                      'Support the project and open additional study tools.',
+                                  actions: [
+                                    _UtilityActionButton(
+                                      label: 'Support ${_ministry.name}',
+                                      icon: Icons.volunteer_activism_outlined,
+                                      filled: true,
+                                      onPressed: () =>
+                                          _showSupportDialog(context),
+                                    ),
+                                    _UtilityActionButton(
+                                      label: 'Open Bible Explorer',
+                                      icon: Icons.menu_book,
+                                      filled: false,
+                                      onPressed: () =>
+                                          _openBibleExplorer(context),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         ),
       ),

@@ -8,6 +8,24 @@ import WatchConnectivity
 final class WatchRemoteBridge: NSObject, WCSessionDelegate {
   private static let savedStateKey = "studybible.watchRemote.lastState.v1"
   private var channel: FlutterMethodChannel?
+  // Only the explicit billing-off build may skip native verification.
+  // A missing or malformed build configuration keeps Watch playback closed.
+  static var requiresPurchaseAccess: Bool {
+    guard let url = Bundle.main.url(forResource: "StudyBibleBilling", withExtension: "plist"),
+          let data = try? Data(contentsOf: url),
+          let config = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+          let enabled = config["enabled"] as? Bool else { return true }
+    return enabled
+  }
+  private var purchaseAccessAllowed: Bool
+  func setPurchaseAccess(_ allowed: Bool) {
+    purchaseAccessAllowed = allowed
+    if !allowed { stopNativePlayer(); state["playing"] = false }
+    state["accessAllowed"] = allowed
+    if !allowed { state["error"] = "Open StudyBible on iPhone to unlock access." }
+    else { state.removeValue(forKey: "error") }
+    publishToWatch()
+  }
   private var readerAttached = false
   private var state: [String: Any]
   private var chapters: [WatchChapter]?
@@ -21,7 +39,7 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
   /// Headsets remain connected to the phone. Route system transport commands
   /// to its native recording while that recording owns playback.
   func handleMediaCommand(_ command: String) -> Bool {
-    guard player != nil else { return false }
+    guard player != nil, purchaseAccessAllowed else { return false }
     let nativeCommand = command == "play" ? "start" : command
     do { try performNative(nativeCommand) }
     catch {
@@ -32,14 +50,17 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
   }
 
 
-  override init() {
+  init(requiresPurchaseAccess: Bool = WatchRemoteBridge.requiresPurchaseAccess) {
+    purchaseAccessAllowed = !requiresPurchaseAccess
     state = UserDefaults.standard.dictionary(forKey: Self.savedStateKey) ?? [
       "book": 0, "chapter": 0, "verse": 0, "loop": "off", "lastLoop": "chapter",
       "playing": false, "title": "Open a Bible passage on iPhone",
     ]
     state["playing"] = false // A terminated process cannot still own playback.
     state["pending"] = false
-    state.removeValue(forKey: "error")
+    state["accessAllowed"] = purchaseAccessAllowed
+    if purchaseAccessAllowed { state.removeValue(forKey: "error") }
+    else { state["error"] = "Open StudyBible on iPhone to unlock access." }
     super.init()
     if WCSession.isSupported() {
       WCSession.default.delegate = self
@@ -107,6 +128,10 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
         replyHandler(self.state)
         return
       }
+      guard self.purchaseAccessAllowed else {
+        replyHandler(self.state.merging(["error": "Open StudyBible on iPhone to unlock access."]) { _, new in new })
+        return
+      }
       let bookJump = command.hasPrefix("book:") && (1...66).contains(Int(command.dropFirst(5)) ?? 0)
       let passageJump = command.hasPrefix("chapter:") || command.hasPrefix("verse:")
       guard bookJump || passageJump || ["previous:book", "previous:chapter", "previous:verse", "next:book", "next:chapter", "next:verse"].contains(command) || ["start", "stop", "pause", "toggle", "next", "previous",
@@ -157,7 +182,10 @@ final class WatchRemoteBridge: NSObject, WCSessionDelegate {
       state["chapterCount"] = all.filter { $0.book == book }.map { $0.chapter }.max() ?? 1
       state["verseCount"] = all.first { $0.book == book && $0.chapter == chapter }?.verseStarts.map { $0.verse }.max() ?? 1
     }
-    if let error = updated["error"] as? String { state["error"] = error }
+    state["accessAllowed"] = purchaseAccessAllowed
+    if !purchaseAccessAllowed {
+      state["error"] = "Open StudyBible on iPhone to unlock access."
+    } else if let error = updated["error"] as? String { state["error"] = error }
     UserDefaults.standard.set(state, forKey: Self.savedStateKey)
     publishToWatch()
     updateNowPlaying()

@@ -2,9 +2,86 @@
 
 This file tracks bugs and verification items found during manual application testing.
 
-## Open Bugs
+
+## Current review — October 20, 2026
+
+The dated current-review paragraph under each of the 33 historical entries supersedes its older status and section placement. The original descriptions and verification history are preserved. “Resolved in source/tests” does not mean newly installed, heard, or thermally verified on a physical device.
+
+Confirmed defects fixed in this working tree: title/author-only library search misses; missing full-text Top Shelf scope; unsafe metadata-only duplicate equivalence; saved pronunciations omitting shipped defaults. New mobile audio policy: full-book generation is restricted to Mac/Windows; iOS/Android tag playback consumes recordings; short note saves prepare persistent audio, and missing recordings produce a message instead of synthesis during playback. Android note speed changes reuse saved audio.
+
+Still open: source-specific verification of SL27 and the anomalous EPUB cohort, unresolved Greek/Strong's candidates, desktop long-session/recovery acceptance, physical-device note creation/playback and heat/battery checks, and release packaging/store readiness. No TestFlight upload is established by this review.
+
+Automated fixtures expecting an empty, explicitly seeded catalog now run without automatic mobile bundled-book provisioning. Existing assertions remain intact; mobile delivery remains covered separately.
+
+## Verification Needed — October 24, 2026
+
+### Clicks between verses in hashtag playback (#Sabbath99)
+
+**Report:** Dean hears frequent clicks between verses when playing a two-item hashtag: Exodus 20:8–11 with Sabbath Note 1, then Exodus 20:8–10 with Sabbath Note 2. Device/platform and reference-announcement setting have not yet been supplied. This is separate from the remote Sony silence report.
+
+**Confirmed implementation weakness:** The Qwen hashtag exporter cuts each measured verse interval directly into a PCM WAV and does not taper its endpoints. Real Apple AVAudioFile exports of Exodus 20:8–11 have nonzero boundary samples: verse 8 ends at -1044 and verse 11 at +2281 (16-bit PCM). Abrupt transitions to/from silence are a plausible source of clicks; the user's audible symptom has not been reproduced on a phone. Timing alignment itself is unchanged and is not newly certified by this work.
+
+**Local candidate, not shipped:** Shared Dart postprocessing applies a five-millisecond cosine fade to the outer edges of generated verse clips, for Android/iOS/macOS, preserving frame count, WAV metadata and interior samples. Cache identity changes from v1 to v2-soft-edges so old generated clips are not reused. Original chapter/cue recordings, stored notes and verse timing are untouched. This treats clip edges; it does not claim to cure decoder/device noises or clicks already inside recordings.
+
+**Verification:** 34 focused tests passed, including fade continuity, unchanged duration/interior, extra WAV chunks, extensible PCM, short clips, rejection of unsupported/truncated WAVs, cache identity and existing hashtag planning. Focused analysis found no issues. Four actual Apple exports of Exodus 20:8–11 passed the production Dart treatment: endpoints zero, identical frame/file lengths and byte-identical interior outside the outer five milliseconds. No listening or physical-phone acceptance claimed; no app build/install/release performed. Evidence and before/after samples are in `docs/release-evidence/2026-10-24-tag-click/`.
+
+**Follow-up from Dean:** The opening “Remember” sounds like “emember”; both ends sound clipped and some endings still click. The fade candidate has not been installed, so this is not evidence that its code caused the reported sound. Inspection of the original Exodus 20 waveform shows speech beginning near 44.129 s, before the stored verse-8 start at 44.179 s. Verse-9 speech likewise starts before its 46.840 s cut; verse 11 currently extends to 75.693 s, into sound near the next verse's opening. This strengthens the timing-boundary diagnosis: fades alone cannot restore missing phonemes or remove an included next-word fragment. Four revised clips and untouched context are staged under `timing-review/`; proposed quiet-gap boundaries at 44.100, 46.700 and 75.600 seconds are listening candidates only. The shipped catalog and source recording remain unchanged. Do not classify the fade patch as a complete fix or apply a blanket time offset to all verses.
+
+**Whole-Bible follow-up (October 24):** Dean requested checking the timing across all verses. Completed a source-hash-verified acoustic audit of all 1,189 shipped chapters and 31,102 verse starts, plus every chapter tail. All current timings are labeled unreviewed alignment estimates. A separate candidate catalog proposes 27,643 bounded quiet-gap changes; 3,002 boundaries have additional ambiguity/weak-alignment flags and 28 chapter tails have above-threshold residual sound. These are review leads, not a claim that every flagged verse is audibly defective. Do not sum the categories as disjoint groups.
+
+The audit locates sustained quiet windows near each existing estimate, rejects ambiguous alternatives and substantial forward moves, and leaves weak alignments unchanged. Proposed changes stay within 250 ms; there is no blanket offset. Six synthetic tests passed. Independent structural validation confirmed every verse identity/order, monotonic cuts, source audio hash and unrelated chapter metadata, with the original catalog unchanged. Candidate and prioritized review records are in `docs/release-evidence/2026-10-24-verse-boundary-audit/`. The scan is resumable and used two local decoding workers, with no new models or recording generation. Quiet energy alone cannot prove a gap is between verses rather than words. Word/listening review remains necessary before promotion; no candidate timings were applied to the app or installed.
+
+**Next verification:** Replay #Sabbath99 with announcements both on and off and confirm clean verse transitions without clipped consonants. Include the two notes, passage repetition, and ordinary playback speed. Keep open until heard on the affected phone.
+
+## Verification Needed — October 23, 2026
+
+### Sony Android: references play, but Bible Scripture stays silent
+
+**Report:** An existing user of the original free app updated with the bottom “Keep Current Data” choice. Bible Explorer speaks the book/chapter but not the Scripture text; hashtag playback speaks both references and text. Toggling Read aloud did not help. Sony model, Android version and installed app version are unknown.
+
+**Device evidence:** Dean's connected Samsung was updated in place to the completed 2.0.6/build 153 runtime/assets (test-signed install number 2153, preserving its October 5 first-install date). Dean confirmed Bible playback works after the same bottom choice. The separate Ministry Test app was untouched. The installation choice alone is therefore not an established cause. No actual Sony failure was reproduced.
+
+**Investigation:** Bible playback uses separate chapter/cue MediaPlayers and asynchronous seeking; hashtags use prepared verse/reference clips. A deliberately suppressed seek-complete callback makes the original bridge wait indefinitely after announcements. This is fault injection, not evidence that Sony actually loses that callback. No setting was found that intentionally enables references while muting Scripture text. Cached chapter corruption is a second unconfirmed explanation; the old path accepted any nonempty chapter cache file.
+
+**Local safeguards, not shipped:** A pending seek now times out after ten seconds of active reading with a clear error; it never resumes from a guessed verse position. Async playback exceptions and stale callbacks are guarded, and error reporting survives cleanup exceptions. Chapter cache files must match the catalog SHA-256; damaged cache is replaced atomically from verified bundled audio. Unavailable or invalid source audio reports an error and is not promoted.
+
+**Verification:** Native deterministic harness: 19 scenarios passed, including missing/late callbacks, pause/resume, rapid seeks, loops and cleanup failure. These are simulated branches, not a Sony/Android device matrix. Chapter-cache tests plus the existing narrator test: 6 passed; focused Dart analysis found no issues. Settings work below is separate from diagnosing this report. No candidate package was built, installed or released.
+
+**Remaining:** Check a next-build candidate on a physical phone, including audible announcements-to-Scripture transitions, seek/loop/speed controls and saved settings. The remote Sony report remains open until a failure is observed or that user verifies a remedy. Do not advise uninstalling to diagnose it.
+
+## Open Bugs — October 23, 2026
+
+### Existing free-user access must survive state writes and support reinstall recovery
+
+**Confirmed source gap:** A billing write could save access state before upgrade eligibility was captured. A restart in that interval could lose the “previous install” eligibility path. The existing local access record is also in Android no-backup app storage, so uninstall can remove it. The original app was free: there is no original paid purchase for Google Play Restore to recover.
+
+**Local candidate, not shipped:** Every access-state write captures existing-user eligibility. A dedicated Google Block Store marker records only established existing-free access, with cloud backup explicitly disabled and app-wide backup still disabled. Valid recovered markers restore local free access; absent or invalid markers never grant access. Existing local access remains usable if recovery is unavailable. Native startup enrolls qualifying existing users even when the Dart billing switch is off, without connecting billing or creating state for new users. If recovery is unavailable, paid Restore and an explicit trial remain available; purchases wait for a successful recovery check and the UI explains why.
+
+**Verification:** 23 JVM policy/recovery tests and 8 Flutter purchase-service tests passed. Native purchase/recovery production sources compiled against the real Android, Flutter, Billing and Block Store 16.4.0 APIs. Independent review caught and corrected a recovery-outage branch that bypassed paid Restore during an active trial. Together with audio/settings/cache checks, 77 focused tests passed; the phone render was an additional component check. No full app build or device recovery test was performed.
+
+**Limits:** The user must open the upgraded app and successfully enroll before uninstalling. Google documents same-device uninstall retention when device Backup is enabled, with package/signature isolation. This is not an account-based guarantee, does not recover an unenrolled original install, and does not establish factory-reset/cross-device recovery. Cloud upload is disabled, but Google may transfer the marker during a user-initiated device restore. No real Block Store write or uninstall/reinstall experiment was performed on Dean's app. Android source and tests are local candidates; physical same-signature recovery acceptance remains required. Official behavior: https://developer.android.com/identity/block-store.
+
+**Review artifacts:** `docs/release-evidence/2026-10-23-android-audio/` contains scoped patches, test evidence and a rendered settings preview. Preserve the pre-existing dirty checkout; these patches describe only this session's changes.
+
+## Open Bugs — October 22, 2026
+
+### Silent autoscroll incorrectly shows audio playing and can re-enable Audio Off
+
+**Release decision:** User explicitly deferred this non-blocking bug to a future bug-fix release. Keep App Store build 150 in review; do not withdraw it or create/upload build 151 for this issue now.
+
+**Reproduction:** In the Bible reader, turn Audio Off in autoscroll settings and Save. Start autoscroll. The voice transport incorrectly shows Pause although no sound plays. Tapping it sets `audioEnabled` back to true, requiring another settings change. User also requested checking eLibrary.
+
+**Cause:** Bundled Bible transport used `controller.isScrolling` as audio-playing state, then unconditionally enabled audio when pressed with Audio Off. Generated-voice fallback controls could also change the saved preference.
+
+**Local candidate, not shipped:** Shared `ReaderNarrationButton` only represents narration when Audio is On, displays a disabled Audio off control otherwise, never edits audio preferences, and rechecks Audio Off before invoking a stale play callback. Applied to bundled/generated Bible controls and generated eLibrary voice controls. Recorded eLibrary playback uses its own player state and does not change this saved preference. Watch remote behavior remains separate.
+
+**Verification:** Five new transport widget regressions plus existing scrolling/settings/media suites: 37 tests pass (`/tmp/studybible-silent-autoscroll-tests.log`). Targeted analysis has no errors; one pre-existing unused `local_settings_store.dart` import remains in the Bible screen. No package built, installed, or uploaded for this candidate; no physical-device acceptance claimed. Existing dirty changes preserved; pre-edit reader files saved under `/tmp/studybible-silent-autoscroll-before/`.
+
+## Historical Open Bugs
 
 ### 1. New hashtag categories are not retained/recognized immediately
+
+**Current review (2026-10-20):** Resolved in source/tests; prior Android verification retained. Category and import-category regression tests pass; fresh device acceptance is separate.
 
 **Area:** Hashtags / Categories
 
@@ -39,6 +116,8 @@ Do not require an existing hashtag membership before a category becomes recogniz
 
 ### 2. Remove nuisance success notification after hashtag category changes
 
+**Current review (2026-10-20):** Resolved in source. Category changes no longer show routine success notices; error notices remain. Fresh device acceptance is separate.
+
 **Area:** Hashtags / UI notifications
 
 **Status:** Fixed on Android
@@ -67,6 +146,8 @@ The desired general rule is: **silent on ordinary success, notify on failure or 
 ---
 
 ### 6. TOC navigation not scrolling to selected chapter
+
+**Current review (2026-10-20):** Resolved in source/tests. Canonical navigation drains the changing window before locating the selected chapter. Reader navigation tests pass; fresh device acceptance is separate.
 
 **Area:** eLibrary / Table of Contents navigation
 
@@ -107,6 +188,8 @@ Verify several Early Writings entries near the beginning, middle, and end on mac
 
 ### 7. Canonical EPUB reader eligibility check accepts any EPUB with a relative path, not just managed-folder paths
 
+**Current review (2026-10-20):** Closed as superseded policy. Any valid EPUB with a path intentionally uses the shared reader, including imported books. Eligibility tests cover this; managed-folder-only behavior is not the current requirement.
+
 **Area:** eLibrary / canonical reader routing (`lib/features/library/presentation/canonical_library_reader.dart`)
 
 **Status:** Open. Found 2026-09-03 during the SL27 provenance follow-up (see `docs/pioneer_import_refactor.md`); not fixed — flagged only, per that investigation's read-only scope.
@@ -139,6 +222,8 @@ Both report `Expected: false / Actual: true`.
 
 ### 8. `_retireLegacySameTitleEpubRows` silently retires unrelated `pioneer_epub_import` rows by exact title match during captured-HTML import
 
+**Current review (2026-10-20):** Resolved in source/tests. Import retirement requires source identity/fingerprint evidence; exact title alone is insufficient. Pioneer text-import regression tests pass.
+
 **Area:** Pioneer import pipeline (`lib/features/utilities/data/pioneer_text_import_service.dart`)
 
 **Status:** Fixed 2026-09-05. `_retireLegacySameTitleEpubRows` no longer matches on `LOWER(title)`; it now only retires a `pioneer_epub_import` row when it carries the incoming work's `source_work_id`, or when its stored `pioneer_source_fingerprint` (sha256 of the file bytes) equals the sha256 of the bytes just imported — i.e. only a provable same-identity or byte-identical row can be retired, never a same-titled but unrelated one. No other call site in the codebase used title-only matching for a retirement/overwrite decision.
@@ -166,6 +251,8 @@ There is no check that the matched row is actually the same physical file, editi
 
 ### 9. `elibrary_catalog_duplicate_repair_service.dart`'s `_equivalent` falls back to title/author/file-name matching when `source_work_id`/`source_package_id` are both empty
 
+**Current review (2026-10-20):** Resolved in this change. Duplicate repair now requires matching source identity or valid content hashes and rejects conflicting identities/hashes. New regressions preserve same-title distinct books and their links.
+
 **Area:** Startup-time catalog repair (`lib/features/utilities/data/elibrary_catalog_duplicate_repair_service.dart:320-350`)
 
 **Status:** Open. Logged 2026-09-05 alongside the entry 8 fix, same false-match shape (two rows treated as the same work by title/author/file-name alone when neither has a `source_work_id`/`source_package_id`), but this is a separate, startup-time repair path — not touched as part of that fix. Not fixed, flagged only.
@@ -177,6 +264,8 @@ There is no check that the matched row is actually the same physical file, editi
 ---
 
 ### 10. `PioneerTextImportService`'s non-EPUB-bulk import paths never assigned a cover for a brand-new row
+
+**Current review (2026-10-20):** Resolved in source/tests. New non-bulk import paths assign covers. Pioneer import regression tests pass.
 
 **Area:** Pioneer import pipeline (`lib/features/utilities/data/pioneer_text_import_service.dart`)
 
@@ -193,6 +282,8 @@ There is no check that the matched row is actually the same physical file, editi
 ---
 
 ### 11. `_extractHtmlBlocks` failed to strip the real `<span class="refcode">{...}</span>` marker, showing every ref code twice
+
+**Current review (2026-10-20):** Resolved in source/tests. Actual refcode span markers are removed from body text while retained as source references. Canonicalizer tests pass.
 
 **Area:** Pioneer import pipeline (`lib/features/utilities/data/pioneer_text_import_service.dart`)
 
@@ -214,6 +305,8 @@ Net effect: every paragraph's visible text ended with its own bracketed ref code
 ---
 
 ### 12. Single-spine-file EPUBs (e.g. SL27) had every chapter's content misattributed to whichever heading the parser found first ("INTRODUCTION" bled into "APPENDIX A" and every other chapter)
+
+**Current review (2026-10-20):** Resolved in parser source/tests. Single-spine headings are split into their own sections; this does not establish that every historical installed copy was rebuilt.
 
 **Area:** Two independently-duplicated pipelines, same root cause —
 `LibraryDocumentCanonicalizer._readSections()`
@@ -317,6 +410,8 @@ the SL27 item the user re-tested against.
 
 ### 13. The research pipeline (`library_text_blocks`/`library_navigation_items`) had no version/staleness gate at all — already-indexed items were skipped forever, never picking up parsing-logic fixes like entry 12's
 
+**Current review (2026-10-20):** Historical source fix retained. Version/staleness checks exist; no fresh live-catalog migration was performed in this pass. Any affected installed copy still needs verification.
+
 **Area:** `lib/features/reader/data/commentary_research_library_service.dart` +
 `commentary_research_library_service_epub_indexing.dart`,
 `lib/core/database/elibrary_schema.dart`.
@@ -384,6 +479,8 @@ It does **not** reach SL27 — see entry 15.
 
 ### 14. Critical: reusing `PioneerEpubNavigationParser` for entry 12's fix would have shredded ~98 ordinary, correctly-structured EGW EPUBs into fake page-fragment "sections" the first time anyone reindexed the catalog — caught before any live reindex ran
 
+**Current review (2026-10-20):** Resolved preventive fix in source/tests. Existing EPUB parsing remains separate from the unsafe universal splitter. Canonical-generation regressions pass; no bulk live reindex performed.
+
 **Area:** `lib/features/utilities/data/pioneer_epub_inspection_parser.dart`
 (`PioneerEpubNavigationParser.parse`), which entry 12's
 `EpubInternalAnchorSectionSplitter` and the existing
@@ -447,6 +544,8 @@ was even attempted.
 ---
 
 ### 15. SL27's actual content pipeline is `PioneerTextImportService.importLocalEpubFile`, not the research pipeline entry 13's version gate covers — the requested SL27 live reindex was not performed
+
+**Current review (2026-10-20):** UNRESOLVED verification: the original installed SL27 copy has not been reindexed or checked in this pass. Parser tests alone cannot establish its live data state.
 
 **Area:** Cross-pipeline identity — `library_items.file_format`/
 `relative_path` for SL27 vs. what `CommentaryResearchLibraryService`'s
@@ -512,6 +611,8 @@ was made to the live database**; it is byte-identical to that backup.
 
 ### 16. A handful of single-chapter-file Pioneer EPUBs canonicalize to just 1 block (or lose over half their blocks) under version 12 — separate from entry 12's fix
 
+**Current review (2026-10-20):** Verified against all seven original EPUBs using canonicalizer v43 in an isolated temporary database. The six historical single-block titles now produce 48–373 blocks, preserving every non-whitespace body character in source order. The Ten Commandments produces 128 blocks and preserves the complete body after excluding standalone print-page labels 2–32 from reading text. No missing prose was found in these current conversions. The inspected Mac catalog still holds the six single-block v12 generations and a 129-block v13 Ten Commandments generation; live library refresh and reader/device verification remain pending. No live catalog or original EPUB was changed. See the Pioneer comparison in `docs/bug-fixes-and-mobile-audio-build132.md`. Follow-up: fresh public downloads of The Rich Man and Lazarus and History of the Sabbath imported successfully through the installed Android Import Book workflow. Rich Man opening/ending and its single Contents jump were checked; History preserved nested Contents and Chapter 2 navigation, with Chapter 13 subsequently confirmed by the user. The initial later-jump observation was confounded by concurrent phone control and is not classified as a confirmed defect. This does not establish a refresh of the older Mac copies or all-title acceptance.
+
 **Area:** `LibraryDocumentCanonicalizer` (`lib/features/library/data/library_document_canonicalizer.dart`), `pioneer_epub_import` source titles.
 
 **Status:** Open — parsing-defect candidate, not yet diagnosed or fixed.
@@ -538,6 +639,8 @@ All six "1 block" titles' source EPUBs were checked structurally (archive listin
 
 ### 3. eLibrary search results may return too few matches
 
+**Current review (2026-10-20):** Resolved in source/tests, with additional search fixes in this change. Text, title, author, and catalog metadata matches obey collection scope and Top Shelf. Body hits retain exact paragraph targets; metadata-only results open the book.
+
 **Area:** eLibrary Search
 
 **Status:** Fixed on Android
@@ -561,6 +664,8 @@ Do not change search logic unless the problem can still be reproduced.
 
 ### 4. Search-result hit text bolding
 
+**Current review (2026-10-20):** Historical fix retained; source renders highlighted matches. Fresh device visual acceptance is still required.
+
 **Area:** eLibrary Search UI
 
 **Status:** Verified on Android
@@ -580,6 +685,8 @@ If current behavior is already correct, mark this item fixed rather than making 
 ---
 
 ### 5. Reference codes in eLibrary search results
+
+**Current review (2026-10-20):** Resolved in source/tests. Available source reference codes are retained; missing source codes are not invented.
 
 **Area:** eLibrary Search UI
 
@@ -603,6 +710,8 @@ If current behavior is correct, mark this item fixed.
 
 ### 17. Canonical EPUB Contents jumps can land on the wrong visual chapter while the reader's virtualized block window is changing
 
+**Current review (2026-10-20):** Resolved in source/tests. Contents window movement, distant source links, illustration navigation, and stable saved reading positions pass their current widget checks.
+
 **Area:** Canonical EPUB reader (`canonical_library_reader.dart`, `library_document_controller.dart`).
 
 **Status:** Open — diagnosed read-only 2026-09-07; no code or live-data change made.
@@ -621,6 +730,8 @@ If current behavior is correct, mark this item fixed.
 
 ### 18. Shipped default narration pronunciations never reach a user who has saved anything in the Pronunciations editor
 
+**Current review (2026-10-20):** Resolved in this change. Legacy saved custom rules merge shipped defaults. Versioned saves record intentionally removed defaults, and deferred fallback snapshots remain exact. Pronunciation regressions pass.
+
 **Area:** Narration pronunciations (`lib/features/reader/presentation/narration_pronunciation.dart`, Pronunciations editor in `bible_explorer_screen.dart`).
 
 **Status:** Open — logged 2026-09-20; deliberately not fixed in the 2.0.5+56 build.
@@ -632,6 +743,8 @@ If current behavior is correct, mark this item fixed.
 ---
 
 ### 19. Tag playback still uses the old flat pacing: no lead-aware catch-up, so a long locked-screen tag session can drain its lead
+
+**Current review (2026-10-20):** Superseded on mobile by saved-audio playback policy in this change. Tags may not synthesize on cache miss; note preparation occurs on save. Desktop lead pacing and long-session listening still need device acceptance; no thermal guarantee is claimed.
 
 **Area:** Tag playback (`lib/features/reader/presentation/tag_playback/`), `SynthesisGovernor` (`lib/core/audio/synthesis_governor.dart`), `NarrationLeadRegistry`.
 
@@ -647,6 +760,8 @@ If current behavior is correct, mark this item fixed.
 
 ### 20. Governor has no priority for the awaited clip: jobs queued for the old position run before the clip the listener is waiting for
 
+**Current review (2026-10-20):** Partially mitigated, not a blanket closure. Cancelled stale speech jobs are skipped and obsolete note revisions are rejected before rendering. Mobile playback does not enqueue synthesis. General desktop queue priority and long-session responsiveness remain verification items.
+
 **Area:** `SynthesisGovernor.run` (strict FIFO `_tail` chain, no cancel or priority); `kokoro_mac_test_narrator.dart` (`_prepared` look-ahead, `prefetchAhead()` = 12 on iOS); `TagPlaybackController` (`_moveTo`, `_resetAhead`, `_discardSlot`).
 
 **Status:** Open — logged 2026-09-21; deliberately not built.
@@ -661,6 +776,8 @@ If current behavior is correct, mark this item fixed.
 
 ### 21. Engine rebuild is limited to a single retry on both paths
 
+**Current review (2026-10-20):** UNRESOLVED recovery limit: a bounded retry remains intentional in the current engine. No new physical-device recovery claim is made. Mobile saved-audio playback removes this engine dependency during listening, but note generation can still report preparation failure.
+
 **Area:** `KokoroMacTestNarrator._synthesize` (`attempt >= 2` rethrows) and `SynthesisHealthMonitor` (`_rebuilt` / `_saidNoRetry`, one rebuild until `healthyJobsToRearm` healthy jobs).
 
 **Status:** Open — logged 2026-09-21; deliberately not built.
@@ -674,6 +791,8 @@ If current behavior is correct, mark this item fixed.
 ## Fixed
 
 ### Pioneer EPUB imports (`pioneer_epub_import_id_*`): navigation tree and search text blocks never built
+
+**Current review (2026-10-20):** Historical repair retained. Import and canonical-generation regressions pass; no blanket claim about every installed Pioneer item is made.
 
 **Area:** Pioneer EPUB import pipeline (`library_acquisition_orchestrator.dart`, `pioneer_archive_org_install_service.dart`)
 
@@ -712,6 +831,8 @@ Every Pioneer EPUB import (`import_pioneer_library_screen.dart`'s bulk folder im
 
 ### Pioneer archive.org downloads: every book corrupted (no real text, no navigation), plus duplicate library entries
 
+**Current review (2026-10-20):** Historical repair retained. EPUB validation/import tests pass. The old all-books-corrupt description is not a freshly reproduced defect; individual historical downloads still require source-specific verification.
+
 **Area:** Pioneer EPUB import pipeline (`pioneer_archive_org_install_service.dart`, `pioneer_epub_folder_inventory_service.dart`)
 
 **Status:** Fixed (code + live data repair), 2026-08-30.
@@ -731,6 +852,8 @@ Every Pioneer EPUB import (`import_pioneer_library_screen.dart`'s bulk folder im
 ---
 
 ### eLibrary Contents showing no nesting or current-location highlight for EGW official EPUBs (Early Writings, etc.)
+
+**Current review (2026-10-20):** Resolved in source/tests. Authored navigation depth and the current selection are represented by the canonical reader. Reader regressions pass; physical-device visual acceptance is separate.
 
 **Area:** eLibrary / canonical reader Contents dialog
 
@@ -757,6 +880,8 @@ Also inconsistent: a few sub-headings detected by the canonicalizer's *heuristic
 ---
 
 ### eLibrary TOC (legacy reader) showing no nesting at all for books with real sub-chapters (Early Writings, SDA Bible Commentary, etc.)
+
+**Current review (2026-10-20):** Resolved in source/tests. Legacy navigation-tree tests preserve real hierarchy.
 
 **Area:** eLibrary / Table of Contents navigation (legacy `library_book_reader_screen.dart` / `library_contents_popup.dart` — used as the canonical-reader fallback, and for any book not yet eligible for canonical)
 
@@ -785,6 +910,8 @@ Books whose real embedded TOC/navMap has genuine multi-level nesting — e.g. Ea
 ---
 
 ### eLibrary TOC showing front matter interleaved with chapters ("scrambled" ordering)
+
+**Current review (2026-10-20):** Resolved in source/tests. Navigation tests preserve authored/spine order and front matter. Installed-book verification remains source-specific.
 
 **Area:** eLibrary / Table of Contents navigation
 
@@ -842,6 +969,8 @@ query in the repair script before assuming it's needed.
 
 ### Cross-reference popup ignored Bible Reader font size
 
+**Current review (2026-10-20):** Resolved in source/tests with prior Android proof retained. Popup text follows reader font scale; cross-reference widget tests pass.
+
 **Area:** Bible Reader / Cross References
 
 **Status:** Fixed
@@ -855,6 +984,8 @@ This was corrected so cross-reference text now follows the current reader font s
 ---
 
 ### NT duplicate Greek/Strong's assignment import bug
+
+**Current review (2026-10-20):** The confirmed duplicate-assignment defect was already repaired. Remaining flagged Greek/Strong's cases are unverified data-review candidates, not confirmed current bugs or evidence of broken word-detail taps. A physical Android check of Revelation 9:19, tapping “power,” correctly opened the displayed exousia / G1849 details. The user confirms this interaction has worked for a long time. No assignment changes are justified by this check; any remaining candidate requires source evidence before classification or repair.
 
 **Area:** Bible text database / Greek / Strong's
 
@@ -877,6 +1008,8 @@ The remaining 955 findings include split/joined Greek forms, tagging conventions
 ---
 
 ### eLibrary Setup screen: scrambled sections and unreadable/indeterminate progress bar
+
+**Current review (2026-10-20):** Resolved in source/tests. Setup section ordering, indexing dialogs, and download progress tests pass. Fresh physical-device layout acceptance is separate.
 
 **Area:** eLibrary Setup (`lib/features/utilities/presentation/elibrary_setup_screen.dart`)
 
@@ -923,6 +1056,8 @@ Windows and Linux desktop builds could not be attempted in this environment at a
 ---
 
 ### Pioneer EPUB standalone print-page blocks split reading flow
+
+**Current review (2026-10-20):** Resolved in source/tests with historical rollout evidence retained. Standalone page markers no longer interrupt flow. No new live-catalog-wide rebuild was performed.
 
 **Area:** Canonical EPUB import (`library_document_canonicalizer.dart`)
 
@@ -1004,6 +1139,8 @@ pending Dean's explicit approval for any live re-canonicalization.
 
 ### Inline formatted-text node boundaries drop spaces and fuse words
 
+**Current review (2026-10-20):** Superseded by the final v15 inline-whitespace entry below. Canonicalizer regressions pass; original text and the historical report are retained.
+
 **Area:** Canonical EPUB import/rendering (`library_document_canonicalizer.dart`)
 
 **Status:** Fixed in code and rehearsed on scratch only 2026-09-07; full
@@ -1045,6 +1182,8 @@ generation.
 
 ### Reference-code rendering verification for a title with source data
 
+**Current review (2026-10-20):** Closed as verification, not a defect. Reference codes render when the source contains them; titles lacking source codes should not receive invented codes.
+
 **Area:** Canonical EPUB reader (`canonical_library_reader.dart`)
 
 **Status:** Verified; no defect found and no Item 2 code change made.
@@ -1058,6 +1197,8 @@ generation.
 ---
 
 ### 17. Inline formatted-text node boundaries drop spaces and fuse words — v15 fix and rehearsal
+
+**Current review (2026-10-20):** Resolved in source/tests with historical isolated rehearsal retained. Inline formatting preserves word boundaries; current canonicalizer regressions pass. Fresh installed-cohort acceptance is separate.
 
 **Area:** Canonical EPUB import/rendering (`library_document_canonicalizer.dart`)
 

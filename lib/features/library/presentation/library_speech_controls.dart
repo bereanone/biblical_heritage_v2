@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:convert';
+import '../../../core/audio/local_narration_policy.dart';
 import 'package:flutter/material.dart';
 import '../../../core/audio/narration_diagnostics.dart';
 import '../../../core/theme/app_settings_service.dart';
@@ -7,6 +7,7 @@ import '../../reader/presentation/kokoro_mac_test_narrator.dart';
 import '../../reader/presentation/narration_pronunciation.dart';
 import '../../reader/presentation/pronunciation_editor.dart';
 import 'mac_reader_autoscroll_controller.dart';
+import 'reader_narration_button.dart';
 import 'library_narration_media_controls.dart';
 import 'library_speech_queue.dart';
 import 'recorded_library_audio_controls.dart';
@@ -125,6 +126,10 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
       await recorded.playFromParagraph(cursor);
       return;
     }
+    if (!LocalNarrationPolicy.canGenerateBooks) {
+      _failed('Download a recording for this book to listen on this device.');
+      return;
+    }
     await _queue.stop();
     if (!mounted) return;
     final c = widget.controller;
@@ -180,6 +185,11 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
       load: _segments.load,
       reveal: (item) => widget.reveal(item),
       speak: (item) async {
+        if (!LocalNarrationPolicy.canGenerateBooks) {
+          throw const SavedAudioUnavailable(
+            'Download a recording for this book to listen on this device.',
+          );
+        }
         final session = _session;
         final speed = widget.controller.speechRate;
         if (_firstSegment) {
@@ -315,6 +325,14 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
           _queue.running) {
         return;
       }
+      // A restored audio preference or a remote command must not bypass the
+      // same restriction as the visible controls. Recorded playback has its
+      // own controls and never starts this synthesis queue.
+      if (_recordedPackage != null) return;
+      if (!LocalNarrationPolicy.canGenerateBooks) {
+        _failed('Download a recording for this book to listen on this device.');
+        return;
+      }
       ++_session;
       _firstSegment = true;
       final cursor = _requestedParagraph ?? widget.initialCursor();
@@ -380,7 +398,7 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
         onSave: (rules) async {
           await AppSettingsService.instance.saveRawSetting(
             'narration_pronunciations_v1',
-            jsonEncode(rules),
+            encodeNarrationPronunciations(rules),
           );
           _narrator.pronunciationCorrections = Map.of(rules);
           saved = true;
@@ -439,45 +457,24 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
         },
       );
     }
+    if (!LocalNarrationPolicy.canGenerateBooks) {
+      return const SizedBox.shrink();
+    }
     if (!c.audioEnabled) {
       return Align(
         alignment: Alignment.centerLeft,
-        child: TextButton.icon(
-          icon: const Icon(Icons.volume_up_outlined),
-          label: const Text('Read aloud'),
-          onPressed: () {
-            c.stopForManualInteraction();
-            c.updatePreferences(
-              MacAutoscrollPreferences(
-                baseSpeed: c.baseSpeed,
-                lastNonzeroStep: c.lastNonzeroStep,
-                maximumStep: c.maximumStep,
-                statusBannerMode: c.statusBannerMode,
-                audioEnabled: true,
-                announceChapter: c.announceChapter,
-                announceVerseNumbers: c.announceVerseNumbers,
-                speechRate: c.speechRate,
-              ),
-            );
-            c.setSignedStep(1);
-          },
-        ),
+        child: ReaderNarrationButton(controller: c),
       );
     }
     return SizedBox(
       height: 64,
       child: Row(
         children: [
-          TextButton.icon(
-            label: const Text('Voice'),
-            onPressed: () {
-              if (c.isScrolling) {
-                c.stopForManualInteraction();
-              } else {
-                c.setSignedStep(1);
-              }
-            },
-            icon: Icon(c.isScrolling ? Icons.pause : Icons.play_arrow),
+          ReaderNarrationButton(
+            controller: c,
+            playLabel: 'Voice',
+            pauseLabel: 'Voice',
+            onPause: c.stopForManualInteraction,
           ),
           Expanded(
             child: Slider(

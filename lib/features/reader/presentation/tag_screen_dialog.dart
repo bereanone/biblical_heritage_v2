@@ -10,6 +10,7 @@ import 'tag_dialog_hash_tab.dart';
 import 'tag_dialog_models.dart';
 import 'tag_dialog_styles.dart';
 import 'tag_detail_screen_launcher.dart';
+import 'tag_detail_screen.dart' show showHashTagNoteEditor;
 import 'tag_quick_apply_helper.dart';
 import 'tag_trash_dialog.dart';
 import 'viewer_passage_models.dart';
@@ -784,6 +785,7 @@ class _HashTagDialogState extends State<HashTagDialog>
           content: Text(
             '$_tagLabel tags collect verse references into reusable lists. '
             'Use Tag Verse to add the current verse or range. '
+            'For hashtags, Add Note beside it creates a note in the selected list, even when the list is empty. '
             'Tap a tag line to open the verse list on the next screen. '
             'Choose a folder, then use Folder filter ON to show only that folder; OFF shows all folders. Choosing a folder alone does not turn filtering on. The circular arrow beside Folder clears the selected list and folder filter and reloads the full view; it does not delete or reset saved data. '
             'To move a list, open it and choose List settings, then Folder. List settings also sets the display aspect ratio for every scripture, note, and image slide in that list. '
@@ -1227,6 +1229,28 @@ class _HashTagDialogState extends State<HashTagDialog>
     );
   }
 
+  Future<void> _addNoteToCurrentTag() async {
+    final tag = _currentTag;
+    if (tag.isEmpty) {
+      await _showNoTagSelectedDialog();
+      return;
+    }
+    setState(() => _working = true);
+    try {
+      final saved = await showHashTagNoteEditor(
+        context,
+        repository: _repository,
+        tag: tag,
+        category: _selectedCategory,
+        fontScale: widget.fontScale,
+      );
+      if (!mounted || saved != true) return;
+      await _reloadSelectedTag(tag, category: _selectedCategory);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
   Future<void> _openSummaryDetails(HashTagSummary summary) async {
     final previousDefault = _defaultTag;
     final changed = await showHashTagDetailPopup(
@@ -1590,6 +1614,7 @@ class _HashTagDialogState extends State<HashTagDialog>
                 _recomputeBrowseViews();
               }),
               onOpenSummaryDetails: _openSummaryDetails,
+              onAddNote: _addNoteToCurrentTag,
             ),
           ),
         ],

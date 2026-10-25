@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../core/bootstrap/library_root_service.dart';
+import '../../../core/database/elibrary_database.dart';
+import '../../library/data/library_document_repository.dart';
+import '../../library/presentation/canonical_library_reader.dart';
 import '../../library/data/library_catalog_service.dart';
 import '../../library/data/library_search_navigation_target.dart';
 import '../../library/presentation/library_book_reader_screen.dart';
@@ -698,11 +701,9 @@ Future<void> _openEpubSource(
   CommentaryResearchMatchItem match,
 ) async {
   final selection = await LibraryRootService.instance.loadSelection();
-  final rootPath = selection.exists
-      ? selection.path?.trim() ?? ''
-      : (await LibraryRootService.instance.accessibleLibraryRootPath())
-                ?.trim() ??
-            '';
+  final rootPath =
+      (await LibraryRootService.instance.accessibleLibraryRootPath())?.trim() ??
+      (selection.exists ? selection.path?.trim() ?? '' : '');
   if (!context.mounted) return;
 
   if (rootPath.isEmpty) {
@@ -732,7 +733,19 @@ Future<void> _openEpubSource(
   if (!context.mounted) return;
 
   final resolvedFilePath = p.join(rootPath, sourceTarget.item.relativePath);
-  if (!File(resolvedFilePath).existsSync()) {
+  final source = File(resolvedFilePath);
+  final hasSource = await source.exists();
+  final canOpen =
+      hasSource ||
+      await commentaryEpubSourceIsReadable(
+        item: sourceTarget.item,
+        source: source,
+        repository: LibraryDocumentRepository(
+          await ELibraryDatabase.instance.database,
+        ),
+      );
+  if (!context.mounted) return;
+  if (!canOpen) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Source EPUB location is not available for this result.'),
@@ -768,6 +781,19 @@ Future<void> _openEpubSource(
       ),
     );
   }
+}
+
+/// A storage policy may remove the raw EPUB after preserving its prepared
+/// document. Match the reader's availability rule instead of requiring both.
+@visibleForTesting
+Future<bool> commentaryEpubSourceIsReadable({
+  required LibraryCatalogItem item,
+  required File source,
+  required LibraryDocumentRepository repository,
+}) async {
+  if (await source.exists()) return true;
+  return supportsCanonicalDocumentReader(item) &&
+      await repository.isComplete(item.id);
 }
 
 Future<_ResolvedSourceEpubTarget?> _resolveSourceEpubTarget(

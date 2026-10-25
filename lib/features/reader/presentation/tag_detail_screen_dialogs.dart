@@ -5,10 +5,12 @@ class _ContentItemDialog extends StatefulWidget {
     required this.repository,
     required this.tag,
     required this.fontScale,
+    this.category,
   });
 
   final HashTagRepository repository;
   final String tag;
+  final String? category;
   final double fontScale;
 
   @override
@@ -50,9 +52,8 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
   }
 
   void _showSnack(String message) {
-    ScaffoldMessenger.maybeOf(
-      context,
-    )?.showSnackBar(SnackBar(content: Text(message)));
+    if (!mounted) return;
+    showNoteEditorFeedback(context, message);
   }
 
   TextStyle _noteBaseStyle(ThemeData theme) {
@@ -180,6 +181,18 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
     );
   }
 
+  Future<void> _chooseImage() async {
+    if (_saving) return;
+    try {
+      final image = await pickNoteImage();
+      if (image == null || !mounted) return;
+      await _stageImageBytes(image.bytes, image.mimeType);
+      if (mounted) setState(() {});
+    } catch (_) {
+      if (mounted) _showSnack('Could not open this image. Please try another picture.');
+    }
+  }
+
   Future<void> _pasteImageFromClipboard() async {
     if (_saving) return;
     final copiedImage=await NoteImageClipboard.read();
@@ -298,6 +311,8 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
   String _extensionForMimeType(String mimeType) {
     return switch (mimeType.trim().toLowerCase()) {
       'image/jpeg' => '.jpg',
+      'image/heic' => '.heic',
+      'image/heif' => '.heif',
       'image/jpg' => '.jpg',
       'image/png' => '.png',
       'image/gif' => '.gif',
@@ -393,6 +408,7 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
     try {
       final inserted = await widget.repository.insertNoteItem(
         tag: widget.tag,
+        category: widget.category,
         noteText: noteText,
         referenceCode: referenceCode,
         noteFormatJson: noteFormatJson,
@@ -506,7 +522,7 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
     final outlineColor = TagDialogStyles.outlineColor(theme);
     return AlertDialog(
       title: Text(
-        'Add Content Item',
+        'Add note to ${widget.tag}',
         style: TagDialogStyles.titleTextStyle(
           theme,
           widget.fontScale,
@@ -695,8 +711,9 @@ class _ContentItemDialogState extends State<_ContentItemDialog> {
                       ],
                     ),
                     const SizedBox(height: 4),
+                    Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _saving ? null : _chooseImage, icon: const Icon(Icons.photo_library_outlined), label: const Text('Choose Image'))),
                     Text(
-                      'Paste an image from the clipboard. It will be copied into the app media folder.',
+                      'Choose a saved image or paste from the clipboard. The image is copied into the app media folder.',
                       style: TagDialogStyles.bodyTextStyle(
                         theme,
                         widget.fontScale,
@@ -1072,14 +1089,15 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
   }
 
   void _showSnack(String message) {
-    ScaffoldMessenger.maybeOf(
-      context,
-    )?.showSnackBar(SnackBar(content: Text(message)));
+    if (!mounted) return;
+    showNoteEditorFeedback(context, message);
   }
 
   String _extensionForMimeType(String mimeType) {
     return switch (mimeType.trim().toLowerCase()) {
       'image/jpeg' => '.jpg',
+      'image/heic' => '.heic',
+      'image/heif' => '.heif',
       'image/jpg' => '.jpg',
       'image/png' => '.png',
       'image/gif' => '.gif',
@@ -1183,6 +1201,18 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
     return true;
   }
 
+  Future<void> _chooseImage() async {
+    if (_saving) return;
+    try {
+      final image = await pickNoteImage();
+      if (image == null || !mounted) return;
+      await _stageImageBytes(image.bytes, image.mimeType);
+      if (mounted) setState(() {});
+    } catch (_) {
+      if (mounted) _showSnack('Could not open this image. Please try another picture.');
+    }
+  }
+
   Future<void> _pasteImageFromClipboard() async {
     if (_saving) return;
     final copiedImage=await NoteImageClipboard.read();
@@ -1250,11 +1280,18 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
     if (_media.isEmpty) return;
     final preset = widget.presentationAspect;
     final original = _imageLayout ?? const NoteImageLayout();
-    final initial = NoteImageLayout.fromJson({...original.toJson(), 'aspect_ratio': preset.aspectRatio ?? 16 / 9});
+    final previewText = _isBibleItem ? _displayTextController.text : _noteController.text;
+    final citation = _displayCitationController.text.trim();
+    final initial = NoteImageLayout.fromJson({
+      ...original.toJson(),
+      'aspect_ratio': preset.aspectRatio ?? 16 / 9,
+      if (_isBibleItem && original.footer.trim().isEmpty)
+        'footer': citation.isEmpty ? widget.canonicalReferenceLabel : citation,
+    });
     final result = await showNoteImageLayoutEditor(context,
       images: _media.map((media) => media.bytes).toList(),
-      text: _noteController.text,
-      formatJson: _blockAlignments.withFormat(presentationTextFormatJsonForText(text: _noteController.text, format: _noteFormat)),
+      text: previewText,
+      formatJson: _blockAlignments.withFormat(presentationTextFormatJsonForText(text: previewText, format: _isBibleItem ? _displayTextFormat : _noteFormat)),
       initial: initial,
     );
     if (!mounted || result == null) return;
@@ -1352,7 +1389,7 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
 
       final createdFiles = <File>[];
       try {
-        await widget.repository.deleteMediaAttachmentsForEntry(widget.entry.id);
+        await widget.repository.deleteMediaAttachmentsForEntry(widget.entry.id, normalized: widget.entry.isNormalized);
         await _deleteMediaFilesForRefs(widget.entry.mediaRefs);
         for (var index = 0; index < _media.length; index++) {
           final attachment = _media[index];
@@ -1360,6 +1397,7 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
           createdFiles.add(File(persisted.absolutePath));
           await widget.repository.addMediaAttachment(
             entryId: widget.entry.id,
+            normalized: widget.entry.isNormalized,
             relativePath: persisted.relativePath,
             mimeType: persisted.mimeType,
             fileSize: persisted.fileSize,
@@ -1871,8 +1909,8 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                 ),
               ],
               const SizedBox(height: 14),
-              ExpansionTile(
-                title: const Text('More options'),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Container(
                     width: double.infinity,
@@ -1915,8 +1953,9 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                           ],
                         ),
                         const SizedBox(height: 4),
+                        Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _saving ? null : _chooseImage, icon: const Icon(Icons.photo_library_outlined), label: const Text('Choose Image'))),
                         Text(
-                          'Paste an image from the clipboard. It will be copied into the app media folder.',
+                          'Choose a saved image or paste from the clipboard. The image is copied into the app media folder.',
                           style: TagDialogStyles.bodyTextStyle(
                             theme,
                             widget.fontScale,
@@ -1924,7 +1963,7 @@ class _EditEntryNoteDialogState extends State<_EditEntryNoteDialog> {
                             height: 1.25,
                           ),
                         ),
-                        if (_media.isNotEmpty && !_isBibleItem)
+                        if (_media.isNotEmpty)
                           Align(alignment: Alignment.centerLeft, child: TextButton.icon(
                             onPressed: _saving ? null : _openImageLayout,
                             icon: const Icon(Icons.photo_size_select_large_outlined),

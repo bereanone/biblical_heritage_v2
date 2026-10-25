@@ -1,7 +1,7 @@
 {
-  "revision": "core-six-20261018-v1",
+  "revision": "core-seven-brhc1914-20261023-v1",
   "catalog_asset": "assets/bundled_library/catalog.db",
-  "catalog_sha256": "7cb6206aa6efaf1bcf20cf61917c3ea8bf0d58265166ad55147514b97aeea24c",
+  "catalog_sha256": "aedcc70cfd93d0d2cb843136c7ff95b1d3ff3455d06efbb3d1a22e3d7a88ad82",
   "books": [
     {
       "id": "library_item_research_pioneer_uriah_smith_DAR_US",
@@ -31,6 +31,11 @@
     {
       "id": "library_item_research_pioneer_stephen_n_haskell_the_story_of_daniel_the_prophet",
       "title": "The Story of Daniel the Prophet",
+      "source_mode": "file"
+    },
+    {
+      "id": "library_item_research_pioneer_bible_readings_home_circle_1914",
+      "title": "Bible Readings for the Home Circle (1914)",
       "source_mode": "file"
     }
   ],
@@ -112,6 +117,18 @@
       "destination": "Research/ManagedBundles/core-20261018-10269f2e5439/covers/SDP-square-titled-20261013.png",
       "sha256": "3ca44bf4c62a830ac8681d4959ce2d167d2ee361c03ef6699d61f011dd11d667",
       "bytes": 2489230
+    },
+    {
+      "asset": "assets/bundled_library/files/b52676589160921340d0697068c831d3c765c39470c228b2d331933ff8640e27",
+      "destination": "Research/ManagedBundles/brhc-1914-20261023/Bible-Readings-for-the-Home-Circle-1914.epub",
+      "sha256": "b52676589160921340d0697068c831d3c765c39470c228b2d331933ff8640e27",
+      "bytes": 1506445
+    },
+    {
+      "asset": "assets/bundled_library/files/a9b43d5d43ab23a391c54d4c88d450e3ee1d03fa1ab571e99f4a09a9d76b7944",
+      "destination": "Research/ManagedBundles/brhc-1914-20261023/BRHC1914-cover.jpg",
+      "sha256": "a9b43d5d43ab23a391c54d4c88d450e3ee1d03fa1ab571e99f4a09a9d76b7944",
+      "bytes": 36630
     }
   ],
   "optional_download_only": [

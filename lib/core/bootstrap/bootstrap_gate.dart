@@ -12,9 +12,12 @@ import 'library_root_native.dart';
 import 'library_root_service.dart';
 import 'sandbox_bootstrap.dart';
 import 'startup_coordinator.dart';
+import '../../features/partners/data/ministry_enrollment_service.dart';
 
 class BootstrapGate extends StatefulWidget {
-  const BootstrapGate({super.key});
+  const BootstrapGate({super.key, this.enrollmentService});
+
+  final MinistryEnrollmentService? enrollmentService;
 
   @override
   State<BootstrapGate> createState() => _BootstrapGateState();
@@ -75,6 +78,8 @@ class _BootstrapGateState extends State<BootstrapGate> {
       });
     });
     try {
+      await (widget.enrollmentService ?? MinistryEnrollmentService.instance)
+          .captureInstallBeforeBootstrap();
       if (LibraryRootNative.usesAndroidDocumentTree) {
         _updateStatus('Validating library folder authorization...');
         final authorization = await LibraryRootService.instance

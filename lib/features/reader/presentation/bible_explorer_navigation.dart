@@ -3,6 +3,42 @@
 part of 'bible_explorer_screen.dart';
 
 extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
+  // Silent chapter navigation is independent of audio transport.
+  Future<void> _skipReaderChapter(bool forward) async {
+    if (!mounted ||
+        _bundledSkipInProgress ||
+        (_macAutoScroll?.isScrolling ?? false)) {
+      return;
+    }
+    final current = _liveVisibleLocation.value;
+    if (current == null) return;
+    setState(() => _bundledSkipInProgress = true);
+    try {
+      final target = await loadBiblePlaybackSkipTarget(
+        await StudyBibleDatabase.instance.bible,
+        current: current,
+        loop: BibleLoopUnit.chapter,
+        forward: forward,
+      );
+      if (target == null ||
+          !mounted ||
+          (_macAutoScroll?.isScrolling ?? false)) {
+        return;
+      }
+      await _navigateToBlockId(target.blockId, recordHistory: true);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not change chapter. Please try again.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _bundledSkipInProgress = false);
+    }
+  }
+
   Future<void> _openCrossReferences(VerseLine line) async {
     if (crossReferenceTapStopsAutoscroll(
       tiltAutoscrollActive: _tiltAutoScroll.isActive,
@@ -250,26 +286,29 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
   }) {
     var activeSource = source;
     return showViewerStrongsPageOne(
-    context,
-    strongsId: source.strongsId,
-    alternateStrongsIds: source.alternateStrongsIds,
-    onStrongsChanged: (id) => activeSource = source.withStrongsId(id),
-    mappedPhrase: source.phrase,
-    morphologyTag: source.morphologyTag,
-    startOnOccurrences: startOnOccurrences,
-    occurrenceViewState: source.occurrenceState,
-    initialPanelScrollOffset: source.panelScrollOffset,
-    onSelectCitation: (blockId, panelScrollOffset) => unawaited(
-      _openLexicalCitation(
-        activeSource.withPanelScrollOffset(panelScrollOffset),
-        blockId,
+      context,
+      strongsId: source.strongsId,
+      alternateStrongsIds: source.alternateStrongsIds,
+      onStrongsChanged: (id) => activeSource = source.withStrongsId(id),
+      mappedPhrase: source.phrase,
+      morphologyTag: source.morphologyTag,
+      startOnOccurrences: startOnOccurrences,
+      occurrenceViewState: source.occurrenceState,
+      initialPanelScrollOffset: source.panelScrollOffset,
+      onSelectCitation: (blockId, panelScrollOffset) => unawaited(
+        _openLexicalCitation(
+          activeSource.withPanelScrollOffset(panelScrollOffset),
+          blockId,
+        ),
       ),
-    ),
-    onSelectBlockId: (blockId) => unawaited(_openBlockId(blockId)),
-    onSelectOccurrence: (blockId, state) => unawaited(
-      _openLexicalOccurrence(activeSource.withOccurrenceState(state), blockId),
-    ),
-  );
+      onSelectBlockId: (blockId) => unawaited(_openBlockId(blockId)),
+      onSelectOccurrence: (blockId, state) => unawaited(
+        _openLexicalOccurrence(
+          activeSource.withOccurrenceState(state),
+          blockId,
+        ),
+      ),
+    );
   }
 
   Future<void> _openLexicalOccurrence(
@@ -512,6 +551,9 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
       themeMode: widget.themeMode,
       onThemeChanged: widget.onThemeChanged,
       onOpenBibleMemory: _openBibleMemory,
+      onOpenAudioSettings: _macAutoScroll == null
+          ? null
+          : _openBibleAudioSettings,
       onOpenInterlinearSettings: _openInterlinearSettings,
       onOpenColorSetup: _openMarkupSettings,
       onApplyDefaultMarkup: _applyDefaultMarkup,
@@ -557,10 +599,24 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
     );
   }
 
+  Future<void> _reloadDefaultHighlight() async {
+    final id = await AppSettingsService.instance.loadDefaultHighlightGroupId();
+    final groups = await HighlightGroupsRepository().loadGroups();
+    if (!mounted) return;
+    final group =
+        groups.where((group) => group.id == id).firstOrNull ??
+        (id == null ? groups.firstOrNull : null);
+    setState(() {
+      _defaultHighlightGroup = group;
+      _defaultHighlightGroupId = group?.id;
+    });
+  }
+
   Future<void> _openMarkupSettings() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const MarkupSettingsScreen()),
     );
+    await _reloadDefaultHighlight();
   }
 
   Future<void> _openSavedPresentations() async {

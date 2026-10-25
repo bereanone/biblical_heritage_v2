@@ -19,9 +19,13 @@ of scope without separate review.
 
 ## Make Bible audio controls obvious on the phone
 
-**Status:** Deferred at Dean's request, 2026-09-25.
+**Status:** Local next-build candidate implemented at Dean's request, 2026-10-23; supersedes the September 25 deferral. Not packaged, installed or shipped.
 
-Dean found the current Bible/audio screen unclear about what to press. Make the
+The bottom-right gear menu now opens **Bible Audio Settings**. Long-press Play opens the same panel. Read aloud, speed, independent recorded book/chapter/verse announcement switches and the pronunciation editor are grouped there. Audio setup is removed from the Bible autoscroll and loop popups; existing saved keys/values and other readers' defaults remain intact. Turning Read aloud off pauses playback. Pronunciation text clearly explains that edits do not change the prerecorded Bible voice.
+
+Verification: 21 focused tests passed; targeted analysis found only the pre-existing unused import in `bible_explorer_screen.dart`. A Flutter-rendered 390×844 phone preview was inspected without clipping (`docs/release-evidence/2026-10-23-android-audio/bible-audio-settings-phone.png`). Component rendering is not installed-device acceptance. Dean should review the panel in the next test build. The Sony playback report remains a separate open verification item in `BUGS.md`.
+
+Original request: Dean found the current Bible/audio screen unclear about what to press. Make the
 primary Play/Pause action visually prominent and plainly labeled in the ordinary
 Bible reader. Keep the bundled recorded-Bible path easy to find without a
 Utilities import step. Check the design on the phone with Dean before calling it
@@ -42,3 +46,8 @@ Do not implement this in the current tester/release. Prioritize existing audio
 correctness, synchronized verse indicators, announcement defaults (book and
 chapter on, verse off; preserve saved choices), phone-build consistency, final
 polish, and delivery of the verified tester package.
+
+
+## App demonstration and October 18 cleanup
+
+See [[docs/demo-video-20261018/Demo Plan|Demo plan, user decisions and verification records]]. Source work is in progress; compiled packages are not installed or accepted. Trash/history settings are separate from the movie critical path.

@@ -1,3 +1,4 @@
+import 'library_reader_help.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -1307,6 +1308,7 @@ class _CanonicalLibraryReaderScreenState
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: <Widget>[
+                          const LibraryReaderHelpButton(),
                           _CanonicalToolbarButton(
                             icon: Icons.list_alt_outlined,
                             label: 'Contents',

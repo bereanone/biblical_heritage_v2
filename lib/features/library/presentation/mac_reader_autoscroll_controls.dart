@@ -302,9 +302,13 @@ class _MacReaderAutoscrollStatusOverlayState
 Future<MacAutoscrollPreferences?> showMacAutoscrollSettingsDialog({
   required BuildContext context,
   required MacAutoscrollPreferences initial,
+  bool showAudioSettings = true,
 }) => showDialog<MacAutoscrollPreferences>(
   context: context,
-  builder: (context) => _MacAutoscrollSettingsDialog(initial: initial),
+  builder: (context) => _MacAutoscrollSettingsDialog(
+    initial: initial,
+    showAudioSettings: showAudioSettings,
+  ),
 );
 
 Future<MacAutoscrollPreferences?> showReaderAutoscrollSettingsDialog({
@@ -324,12 +328,14 @@ class _MacAutoscrollSettingsDialog extends StatefulWidget {
   const _MacAutoscrollSettingsDialog({
     required this.initial,
     this.title = 'Mac Autoscroll',
+    this.showAudioSettings = true,
     this.showKeyboardHelp = true,
     this.showStatusBanner = true,
   });
   final MacAutoscrollPreferences initial;
   final String title;
   final bool showKeyboardHelp;
+  final bool showAudioSettings;
   final bool showStatusBanner;
 
   @override
@@ -358,7 +364,7 @@ class _MacAutoscrollSettingsDialogState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            if (!_audioEnabled) ...[
+            if (!widget.showAudioSettings || !_audioEnabled) ...[
               Text('Reading speed: ${_baseSpeed.round()} pixels per second'),
               Slider(
                 key: const ValueKey('mac-autoscroll-base-speed'),
@@ -388,7 +394,7 @@ class _MacAutoscrollSettingsDialogState
                 },
               ),
             ],
-            if (_audioEnabled) ...[
+            if (widget.showAudioSettings && _audioEnabled) ...[
               Text('Voice speed: ${_speechRate.toStringAsFixed(2)}×'),
               Slider(
                 value: _speechRate,
@@ -403,7 +409,8 @@ class _MacAutoscrollSettingsDialogState
               ),
             ],
             const SizedBox(height: 16),
-            if (widget.showKeyboardHelp && !_audioEnabled) ...[
+            if (widget.showKeyboardHelp &&
+                (!widget.showAudioSettings || !_audioEnabled)) ...[
               const Text('Arrow keys change speed and direction.'),
               const Text('Up Arrow: one step upward'),
               const Text('Down Arrow: one step downward'),
@@ -438,31 +445,35 @@ class _MacAutoscrollSettingsDialogState
               ),
             ],
             const SizedBox(height: 16),
-            const Text('Narration'),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Announce chapter changes'),
-              value: _announceChapter,
-              onChanged: (value) => setState(() => _announceChapter = value),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Speak verse numbers'),
-              value: _announceVerseNumbers,
-              onChanged: (value) =>
-                  setState(() => _announceVerseNumbers = value),
-            ),
+            if (widget.showAudioSettings) ...[
+              const Text('Narration'),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Announce chapter changes'),
+                value: _announceChapter,
+                onChanged: (value) => setState(() => _announceChapter = value),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Speak verse numbers'),
+                value: _announceVerseNumbers,
+                onChanged: (value) =>
+                    setState(() => _announceVerseNumbers = value),
+              ),
+            ],
           ],
         ),
       ),
     ),
     actions: <Widget>[
-      Switch(
-        key: const ValueKey('mac-autoscroll-audio-toggle'),
-        value: _audioEnabled,
-        onChanged: (value) => setState(() => _audioEnabled = value),
-      ),
-      Text(_audioEnabled ? 'Audio On' : 'Audio Off'),
+      if (widget.showAudioSettings)
+        Switch(
+          key: const ValueKey('mac-autoscroll-audio-toggle'),
+          value: _audioEnabled,
+          onChanged: (value) => setState(() => _audioEnabled = value),
+        ),
+      if (widget.showAudioSettings)
+        Text(_audioEnabled ? 'Audio On' : 'Audio Off'),
       TextButton(
         key: const ValueKey('mac-autoscroll-cancel'),
         onPressed: () => Navigator.of(context).pop(),

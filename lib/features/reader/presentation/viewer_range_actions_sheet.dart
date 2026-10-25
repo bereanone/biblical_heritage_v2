@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'tag_dialog_styles.dart';
+import 'reader_selection_help.dart';
 
 enum ViewerRangeAction {
   copyNoCitation,
@@ -170,17 +171,6 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                         ).pop(ViewerRangeAction.addToMemory),
                       ),
                       _ActionButton(
-                        icon: Icons.translate_outlined,
-                        label: "Strong's",
-                        fontScale: fontScale,
-                        enabled: enableStrongs,
-                        onTap: enableStrongs
-                            ? () => Navigator.of(
-                                sheetContext,
-                              ).pop(ViewerRangeAction.strongs)
-                            : null,
-                      ),
-                      _ActionButton(
                         icon: Icons.unfold_more,
                         label: 'Extend Range',
                         fontScale: fontScale,
@@ -200,7 +190,7 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Extend Range: scroll, then long-press another verse. Your current selection stays selected.',
+                    readerSelectionHelp,
                     style: TagDialogStyles.bodyTextStyle(
                       theme,
                       fontScale,
@@ -223,14 +213,13 @@ class _ActionButton extends StatelessWidget {
     required this.label,
     required this.fontScale,
     required this.onTap,
-    this.enabled = true,
   });
 
   final IconData icon;
   final String label;
   final double fontScale;
   final VoidCallback? onTap;
-  final bool enabled;
+  final bool enabled = true;
 
   @override
   Widget build(BuildContext context) {

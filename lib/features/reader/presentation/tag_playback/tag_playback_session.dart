@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../../../core/audio/local_narration_policy.dart';
 
 import '../../../../core/database/study_bible_database.dart';
 import '../../../../core/theme/app_settings_service.dart';
@@ -67,7 +68,10 @@ class TagPlaybackSession {
     ).plan(entries);
     // Older notes may predate the persistent cache. Prepare a bounded lead
     // from this tag only; opening the popup never waits for local synthesis.
-    for (final item in items.take(6)) {
+    for (final item
+        in LocalNarrationPolicy.savedPlaybackOnly
+            ? const <TagPlaybackItem>[]
+            : items.take(6)) {
       if (item.noteClips.isEmpty) continue;
       TagNoteAudioCache.instance.scheduleNoteText(
         item.noteClips.map((clip) => clip.body).join('\n'),

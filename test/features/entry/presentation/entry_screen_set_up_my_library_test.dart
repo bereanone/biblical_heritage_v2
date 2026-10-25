@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -87,6 +88,9 @@ Future<void> _pumpUntilInvitationResolved(WidgetTester tester) async {
 }
 
 void main() {
+  // This fixture owns its complete catalog. Mobile provisioning adds shipped
+  // books automatically and is verified in the dedicated delivery tests.
+
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
@@ -130,6 +134,7 @@ void main() {
 
       expect(find.text('Bible Explorer'), findsOneWidget);
     },
+    variant: const TargetPlatformVariant({TargetPlatform.macOS}),
   );
 
   testWidgets(
@@ -147,6 +152,7 @@ void main() {
       expect(find.text('Set Up My Library'), findsNothing);
       expect(find.text('Bible Explorer'), findsOneWidget);
     },
+    variant: const TargetPlatformVariant({TargetPlatform.macOS}),
   );
 
   testWidgets(
@@ -169,6 +175,7 @@ void main() {
       );
       expect(stillUnresolved, isTrue);
     },
+    variant: const TargetPlatformVariant({TargetPlatform.macOS}),
   );
 
   testWidgets('choosing Skip for Now from the invitation persists it', (
@@ -180,5 +187,5 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, 'Skip for Now'));
     await _pumpUntilTextGone(tester, 'Set Up My Library');
     await _pumpUntilInvitationResolved(tester);
-  });
+  }, variant: const TargetPlatformVariant({TargetPlatform.macOS}));
 }

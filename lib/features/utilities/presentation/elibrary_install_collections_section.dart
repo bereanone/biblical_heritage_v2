@@ -33,6 +33,7 @@ class ELibraryInstallCollectionsSection extends StatelessWidget {
   const ELibraryInstallCollectionsSection({
     super.key,
     required this.running,
+    this.showPdfOptions = true,
     required this.selectionWarning,
     required this.installBooks,
     required this.installDevotionals,
@@ -64,6 +65,7 @@ class ELibraryInstallCollectionsSection extends StatelessWidget {
   });
 
   final bool running;
+  final bool showPdfOptions;
   final String? selectionWarning;
   final bool installBooks;
   final bool installDevotionals;
@@ -121,7 +123,11 @@ class ELibraryInstallCollectionsSection extends StatelessWidget {
           runSpacing: 12,
           children: [
             ActionChip(
-              label: const Text('Select All Collections + All File Types'),
+              label: Text(
+                showPdfOptions
+                    ? 'Select All Collections + All File Types'
+                    : 'Select All EPUB Collections',
+              ),
               onPressed: running ? null : onSelectAllCollectionsAndFormats,
             ),
             ActionChip(
@@ -132,14 +138,16 @@ class ELibraryInstallCollectionsSection extends StatelessWidget {
               label: const Text('EPUB Only'),
               onPressed: running ? null : onSetPresetEpubOnly,
             ),
-            ActionChip(
-              label: const Text('PDF Only'),
-              onPressed: running ? null : onSetPresetPdfOnly,
-            ),
-            ActionChip(
-              label: const Text('EPUB + PDF'),
-              onPressed: running ? null : onSetPresetBoth,
-            ),
+            if (showPdfOptions)
+              ActionChip(
+                label: const Text('PDF Only'),
+                onPressed: running ? null : onSetPresetPdfOnly,
+              ),
+            if (showPdfOptions)
+              ActionChip(
+                label: const Text('EPUB + PDF'),
+                onPressed: running ? null : onSetPresetBoth,
+              ),
           ],
         ),
         if (selectionWarning != null) ...[
@@ -287,12 +295,13 @@ class ELibraryInstallCollectionsSection extends StatelessWidget {
           title: const Text('EPUB'),
           contentPadding: EdgeInsets.zero,
         ),
-        CheckboxListTile(
-          value: installPdf,
-          onChanged: running ? null : onPdfChanged,
-          title: const Text('PDF'),
-          contentPadding: EdgeInsets.zero,
-        ),
+        if (showPdfOptions)
+          CheckboxListTile(
+            value: installPdf,
+            onChanged: running ? null : onPdfChanged,
+            title: const Text('PDF'),
+            contentPadding: EdgeInsets.zero,
+          ),
         const SizedBox(height: 8),
         Text(
           _installCollectionsDisclosureText,

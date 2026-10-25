@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/app_info/app_version_info.dart';
+import 'study_bible_about_dialog.dart';
 import '../../../core/theme/app_theme_mode.dart';
 import '../../library/presentation/set_up_my_library_invitation.dart';
+import '../../partners/data/ministry_enrollment_service.dart';
+import '../../partners/data/ministry_profile.dart';
+import '../../partners/presentation/ministry_welcome_screen.dart';
 import '../../reader/presentation/bible_explorer_screen.dart';
 import '../../utilities/presentation/utilities_screen.dart';
 
@@ -24,6 +27,7 @@ class _EntryScreenState extends State<EntryScreen> {
   @override
   void initState() {
     super.initState();
+    MinistryEnrollmentService.instance.state.addListener(_ministryChanged);
     // Runs after the first frame so the Bible Explorer/Utilities buttons
     // are already interactive underneath; a dismissed (not explicitly
     // skipped) invitation never blocks using the Bible.
@@ -32,35 +36,32 @@ class _EntryScreenState extends State<EntryScreen> {
     });
   }
 
+  void _ministryChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    MinistryEnrollmentService.instance.state.removeListener(_ministryChanged);
+    super.dispose();
+  }
+
+  void _openUtilities() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => UtilitiesScreen(
+          themeMode: widget.themeMode,
+          onThemeChanged: widget.onThemeChanged,
+        ),
+      ),
+    );
+  }
+
   void _handleThemeSelected(AppThemeMode mode) {
     widget.onThemeChanged(mode);
   }
 
-  Future<void> _showAboutDialog() async {
-    final version = await AppVersionInfo.versionWithBuild();
-    if (!mounted) return;
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('About'),
-        content: Text(
-          'Biblical Heritage #StudyBible\n'
-          'Version $version\n'
-          '© 2026 Biblical Heritage\n'
-          'Built with Flutter.\n\n'
-          'Cross-reference data derived from the OpenBible.info Bible Cross References dataset, licensed under Creative Commons Attribution 4.0.\n'
-          'https://www.openbible.info/labs/cross-references/\n\n'
-          'Help: open Utilities for setup tools, then Bible Explorer for study controls and tutorials.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
+  Future<void> _showAboutDialog() => showStudyBibleAboutDialog(context);
 
   void _enterApp() {
     Navigator.of(context).push(
@@ -75,6 +76,15 @@ class _EntryScreenState extends State<EntryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final partner = MinistryEnrollmentService.instance.state.value?.displayProfile;
+    if (partner != null && partner.id != MinistryProfile.biblicalHeritage.id) {
+      return MinistryWelcomeScreen(
+        profile: partner,
+        onExplore: _enterApp,
+        onUtilities: _openUtilities,
+        onAbout: _showAboutDialog,
+      );
+    }
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isSepiaTheme = widget.themeMode == AppThemeMode.sepia;

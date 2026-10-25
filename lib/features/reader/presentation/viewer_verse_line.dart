@@ -9,7 +9,7 @@ import 'viewer_range_selection.dart';
 import 'viewer_selection_style.dart';
 import 'text_range_geometry.dart';
 
-const bool _enableTextRangeGeometry = false;
+const bool _enableTextRangeGeometry = true;
 
 class ViewerVerseLine extends StatelessWidget {
   const ViewerVerseLine({
@@ -70,6 +70,9 @@ class ViewerVerseLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // A caller may have stale or incomplete window context after navigation.
+    // Only an actual first verse can substitute a chapter heading for its label.
+    final displayChapterNumber = showChapterNumber && line.verse == 1;
     final theme = Theme.of(context);
     final textDirection = Directionality.of(context);
     final brightness = theme.brightness;
@@ -134,6 +137,7 @@ class ViewerVerseLine extends StatelessWidget {
           startsInRedLetter: startsInRedLetter,
           blockId: line.blockId,
           rangeSelection: rangeSelection,
+          wordSelection: true,
           onTokenLongPress: onTokenLongPress,
           onTokenLongPressEnd: onTokenLongPressEnd,
           onTokenLongPressMove: onTokenLongPressMove,
@@ -145,44 +149,57 @@ class ViewerVerseLine extends StatelessWidget {
       ],
     );
 
+    if (geometryRegistry != null && line.blockId != null) {
+      var offset = 0;
+      final ranges = <int, List<int>>{};
+      for (final segment in parseViewerMarkupSegments(
+        html: line.html,
+        fallbackText: line.text,
+        baseStyle: style.copyWith(color: baseTextColor),
+        redLetterColor: redLetterColor,
+        startsInRedLetter: startsInRedLetter,
+        splitWords: rangeSelection?.usesWordIndices == true,
+      )) {
+        final end = offset + segment.text.length;
+        if ((rangeSelection?.usesWordIndices == true
+                ? segment.wordIndex
+                : segment.tokenIndex)
+            case final int token) {
+          final range = ranges.putIfAbsent(token, () => [offset, end]);
+          range[1] = end;
+        }
+        offset = end;
+      }
+      for (final entry in ranges.entries) {
+        geometrySeeds.add(
+          TextRangeLayoutSeed(
+            anchor: TextRangeAnchor.bible(
+              scopeId: geometryScopeId ?? 'viewer:${line.blockId}',
+              verseBlockId: line.blockId!,
+              tokenIndex: entry.key,
+            ),
+            startOffset: entry.value[0],
+            endOffset: entry.value[1],
+          ),
+        );
+      }
+    }
     final registry = geometryRegistry;
     final mappedTapEnabled =
         underlineMappedStrongs && onTapMappedPhrase != null;
     final richTextKey = mappedTapEnabled ? GlobalKey() : null;
     final richText = RichText(key: richTextKey, text: textSpan);
     final renderedText = _enableTextRangeGeometry && registry != null
-        ? GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onLongPressEnd: (_) => onTokenLongPressEnd?.call(),
-            onLongPressStart: (details) {
-              final anchor = _nearestAnchorForGlobalPosition(
-                registry: registry,
-                scopeId: geometryScopeId ?? 'viewer:${line.blockId ?? 0}',
-                globalPosition: details.globalPosition,
-              );
-              if (anchor == null) return;
-              onTokenLongPress?.call(anchor.tokenIndex);
-            },
-            onLongPressMoveUpdate: (details) {
-              final anchor = _nearestAnchorForGlobalPosition(
-                registry: registry,
-                scopeId: geometryScopeId ?? 'viewer:${line.blockId ?? 0}',
-                globalPosition: details.globalPosition,
-              );
-              if (anchor == null) return;
-              onTokenLongPressMove?.call(anchor.tokenIndex);
-            },
-            child: TextRangeGeometryReporter(
-              registry: registry,
-              scopeId: geometryScopeId ?? 'viewer:${line.blockId ?? 0}',
-              sourceKind: TextRangeSourceKind.bible,
-              text: textSpan,
-              seeds: geometrySeeds,
-              geometryRevision: geometryRevision,
-              textDirection: textDirection,
-              textAlign: TextAlign.start,
-              child: richText,
-            ),
+        ? TextRangeGeometryReporter(
+            registry: registry,
+            scopeId: geometryScopeId ?? 'viewer:${line.blockId ?? 0}',
+            sourceKind: TextRangeSourceKind.bible,
+            text: textSpan,
+            seeds: geometrySeeds,
+            geometryRevision: geometryRevision,
+            textDirection: textDirection,
+            textAlign: TextAlign.start,
+            child: richText,
           )
         : richText;
     final textWidget = !mappedTapEnabled
@@ -247,8 +264,8 @@ class ViewerVerseLine extends StatelessWidget {
             _VerseGutter(
               chapter: line.chapter,
               verse: line.verse,
-              showVerseNumber: !showChapterNumber,
-              showChapterNumber: showChapterNumber,
+              showVerseNumber: !displayChapterNumber,
+              showChapterNumber: displayChapterNumber,
               chapterStyle: chapterStyle,
               numberStyle: isSelected
                   ? numberStyle.copyWith(color: baseTextColor)
@@ -273,18 +290,6 @@ class ViewerVerseLine extends StatelessWidget {
       ),
     );
   }
-}
-
-TextRangeAnchor? _nearestAnchorForGlobalPosition({
-  required TextRangeGeometryRegistry registry,
-  required String scopeId,
-  required Offset globalPosition,
-}) {
-  return registry.nearestAnchorToGlobalPoint(
-    globalPosition,
-    sourceKind: TextRangeSourceKind.bible,
-    scopeId: scopeId,
-  );
 }
 
 double fontScaleFromStyle(TextStyle style) {

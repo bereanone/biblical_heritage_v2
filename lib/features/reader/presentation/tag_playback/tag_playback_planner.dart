@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import '../../../../core/audio/durable_speech_cache.dart';
 
 import '../../../library/data/library_citation_display_helper.dart';
 import '../tag_quick_apply_helper.dart';
@@ -115,7 +116,8 @@ class TagPlaybackPlanner {
       text,
       maxChars: maxNoteChunkChars,
     ))
-      TagSpeechClip(text: chunk, kind: TagClipKind.note),
+      for (final bounded in DurableSpeechCache.chunks(chunk))
+        TagSpeechClip(text: bounded, kind: TagClipKind.note),
   ];
 
   /// Every entry says what it is before its content when the reference is on.
@@ -286,14 +288,20 @@ class TagPlaybackPlanner {
           // lead-in makes its first verse ineligible and changes the voice.
           // Keep the full range in the item label; announce its starting verse
           // with the matching saved Qwen book/chapter/verse cues.
-          clip(lines[i], blockId, reference: i == 0
-              ? spokenBibleReference(
-                  bookName: bookNames[entry.bookNumber] ?? 'Book ${entry.bookNumber}',
-                  chapter: entry.chapter,
-                  verseStart: entry.verse,
-                  verseEnd: entry.verse,
-                )
-              : null),
+          clip(
+            lines[i],
+            blockId,
+            reference: i == 0
+                ? spokenBibleReference(
+                    bookName:
+                        bookNames[entry.bookNumber] ??
+                        'Book ${entry.bookNumber}',
+                    chapter: entry.chapter,
+                    verseStart: entry.verse,
+                    verseEnd: entry.verse,
+                  )
+                : null,
+          ),
         );
       }
       return clips;

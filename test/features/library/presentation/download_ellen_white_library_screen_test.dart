@@ -9,6 +9,7 @@ import 'package:studybible2/core/bootstrap/library_root_service.dart';
 import 'package:studybible2/core/database/elibrary_database.dart';
 import 'package:studybible2/core/database/user_database.dart';
 import 'package:studybible2/features/library/presentation/download_ellen_white_library_screen.dart';
+import 'package:studybible2/features/utilities/presentation/elibrary_setup_screen.dart';
 
 Future<void> _installPathProviderMocks({
   required Directory supportDir,
@@ -67,7 +68,7 @@ void main() {
   });
 
   testWidgets(
-    '5. "Choose Books to Download" reaches the existing eLibrary Setup '
+    '5. "Continue with All EPUBs Selected" reaches the existing eLibrary Setup '
     'selection screen',
     (tester) async {
       await tester.pumpWidget(
@@ -75,8 +76,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Choose Books to Download'), findsOneWidget);
-      await tester.tap(find.text('Choose Books to Download'));
+      expect(find.text('Continue with All EPUBs Selected'), findsOneWidget);
+      await tester.tap(find.text('Continue with All EPUBs Selected'));
       // ELibrarySetupScreen (existing, unmodified) keeps some async
       // loading state busy indefinitely outside a real app context, so a
       // full pumpAndSettle here would hang; a few bounded pumps are enough
@@ -87,7 +88,12 @@ void main() {
 
       // The existing, unmodified official-download selection screen.
       expect(find.text('eLibrary Setup'), findsWidgets);
+      final setup = tester.widget<ELibrarySetupScreen>(
+        find.byType(ELibrarySetupScreen),
+      );
+      expect(setup.selectAllEpubsInitially, isTrue);
     },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
 
   testWidgets('does not expose a manual "Index Now" step to the user', (

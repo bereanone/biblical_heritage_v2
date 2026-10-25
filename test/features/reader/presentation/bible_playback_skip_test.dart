@@ -70,6 +70,36 @@ void main() {
       },
     );
   }
+  for (final savedLoop in [null, ...BibleLoopUnit.values]) {
+    test(
+      'idle arrows ignore saved $savedLoop and navigate one chapter',
+      () async {
+        final unit = bibleNavigationUnit(audioPlaying: false, loop: savedLoop);
+        expect(unit, BibleLoopUnit.chapter);
+        final forward = await loadBiblePlaybackSkipTarget(
+          db,
+          current: locations[7],
+          loop: unit,
+          forward: true,
+        );
+        final backward = await loadBiblePlaybackSkipTarget(
+          db,
+          current: locations[7],
+          loop: unit,
+          forward: false,
+        );
+        expect(forward, locations[9]);
+        expect(backward, locations[3]);
+      },
+    );
+    test('playing arrows retain saved $savedLoop scope', () {
+      expect(
+        bibleNavigationUnit(audioPlaying: true, loop: savedLoop),
+        savedLoop ?? BibleLoopUnit.chapter,
+      );
+    });
+  }
+
   test('verse and chapter skips cross book boundaries', () async {
     for (final unit in [BibleLoopUnit.verse, BibleLoopUnit.chapter]) {
       final next = await loadBiblePlaybackSkipTarget(

@@ -18,7 +18,9 @@ import '../../library/presentation/library_item_open_guard.dart';
 import '../data/presentation/note_image_layout.dart';
 import 'note_image_layout_editor.dart';
 import 'note_image_clipboard.dart';
+import 'note_image_import.dart';
 import 'slide_link_control.dart';
+import 'tag_entry_actions.dart';
 import '../data/presentation/presentation_text_format.dart';
 import 'presentation_prep/presentation_ui_helpers.dart';
 import 'tag_dialog_styles.dart';
@@ -30,6 +32,23 @@ import 'viewer_presentation_settings.dart';
 import 'viewer_search_dialog.dart';
 
 part 'tag_detail_screen_dialogs.dart';
+
+/// Reuses the list's note editor, including for a tag with no entries yet.
+Future<bool?> showHashTagNoteEditor(
+  BuildContext context, {
+  required HashTagRepository repository,
+  required String tag,
+  String? category,
+  required double fontScale,
+}) => showDialog<bool>(
+  context: context,
+  builder: (_) => _ContentItemDialog(
+    repository: repository,
+    tag: tag,
+    category: category,
+    fontScale: fontScale,
+  ),
+);
 
 class HashTagDetailScreen extends StatefulWidget {
   const HashTagDetailScreen({
@@ -326,6 +345,7 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
         return AlertDialog(
           title: const Text('How this screen works'),
           content: const SingleChildScrollView(child: Text(
+            'Editing tip: Editing is also possible in landscape mode for additional room. Entry buttons use compact labels on phones and single-line labels on tablet-sized screens when enough space is available. Button text stays limited as reading text gets larger; on very narrow screens, the buttons wrap so every action remains visible.\n\n'
             'Listen opens this list’s audio controls; the clock there opens its listening schedule. '
             'Present opens your slides. The magnifying glass beside the entry count finds Bible text to add directly to this list. Add entry adds a note or content item.\n\n'
             'In List settings, Folder lets you move this list to an existing folder or use Add new folder, enter its name, and choose Move. List settings includes the display aspect ratio. Change it once to resize all Bible, note, and image slides in this list for a different projector. '
@@ -1266,15 +1286,12 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
 
   Future<void> _addContentItem() async {
     if (_isDollarRepository) return;
-    final shouldSave = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return _ContentItemDialog(
-          repository: widget.repository,
-          tag: widget.tag,
-          fontScale: widget.fontScale,
-        );
-      },
+    final shouldSave = await showHashTagNoteEditor(
+      context,
+      repository: widget.repository,
+      tag: widget.tag,
+      category: _resolvedCategory,
+      fontScale: widget.fontScale,
     );
     if (shouldSave != true) return;
     if (!mounted) return;
@@ -1835,6 +1852,24 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
+                                        TagEntryActions(
+                                          onEdit: () async {
+                                            if (_isDollarRepository) {
+                                              setState(() => _focusedIndex = index);
+                                              await _editCurrentLink();
+                                            } else {
+                                              await _editEntryNote(entry);
+                                            }
+                                          },
+                                          onMoveUp: canMoveUp ? () => _moveEntry(entry, -1) : null,
+                                          onMoveDown: canMoveDown ? () => _moveEntry(entry, 1) : null,
+                                          onTrash: () => _trashEntry(entry),
+                                          onTrashLongPress: widget.tag.startsWith('#') &&
+                                              entry.bookNumber > 0 && entry.chapter > 0 && entry.verse > 0
+                                              ? () => _trashEntry(entry) : null,
+                                          foregroundColor: TagDialogStyles.accent(theme),
+                                        ),
+                                        const SizedBox(height: 6),
                                         if (entry.userTitle
                                                     ?.trim()
                                                     .isNotEmpty ==
@@ -2034,118 +2069,6 @@ class _HashTagDetailScreenState extends State<HashTagDetailScreen> {
                                         ],
                                       ],
                                     ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Wrap(
-                                    spacing: 2,
-                                    crossAxisAlignment:
-                                        WrapCrossAlignment.center,
-                                    children: [
-                                      IconButton(
-                                        tooltip: _isDollarRepository
-                                            ? 'Edit item'
-                                            : 'Edit item',
-                                        onPressed: () async {
-                                          if (_isDollarRepository) {
-                                            setState(
-                                              () => _focusedIndex = index,
-                                            );
-                                            await _editCurrentLink();
-                                          } else {
-                                            await _editEntryNote(entry);
-                                          }
-                                        },
-                                        icon: Icon(
-                                          Icons.edit_outlined,
-                                          color: TagDialogStyles.accent(theme),
-                                        ),
-                                        iconSize: presentationScaledSize(
-                                          context,
-                                          22,
-                                          widget.fontScale,
-                                          min: 20,
-                                          max: 26,
-                                        ),
-                                        constraints:
-                                            const BoxConstraints.tightFor(
-                                              width: 44,
-                                              height: 44,
-                                            ),
-                                      ),
-                                      IconButton(
-                                        tooltip: 'Move up',
-                                        onPressed: canMoveUp
-                                            ? () => _moveEntry(entry, -1)
-                                            : null,
-                                        icon: const Icon(
-                                          Icons.keyboard_arrow_up,
-                                        ),
-                                        iconSize: presentationScaledSize(
-                                          context,
-                                          22,
-                                          widget.fontScale,
-                                          min: 20,
-                                          max: 26,
-                                        ),
-                                        constraints:
-                                            const BoxConstraints.tightFor(
-                                              width: 44,
-                                              height: 44,
-                                            ),
-                                      ),
-                                      IconButton(
-                                        tooltip: 'Move down',
-                                        onPressed: canMoveDown
-                                            ? () => _moveEntry(entry, 1)
-                                            : null,
-                                        icon: const Icon(
-                                          Icons.keyboard_arrow_down,
-                                        ),
-                                        iconSize: presentationScaledSize(
-                                          context,
-                                          22,
-                                          widget.fontScale,
-                                          min: 20,
-                                          max: 26,
-                                        ),
-                                        constraints:
-                                            const BoxConstraints.tightFor(
-                                              width: 44,
-                                              height: 44,
-                                            ),
-                                      ),
-                                      Tooltip(
-                                        message: 'Move to Trash',
-                                        child: GestureDetector(
-                                          onLongPress:
-                                              widget.tag.startsWith('#') &&
-                                                  entry.bookNumber > 0 &&
-                                                  entry.chapter > 0 &&
-                                                  entry.verse > 0
-                                              ? () => _trashEntry(entry)
-                                              : null,
-                                          child: IconButton(
-                                            onPressed: () => _trashEntry(entry),
-                                            icon: Icon(
-                                              Icons.delete,
-                                              color: theme.colorScheme.error,
-                                            ),
-                                            iconSize: presentationScaledSize(
-                                              context,
-                                              22,
-                                              widget.fontScale,
-                                              min: 20,
-                                              max: 26,
-                                            ),
-                                            constraints:
-                                                const BoxConstraints.tightFor(
-                                                  width: 44,
-                                                  height: 44,
-                                                ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
                                   ),
                                 ],
                               ),

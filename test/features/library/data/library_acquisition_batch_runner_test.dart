@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
@@ -83,6 +84,11 @@ Uint8List _placeholderStubBytes() {
 }
 
 void main() {
+  // This fixture owns its complete catalog. Mobile provisioning adds shipped
+  // books automatically and is verified in the dedicated delivery tests.
+  setUp(() => debugDefaultTargetPlatformOverride = TargetPlatform.macOS);
+  tearDown(() => debugDefaultTargetPlatformOverride = null);
+
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;

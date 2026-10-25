@@ -866,7 +866,10 @@ class DownloadedFileMaintenanceSection extends StatelessWidget {
 }
 
 class ELibrarySetupScreen extends StatefulWidget {
-  const ELibrarySetupScreen({super.key});
+  const ELibrarySetupScreen({super.key, this.selectAllEpubsInitially = false});
+
+  /// Recommended Ellen White setup; nothing downloads until Install Selected.
+  final bool selectAllEpubsInitially;
 
   @override
   State<ELibrarySetupScreen> createState() => _ELibrarySetupScreenState();
@@ -931,6 +934,17 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.selectAllEpubsInitially) {
+      _installBooks = true;
+      _installDevotionals = true;
+      _installCommentaries = true;
+      _installMiscCollections = true;
+      _installPamphlets = true;
+      _installPeriodicals = true;
+      _installManuscriptReleases = true;
+      _installEpub = true;
+      _installPdf = false;
+    }
     _load();
     _loadEstimateCache();
     _loadCaptureFolderState();
@@ -2026,7 +2040,7 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
       _installPeriodicals = true;
       _installManuscriptReleases = true;
       _installEpub = true;
-      _installPdf = true;
+      _installPdf = false;
       _clearSelectionWarning();
     });
   }
@@ -2976,7 +2990,21 @@ class _ELibrarySetupScreenState extends State<ELibrarySetupScreen> {
                             manualIndexCurrentTitle: _manualIndexCurrentTitle,
                           ),
                           const Divider(height: 32),
+                          if (widget.selectAllEpubsInitially) ...[
+                            const Text(
+                              'All Ellen White collections are selected as EPUBs. '
+                              'You can download now or change the selections below.',
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.icon(
+                              onPressed: _running ? null : _startSetup,
+                              icon: const Icon(Icons.download),
+                              label: const Text('Download Selected Books'),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
                           ELibraryInstallCollectionsSection(
+                            showPdfOptions: false,
                             running: _running,
                             selectionWarning: _selectionWarning,
                             installBooks: _installBooks,

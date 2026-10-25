@@ -33,7 +33,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       _openRangeActions();
       return;
     }
-    if (_rangeSelection.hasSelection && !_rangeSelection.hasCompletedRange) {
+    if (_rangeSelection.hasSelection) {
       setState(() {
         _rangeSelection = _rangeSelection.clear();
       });
@@ -101,16 +101,6 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
   }
 
   void _selectTokenAnchor(VerseLine line, int tokenIndex) {
-    if (_rangeSelection.hasCompletedRange) {
-      final blockId = line.blockId ?? 0;
-      if (blockId <= 0) return;
-      setState(
-        () => _rangeSelection = _rangeSelection.extendVerseRange(blockId),
-      );
-      unawaited(_openRangeActions());
-      return;
-    }
-
     _stopReaderAutoscroll();
     _clearBibleSearchSessionForManualSelection();
     final blockId = line.blockId ?? 0;
@@ -131,7 +121,11 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
     }
 
     setState(() {
-      _rangeSelection = _rangeSelection.beginTokenRange(blockId, tokenIndex);
+      _rangeSelection = _rangeSelection.beginTokenRange(
+        blockId,
+        tokenIndex,
+        wordIndices: true,
+      );
     });
   }
 
@@ -148,7 +142,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         );
       });
     }
-    unawaited(_openRangeActions());
+    // Release leaves the range selected; a separate tap opens actions.
   }
 
   void _dragVerseAnchor(VerseLine line) {
@@ -170,7 +164,11 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
     if (blockId <= 0 || tokenIndex <= 0) return;
     if (!_rangeSelection.hasSelection) {
       setState(() {
-        _rangeSelection = _rangeSelection.beginTokenRange(blockId, tokenIndex);
+        _rangeSelection = _rangeSelection.beginTokenRange(
+          blockId,
+          tokenIndex,
+          wordIndices: true,
+        );
       });
       return;
     }
@@ -288,6 +286,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
               passage.bookName,
             ),
           );
+          if (changed == true) await _reloadDefaultHighlight();
           if (changed == true && mounted) {
             setState(() {
               _highlightRefreshTick += 1;
@@ -297,6 +296,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
           return;
         }
         final changed = await showHighlightPopup(context, verseRefs: verseRefs);
+        if (changed == true) await _reloadDefaultHighlight();
         if (changed == true && mounted) {
           setState(() {
             _highlightRefreshTick += 1;
@@ -530,6 +530,7 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
     if (!mounted) return;
     setState(() {
       _highlightRefreshTick += 1;
+      _rangeSelection = _rangeSelection.clear();
     });
   }
 
@@ -563,23 +564,46 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
     for (final line in lines) {
       final versePieces = <String>[];
       final blockId = line.blockId ?? 0;
+      if (_rangeSelection.usesWordIndices) {
+        final text = parseViewerMarkupSegments(
+          html: line.html,
+          fallbackText: line.text,
+          baseStyle: const TextStyle(),
+          redLetterColor: Colors.red,
+        ).map((s) => s.text).join();
+        final words = RegExp(
+          r'[^\s]+',
+          unicode: true,
+        ).allMatches(text).toList();
+        final selected = <RegExpMatch>[];
+        for (var index = 0; index < words.length; index++) {
+          if (_rangeSelection.containsTokenPosition(blockId, index + 1)) {
+            selected.add(words[index]);
+          }
+        }
+        if (selected.isNotEmpty) {
+          final part = text.substring(selected.first.start, selected.last.end);
+          pieces.add(includeVerseNumbers ? '${line.verse} $part' : part);
+        }
+        continue;
+      }
       for (final segment in parseViewerMarkupSegments(
         html: line.html,
         fallbackText: line.text,
         baseStyle: const TextStyle(),
         redLetterColor: Colors.red,
+        splitWords: _rangeSelection.usesWordIndices,
       )) {
-        final tokenIndex = segment.tokenIndex;
+        final tokenIndex = _rangeSelection.usesWordIndices
+            ? segment.wordIndex
+            : segment.tokenIndex;
         if (tokenIndex == null) continue;
         if (_rangeSelection.containsTokenPosition(blockId, tokenIndex)) {
-          final text = segment.text.trim();
-          if (text.isNotEmpty) {
-            versePieces.add(text);
-          }
+          versePieces.add(segment.text);
         }
       }
       if (versePieces.isNotEmpty) {
-        final text = versePieces.join(' ');
+        final text = versePieces.join(' ').trim();
         pieces.add(includeVerseNumbers ? '${line.verse} $text' : text);
       }
     }
@@ -596,8 +620,11 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         fallbackText: line.text,
         baseStyle: const TextStyle(),
         redLetterColor: Colors.red,
+        splitWords: _rangeSelection.usesWordIndices,
       )) {
-        final tokenIndex = segment.tokenIndex;
+        final tokenIndex = _rangeSelection.usesWordIndices
+            ? segment.wordIndex
+            : segment.tokenIndex;
         if (tokenIndex == null) continue;
         if (_rangeSelection.containsTokenPosition(blockId, tokenIndex)) {
           final strongs = _preferredStrongs(segment.strongs);
@@ -652,9 +679,36 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       final tokenCount = _tokenCountForLine(line);
       startToken ??= 1;
       endToken ??= tokenCount;
+      final startWord = _rangeSelection.usesWordIndices ? startToken : null;
+      final endWord = _rangeSelection.usesWordIndices ? endToken : null;
+      if (_rangeSelection.usesWordIndices) {
+        final words = parseViewerMarkupSegments(
+          html: line.html,
+          fallbackText: line.text,
+          baseStyle: const TextStyle(),
+          redLetterColor: Colors.red,
+          splitWords: true,
+        );
+        final selected = words
+            .where(
+              (w) =>
+                  w.wordIndex != null &&
+                  w.wordIndex! >= startWord! &&
+                  w.wordIndex! <= endWord!,
+            )
+            .toList();
+        final source = selected
+            .map((w) => w.tokenIndex)
+            .whereType<int>()
+            .toList();
+        startToken = source.isEmpty ? 1 : source.first;
+        endToken = source.isEmpty ? 1 : source.last;
+      }
       items.add(
         TokenHighlightSelection(
           verseRef: verseRef,
+          startWord: startWord,
+          endWord: endWord,
           startToken: startToken,
           endToken: endToken,
         ),
@@ -670,8 +724,11 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       fallbackText: line.text,
       baseStyle: const TextStyle(),
       redLetterColor: Colors.red,
+      splitWords: _rangeSelection.usesWordIndices,
     )) {
-      final tokenIndex = segment.tokenIndex;
+      final tokenIndex = _rangeSelection.usesWordIndices
+          ? segment.wordIndex
+          : segment.tokenIndex;
       if (tokenIndex != null && tokenIndex > maxToken) {
         maxToken = tokenIndex;
       }

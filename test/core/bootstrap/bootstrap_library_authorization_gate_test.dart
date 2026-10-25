@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:studybible2/core/bootstrap/bootstrap_gate.dart';
+import 'package:studybible2/features/partners/data/ministry_enrollment_service.dart';
 import 'package:studybible2/core/bootstrap/library_root_native.dart';
 import 'package:studybible2/core/bootstrap/library_root_service.dart';
 
@@ -42,7 +43,17 @@ void main() {
           };
         });
 
-    await tester.pumpWidget(const BootstrapGate());
+    await tester.pumpWidget(
+      BootstrapGate(
+        enrollmentService: MinistryEnrollmentService(
+          read: () async => null,
+          write: (_) async {},
+          seed: (_) async {},
+          loadInstallState: () async => <String, Object?>{},
+          saveInstallState: (_) async {},
+        ),
+      ),
+    );
     await tester.pump();
     await tester.pump();
 
@@ -68,7 +79,17 @@ void main() {
           };
         });
 
-    await tester.pumpWidget(const BootstrapGate());
+    await tester.pumpWidget(
+      BootstrapGate(
+        enrollmentService: MinistryEnrollmentService(
+          read: () async => null,
+          write: (_) async {},
+          seed: (_) async {},
+          loadInstallState: () async => <String, Object?>{},
+          saveInstallState: (_) async {},
+        ),
+      ),
+    );
     await tester.pump();
     await tester.pump();
 

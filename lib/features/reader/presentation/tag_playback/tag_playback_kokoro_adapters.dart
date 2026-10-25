@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import '../../../../core/audio/local_narration_policy.dart';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
@@ -38,7 +39,7 @@ class KokoroTagClipRenderer implements TagClipRenderer {
     // user's own corrections and the engine lexicon still do.
     // Names exactly what is about to be spoken, so any audio that does not
     // match a debug-console line here did not come from this popup.
-    debugPrint('Tag playback synthesizing: ${clip.text}');
+    debugPrint('Tag playback loading: ${clip.text}');
     final started = DateTime.now();
     try {
       final path = clip.kind == TagClipKind.verse
@@ -51,6 +52,7 @@ class KokoroTagClipRenderer implements TagClipRenderer {
               text: clip.text,
               speed: speed,
               blockId: clip.blockId,
+              allowGeneration: !LocalNarrationPolicy.savedPlaybackOnly,
             )).path;
       final file = File(path);
       // 24 kHz, 16-bit mono WAV: 48,000 bytes per second of speech.
@@ -164,7 +166,10 @@ class AudioplayersTagClipPlayer implements TagClipPlayer {
     _playing = true;
     _paused = false;
     _currentPath = path;
-    _activeRate = TagQwenAudioCache.isCachedPath(path)
+    _activeRate =
+        TagQwenAudioCache.isCachedPath(path) ||
+            (LocalNarrationPolicy.savedPlaybackOnly &&
+                TagNoteAudioCache.instance.isCachedPath(path))
         ? _recordedRate
         : _playbackRate;
     final player = _players[_active];

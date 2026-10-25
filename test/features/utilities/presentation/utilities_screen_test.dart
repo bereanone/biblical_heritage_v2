@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:studybible2/features/partners/data/ministry_enrollment_service.dart';
+import 'package:studybible2/features/partners/data/ministry_profile.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -9,6 +12,45 @@ import 'package:studybible2/features/utilities/presentation/utilities_screen.dar
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   databaseFactory = databaseFactoryFfi;
+
+  for (final profile in MinistryProfile.available) {
+    testWidgets('${profile.name} Support opens its own website', (
+      tester,
+    ) async {
+      final notifier = MinistryEnrollmentService.instance.state;
+      final previous = notifier.value;
+      notifier.value = MinistryEnrollment(
+        ministryId: profile.id,
+        setupCompleted: true,
+        grandfathered: true,
+        firstSeenUtc: DateTime.utc(2026, 10, 20),
+      );
+      addTearDown(() => notifier.value = previous);
+      String? opened;
+      const channel = MethodChannel('plugins.flutter.io/url_launcher');
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) async {
+        if (call.method == 'launch') {
+          opened = (call.arguments as Map)['url'] as String;
+          return true;
+        }
+        return false;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      await _pumpUtilitiesScreen(tester, const Size(1366, 1024));
+      await tester.ensureVisible(find.text('Support ${profile.name}'));
+      await tester.tap(find.text('Support ${profile.name}'));
+      await tester.pumpAndSettle();
+      expect(opened, profile.websiteUrl);
+      expect(find.byType(AlertDialog), findsNothing);
+    });
+  }
 
   testWidgets('utilities screen uses the iPad two-column dashboard', (
     tester,

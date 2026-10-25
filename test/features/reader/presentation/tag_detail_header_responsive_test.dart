@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:studybible2/core/database/user_database.dart';
+import 'package:studybible2/core/database/study_bible_database.dart';
 import 'package:studybible2/features/reader/presentation/tag_detail_screen.dart';
 import 'package:studybible2/features/reader/presentation/tag_quick_apply_helper.dart';
 
@@ -27,6 +28,7 @@ Future<void> _clearUserDatabase(Directory root) async {
 
 Widget _screen({required Size size, required HashTagRepository repository}) {
   return MaterialApp(
+    theme: ThemeData(fontFamily: 'Roboto'),
     home: MediaQuery(
       data: MediaQueryData(size: size),
       child: Scaffold(
@@ -46,6 +48,12 @@ Widget _screen({required Size size, required HashTagRepository repository}) {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async {
+    final fonts = FontLoader('Roboto')
+      ..addFont(rootBundle.load('assets/fonts/Roboto-Regular.ttf'));
+    await fonts.load();
+  });
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
@@ -105,4 +113,47 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+  testWidgets(
+    'portrait entries keep wide reading text below scrolling actions',
+    (tester) async {
+      const size = Size(360, 800);
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.runAsync(() async {
+        await StudyBibleDatabase.instance.loadBooks();
+        await repository.addBibleRangeToTag(
+          tag:
+              '#A-very-long-tag-name-that-must-truncate-without-moving-actions',
+          category: 'Long Category Name',
+          bookNumber: 66,
+          chapter: 9,
+          verseStart: 19,
+          verseEnd: 19,
+        );
+        await tester.pumpWidget(_screen(size: size, repository: repository));
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      });
+      await tester.pumpAndSettle();
+      final verse = find.textContaining('For their power');
+      expect(verse, findsOneWidget);
+      final verseRect = tester.getRect(verse);
+      expect(verseRect.width, greaterThan(234));
+      expect(
+        tester.getRect(find.byTooltip('Edit item')).bottom,
+        lessThan(verseRect.top),
+      );
+      expect(find.text('Move\nup'), findsOneWidget);
+      expect(find.text('Move\ndown'), findsOneWidget);
+      expect(find.text('Trash').hitTestable(), findsOneWidget);
+      expect(
+        tester.getRect(find.byTooltip('Move to Trash')).right,
+        lessThanOrEqualTo(verseRect.right),
+      );
+      expect(find.byType(Scrollbar), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 }

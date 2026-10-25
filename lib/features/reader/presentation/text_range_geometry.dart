@@ -114,6 +114,8 @@ class TextRangeGeometry {
     required this.textDirection,
     this.lineIndex,
     this.baseline,
+    this.globalStartRect,
+    this.globalEndRect,
   });
 
   final TextRangeAnchor anchor;
@@ -122,6 +124,8 @@ class TextRangeGeometry {
   final TextDirection textDirection;
   final int? lineIndex;
   final double? baseline;
+  final Rect? globalStartRect;
+  final Rect? globalEndRect;
 
   Offset get localCenter => localRect.center;
 
@@ -135,11 +139,21 @@ class TextRangeGeometry {
       textDirection: textDirection,
       lineIndex: lineIndex,
       baseline: baseline,
+      globalStartRect: globalStartRect?.shift(delta),
+      globalEndRect: globalEndRect?.shift(delta),
     );
   }
 }
 
 class TextRangeGeometryRegistry extends ChangeNotifier {
+  final positionRefresh = ChangeNotifier();
+  void refreshPositions() => positionRefresh.notifyListeners();
+  @override
+  void dispose() {
+    positionRefresh.dispose();
+    super.dispose();
+  }
+
   final Map<TextRangeAnchor, TextRangeGeometry> _entries =
       <TextRangeAnchor, TextRangeGeometry>{};
 
@@ -362,12 +376,17 @@ class _TextRangeGeometryReporterState extends State<TextRangeGeometryReporter> {
   @override
   void initState() {
     super.initState();
+    widget.registry.positionRefresh.addListener(_scheduleMeasure);
     _scheduleMeasure();
   }
 
   @override
   void didUpdateWidget(covariant TextRangeGeometryReporter oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.registry != widget.registry) {
+      oldWidget.registry.positionRefresh.removeListener(_scheduleMeasure);
+      widget.registry.positionRefresh.addListener(_scheduleMeasure);
+    }
     if (oldWidget.text != widget.text ||
         oldWidget.scopeId != widget.scopeId ||
         oldWidget.sourceKind != widget.sourceKind ||
@@ -387,6 +406,7 @@ class _TextRangeGeometryReporterState extends State<TextRangeGeometryReporter> {
 
   @override
   void dispose() {
+    widget.registry.positionRefresh.removeListener(_scheduleMeasure);
     for (final anchor in _registeredAnchors) {
       widget.registry.remove(anchor);
     }
@@ -444,6 +464,8 @@ class _TextRangeGeometryReporterState extends State<TextRangeGeometryReporter> {
           anchor: seed.anchor,
           localRect: rect,
           globalRect: rect.shift(origin),
+          globalStartRect: boxes.first.toRect().shift(origin),
+          globalEndRect: boxes.last.toRect().shift(origin),
           textDirection: widget.textDirection,
           lineIndex: seed.lineIndex,
         ),

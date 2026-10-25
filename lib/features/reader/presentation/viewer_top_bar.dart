@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'presentation_prep/presentation_ui_helpers.dart';
 import 'viewer_reference_title.dart';
+import 'highlight_render.dart';
 import 'reader_tag_button.dart';
 import 'viewer_search_models.dart';
 
@@ -15,6 +16,10 @@ class ViewerTopBar extends StatelessWidget {
     required this.baseBibleFontSize,
     required this.onSearch,
     this.bibleSearchSession,
+    this.onPaintSelection,
+    this.onColorSetup,
+    this.highlightColor,
+    this.highlightName,
     this.onPreviousBibleSearchHit,
     this.onNextBibleSearchHit,
     required this.onSavedPresentations,
@@ -32,6 +37,10 @@ class ViewerTopBar extends StatelessWidget {
   final double fontScale;
   final double baseBibleFontSize;
   final VoidCallback onSearch;
+  final VoidCallback? onPaintSelection;
+  final VoidCallback? onColorSetup;
+  final Color? highlightColor;
+  final String? highlightName;
   final BibleSearchSession? bibleSearchSession;
   final VoidCallback? onPreviousBibleSearchHit;
   final VoidCallback? onNextBibleSearchHit;
@@ -110,16 +119,38 @@ class ViewerTopBar extends StatelessWidget {
           height: kToolbarHeight,
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: inset),
-            child: Row(
-              children: [
-                ..._leftButtons(
-                  context,
-                  actionExtent: actionExtent,
-                  iconSize: iconSize,
-                  compact: compact,
-                ),
-                Expanded(child: _titleInkWell(titleText, titleStyle)),
-              ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Reserve equal space on both sides of the reference so its
+                // center is the screen center, independent of action widths.
+                final navigationWidth = 2 * 48.0;
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: _leftButtons(
+                          context,
+                          actionExtent: actionExtent,
+                          iconSize: iconSize,
+                          compact: compact,
+                          includePaint: false,
+                          includeSearchNavigator: false,
+                        ),
+                      ),
+                    ),
+                    Center(
+                      child: SizedBox(
+                        width: (constraints.maxWidth - 2 * navigationWidth)
+                            .clamp(40.0, double.infinity),
+                        child: _titleInkWell(titleText, titleStyle),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -129,14 +160,26 @@ class ViewerTopBar extends StatelessWidget {
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: inset),
             child: Row(
-              children: _rightButtons(
-                context,
-                actionExtent: actionExtent,
-                iconSize: iconSize,
-              ),
+              children: [
+                ..._paintButtons(context),
+                ..._rightButtons(
+                  context,
+                  actionExtent: actionExtent,
+                  iconSize: iconSize,
+                ),
+              ],
             ),
           ),
         ),
+        if (_showBibleSearchNavigator)
+          Center(
+            child: _BibleSearchNavigator(
+              session: bibleSearchSession!,
+              compact: compact,
+              onPrevious: onPreviousBibleSearchHit,
+              onNext: onNextBibleSearchHit,
+            ),
+          ),
       ],
     );
   }
@@ -146,6 +189,8 @@ class ViewerTopBar extends StatelessWidget {
     required double actionExtent,
     required double iconSize,
     required bool compact,
+    bool includePaint = true,
+    bool includeSearchNavigator = true,
   }) {
     return [
       IconButton(
@@ -168,13 +213,62 @@ class ViewerTopBar extends StatelessWidget {
         onPressed: onSearch,
         icon: Icon(Icons.search, size: iconSize),
       ),
-      if (_showBibleSearchNavigator) ...[
+      if (includePaint) ..._paintButtons(context),
+      if (includeSearchNavigator && _showBibleSearchNavigator) ...[
         const SizedBox(width: 8),
         _BibleSearchNavigator(
           session: bibleSearchSession!,
           compact: compact,
           onPrevious: onPreviousBibleSearchHit,
           onNext: onNextBibleSearchHit,
+        ),
+      ],
+    ];
+  }
+
+  List<Widget> _paintButtons(BuildContext context) {
+    final theme = Theme.of(context);
+    final preview = highlightColor == null
+        ? null
+        : resolveHighlightRender(
+            highlightColor!,
+            theme.brightness == Brightness.dark,
+          );
+    return [
+      if (onColorSetup != null) ...[
+        IconButton(
+          key: const ValueKey('viewer-paint-selection'),
+          tooltip: 'Highlight selected text',
+          onPressed: onPaintSelection,
+          icon: const Icon(Icons.brush_outlined),
+        ),
+        Tooltip(
+          message: 'Color Setup: ${highlightName ?? 'choose a default color'}',
+          child: TextButton(
+            key: const ValueKey('viewer-highlight-color'),
+            onPressed: onColorSetup,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(72, 44),
+              fixedSize: const Size(76, 44),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+              decoration: BoxDecoration(
+                color: preview?.backgroundColor,
+                border: Border.all(color: theme.colorScheme.outline),
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  'Highlight',
+                  textScaler: TextScaler.noScaling,
+                  style: TextStyle(fontSize: 11, color: preview?.textColor),
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     ];
@@ -247,12 +341,15 @@ class ViewerTopBar extends StatelessWidget {
       onTap: onChoosePassage,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-        child: Text(
-          titleText,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
-          style: titleStyle,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            titleText,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: titleStyle,
+          ),
         ),
       ),
     );
@@ -301,10 +398,12 @@ class ViewerTopBar extends StatelessWidget {
                   fit: StackFit.expand,
                   children: [
                     Positioned(
-                      left: 24,
+                      left: 0,
+                      width: halfBar - halfTitle - inset,
                       top: 0,
                       bottom: 0,
                       child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           IconButton(
@@ -325,6 +424,7 @@ class ViewerTopBar extends StatelessWidget {
                             onPressed: onSearch,
                             icon: Icon(Icons.search, size: iconSize),
                           ),
+                          ..._paintButtons(context),
                           if (_showBibleSearchNavigator) ...[
                             const SizedBox(width: 16),
                             _BibleSearchNavigator(

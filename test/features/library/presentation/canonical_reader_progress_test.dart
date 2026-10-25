@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +15,9 @@ import 'package:studybible2/features/library/data/library_document_repository.da
 import 'package:studybible2/features/library/presentation/canonical_library_reader.dart';
 
 void main() {
+  // This fixture owns its complete catalog. Mobile provisioning adds shipped
+  // books automatically and is verified in the dedicated delivery tests.
+
   TestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('saves a stable reading position while the screen remains open', (
     tester,
@@ -136,5 +140,5 @@ void main() {
           .setMockMethodCallHandler(channel, null);
       await setup.dir.delete(recursive: true);
     });
-  });
+  }, variant: const TargetPlatformVariant({TargetPlatform.macOS}));
 }

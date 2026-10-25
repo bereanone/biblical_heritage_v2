@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_settings_service.dart';
 import '../data/presentation/presentation_grouping_adapter.dart';
 import '../data/presentation/presentation_models.dart';
+import '../data/presentation/presentation_item_settings_repository.dart';
 import 'tag_quick_apply_helper.dart';
 import 'viewer_presentation_screen.dart';
 
@@ -27,7 +28,8 @@ Future<void> showPresentationLaunchOptions(
     context,
     slides: slides,
     initialIndex: initialSlideIndex,
-    tagFamily:tagFamily,tag:tag,
+    tagFamily: tagFamily,
+    tag: tag,
   );
 }
 
@@ -35,12 +37,20 @@ Future<void> showViewerPresentationScreen(
   BuildContext context, {
   required List<PresentationSlide> slides,
   required int initialIndex,
-  String? tagFamily, String? tag,
+  String? tagFamily,
+  String? tag,
 }) async {
   if (slides.isEmpty) return;
   final preset = tagFamily != null && tag != null
-      ? await AppSettingsService.instance.loadTagPresentationAspectRatioPreset(tagFamily:tagFamily,tag:tag)
+      ? await AppSettingsService.instance.loadTagPresentationAspectRatioPreset(
+          tagFamily: tagFamily,
+          tag: tag,
+        )
       : await AppSettingsService.instance.loadPresentationAspectRatioPreset();
+  final slideSettings = tagFamily != null && tag != null
+      ? await PresentationItemSettingsRepository.instance
+            .loadSlideSettingsForTag(tagFamily: tagFamily, tag: tag)
+      : null;
   if (!context.mounted) return;
   await Navigator.of(context).push(
     MaterialPageRoute<void>(
@@ -49,6 +59,9 @@ Future<void> showViewerPresentationScreen(
         slides: slides,
         initialIndex: initialIndex,
         aspectRatioPreset: preset,
+        initialSlideSettings: slideSettings ?? const {},
+        tagFamily: tagFamily,
+        tag: tag,
       ),
     ),
   );

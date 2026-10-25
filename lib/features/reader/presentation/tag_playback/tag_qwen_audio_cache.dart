@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../../../core/database/study_bible_database.dart';
 import '../bundled_bible_audio_narrator.dart';
 import 'tag_playback_models.dart';
+import 'tag_pcm_clip_edges.dart';
 import 'tag_playback_planner.dart';
 
 /// Only an exact verse may reuse its recording. Edited excerpts keep their
@@ -136,7 +137,7 @@ class TagQwenAudioCache {
           .convert(
             utf8.encode(
               jsonEncode([
-                'qwen-tag-pcm-v1',
+                tagQwenPcmCacheVersion,
                 chapter.audioSha256,
                 range.$1,
                 range.$2,
@@ -197,6 +198,9 @@ class TagQwenAudioCache {
       if (!await part.exists() || await part.length() <= 44) {
         throw StateError('Empty Qwen verse clip');
       }
+      final wav = await part.readAsBytes();
+      softenTagPcmClipEdges(wav);
+      await part.writeAsBytes(wav, flush: true);
       await part.rename(target.path);
       debugPrint(
         'Tag playback using Qwen: ${chapter.book}:${chapter.chapter} at ${range.$1}s',

@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../../core/audio/narration_media_session.dart';
 import 'bible_loop_announcement_settings.dart';
+import 'bundled_bible_recording_cache.dart';
 
 @immutable
 class BundledAnnouncementEvent {
@@ -300,7 +301,7 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
     final destination = File(
       '${directory.path}/${chapter.audioSha256.substring(0, 16)}_$filename',
     );
-    if (await destination.exists() && await destination.length() > 0) {
+    if (await bibleRecordingMatches(destination, chapter.audioSha256)) {
       return destination.path;
     }
     // Android tester packages keep the optional full recording outside the APK.
@@ -317,22 +318,25 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
         return source.path;
       }
     }
-    final ByteData bytes;
-    try {
-      bytes = await rootBundle.load(chapter.asset);
-    } catch (_) {
-      throw StateError(
-        'This chapter recording is not installed. '
-        'Install the optional recorded Bible audio collection to listen.',
-      );
-    }
-    final temporary = File('${destination.path}.copying');
-    await temporary.writeAsBytes(
-      bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes),
-      flush: true,
+    return materializeVerifiedBibleRecording(
+      destination: destination,
+      expectedSha256: chapter.audioSha256,
+      loadBytes: () async {
+        final ByteData bytes;
+        try {
+          bytes = await rootBundle.load(chapter.asset);
+        } catch (_) {
+          throw StateError(
+            'This chapter recording is not installed. '
+            'Install the optional recorded Bible audio collection to listen.',
+          );
+        }
+        return bytes.buffer.asUint8List(
+          bytes.offsetInBytes,
+          bytes.lengthInBytes,
+        );
+      },
     );
-    await temporary.rename(destination.path);
-    return destination.path;
   }
 
   Future<void> _loadCueCatalog() => _cueCatalogLoad ??= () async {

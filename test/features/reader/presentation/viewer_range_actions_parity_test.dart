@@ -39,13 +39,13 @@ void main() {
         'Add # Tag': ViewerRangeAction.addHashTag,
         'Choose # Tag': ViewerRangeAction.addDollarTag,
         'Add to Memory': ViewerRangeAction.addToMemory,
-        "Strong's": ViewerRangeAction.strongs,
         'Extend Range': ViewerRangeAction.extendRange,
         'Reset Range': ViewerRangeAction.resetRange,
       };
       for (final action in actions.entries) {
         await tester.tap(find.text('Open'));
         await tester.pumpAndSettle();
+        expect(find.text("Strong's"), findsNothing);
         await tester.scrollUntilVisible(
           find.text(action.key),
           100,

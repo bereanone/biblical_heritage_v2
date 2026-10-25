@@ -8,20 +8,59 @@ const defaultNarrationPronunciations = <String, String>{
   'live forever': 'liv forever',
 };
 
-Map<String, String> decodeNarrationPronunciations(String? value) {
-  if (value == null) return Map.of(defaultNarrationPronunciations);
+String _pronunciationKey(String value) => value.trim().toLowerCase();
+
+Map<String, String> decodeNarrationPronunciations(
+  String? value, {
+  bool includeDefaults = true,
+}) {
+  Map<String, String> defaults() =>
+      includeDefaults ? Map.of(defaultNarrationPronunciations) : {};
+  if (value == null) return defaults();
   try {
     final decoded = jsonDecode(value) as Map<String, dynamic>;
-    return {
-      for (final entry in decoded.entries)
-        if (entry.key.trim().isNotEmpty &&
-            entry.value is String &&
-            (entry.value as String).trim().isNotEmpty)
-          entry.key.trim(): (entry.value as String).trim(),
-    };
+    final versioned = decoded['version'] == 2 && decoded['rules'] is Map;
+    final saved = versioned
+        ? Map<String, dynamic>.from(decoded['rules'] as Map)
+        : decoded;
+    // An explicitly cleared legacy dictionary meant "no corrections".
+    if (!versioned && saved.isEmpty) return {};
+    final rules = defaults();
+    final disabled = versioned && decoded['disabledDefaults'] is List
+        ? (decoded['disabledDefaults'] as List)
+              .whereType<String>()
+              .map(_pronunciationKey)
+              .toSet()
+        : <String>{};
+    rules.removeWhere((key, _) => disabled.contains(_pronunciationKey(key)));
+    for (final entry in saved.entries) {
+      if (entry.key.trim().isEmpty ||
+          entry.value is! String ||
+          (entry.value as String).trim().isEmpty)
+        continue;
+      rules.removeWhere(
+        (key, _) => _pronunciationKey(key) == _pronunciationKey(entry.key),
+      );
+      rules[entry.key.trim()] = (entry.value as String).trim();
+    }
+    return rules;
   } catch (_) {
-    return Map.of(defaultNarrationPronunciations);
+    return defaults();
   }
+}
+
+/// Persist intentional removals separately so a future default can be added
+/// without resurrecting a correction the user explicitly removed.
+String encodeNarrationPronunciations(Map<String, String> rules) {
+  final keys = rules.keys.map(_pronunciationKey).toSet();
+  return jsonEncode({
+    'version': 2,
+    'rules': rules,
+    'disabledDefaults': [
+      for (final key in defaultNarrationPronunciations.keys)
+        if (!keys.contains(_pronunciationKey(key))) key,
+    ],
+  });
 }
 
 /// Applies each whole-word correction once to speech input, never stored text.
@@ -58,11 +97,12 @@ Future<Map<String, String>> loadDeferredNarrationPronunciations({
 }) async {
   const key = 'narration_deferred_pronunciations_v2';
   final current = await load(key);
-  if (current != null) return decodeNarrationPronunciations(current);
+  if (current != null)
+    return decodeNarrationPronunciations(current, includeDefaults: false);
   final previous = await load('narration_deferred_pronunciations_v1');
   final deferred = previous == null
       ? Map<String, String>.of(rules)
-      : decodeNarrationPronunciations(previous);
+      : decodeNarrationPronunciations(previous, includeDefaults: false);
   const churches = {
     'ephesus',
     'smyrna',

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -16,6 +17,9 @@ import 'package:studybible2/features/library/presentation/library_document_contr
 import 'package:studybible2/features/library/presentation/reader_tilt_autoscroll_controller.dart';
 
 void main() {
+  // This fixture owns its complete catalog. Mobile provisioning adds shipped
+  // books automatically and is verified in the dedicated delivery tests.
+
   TestWidgetsFlutterBinding.ensureInitialized();
   testWidgets(
     'a highlighted index link reaches the exact distant paragraph and keeps its stored markup',
@@ -166,6 +170,7 @@ void main() {
         await setup.dir.delete(recursive: true);
       });
     },
+    variant: const TargetPlatformVariant({TargetPlatform.macOS}),
   );
   testWidgets('long-press selection on linked text does not navigate', (
     tester,
@@ -230,5 +235,5 @@ void main() {
       await setup.db.close();
       await setup.dir.delete(recursive: true);
     });
-  });
+  }, variant: const TargetPlatformVariant({TargetPlatform.macOS}));
 }

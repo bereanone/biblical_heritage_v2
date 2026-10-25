@@ -141,15 +141,27 @@ class _TagPlaybackPanelState extends State<TagPlaybackPanel> {
                   ),
                 ),
               Expanded(
-                child: Text(
-                  _statusText(),
-                  key: const Key('tag_playback_status'),
-                  style: TagDialogStyles.bodyTextStyle(
-                    theme,
-                    widget.fontScale,
-                    color: failed
-                        ? theme.colorScheme.error
-                        : TagDialogStyles.body(theme),
+                child: Container(
+                  padding: failed ? const EdgeInsets.all(12) : EdgeInsets.zero,
+                  decoration: failed
+                      ? BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                        )
+                      : null,
+                  child: Semantics(
+                    liveRegion: failed,
+                    child: Text(
+                      _statusText(),
+                      key: const Key('tag_playback_status'),
+                      style: TagDialogStyles.bodyTextStyle(
+                        theme,
+                        widget.fontScale,
+                        color: failed
+                            ? const Color(0xFF8B0000)
+                            : TagDialogStyles.body(theme),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -308,7 +320,9 @@ class _TagPlaybackPanelState extends State<TagPlaybackPanel> {
                         ? '${item.preview}  ·  + note'
                         : item.preview),
               maxLines: isCurrent ? null : 2,
-              overflow: isCurrent ? TextOverflow.visible : TextOverflow.ellipsis,
+              overflow: isCurrent
+                  ? TextOverflow.visible
+                  : TextOverflow.ellipsis,
               style: body.copyWith(
                 fontSize: (body.fontSize ?? 15) - 1,
                 fontStyle: silent ? FontStyle.italic : FontStyle.normal,

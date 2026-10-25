@@ -41,6 +41,29 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
     private var loopStartMs: Int? = null
     private var loopEndMs: Int? = null
 
+    // A device must acknowledge a seek before we can safely resume Scripture.
+    // Never guess the verse position if that callback is lost or stalls.
+    private val seekTimeout = Runnable {
+        if (reading && pendingSeekMs != null) {
+            reportError(IllegalStateException(
+                "Bible audio could not reach the selected verse. Try another chapter, then return."
+            ))
+        }
+    }
+
+    private fun watchPendingSeek() {
+        handler.removeCallbacks(seekTimeout)
+        if (reading && pendingSeekMs != null) handler.postDelayed(seekTimeout, 10_000L)
+    }
+
+    private fun playbackCallback(action: () -> Unit) {
+        try {
+            action()
+        } catch (error: Exception) {
+            reportError(error)
+        }
+    }
+
     private val tick = object : Runnable {
         override fun run() {
             if (!reading) return
@@ -154,31 +177,38 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
         val player = playerFor(path)
         player.setOnCompletionListener { completed ->
             if (completed !== chapterPlayer || !reading) return@setOnCompletionListener
-            val start = loopStartMs
-            if (start != null) {
-                seekChapter(start)
-                nextEvent = eventIndexAt(start)
-                channel.invokeMethod("looped", null)
-                if (!playDueCue(start)) startChapter()
-            } else {
-                reading = false
-                handler.removeCallbacks(tick)
-                channel.invokeMethod("complete", null)
+            playbackCallback {
+                val start = loopStartMs
+                if (start != null) {
+                    seekChapter(start)
+                    nextEvent = eventIndexAt(start)
+                    channel.invokeMethod("looped", null)
+                    if (!playDueCue(start)) startChapter()
+                } else {
+                    reading = false
+                    handler.removeCallbacks(tick)
+                    channel.invokeMethod("complete", null)
+                }
             }
         }
-        player.setOnErrorListener { _, what, extra ->
-            reportError(IllegalStateException("Recording playback failed ($what/$extra)"))
+        player.setOnErrorListener { failed, what, extra ->
+            if (failed === chapterPlayer) {
+                reportError(IllegalStateException("Recording playback failed ($what/$extra)"))
+            }
             true
         }
         player.setOnSeekCompleteListener { completed ->
             if (completed !== chapterPlayer) return@setOnSeekCompleteListener
             val target = pendingSeekMs ?: return@setOnSeekCompleteListener
-            if (target != dispatchedSeekMs) {
-                dispatchSeek(completed, target)
-            } else {
-                pendingSeekMs = null
-                dispatchedSeekMs = null
-                startChapter()
+            playbackCallback {
+                if (target != dispatchedSeekMs) {
+                    dispatchSeek(completed, target)
+                } else {
+                    pendingSeekMs = null
+                    dispatchedSeekMs = null
+                    handler.removeCallbacks(seekTimeout)
+                    startChapter()
+                }
             }
         }
         chapterPlayer = player
@@ -197,6 +227,7 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
         if (!playDueCue(position)) startChapter()
         handler.removeCallbacks(tick)
         handler.post(tick)
+        watchPendingSeek()
     }
 
     private fun startChapter() {
@@ -215,6 +246,7 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
     private fun pause() {
         reading = false
         ++generation
+        handler.removeCallbacks(seekTimeout)
         handler.removeCallbacks(tick)
         releaseCue()
         chapterPlayer?.let { if (it.isPlaying) it.pause() }
@@ -252,6 +284,7 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
 
     private fun dispatchSeek(player: MediaPlayer, target: Int) {
         dispatchedSeekMs = target
+        watchPendingSeek()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             player.seekTo(target.toLong(), MediaPlayer.SEEK_CLOSEST)
         } else {
@@ -321,11 +354,15 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
         cuePlayer = player
         player.setOnCompletionListener {
             if (token != generation || it !== cuePlayer) return@setOnCompletionListener
-            releaseCue()
-            startNextCue()
+            playbackCallback {
+                releaseCue()
+                startNextCue()
+            }
         }
-        player.setOnErrorListener { _, what, extra ->
-            reportError(IllegalStateException("Qwen announcement failed ($what/$extra)"))
+        player.setOnErrorListener { failed, what, extra ->
+            if (token == generation && failed === cuePlayer) {
+                reportError(IllegalStateException("Qwen announcement failed ($what/$extra)"))
+            }
             true
         }
         player.start()
@@ -337,7 +374,18 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
     }
 
     private fun reportError(error: Exception) {
-        pause()
+        reading = false
+        ++generation
+        handler.removeCallbacks(seekTimeout)
+        handler.removeCallbacks(tick)
+        // A decoder error can also make cleanup throw. Invalidate callbacks
+        // first, attempt each cleanup independently, and retain the real error.
+        val cue = cuePlayer
+        cuePlayer = null
+        try { cue?.release() } catch (_: Exception) { }
+        try {
+            chapterPlayer?.let { if (it.isPlaying) it.pause() }
+        } catch (_: Exception) { }
         channel.invokeMethod("error", error.message ?: "Recorded Bible playback failed")
     }
     /** Decode only requested intervals, preserving the shipped voice in PCM. */

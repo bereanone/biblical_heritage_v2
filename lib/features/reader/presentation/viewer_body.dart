@@ -17,6 +17,7 @@ import 'viewer_passage_models.dart';
 import 'viewer_range_selection.dart';
 import 'viewer_verse_line.dart';
 import 'text_range_geometry.dart';
+import 'viewer_selection_handles.dart';
 import '../../library/presentation/reader_tilt_autoscroll_controller.dart';
 import '../../library/presentation/mac_reader_autoscroll_controller.dart';
 import 'reader_autoscroll_diagnostics.dart';
@@ -24,7 +25,7 @@ import 'reader_bounded_fling_physics.dart';
 
 part 'viewer_body_helpers.dart';
 
-const bool _enableTextRangeGeometry = false;
+const bool _enableTextRangeGeometry = true;
 const int viewerMaximumAutomaticBlockLeap = 100;
 
 bool viewerAutomaticBlockTransitionIsSafe({
@@ -97,6 +98,8 @@ class ViewerBody extends StatefulWidget {
     this.onSelectVerseNumber = _noopVerseSelection,
     this.onSelectTokenLongPress,
     this.onTokenLongPressEnd,
+    this.onMoveSelectionEndpoint,
+    this.onDismissSelection,
     this.onSelectTokenLongPressMove,
     this.onSelectVerseNumberLongPressMove,
     this.onTapSelectedRange = _noop,
@@ -113,6 +116,9 @@ class ViewerBody extends StatefulWidget {
     this.onManualScroll,
   });
 
+  final void Function(bool start, int blockId, int tokenIndex)?
+  onMoveSelectionEndpoint;
+  final VoidCallback? onDismissSelection;
   final int anchorBlockId;
   final ViewerDataController data;
   final Map<int, String> bookNamesByNumber;
@@ -463,6 +469,17 @@ class _ViewerBodyState extends State<ViewerBody> {
   void _handleCrossVerseDrag(LongPressMoveUpdateDetails details) {
     final onMove = widget.onSelectTokenLongPressMove;
     if (onMove == null) return;
+    final geometry = _geometryRegistry.nearestAnchorToGlobalPoint(
+      details.globalPosition,
+      sourceKind: TextRangeSourceKind.bible,
+    );
+    if (geometry != null) {
+      final line = widget.data.getBlock(geometry.blockId);
+      if (line != null) {
+        onMove(line, geometry.tokenIndex);
+        return;
+      }
+    }
     final blockId = _blockIdAtGlobalPosition(details.globalPosition);
     if (blockId == null) return;
     final targetLine = widget.data.getBlock(blockId);
@@ -493,6 +510,7 @@ class _ViewerBodyState extends State<ViewerBody> {
       baseStyle: bodyStyle,
       redLetterColor: redLetterColor,
       localPosition: textLocalPos,
+      wordSelection: widget.rangeSelection.usesWordIndices,
       maxWidth: textWidth,
       textDirection: Directionality.of(context),
       textAlign: TextAlign.start,
@@ -805,174 +823,192 @@ class _ViewerBodyState extends State<ViewerBody> {
           }
         });
 
-        return NotificationListener<ScrollNotification>(
-          onNotification: (notification) {
-            final notificationContext = notification.context;
-            if (notificationContext != null) {
-              _pixelScrollPosition = Scrollable.maybeOf(
-                notificationContext,
-              )?.position;
-            }
-            final manualStart = readerScrollNotificationIsManual(notification);
-            if (manualStart && !_suppressUserScroll) {
-              _automaticPixelScrollActive = false;
-              widget.onManualScroll?.call();
-            }
-            final isScrolling = notification is ScrollStartNotification
-                ? true
-                : notification is ScrollEndNotification
-                ? false
-                : _userIsScrolling;
-            if (_userIsScrolling != isScrolling) {
-              _userIsScrolling = isScrolling;
-              if (!isScrolling && mounted) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) setState(() {});
-                });
+        return ViewerSelectionHandles(
+          registry: _geometryRegistry,
+          selection: widget.rangeSelection,
+          onMove: widget.onMoveSelectionEndpoint,
+          onDismiss: widget.onDismissSelection,
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              if (widget.rangeSelection.hasTokenSelection) {
+                _geometryRegistry.refreshPositions();
               }
-            }
-            return false;
-          },
-          child: ScrollablePositionedList.builder(
-            key: _visibleListKey,
-            physics: Platform.isIOS ? const ReaderBoundedFlingPhysics() : null,
-            // Never expose unloaded forward IDs as scrollable blank rows. The
-            // item count grows only after ensureWindow has populated them.
-            itemCount: viewerBodyItemCountForLoadedWindow(
-              widget.data.lastBlockId,
-            ),
-            itemScrollController: _itemScrollController,
-            scrollOffsetController: _scrollOffsetController,
-            itemPositionsListener: _itemPositionsListener,
-            initialScrollIndex: _indexForBlockId(
-              widget.restoreScrollPosition?.blockId ?? widget.anchorBlockId,
-            ),
-            initialAlignment: widget.restoreScrollPosition?.alignment ?? 0.5,
-            padding: const EdgeInsets.fromLTRB(22, 4, 22, 14),
-            itemBuilder: (context, index) {
-              // Make the visible pixel position available before the first
-              // user scroll notification. Mac autoscroll can therefore begin
-              // from a freshly opened reader instead of reporting a boundary.
-              _pixelScrollPosition ??= Scrollable.maybeOf(context)?.position;
-              if (_pixelScrollPosition == null ||
-                  !_pixelScrollPosition!.hasPixels) {
-                _captureVisiblePixelPosition();
+              final notificationContext = notification.context;
+              if (notificationContext != null) {
+                _pixelScrollPosition = Scrollable.maybeOf(
+                  notificationContext,
+                )?.position;
               }
-              final blockId = index + 1;
-              final line = widget.data.getBlock(blockId);
-              if (line == null) {
-                return SizedBox(height: 44 * widget.fontScale);
-              }
-
-              final blockContext = blockContextById[blockId];
-              final previousVerseLine = blockContext?.previousVerseLine;
-              final bookName =
-                  widget.bookNamesByNumber[line.bookNumber] ??
-                  'Book ${line.bookNumber}';
-              final verseKey = '$bookName ${line.chapter}:${line.verse}';
-              final numericVerseKey =
-                  '${line.bookNumber}:${line.chapter}:${line.verse}';
-              final rangeSelected = shouldOpenRangeActionsOnTap(
-                widget.rangeSelection,
-                blockId,
+              final manualStart = readerScrollNotificationIsManual(
+                notification,
               );
-              final headings =
-                  (cachedHeadings ?? const <int, List<String>>{})[blockId] ??
-                  const <String>[];
-              final acrostic =
-                  (cachedAcrostics ?? const <int, AcrosticRecord>{})[blockId];
-              final showChapterNumber =
-                  previousVerseLine == null ||
-                  previousVerseLine.bookNumber != line.bookNumber ||
-                  previousVerseLine.chapter != line.chapter;
-              return KeyedSubtree(
-                key: _keyForBlock(blockId),
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (acrostic != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: ViewerAcrosticBlock(
-                            hebrew: acrostic.hebrew,
-                            transliteration: acrostic.transliteration,
-                            fontScale: widget.fontScale,
-                          ),
-                        ),
-                      for (final heading in headings)
-                        if (heading.trim().isNotEmpty)
+              if (manualStart && !_suppressUserScroll) {
+                _automaticPixelScrollActive = false;
+                widget.onManualScroll?.call();
+              }
+              final isScrolling = notification is ScrollStartNotification
+                  ? true
+                  : notification is ScrollEndNotification
+                  ? false
+                  : _userIsScrolling;
+              if (_userIsScrolling != isScrolling) {
+                _userIsScrolling = isScrolling;
+                if (!isScrolling && mounted) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) setState(() {});
+                  });
+                }
+              }
+              return false;
+            },
+            child: ScrollablePositionedList.builder(
+              key: _visibleListKey,
+              physics: Platform.isIOS
+                  ? const ReaderBoundedFlingPhysics()
+                  : null,
+              // Never expose unloaded forward IDs as scrollable blank rows. The
+              // item count grows only after ensureWindow has populated them.
+              itemCount: viewerBodyItemCountForLoadedWindow(
+                widget.data.lastBlockId,
+              ),
+              itemScrollController: _itemScrollController,
+              scrollOffsetController: _scrollOffsetController,
+              itemPositionsListener: _itemPositionsListener,
+              initialScrollIndex: _indexForBlockId(
+                widget.restoreScrollPosition?.blockId ?? widget.anchorBlockId,
+              ),
+              initialAlignment: widget.restoreScrollPosition?.alignment ?? 0.5,
+              padding: const EdgeInsets.fromLTRB(22, 4, 22, 14),
+              itemBuilder: (context, index) {
+                // Make the visible pixel position available before the first
+                // user scroll notification. Mac autoscroll can therefore begin
+                // from a freshly opened reader instead of reporting a boundary.
+                _pixelScrollPosition ??= Scrollable.maybeOf(context)?.position;
+                if (_pixelScrollPosition == null ||
+                    !_pixelScrollPosition!.hasPixels) {
+                  _captureVisiblePixelPosition();
+                }
+                final blockId = index + 1;
+                final line = widget.data.getBlock(blockId);
+                if (line == null) {
+                  return SizedBox(height: 44 * widget.fontScale);
+                }
+
+                final blockContext = blockContextById[blockId];
+                final bookName =
+                    widget.bookNamesByNumber[line.bookNumber] ??
+                    'Book ${line.bookNumber}';
+                final verseKey = '$bookName ${line.chapter}:${line.verse}';
+                final numericVerseKey =
+                    '${line.bookNumber}:${line.chapter}:${line.verse}';
+                final rangeSelected = shouldOpenRangeActionsOnTap(
+                  widget.rangeSelection,
+                  blockId,
+                );
+                final headings =
+                    (cachedHeadings ?? const <int, List<String>>{})[blockId] ??
+                    const <String>[];
+                final acrostic =
+                    (cachedAcrostics ?? const <int, AcrosticRecord>{})[blockId];
+                // A loaded-window boundary is not a chapter boundary. The
+                // label belongs to the verse, even when row context is absent.
+                final showChapterNumber = line.verse == 1;
+                return KeyedSubtree(
+                  key: _keyForBlock(blockId),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (acrostic != null)
                           Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: ViewerHeadingBlock(
-                              text: heading,
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: ViewerAcrosticBlock(
+                              hebrew: acrostic.hebrew,
+                              transliteration: acrostic.transliteration,
                               fontScale: widget.fontScale,
                             ),
                           ),
-                      ViewerVerseLine(
-                        line: line,
-                        style: bodyStyle,
-                        isSelected: selectedBlockId == blockId,
-                        underlineMappedStrongs: widget.underlineMappedStrongs,
-                        selectedMappedTokenIndex:
-                            widget.selectedMappedBlockId == blockId
-                            ? widget.selectedMappedTokenIndex
-                            : null,
-                        onTapMappedPhrase: widget.onTapMappedPhrase == null
-                            ? null
-                            : (phrase) =>
-                                  widget.onTapMappedPhrase!(line, phrase),
-                        isRangeSelected: rangeSelected,
-                        geometryRegistry: _enableTextRangeGeometry
-                            ? _geometryRegistry
-                            : null,
-                        geometryScopeId: _enableTextRangeGeometry
-                            ? geometryScopeId
-                            : null,
-                        geometryRevision: _enableTextRangeGeometry
-                            ? _geometryTick
-                            : 0,
-                        highlight:
-                            (cachedHighlights ??
-                            const <String, VerseHighlightRecord>{})[verseKey],
-                        tokenHighlights:
-                            (cachedTokenHighlights ??
-                                const <
-                                  String,
-                                  List<VerseHighlightRecord>
-                                >{})[verseKey] ??
-                            const <VerseHighlightRecord>[],
-                        hasUserMarkup: (cachedVerseMarkups ?? const <String>{})
-                            .contains(numericVerseKey),
-                        showChapterNumber: showChapterNumber,
-                        startsInRedLetter:
-                            blockContext?.startsInRedLetter ?? false,
-                        onTap: () => widget.onSelectVerse(line),
-                        onVerseNumberTap: widget.onOpenCrossReferences == null
-                            ? null
-                            : () => widget.onOpenCrossReferences!(line),
-                        onVerseNumberLongPress: () =>
-                            widget.onSelectVerseNumber(line),
-                        onVerseNumberLongPressMoveDetails:
-                            widget.onSelectVerseNumberLongPressMove != null
-                            ? _handleVerseGutterDrag
-                            : null,
-                        rangeSelection: widget.rangeSelection,
-                        onTokenLongPressEnd: widget.onTokenLongPressEnd,
-                        onTokenLongPress: (tokenIndex) {
-                          widget.onSelectTokenLongPress?.call(line, tokenIndex);
-                        },
-                        onTokenLongPressMoveDetails:
-                            widget.onSelectTokenLongPressMove != null
-                            ? _handleCrossVerseDrag
-                            : null,
-                      ),
-                    ],
+                        for (final heading in headings)
+                          if (heading.trim().isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: ViewerHeadingBlock(
+                                text: heading,
+                                fontScale: widget.fontScale,
+                              ),
+                            ),
+                        ViewerVerseLine(
+                          line: line,
+                          style: bodyStyle,
+                          isSelected: selectedBlockId == blockId,
+                          underlineMappedStrongs: widget.underlineMappedStrongs,
+                          selectedMappedTokenIndex:
+                              widget.selectedMappedBlockId == blockId
+                              ? widget.selectedMappedTokenIndex
+                              : null,
+                          onTapMappedPhrase: widget.onTapMappedPhrase == null
+                              ? null
+                              : (phrase) =>
+                                    widget.onTapMappedPhrase!(line, phrase),
+                          isRangeSelected: rangeSelected,
+                          geometryRegistry:
+                              _enableTextRangeGeometry &&
+                                  widget.rangeSelection.hasTokenSelection
+                              ? _geometryRegistry
+                              : null,
+                          geometryScopeId: _enableTextRangeGeometry
+                              ? geometryScopeId
+                              : null,
+                          geometryRevision: _enableTextRangeGeometry
+                              ? _geometryTick
+                              : 0,
+                          highlight:
+                              (cachedHighlights ??
+                              const <String, VerseHighlightRecord>{})[verseKey],
+                          tokenHighlights:
+                              (cachedTokenHighlights ??
+                                  const <
+                                    String,
+                                    List<VerseHighlightRecord>
+                                  >{})[verseKey] ??
+                              const <VerseHighlightRecord>[],
+                          hasUserMarkup:
+                              (cachedVerseMarkups ?? const <String>{}).contains(
+                                numericVerseKey,
+                              ),
+                          showChapterNumber: showChapterNumber,
+                          startsInRedLetter:
+                              blockContext?.startsInRedLetter ?? false,
+                          onTap: () => widget.onSelectVerse(line),
+                          onVerseNumberTap: widget.onOpenCrossReferences == null
+                              ? null
+                              : () => widget.onOpenCrossReferences!(line),
+                          onVerseNumberLongPress: () =>
+                              widget.onSelectVerseNumber(line),
+                          onVerseNumberLongPressMoveDetails:
+                              widget.onSelectVerseNumberLongPressMove != null
+                              ? _handleVerseGutterDrag
+                              : null,
+                          rangeSelection: widget.rangeSelection,
+                          onTokenLongPressEnd: widget.onTokenLongPressEnd,
+                          onTokenLongPress: (tokenIndex) {
+                            widget.onSelectTokenLongPress?.call(
+                              line,
+                              tokenIndex,
+                            );
+                          },
+                          onTokenLongPressMoveDetails:
+                              widget.onSelectTokenLongPressMove != null
+                              ? _handleCrossVerseDrag
+                              : null,
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         );
       },

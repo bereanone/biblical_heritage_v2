@@ -5,6 +5,8 @@ import '../data/presentation/presentation_models.dart';
 import '../data/presentation/presentation_slide_settings.dart';
 import 'presentation_prep/tag_presentation_media_path_resolver.dart';
 import 'presentation_slide_canvas.dart';
+import 'presentation_slide_editor.dart';
+import '../data/presentation/presentation_item_settings_repository.dart';
 import 'viewer_presentation_settings.dart';
 
 class ViewerPresentationScreen extends StatefulWidget {
@@ -13,11 +15,17 @@ class ViewerPresentationScreen extends StatefulWidget {
     required this.slides,
     required this.initialIndex,
     required this.aspectRatioPreset,
+    this.initialSlideSettings = const {},
+    this.tagFamily,
+    this.tag,
   });
 
   final List<PresentationSlide> slides;
   final int initialIndex;
   final PresentationAspectRatioPreset aspectRatioPreset;
+  final Map<String, PresentationSlideSettings> initialSlideSettings;
+  final String? tagFamily;
+  final String? tag;
 
   @override
   State<ViewerPresentationScreen> createState() =>
@@ -27,6 +35,8 @@ class ViewerPresentationScreen extends StatefulWidget {
 class _ViewerPresentationScreenState extends State<ViewerPresentationScreen> {
   final Map<int, String> _bookNames = <int, String>{};
   int _index = 0;
+  late final Map<String, PresentationSlideSettings> _slideSettings;
+  bool _editing = false;
   bool _loadingBooks = true;
   List<String> _mediaRootPaths = const <String>[];
   bool _loadingMediaRoot = true;
@@ -34,6 +44,7 @@ class _ViewerPresentationScreenState extends State<ViewerPresentationScreen> {
   @override
   void initState() {
     super.initState();
+    _slideSettings = Map.of(widget.initialSlideSettings);
     _index = widget.initialIndex.clamp(0, widget.slides.length - 1);
     _loadBooks();
     _loadMediaRootPath();
@@ -91,13 +102,32 @@ class _ViewerPresentationScreenState extends State<ViewerPresentationScreen> {
         child: Stack(
           children: [
             Positioned.fill(
-              child: PresentationSlideCanvas(
+              child: PresentationSlideEditor(
                 key: ValueKey(slide.settingsKey),
-                slide: slide,
-                aspectRatioPreset: widget.aspectRatioPreset,
-                bookNames: _bookNames,
-                settings: PresentationSlideSettings.defaults(),
-                mediaRootPaths: _mediaRootPaths,
+                settings:
+                    _slideSettings[slide.settingsKey] ??
+                    PresentationSlideSettings.defaults(),
+                onEditingChanged: (value) => setState(() => _editing = value),
+                onSave: (settings) async {
+                  if (widget.tagFamily != null && widget.tag != null) {
+                    await PresentationItemSettingsRepository.instance
+                        .saveSlideSettingsForTag(
+                          tagFamily: widget.tagFamily!,
+                          tag: widget.tag!,
+                          slide: slide,
+                          settings: settings,
+                        );
+                  }
+                  _slideSettings[slide.settingsKey] = settings;
+                },
+                builder: (settings, reportFont) => PresentationSlideCanvas(
+                  slide: slide,
+                  aspectRatioPreset: widget.aspectRatioPreset,
+                  bookNames: _bookNames,
+                  settings: settings,
+                  mediaRootPaths: _mediaRootPaths,
+                  onBodyFontSizeResolved: reportFont,
+                ),
               ),
             ),
             Positioned(
@@ -116,7 +146,7 @@ class _ViewerPresentationScreenState extends State<ViewerPresentationScreen> {
               left: 14,
               child: _PresenterControlButton(
                 icon: Icons.chevron_left_rounded,
-                onPressed: _canGoPrevious ? _previous : null,
+                onPressed: !_editing && _canGoPrevious ? _previous : null,
                 foregroundColor: const Color(0xFF9AA1AB),
                 borderColor: const Color(0xFF3A404A),
                 tooltip: 'Previous slide',
@@ -127,7 +157,7 @@ class _ViewerPresentationScreenState extends State<ViewerPresentationScreen> {
               right: 14,
               child: _PresenterControlButton(
                 icon: Icons.chevron_right_rounded,
-                onPressed: _canGoNext ? _next : null,
+                onPressed: !_editing && _canGoNext ? _next : null,
                 foregroundColor: const Color(0xFF9AA1AB),
                 borderColor: const Color(0xFF3A404A),
                 tooltip: 'Next slide',

@@ -98,6 +98,8 @@ class ELibraryCatalogDuplicateRepairService {
         'relative_path',
         'source_work_id',
         'source_package_id',
+        'file_hash',
+        'pioneer_source_fingerprint',
         'last_opened',
         'epub_href',
         'epub_cfi',
@@ -318,35 +320,27 @@ const _generatedItemTables = <String>[
 ];
 
 bool _equivalent(Map<String, Object?> canonical, Map<String, Object?> legacy) {
-  final canonicalWork = _normalizedText(canonical['source_work_id']);
-  final legacyWork = _normalizedText(legacy['source_work_id']);
-  if (canonicalWork.isNotEmpty && legacyWork.isNotEmpty) {
-    return canonicalWork == legacyWork;
+  // Names are discovery hints, never proof that one source can be retired.
+  // Conflicting established identities always preserve both rows.
+  var identityMatched = false;
+  for (final field in ['source_work_id', 'source_package_id']) {
+    final left = _normalizedText(canonical[field]);
+    final right = _normalizedText(legacy[field]);
+    if (left.isEmpty || right.isEmpty) continue;
+    if (left != right) return false;
+    identityMatched = true;
   }
-  final canonicalPackage = _normalizedText(canonical['source_package_id']);
-  final legacyPackage = _normalizedText(legacy['source_package_id']);
-  if (canonicalPackage.isNotEmpty && legacyPackage.isNotEmpty) {
-    return canonicalPackage == legacyPackage;
+  var bytesMatched = false;
+  for (final field in ['pioneer_source_fingerprint', 'file_hash']) {
+    final left = canonical[field]?.toString().trim().toLowerCase() ?? '';
+    final right = legacy[field]?.toString().trim().toLowerCase() ?? '';
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(left) ||
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(right))
+      continue;
+    if (left != right) return false;
+    bytesMatched = true;
   }
-  if (_normalizedFileName(canonical['file_name']?.toString() ?? '') !=
-      _normalizedFileName(legacy['file_name']?.toString() ?? '')) {
-    return false;
-  }
-  final canonicalTitle = _normalizedText(canonical['title']);
-  final legacyTitle = _normalizedText(legacy['title']);
-  final canonicalAuthor = _normalizedText(canonical['author']);
-  final legacyAuthor = _normalizedText(legacy['author']);
-  if (canonicalTitle.isNotEmpty &&
-      legacyTitle.isNotEmpty &&
-      canonicalTitle != legacyTitle) {
-    return false;
-  }
-  if (canonicalAuthor.isNotEmpty &&
-      legacyAuthor.isNotEmpty &&
-      canonicalAuthor != legacyAuthor) {
-    return false;
-  }
-  return true;
+  return identityMatched || bytesMatched;
 }
 
 String _normalizedPath(String value) =>

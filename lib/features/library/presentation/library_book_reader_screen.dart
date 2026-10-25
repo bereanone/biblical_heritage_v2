@@ -1,3 +1,4 @@
+import 'library_reader_help.dart';
 // ignore_for_file: unused_element, dead_code
 
 import 'dart:async';
@@ -4448,8 +4449,16 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
         item: widget.item,
         searchTarget: widget.searchTarget,
         highlightTerms: widget.highlightTerms,
-        themeMode: widget.themeMode,
-        onThemeChanged: widget.onThemeChanged,
+        themeMode: _nightMode ? AppThemeMode.night : AppThemeMode.sepia,
+        onThemeChanged: (next) {
+          setState(() => _nightMode = next == AppThemeMode.night);
+          final onThemeChanged = widget.onThemeChanged;
+          if (onThemeChanged != null) {
+            onThemeChanged(next);
+          } else {
+            unawaited(ThemePreferences.instance.saveThemeMode(next));
+          }
+        },
         onBack: _backToBible,
         onSearch: _openSearch,
         onLibrary: _closeToLibrary,
@@ -4984,6 +4993,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      const LibraryReaderHelpButton(),
                       _ToolbarPillButton(
                         isNightMode: isNight,
                         icon: Icons.list_alt_outlined,

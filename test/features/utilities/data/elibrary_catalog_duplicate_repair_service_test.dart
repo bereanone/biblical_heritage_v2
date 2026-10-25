@@ -224,4 +224,92 @@ void main() {
     expect(second.indexRowsRemoved, 0);
     expect(second.userStateRowsMigrated, 0);
   });
+
+  test('metadata alone never proves a legacy copy is safe to retire', () async {
+    await item(
+      id: 'canonical',
+      path: 'ePubs/EGW/EGW_Books/book.epub',
+      title: 'Same title',
+    );
+    await item(
+      id: 'legacy',
+      path: 'ePubs/Research/EGW_Books/book.epub',
+      title: 'Same title',
+    );
+    await link('legacy-link', 'legacy', 'Keep this note.');
+    final report = await ELibraryCatalogDuplicateRepairService.instance.repair(
+      db: db,
+    );
+    expect(report.legacyCatalogRowsRetired, 0);
+    expect(report.ambiguousDuplicates, hasLength(1));
+    expect(await db.query('library_links'), hasLength(1));
+    expect(
+      await ELibraryCatalogDuplicateRepairService.instance
+          .shouldSkipLegacyCandidate(
+            db: db,
+            relativePath: 'ePubs/Research/EGW_Books/book.epub',
+          ),
+      isFalse,
+    );
+  });
+
+  test(
+    'different source fingerprints preserve both rows even with a matching work ID',
+    () async {
+      await item(
+        id: 'canonical',
+        path: 'ePubs/EGW/EGW_Books/book.epub',
+        title: 'Same title',
+        workId: 'SAME',
+      );
+      await item(
+        id: 'legacy',
+        path: 'ePubs/Research/EGW_Books/book.epub',
+        title: 'Same title',
+        workId: 'SAME',
+      );
+      await db.update(
+        'library_items',
+        {'pioneer_source_fingerprint': 'a' * 64},
+        where: 'id = ?',
+        whereArgs: ['canonical'],
+      );
+      await db.update(
+        'library_items',
+        {'pioneer_source_fingerprint': 'b' * 64},
+        where: 'id = ?',
+        whereArgs: ['legacy'],
+      );
+      expect(
+        (await ELibraryCatalogDuplicateRepairService.instance.repair(
+          db: db,
+        )).legacyCatalogRowsRetired,
+        0,
+      );
+      expect(
+        await db.query('library_items', where: 'deleted_at IS NULL'),
+        hasLength(2),
+      );
+    },
+  );
+
+  test('identical source bytes permit safe repair without work IDs', () async {
+    await item(
+      id: 'canonical',
+      path: 'ePubs/EGW/EGW_Books/book.epub',
+      title: 'Same title',
+    );
+    await item(
+      id: 'legacy',
+      path: 'ePubs/Research/EGW_Books/book.epub',
+      title: 'Same title',
+    );
+    await db.update('library_items', {'pioneer_source_fingerprint': 'a' * 64});
+    expect(
+      (await ELibraryCatalogDuplicateRepairService.instance.repair(
+        db: db,
+      )).legacyCatalogRowsRetired,
+      1,
+    );
+  });
 }

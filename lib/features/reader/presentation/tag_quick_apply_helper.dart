@@ -14,6 +14,7 @@ import '../../library/data/library_catalog_service.dart'
     show extractLibrarySearchHighlightTerms;
 import '../data/presentation/presentation_models.dart';
 import '../data/tags/shared_list_text_blocks.dart';
+import '../data/tags/tag_media_identity.dart';
 import '../data/presentation/presentation_text_format.dart';
 import 'viewer_passage_models.dart';
 import 'viewer_range_selection.dart';
@@ -1029,6 +1030,29 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     } catch (_) {
       return false;
     }
+  }
+
+  /// Seeds empty ministry lists without moving, editing, or reviving any
+  /// user-created list that already has the same name. Safe to repeat on updates.
+  Future<void> ensureMinistryStarterTags({required String folder, required List<String> tags}) async {
+    await ensureSchema();
+    if (!await createCategory(folder)) throw StateError('Could not create the ministry folder.');
+    final db = await _db();
+    await db.transaction((txn) async {
+      final parent = await _ensureNormalizedCategoryGroupId(txn, folder);
+      if (parent == null) throw StateError('Ministry folder is not available.');
+      for (final tag in tags) {
+        final name = normalizeTagName(tag);
+        if (name.isEmpty) continue;
+        final existing = await txn.query('tag_groups', columns: ['id'],
+          where: 'tag_kind = ? AND LOWER(name) = LOWER(?)',
+          whereArgs: [_tagKindForTable(), name], limit: 1);
+        if (existing.isNotEmpty) continue;
+        final now = _utcNow();
+        final id = await _ensureNormalizedTagGroup(txn, normalizedTag: name, now: now);
+        await txn.update('tag_groups', {'parent_group_id': parent}, where: 'id = ?', whereArgs: [id]);
+      }
+    });
   }
 
   Future<bool> hasVisibleTagSummary(String tag, {String? category}) async {
@@ -3134,14 +3158,29 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         where: 'rowid = ?',
         whereArgs: [id],
       );
-      _queueNoteAudio(values, id);
+      if (_changesNoteAudio(values)) {
+        await _queueSavedNoteAudio(db, id, normalized: true);
+      }
       return;
     }
     await db.update(tableName, values, where: 'id = ?', whereArgs: [id]);
-    _queueNoteAudio(values, id);
+    if (_changesNoteAudio(values)) await _queueSavedNoteAudio(db, id);
   }
 
-  void _queueNoteAudio(Map<String, Object?> values, int id) {
+  bool _changesNoteAudio(Map<String, Object?> values) =>
+      ['note_text', 'content_html', 'note_format_json', 'reference_code']
+          .any(values.containsKey);
+
+  Future<void> _queueSavedNoteAudio(Database db, int id, {bool normalized = false}) async {
+    final rows = await db.query(
+      normalized ? 'tag_items' : tableName,
+      where: normalized ? 'rowid = ?' : 'id = ?', whereArgs: [id], limit: 1,
+    );
+    if (rows.isEmpty) return;
+    final values = rows.single;
+    final title = bibleItemOverlayUserTitle(values['note_format_json']) ??
+        librarySafeUserFacingReferenceText(values['reference_code']?.toString());
+
     final note = values['note_text']?.toString().trim() ?? '';
     final html = values['content_html']?.toString() ?? '';
     final spoken = note.isNotEmpty
@@ -3149,10 +3188,11 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
         : _stripHtml(
             html.replaceAll(RegExp(r'</p>', caseSensitive: false), '\n'),
           ).trim();
-    if (spoken.isNotEmpty) {
+    {
       TagNoteAudioCache.instance.scheduleNoteText(
         spoken,
-        entryKey: '$tableName:$id',
+        entryKey: '${normalized ? 'tag_items' : tableName}:$id',
+        title: title,
       );
     }
   }
@@ -3214,10 +3254,11 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
       });
     }
     final insertedId = await db.insert(tableName, values);
-    if (insertedId > 0 && cleanNote.isNotEmpty) {
+    if (insertedId > 0) {
       TagNoteAudioCache.instance.scheduleNoteText(
         cleanNote,
         entryKey: '$tableName:$insertedId',
+        title: cleanReferenceCode.isEmpty ? null : cleanReferenceCode,
       );
     }
     return insertedId;
@@ -3262,6 +3303,7 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
 
   Future<void> addMediaAttachment({
     required int entryId,
+    bool normalized = false,
     required String relativePath,
     required String mimeType,
     required int fileSize,
@@ -3271,10 +3313,11 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
   }) async {
     await ensureSchema();
     final db = await _db();
+    final mediaEntryId = await tagMediaEntryId(db, entryId, normalized: normalized);
     final now = DateTime.now().millisecondsSinceEpoch.toString();
     await db.insert('tag_item_media', {
       'id': 'legacy-media-$entryId-$now-${p.basename(relativePath)}',
-      'tag_item_id': entryId.toString(),
+      'tag_item_id': mediaEntryId,
       'media_type': _mediaTypeFromMimeType(mimeType),
       'relative_path': relativePath,
       'caption': caption,
@@ -3301,13 +3344,14 @@ $presentationSlideColumn$presentationSlideRegionColumn        created_at INTEGER
     return tableName == 'dollar_tags' ? 'dollar' : 'hash';
   }
 
-  Future<void> deleteMediaAttachmentsForEntry(int entryId) async {
+  Future<void> deleteMediaAttachmentsForEntry(int entryId, {bool normalized = false}) async {
     await ensureSchema();
     final db = await _db();
+    final mediaEntryId = await tagMediaEntryId(db, entryId, normalized: normalized);
     await db.delete(
       'tag_item_media',
       where: 'tag_item_id = ?',
-      whereArgs: [entryId.toString()],
+      whereArgs: [mediaEntryId],
     );
   }
 

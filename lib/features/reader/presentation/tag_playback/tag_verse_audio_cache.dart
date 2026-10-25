@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import '../../../../core/audio/local_narration_policy.dart';
 
 import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
@@ -80,6 +81,7 @@ class TagVerseAudioCache {
       text: clip.text,
       speed: speed,
       blockId: clip.blockId,
+      allowGeneration: !LocalNarrationPolicy.savedPlaybackOnly,
     );
     final temporary = File('${target.path}.part');
     try {

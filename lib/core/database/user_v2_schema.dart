@@ -8,6 +8,21 @@ class UserV2Schema {
       await _createCoreTables(db);
       await _createSyncTables(db);
       await _ensureLibraryLinkColumns(db);
+      final highlightColumns = await _tableColumns(db, 'highlights');
+      await _addColumnIfMissing(
+        db,
+        'highlights',
+        highlightColumns,
+        'start_word',
+        'INTEGER',
+      );
+      await _addColumnIfMissing(
+        db,
+        'highlights',
+        highlightColumns,
+        'end_word',
+        'INTEGER',
+      );
       await _ensureLibraryNavigationColumns(db);
       await _ensureElibraryRefIndex(db);
       await _ensureLibraryTextBlocks(db);

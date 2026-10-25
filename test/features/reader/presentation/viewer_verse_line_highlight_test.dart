@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:studybible2/features/reader/presentation/text_range_geometry.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:studybible2/features/reader/data/highlights_repository.dart';
 import 'package:studybible2/features/reader/presentation/highlight_render.dart';
@@ -6,6 +7,25 @@ import 'package:studybible2/features/reader/presentation/viewer_passage_models.d
 import 'package:studybible2/features/reader/presentation/viewer_verse_line.dart';
 
 void main() {
+  testWidgets('verse reports actual token endpoints for selection handles', (tester) async {
+    final registry = TextRangeGeometryRegistry();
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ViewerVerseLine(
+      line: const VerseLine(blockId: 9, bookNumber: 27, chapter: 7, verse: 20,
+        html: '<w>the</w> <w>horns that were</w> <w>in</w>', text: 'the horns that were in'),
+      style: const TextStyle(fontSize: 20), isSelected: false,
+      geometryRegistry: registry, onTap: () {},
+    ))));
+    await tester.pump();
+    expect(registry.entries.length, 3);
+    for (final entry in registry.entries) {
+      expect(entry.anchor.blockId, 9);
+      expect(entry.globalRect.width, greaterThan(0));
+      expect(entry.globalStartRect, isNotNull);
+      expect(entry.globalEndRect, isNotNull);
+    }
+    await tester.pumpWidget(const SizedBox());
+    registry.dispose();
+  });
   testWidgets('dark reader renders a saved yellow token range with dark text', (
     tester,
   ) async {

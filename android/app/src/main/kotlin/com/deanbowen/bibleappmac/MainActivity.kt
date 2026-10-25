@@ -66,6 +66,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
     private val storageExecutor = Executors.newSingleThreadExecutor()
     private var narrationThermalBridge: NarrationThermalBridge? = null
     private var recordedAudioBridge: RecordedBibleAudioBridge? = null
+    private var playPurchaseBridge: PlayPurchaseBridge? = null
 
     override fun onFlutterSurfaceViewCreated(flutterSurfaceView: FlutterSurfaceView) {
         super.onFlutterSurfaceViewCreated(flutterSurfaceView)
@@ -74,6 +75,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        playPurchaseBridge = PlayPurchaseBridge(this, flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "studybible/rich_clipboard")
             .setMethodCallHandler { call, result ->
                 if (call.method == "writeImage") {
@@ -901,6 +903,8 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        playPurchaseBridge?.close()
+        playPurchaseBridge = null
         narrationThermalBridge?.close()
         narrationThermalBridge = null
         sensorManager?.unregisterListener(this)

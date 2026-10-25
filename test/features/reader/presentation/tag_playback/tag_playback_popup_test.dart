@@ -31,6 +31,51 @@ Color? rowColor(WidgetTester tester, int index) {
 
 void main() {
   group('panel', () {
+    for (final scale in [1.0, 1.8]) {
+      testWidgets(
+        'long selected passage stays inside its row at scale $scale',
+        (tester) async {
+          final passage = List.filled(
+            5,
+            'Remember the sabbath day, to keep it holy.',
+          ).join(' ');
+          final h = Harness([
+            TagPlaybackItem(
+              entryId: 0,
+              label: 'Exodus 20:8–11',
+              preview: passage,
+              contentClips: [
+                TagSpeechClip(text: passage, kind: TagClipKind.verse),
+              ],
+            ),
+            fakeItem(1, label: 'Sabbath Note 1'),
+          ]);
+          await tester.pumpWidget(
+            host(TagPlaybackPanel(controller: h.controller, fontScale: scale)),
+          );
+          await tester.pumpAndSettle();
+          final row = tester.getRect(
+            find.byKey(const Key('tag_playback_row_0')),
+          );
+          final text = tester.getRect(find.text(passage));
+          expect(
+            text.bottom,
+            lessThanOrEqualTo(row.bottom),
+            reason: 'Passage must not paint over the next entry',
+          );
+          final nextFinder = find.byKey(const Key('tag_playback_row_1'));
+          if (nextFinder.evaluate().isNotEmpty) {
+            expect(
+              text.bottom,
+              lessThanOrEqualTo(tester.getRect(nextFinder).top),
+            );
+          }
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox());
+          h.controller.dispose();
+        },
+      );
+    }
     testWidgets('shows which entry of how many, and the reference', (
       tester,
     ) async {

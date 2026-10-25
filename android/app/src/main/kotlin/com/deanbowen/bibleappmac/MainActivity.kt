@@ -95,16 +95,22 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, SensorEventL
                     try {
                         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                         val clip = clipboard.primaryClip
-                        val uri = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).uri else null
-                        if (uri == null || contentResolver.getType(uri)?.startsWith("image/") != true) result.success(null)
-                        else contentResolver.openInputStream(uri).use { input ->
-                            val bitmap = android.graphics.BitmapFactory.decodeStream(input)
-                            if (bitmap == null) result.success(null) else {
-                                val output = java.io.ByteArrayOutputStream()
-                                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)
-                                bitmap.recycle(); result.success(output.toByteArray())
+                        val image = firstReadableClipboardImage(clip?.itemCount ?: 0) { index ->
+                            val uri = clip?.getItemAt(index)?.uri
+                            if (uri == null) null else contentResolver.openInputStream(uri).use { input ->
+                                // Providers can omit or mislabel MIME metadata. The decoder,
+                                // rather than the label, establishes that this is an image.
+                                val bitmap = android.graphics.BitmapFactory.decodeStream(input)
+                                if (bitmap == null) null else try {
+                                    val output = java.io.ByteArrayOutputStream()
+                                    check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
+                                    output.toByteArray()
+                                } finally {
+                                    bitmap.recycle()
+                                }
                             }
                         }
+                        result.success(image)
                     } catch (error: Exception) { result.error("clipboard_failed", "Could not read image", null) }
                 } else if (call.method != "write") {
                     result.notImplemented()

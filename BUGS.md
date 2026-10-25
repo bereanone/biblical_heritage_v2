@@ -3,6 +3,20 @@
 This file tracks bugs and verification items found during manual application testing.
 
 
+## Release clearance check — October 25, 2026
+
+**Release decision: not yet cleared for public submission.** The following is the current focused verification, not a replacement for the older evidence below.
+
+- **Listen-list overlap: reproduced and fixed in source.** A selected passage used unlimited lines inside a fixed 68-pixel row. Rows now size to content, and indexed navigation follows the current entry without assuming row height. New regression cases fail on the old code and pass on the correction at normal and enlarged text sizes. The existing long-list navigation check also passes.
+- **Android image paste: compatibility correction in source; Samsung acceptance still required.** The native reader now checks every clipboard item and decodes the image rather than requiring image MIME metadata. An unreadable earlier item no longer hides a later readable image. This does not establish that Samsung keyboard history exposes the screenshot on the system clipboard, or that the reported screenshot failure is fixed.
+- **Automated checks:** 272 Flutter checks passed across hashtag playback, presentation fitting/editing, audio settings/navigation/cache, image import/clipboard, and Android/Apple access gates; 29 JVM clipboard/legacy-access policy/recovery checks passed; 19 deterministic native audio scenarios passed. Focused static analysis passed without issues. The JVM checks do not prove a real Google Block Store uninstall/reinstall cycle. The native audio scenarios do not reproduce the remote Sony report.
+- **Still requires real-device evidence:** fresh Samsung screenshot paste; audible #Sabbath99 transitions with announcements on/off and both notes; saved Audio Off behavior and final presentation controls on each mobile platform; existing-user recovery through reinstall on a disposable, enrolled, same-signature test installation. Do not uninstall or clear storage on Dean's phones to obtain this evidence.
+- **Remote Sony:** remains open until the affected user confirms playback or we obtain a real failure trace. Local Samsung success cannot close that report.
+- **Deferred by Dean:** editable presentation HTML transfer and desktop activation are next-version work, not defects to claim fixed here.
+
+**Package/device verification:** Android 2.0.6/test install 2155 built, passed the release snapshot/engine and APK signature checks, installed in place on the Samsung, and cold-launched successfully. Its original October 5 installation date remains intact; the process remained running without startup-crash matches in the checked log window. This is not audible or screenshot-paste acceptance. The matching physical-iOS 2.0.6+155 package built and passed full package/Watch-companion signature verification after refreshing the parent app seal with its existing development identity and entitlements. The iPhone disconnected during pre-install backup access; this correction has not been installed on it. No store upload, submission, data reset, or uninstall was performed.
+
+
 ## Current review — October 20, 2026
 
 The dated current-review paragraph under each of the 33 historical entries supersedes its older status and section placement. The original descriptions and verification history are preserved. “Resolved in source/tests” does not mean newly installed, heard, or thermally verified on a physical device.

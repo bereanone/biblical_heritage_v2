@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../tag_dialog_styles.dart';
 import 'tag_playback_controller.dart';
@@ -22,34 +23,24 @@ class TagPlaybackPanel extends StatefulWidget {
 }
 
 class _TagPlaybackPanelState extends State<TagPlaybackPanel> {
-  static const double _rowExtent = 68;
-  final ScrollController _scroll = ScrollController();
+  final ItemScrollController _scroll = ItemScrollController();
   int _lastRevealed = -1;
   bool _showSettings = false;
 
   TagPlaybackController get _c => widget.controller;
-
-  @override
-  void dispose() {
-    _scroll.dispose();
-    super.dispose();
-  }
 
   void _revealCurrent() {
     final index = _c.currentIndex;
     if (index == _lastRevealed) return;
     _lastRevealed = index;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scroll.hasClients) return;
-      final position = _scroll.position;
-      final target =
-          (index * _rowExtent - position.viewportDimension / 2 + _rowExtent / 2)
-              .clamp(0.0, position.maxScrollExtent);
-      _scroll.animateTo(
-        target,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
+      if (!mounted ||
+          !_scroll.isAttached ||
+          _c.entryCount == 0 ||
+          index != _c.currentIndex) {
+        return;
+      }
+      _scroll.jumpTo(index: index, alignment: 0.15);
     });
   }
 
@@ -267,9 +258,8 @@ class _TagPlaybackPanelState extends State<TagPlaybackPanel> {
     final current = _c.currentIndex;
     final active = _c.status != TagPlaybackStatus.idle;
     final body = TagDialogStyles.bodyTextStyle(theme, widget.fontScale);
-    return ListView.builder(
-      controller: _scroll,
-      itemExtent: _rowExtent,
+    return ScrollablePositionedList.builder(
+      itemScrollController: _scroll,
       itemCount: _c.entryCount,
       itemBuilder: (context, index) {
         final item = _c.items[index];

@@ -23,10 +23,10 @@ void main() {
       child: ValueListenableBuilder(
         valueListenable: service.state,
         builder: (context, value, child) =>
-            value?.profile != null &&
-                value?.profile != MinistryProfile.biblicalHeritage
+            value?.displayProfile != null &&
+                value?.displayProfile != MinistryProfile.biblicalHeritage
             ? MinistryWelcomeScreen(
-                profile: value!.profile!,
+                profile: value!.displayProfile,
                 onExplore: () {},
                 onUtilities: () {},
                 onAbout: () {},
@@ -37,7 +37,7 @@ void main() {
   );
 
   testWidgets(
-    'fresh install accepts ADL once and displays persistent branded welcome',
+    'ADL discount enrollment keeps the standard welcome after restart',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -49,20 +49,16 @@ void main() {
       await tester.enterText(find.byType(TextField), 'adl');
       await tester.tap(find.text('Apply promotional code'));
       await tester.pumpAndSettle();
-      expect(
-        find.bySemanticsLabel('The Advent Defense League'),
-        findsOneWidget,
-      );
+      expect(find.bySemanticsLabel('The Advent Defense League'), findsNothing);
       expect(find.byType(MinistrySetupScreen), findsNothing);
-      expect(find.bySemanticsLabel('Explore the Bible'), findsOneWidget);
+      expect(find.text('Biblical Heritage welcome'), findsOneWidget);
+      expect(service.state.value?.ministryId, 'adl');
+      expect(service.state.value?.profile?.unlockPriceUsdCents, 999);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
-      expect(
-        find.bySemanticsLabel('The Advent Defense League'),
-        findsOneWidget,
-      );
+      expect(find.bySemanticsLabel('The Advent Defense League'), findsNothing);
       expect(find.byType(MinistrySetupScreen), findsNothing);
       expect(tester.takeException(), isNull);
     },

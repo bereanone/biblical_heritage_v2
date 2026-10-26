@@ -5,7 +5,7 @@ This file tracks bugs and verification items found during manual application tes
 
 ## Release clearance check — October 25, 2026
 
-**Release decision: not yet cleared for public submission.** The following is the current focused verification, not a replacement for the older evidence below.
+**Release decision: version 2.0.6, build 156 submitted to both stores for review with Dean’s explicit approval.** Apple confirms Waiting for Review; Google Play confirms Changes in review. Both are configured for automatic release after approval. This submission does not close the outstanding device-verification items or remote reports below.
 
 **User release-scope decision:** Dean reports finding no other sound problems and explicitly defers further audio fixes to a future update. Audio clipping/listening follow-up and the remote Sony report remain tracked, but are not blockers for this rollout under that decision. This is acceptance of the current release scope, not proof that the remote Sony failure or every verse boundary is fixed. Remaining focused verification concerns Samsung screenshot paste, real existing-user reinstall recovery, and the matching iPhone correction; store packaging and submission remain separate steps.
 
@@ -20,6 +20,9 @@ This file tracks bugs and verification items found during manual application tes
 
 
 **Store candidate 2.0.6+156:** Android production App Bundle passes bundletool validation and signature verification with the established production certificate and unchanged existing-free-user cutoff. Apple distribution IPA passes physical-iOS, billing-enabled, deep-signature, and Watch app/widget version checks after synchronizing the project-level companion build number to 156. Thirty-six focused entry/partner/Android and Apple purchase checks pass, including real EntryScreen widgets under Android and iOS themes: ADL retains its enrollment and discount price while displaying the standard Biblical Heritage welcome. These are package and automated-rendering checks, not a new purchase transaction or physical-device acceptance. Store upload/processing and public submission are separate evidence levels.
+
+
+**Final store handoff — October 25, 2026:** Both uploads and review submissions are complete. Apple’s initial upload authentication failures were resolved through a fresh user sign-in and the Xcode Organizer upload flow. Required release notes in the existing Bangla listing were populated with the matching approved notes, and the export-compliance answer matches the previous release’s no-non-exempt-encryption status. App Store Connect now visibly displays the Biblical Heritage logo for the attached iOS build and Apple Watch assets. Three third-party framework dSYM warnings remain; Apple accepted the upload and submission. Existing public versions remain unchanged until approval. Store screenshots and the detailed machine-readable status are preserved locally under /tmp/studybible-store156-candidate/upload-status.json; no credentials or device backups were committed.
 
 
 ## Current review — October 20, 2026

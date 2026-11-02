@@ -1,0 +1,47 @@
+[
+  {
+    "path": "android/app/build.gradle.kts",
+    "baseline_sha256": "f0bbb721cce12b1029107b207d01d8484e326c90f287e638d92e5a1f91f224be",
+    "candidate_sha256": "a927d3e4eba96c43059bbfeca60fd6591dd525151078510d7d81c32dfe0e7c67"
+  },
+  {
+    "path": "android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayPurchaseBridge.kt",
+    "baseline_sha256": "fd73bd98b9a684f3d2e3bce6b927ee695613f9881c8d2e0f60b71015ade2b081",
+    "candidate_sha256": "d942b298dda0479f1bfe297f85932a646020a627160d9b71de4c65866f6a2ea0"
+  },
+  {
+    "path": "android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessPolicy.kt",
+    "baseline_sha256": "49f309f4273ab51cd49821ce37608ac77ea6f5a8e0089d193b237b024fb0a643",
+    "candidate_sha256": "416bc2b45ed854c53e3cad7e115f48a16e15c727d83a98b75ef577a8596902cd"
+  },
+  {
+    "path": "android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessRecovery.kt",
+    "baseline_sha256": null,
+    "candidate_sha256": "704697157cace7a341b00617182b3ebf186edb671e0e043746e5b1ce8c189d0d"
+  },
+  {
+    "path": "android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayLegacyBlockStore.kt",
+    "baseline_sha256": null,
+    "candidate_sha256": "ccd706b08a95db8ca0ce0975e6e41c35894b714b78ea15228350cf5a417c8204"
+  },
+  {
+    "path": "android/app/src/test/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessPolicyTest.kt",
+    "baseline_sha256": "8b4a5b7c3d41a5e7432e36f75d4ff959cfae4ba629dd04d1dc56e1ab5ea5b49b",
+    "candidate_sha256": "c89ad54728a5553cad55c7a86e3e214563dca705cc6e1462ab96121005780bfb"
+  },
+  {
+    "path": "android/app/src/test/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessRecoveryTest.kt",
+    "baseline_sha256": null,
+    "candidate_sha256": "92be00885bf14088f6a7514822d8c90ddcf6d615963ae036b67439eec95b1bc7"
+  },
+  {
+    "path": "lib/features/purchases/data/android_purchase_service.dart",
+    "baseline_sha256": "9aea02d828aa9f365b2742c2e7256fd733992ba460a3d215dfe8fa54f114fa11",
+    "candidate_sha256": "ed5404cbd878dde310d813a65b5ca648e0a8ec620812cfcdfe55f3216c9d88e7"
+  },
+  {
+    "path": "test/features/purchases/android_purchase_service_test.dart",
+    "baseline_sha256": "ed86f2ad2bf7f66498105ff47d208193539a4c1240edeaaef4d8ac4779632863",
+    "candidate_sha256": "149bea30f99dc56aecc36425aa60cf5c1d3e6e0bc208218b3197e91152432e9c"
+  }
+]

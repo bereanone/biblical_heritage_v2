@@ -179,6 +179,13 @@ class AudioplayersTagClipPlayer implements TagClipPlayer {
         await player.play(DeviceFileSource(path));
       });
       if (_playing && serial == _serial) {
+        NarrationDiagnostics.recordTagPlaybackSource(
+          TagQwenAudioCache.isCachedPath(path)
+              ? 'recorded_bible_pcm'
+              : TagVerseAudioCache.instance.isCachedPath(path)
+              ? 'generated_bible_speech'
+              : 'other_tag_audio',
+        );
         NarrationDiagnostics.log('tag audio started: $path');
         unawaited(_armWatchdog(serial, path));
       }

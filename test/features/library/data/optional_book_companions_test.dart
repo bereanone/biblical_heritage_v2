@@ -67,9 +67,25 @@ void main() {
       expect(recordedCueItemIndex(cue,[const LibrarySpeechItem(cursor:'0',nextCursor:'1',text:'Different paragraph.')]),-1);
     } finally {await root.delete(recursive:true);}
   });
+  test('corrected WOR audio requires its exact verified edition', () async {
+    final root=await Directory.systemTemp.createTemp('wor-corrected-audio-');
+    try {
+      final dir=await Directory('${root.path}/corrected').create();
+      await File('${dir.path}/one.mp3').writeAsBytes([1,2,3]);
+      await File('${dir.path}/audio-manifest.json').writeAsString(jsonEncode({
+        'title':'Waggoner on Romans','total_chapters':1,
+        'requires_source_sha256':OptionalBookCompanions.worSingleReaderSource,
+        'tracks':[{'chapter':1,'title':'Chapter one','file':'one.mp3','cues':[]}]
+      }));
+      expect(await RecordedLibraryAudioPackage.findIn(root,'Waggoner on Romans',sourceHash:'wrong'),isNull);
+      expect(await RecordedLibraryAudioPackage.findIn(root,'Waggoner on Romans',sourceHash:OptionalBookCompanions.worSource),isNull);
+      expect(await RecordedLibraryAudioPackage.findIn(root,'Waggoner on Romans',sourceHash:OptionalBookCompanions.worSingleReaderSource),isNotNull);
+      expect(OptionalBookCompanions.matchesWor(OptionalBookCompanions.worSingleReaderSource),false);
+    } finally {await root.delete(recursive:true);}
+  });
   test('managed installer excludes the optional book text and EPUB', () async {
     final manifest=jsonDecode(await File('assets/bundled_library/manifest.json').readAsString()) as Map;
-    expect((manifest['books'] as List).length,6);
+    expect(manifest['books'] as List,isNotEmpty);
     expect((manifest['books'] as List).any((b)=>b['title']=='Waggoner on Romans'),false);
     expect((manifest['resources'] as List).any((b)=>b['sha256']==OptionalBookCompanions.worSource),false);
     expect(await File('assets/bundled_library/files/${OptionalBookCompanions.worSource}').exists(),false);

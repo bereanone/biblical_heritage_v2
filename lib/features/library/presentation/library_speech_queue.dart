@@ -1,3 +1,5 @@
+import 'library_narration_text.dart';
+
 /// A cursor belongs to a book reader, never to the Bible verse map.
 class LibrarySpeechItem {
   const LibrarySpeechItem({
@@ -6,6 +8,7 @@ class LibrarySpeechItem {
     required this.text,
     String? sourceCursor,
     this.startOffset = 0,
+    this.isHeading = false,
     this.sourceLength,
     this.showSectionStart = false,
     this.showMarginNotes = false,
@@ -23,6 +26,9 @@ class LibrarySpeechItem {
   /// Readers use this to keep long expanded notes aligned with recorded audio.
   final int? marginNoteIndex;
   final double? marginNoteProgress;
+
+  /// A source title or byline can belong to the following chapter recording.
+  final bool isHeading;
   final String sourceCursor;
   final int startOffset;
 
@@ -32,6 +38,8 @@ class LibrarySpeechItem {
   final String cursor;
   final String nextCursor;
   final String text;
+
+  String get spokenText => prepareLibraryNarrationText(text);
 }
 
 class LibrarySpeechQueue {
@@ -171,6 +179,14 @@ class LibrarySpeechSegmenter {
         end = nextSpace == null
             ? text.length
             : start + maximumCharacters + nextSpace.end;
+      }
+    }
+    // Keep a full citation or silent source marker together even when it
+    // crosses the ordinary synthesis window. Original offsets remain exact.
+    for (final span in librarySpeechSpans(text)) {
+      if (span.start < end && span.end > end) {
+        end = span.start > start ? span.start : span.end;
+        break;
       }
     }
     return LibrarySpeechItem(

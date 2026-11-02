@@ -143,8 +143,55 @@ source-data/
 /ios/build/
 
 # Generated install-time Play asset pack staging (original assets stay intact).
-/android/play_assetpacks/*/src/main/assets/
+/android/play_assetpacks/*/src/main/assets
 /android/play_assetpacks/staging-manifest.json
 
 # Local Play purchase-verification configuration (no signing passwords).
 /android/play-purchases.properties
+
+# Large build data is versioned by checksum in Google Drive, not Git.
+# Restore a fresh checkout with tool/restore_cloud_data.py; see docs/cloud-data.md.
+/assets/bundled_library/catalog.db
+/assets/bundled_library/files/*
+!/assets/bundled_library/files/.gitkeep
+/assets/databases/*.db
+/assets/audio/pronunciation/bible-map-v1.json
+/tool/audits/front_matter_repair_report_2026-08-25.json
+/tool/audits/strongs_duplication_scan_report.json
+/docs/release-evidence/2026-10-24-verse-boundary-audit/audit.json
+
+# Additional cloud-managed media, artwork, fixtures, and generated audit reports.
+/assets/fonts/NotoSerif-Bold.ttf
+/assets/fonts/NotoSerif-Regular.ttf
+/assets/icons/GoldLogo.png
+/assets/library_covers/DAR.png
+/assets/library_covers/LOF_ATJ.png
+/assets/library_covers/templates/pioneer_cover_template.png
+/assets/partners/adl_welcome.png
+/assets/partners/heritage_hope_welcome.png
+/docs/release-evidence/2026-10-24-tag-click/timing-review/exodus20-8-11-context.wav
+/docs/release-evidence/2026-10-24-tag-click/timing-review/exodus20-verse10-candidate.wav
+/docs/release-evidence/2026-10-24-tag-click/timing-review/exodus20-verse11-candidate.wav
+/docs/release-evidence/2026-10-24-tag-click/timing-review/exodus20-verse8-candidate.wav
+/docs/release-evidence/2026-10-24-tag-click/timing-review/exodus20-verse9-candidate.wav
+/docs/release-evidence/2026-10-24-tag-click/verse10-after.wav
+/docs/release-evidence/2026-10-24-tag-click/verse10-before.wav
+/docs/release-evidence/2026-10-24-tag-click/verse11-after.wav
+/docs/release-evidence/2026-10-24-tag-click/verse11-before.wav
+/docs/release-evidence/2026-10-24-tag-click/verse8-after.wav
+/docs/release-evidence/2026-10-24-tag-click/verse8-before.wav
+/docs/release-evidence/2026-10-24-tag-click/verse9-after.wav
+/docs/release-evidence/2026-10-24-tag-click/verse9-before.wav
+/docs/release-evidence/2026-10-24-verse-boundary-audit/catalog.quiet-gap-candidate.json
+/docs/release-evidence/2026-10-24-verse-boundary-audit/priority-review.json
+/docs/release-evidence/20261022-eula/studybible-access-review-recording.mov
+/test/fixtures/elibrary/real_ssp/images/image_0001.png
+/tool/audits/nav_parent_link_repair_android_report_2026-08-27.json
+/tool/audits/nav_parent_link_repair_dryrun_2026-08-27.json
+/tool/audits/nav_parent_link_repair_report_2026-08-27.json
+/tool/audits/nav_sort_order_repair_android_report_2026-08-25.json
+/tool/audits/nav_sort_order_repair_android_report_2026-08-27.json
+/tool/audits/nav_sort_order_repair_dryrun_2026-08-25.json
+/tool/audits/nav_sort_order_repair_report_2026-08-25.json
+/tool/audits/nt_word_order_verification_report.json
+/tool/audits/strongs_duplication_scan_report.csv

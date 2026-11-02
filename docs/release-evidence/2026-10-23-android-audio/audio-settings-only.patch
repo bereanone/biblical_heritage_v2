@@ -1,0 +1,1183 @@
+--- before/lib/features/library/presentation/mac_reader_autoscroll_controls.dart
++++ after/lib/features/library/presentation/mac_reader_autoscroll_controls.dart
+@@ -302,9 +302,13 @@
+ Future<MacAutoscrollPreferences?> showMacAutoscrollSettingsDialog({
+   required BuildContext context,
+   required MacAutoscrollPreferences initial,
++  bool showAudioSettings = true,
+ }) => showDialog<MacAutoscrollPreferences>(
+   context: context,
+-  builder: (context) => _MacAutoscrollSettingsDialog(initial: initial),
++  builder: (context) => _MacAutoscrollSettingsDialog(
++    initial: initial,
++    showAudioSettings: showAudioSettings,
++  ),
+ );
+ 
+ Future<MacAutoscrollPreferences?> showReaderAutoscrollSettingsDialog({
+@@ -324,12 +328,14 @@
+   const _MacAutoscrollSettingsDialog({
+     required this.initial,
+     this.title = 'Mac Autoscroll',
++    this.showAudioSettings = true,
+     this.showKeyboardHelp = true,
+     this.showStatusBanner = true,
+   });
+   final MacAutoscrollPreferences initial;
+   final String title;
+   final bool showKeyboardHelp;
++  final bool showAudioSettings;
+   final bool showStatusBanner;
+ 
+   @override
+@@ -358,7 +364,7 @@
+           mainAxisSize: MainAxisSize.min,
+           crossAxisAlignment: CrossAxisAlignment.start,
+           children: <Widget>[
+-            if (!_audioEnabled) ...[
++            if (!widget.showAudioSettings || !_audioEnabled) ...[
+               Text('Reading speed: ${_baseSpeed.round()} pixels per second'),
+               Slider(
+                 key: const ValueKey('mac-autoscroll-base-speed'),
+@@ -388,7 +394,7 @@
+                 },
+               ),
+             ],
+-            if (_audioEnabled) ...[
++            if (widget.showAudioSettings && _audioEnabled) ...[
+               Text('Voice speed: ${_speechRate.toStringAsFixed(2)}×'),
+               Slider(
+                 value: _speechRate,
+@@ -403,7 +409,8 @@
+               ),
+             ],
+             const SizedBox(height: 16),
+-            if (widget.showKeyboardHelp && !_audioEnabled) ...[
++            if (widget.showKeyboardHelp &&
++                (!widget.showAudioSettings || !_audioEnabled)) ...[
+               const Text('Arrow keys change speed and direction.'),
+               const Text('Up Arrow: one step upward'),
+               const Text('Down Arrow: one step downward'),
+@@ -438,31 +445,35 @@
+               ),
+             ],
+             const SizedBox(height: 16),
+-            const Text('Narration'),
+-            SwitchListTile(
+-              contentPadding: EdgeInsets.zero,
+-              title: const Text('Announce chapter changes'),
+-              value: _announceChapter,
+-              onChanged: (value) => setState(() => _announceChapter = value),
+-            ),
+-            SwitchListTile(
+-              contentPadding: EdgeInsets.zero,
+-              title: const Text('Speak verse numbers'),
+-              value: _announceVerseNumbers,
+-              onChanged: (value) =>
+-                  setState(() => _announceVerseNumbers = value),
+-            ),
++            if (widget.showAudioSettings) ...[
++              const Text('Narration'),
++              SwitchListTile(
++                contentPadding: EdgeInsets.zero,
++                title: const Text('Announce chapter changes'),
++                value: _announceChapter,
++                onChanged: (value) => setState(() => _announceChapter = value),
++              ),
++              SwitchListTile(
++                contentPadding: EdgeInsets.zero,
++                title: const Text('Speak verse numbers'),
++                value: _announceVerseNumbers,
++                onChanged: (value) =>
++                    setState(() => _announceVerseNumbers = value),
++              ),
++            ],
+           ],
+         ),
+       ),
+     ),
+     actions: <Widget>[
+-      Switch(
+-        key: const ValueKey('mac-autoscroll-audio-toggle'),
+-        value: _audioEnabled,
+-        onChanged: (value) => setState(() => _audioEnabled = value),
+-      ),
+-      Text(_audioEnabled ? 'Audio On' : 'Audio Off'),
++      if (widget.showAudioSettings)
++        Switch(
++          key: const ValueKey('mac-autoscroll-audio-toggle'),
++          value: _audioEnabled,
++          onChanged: (value) => setState(() => _audioEnabled = value),
++        ),
++      if (widget.showAudioSettings)
++        Text(_audioEnabled ? 'Audio On' : 'Audio Off'),
+       TextButton(
+         key: const ValueKey('mac-autoscroll-cancel'),
+         onPressed: () => Navigator.of(context).pop(),
+--- before/lib/features/library/presentation/reader_narration_button.dart
++++ after/lib/features/library/presentation/reader_narration_button.dart
+@@ -14,6 +14,8 @@
+     this.onPause,
+     this.onChanged,
+     this.onLongPress,
++    this.audioOffHint =
++        'Audio is off. Enable Audio in autoscroll settings to listen.',
+   });
+ 
+   final MacReaderAutoScrollController controller;
+@@ -23,6 +25,7 @@
+   final VoidCallback? onPause;
+   final VoidCallback? onChanged;
+   final VoidCallback? onLongPress;
++  final String audioOffHint;
+ 
+   @override
+   Widget build(BuildContext context) => ListenableBuilder(
+@@ -33,7 +36,7 @@
+       return Tooltip(
+         message: audioEnabled
+             ? (playing ? pauseLabel : playLabel)
+-            : 'Audio is off. Enable Audio in autoscroll settings to listen.',
++            : audioOffHint,
+         child: TextButton.icon(
+           icon: Icon(
+             !audioEnabled
+--- before/lib/features/reader/presentation/bible_explorer_navigation.dart
++++ after/lib/features/reader/presentation/bible_explorer_navigation.dart
+@@ -515,6 +515,9 @@
+       themeMode: widget.themeMode,
+       onThemeChanged: widget.onThemeChanged,
+       onOpenBibleMemory: _openBibleMemory,
++      onOpenAudioSettings: _macAutoScroll == null
++          ? null
++          : _openBibleAudioSettings,
+       onOpenInterlinearSettings: _openInterlinearSettings,
+       onOpenColorSetup: _openMarkupSettings,
+       onApplyDefaultMarkup: _applyDefaultMarkup,
+--- before/lib/features/reader/presentation/bible_explorer_screen.dart
++++ after/lib/features/reader/presentation/bible_explorer_screen.dart
+@@ -28,6 +28,7 @@
+ import 'bible_memory_screen.dart';
+ import 'bible_narration_media_controls.dart';
+ import 'bible_loop_announcement_settings.dart';
++import 'bible_audio_settings.dart';
+ import 'bible_loop_picker.dart';
+ import 'bible_playback_skip.dart';
+ import 'bible_watch_remote.dart';
+@@ -225,7 +226,7 @@
+   late final KokoroMacTestNarrator _kokoroNarrator;
+   BundledBibleAudioNarrator? _bundledNarrator;
+   BibleVisibleLocation? _spokenBundledLocation;
+-  bool _showBundledSpeed = false;
++  late final Future<void> _audioPreferencesReady;
+   bool _bundledSkipInProgress = false;
+   _BibleLoopMode _bibleLoopMode = _BibleLoopMode.off;
+   _BibleLoopMode _lastBibleLoopMode = _BibleLoopMode.chapter;
+@@ -312,9 +313,11 @@
+         scrollTarget: _tiltScrollTarget,
+         narrationControlsPacing: true,
+       )..addListener(_onMacAutoscrollChanged);
+-      AppSettingsService.instance.loadMacAutoscrollPreferences().then((value) {
+-        if (mounted) _macAutoScroll?.updatePreferences(value);
+-      });
++      _audioPreferencesReady = AppSettingsService.instance
++          .loadMacAutoscrollPreferences()
++          .then((value) {
++            if (mounted) _macAutoScroll?.updatePreferences(value);
++          });
+     }
+     if (_usesBundledBibleAudio && _macAutoScroll != null) {
+       _speechTilt = SpeechTiltBinding(
+@@ -1267,6 +1270,42 @@
+     }
+   }
+ 
++  Future<void> _openBibleAudioSettings() async {
++    final controller = _macAutoScroll;
++    if (controller == null) return;
++    await Future.wait([_audioPreferencesReady, _loopAnnouncementsReady]);
++    if (!mounted) return;
++    var openPronunciations = false;
++    _readerShortcutsSuspended = true;
++    try {
++      await showModalBottomSheet<void>(
++        context: context,
++        isScrollControlled: true,
++        showDragHandle: true,
++        builder: (_) => BibleAudioSettings(
++          controller: controller,
++          announcements: _usesBundledBibleAudio ? _loopAnnouncements : null,
++          onPreferencesChanged: (preferences) => unawaited(
++            AppSettingsService.instance.saveMacAutoscrollPreferences(
++              preferences,
++            ),
++          ),
++          onAnnouncementChanged: (unit, enabled) {
++            setState(() {
++              _loopAnnouncements = _loopAnnouncements.withValue(unit, enabled);
++            });
++            unawaited(_applyLoopAnnouncementSwitch(unit, enabled));
++          },
++          onPronunciations: () => openPronunciations = true,
++        ),
++      );
++    } finally {
++      _readerShortcutsSuspended = false;
++      if (mounted) _readerFocusNode.requestFocus();
++    }
++    if (mounted && openPronunciations) await _openPronunciations();
++  }
++
+   Future<void> _openPronunciations() async {
+     _macAutoScroll?.stopForManualInteraction();
+     await _kokoroNarrator.stop();
+@@ -1314,40 +1353,15 @@
+     builder: (context, _) {
+       final controller = _macAutoScroll!;
+       if (_usesBundledBibleAudio) return _bundledSpeechControls(controller);
+-      if (!controller.audioEnabled) {
+-        return Align(
+-          alignment: Alignment.centerLeft,
+-          child: ReaderNarrationButton(controller: controller),
+-        );
+-      }
+-      return SizedBox(
+-        height: 64,
+-        child: Row(
+-          children: [
+-            ReaderNarrationButton(
+-              controller: controller,
+-              playLabel: 'Voice',
+-              pauseLabel: 'Voice',
+-              onChanged: _readerFocusNode.requestFocus,
+-            ),
+-            Expanded(
+-              child: Slider(
+-                key: const ValueKey('narration-speed'),
+-                value: controller.speechRate,
+-                min: 0.75,
+-                max: 1.5,
+-                divisions: 15,
+-                label: '${controller.speechRate.toStringAsFixed(2)}×',
+-                onChanged: controller.setSpeechRate,
+-              ),
+-            ),
+-            Text('${controller.speechRate.toStringAsFixed(2)}×'),
+-            TextButton.icon(
+-              onPressed: _openPronunciations,
+-              icon: const Icon(Icons.record_voice_over),
+-              label: const Text('Pronunciations'),
+-            ),
+-          ],
++      return Align(
++        alignment: Alignment.centerLeft,
++        child: ReaderNarrationButton(
++          controller: controller,
++          playLabel: 'Play Bible',
++          onLongPress: _openBibleAudioSettings,
++          audioOffHint:
++              'Audio is off. Open Bible Audio Settings in the gear menu.',
++          onChanged: _readerFocusNode.requestFocus,
+         ),
+       );
+     },
+@@ -1649,6 +1663,7 @@
+           _BibleLoopMode.off => null,
+         },
+         selectedTargetLabel: _bundledLoopTargetLabel(),
++        showAnnouncements: false,
+         announcements: _loopAnnouncements,
+         onAnnouncementChanged: (unit, enabled) {
+           setState(() {
+@@ -1814,8 +1829,9 @@
+                   controller: controller,
+                   playLabel: 'Play Bible',
+                   busy: _bundledSkipInProgress,
+-                  onLongPress: () =>
+-                      setState(() => _showBundledSpeed = !_showBundledSpeed),
++                  onLongPress: _openBibleAudioSettings,
++                  audioOffHint:
++                      'Audio is off. Open Bible Audio Settings in the gear menu.',
+                 ),
+                 IconButton(
+                   key: const ValueKey('bible-skip-next'),
+@@ -1833,24 +1849,6 @@
+                 ),
+               ],
+             ),
+-            if (_showBundledSpeed)
+-              Row(
+-                children: [
+-                  const Text('Speed'),
+-                  Expanded(
+-                    child: Slider(
+-                      key: const ValueKey('narration-speed'),
+-                      value: controller.speechRate,
+-                      min: 0.75,
+-                      max: 1.5,
+-                      divisions: 15,
+-                      label: '${controller.speechRate.toStringAsFixed(2)}×',
+-                      onChanged: controller.setSpeechRate,
+-                    ),
+-                  ),
+-                  Text('${controller.speechRate.toStringAsFixed(2)}×'),
+-                ],
+-              ),
+           ],
+         );
+       },
+@@ -1874,6 +1872,7 @@
+     _readerShortcutsSuspended = true;
+     final result = await showMacAutoscrollSettingsDialog(
+       context: context,
++      showAudioSettings: false,
+       initial: MacAutoscrollPreferences(
+         baseSpeed: controller.baseSpeed,
+         lastNonzeroStep: controller.lastNonzeroStep,
+@@ -1924,8 +1923,6 @@
+     if (!mounted) return;
+     await showReaderTiltSettingsSheet(
+       context,
+-      speechController: _macAutoScroll,
+-      onPronunciations: _openPronunciations,
+       preferences: _tiltAutoScroll.preferences,
+       includeChapterTilt: false,
+       onChanged: _saveTiltPreferences,
+--- before/lib/features/reader/presentation/viewer_mode_popup.dart
++++ after/lib/features/reader/presentation/viewer_mode_popup.dart
+@@ -10,6 +10,7 @@
+   required AppThemeMode themeMode,
+   required ValueChanged<AppThemeMode> onThemeChanged,
+   required VoidCallback onOpenBibleMemory,
++  VoidCallback? onOpenAudioSettings,
+   required VoidCallback onOpenInterlinearSettings,
+   required VoidCallback onOpenColorSetup,
+   required VoidCallback onApplyDefaultMarkup,
+@@ -34,223 +35,233 @@
+             builder: (context, setStateDialog) {
+               return Padding(
+                 padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
+-                child: Column(
+-                  mainAxisSize: MainAxisSize.min,
+-                  children: [
+-                    _ModeRow(
+-                      title: 'Bible Remote Instructions',
+-                      subtitle: 'Apple Watch help',
+-                      trailing: const Icon(Icons.help_outline),
+-                      onTap: () {
+-                        Navigator.of(dialogContext).pop();
+-                        ownerNavigator.push(
+-                          MaterialPageRoute<void>(
+-                            builder: (_) => const WatchInstructionsScreen(),
++                child: SingleChildScrollView(
++                  child: Column(
++                    mainAxisSize: MainAxisSize.min,
++                    children: [
++                      if (onOpenAudioSettings != null)
++                        _ModeRow(
++                          title: 'Bible Audio Settings',
++                          subtitle: 'Read aloud, speed and announcements',
++                          trailing: const Icon(Icons.volume_up_outlined),
++                          onTap: () {
++                            Navigator.of(dialogContext).pop();
++                            onOpenAudioSettings();
++                          },
++                        ),
++                      _ModeRow(
++                        title: 'Bible Remote Instructions',
++                        subtitle: 'Apple Watch help',
++                        trailing: const Icon(Icons.help_outline),
++                        onTap: () {
++                          Navigator.of(dialogContext).pop();
++                          ownerNavigator.push(
++                            MaterialPageRoute<void>(
++                              builder: (_) => const WatchInstructionsScreen(),
++                            ),
++                          );
++                        },
++                      ),
++                      _ModeRow(
++                        title: 'Bible Memory',
++                        subtitle: 'Open',
++                        onTap: () {
++                          Navigator.of(dialogContext).pop();
++                          onOpenBibleMemory();
++                        },
++                      ),
++                      Divider(
++                        height: 8,
++                        color: theme.dividerColor.withValues(alpha: 0.55),
++                      ),
++                      _ModeRow(
++                        title: 'Interlinear Settings',
++                        subtitle: 'Open',
++                        trailing: IconButton(
++                          tooltip: 'Interlinear Settings',
++                          onPressed: () {
++                            Navigator.of(dialogContext).pop();
++                            onOpenInterlinearSettings();
++                          },
++                          icon: const Icon(Icons.settings),
++                        ),
++                        onTap: () {
++                          Navigator.of(dialogContext).pop();
++                          onOpenInterlinearSettings();
++                        },
++                      ),
++                      Divider(
++                        height: 8,
++                        color: theme.dividerColor.withValues(alpha: 0.55),
++                      ),
++                      _ModeRow(
++                        title: 'Apply Markup',
++                        subtitle: 'Highlight selection',
++                        trailing: IconButton(
++                          tooltip: 'Selection and highlighting help',
++                          icon: const Icon(Icons.help_outline),
++                          onPressed: () {
++                            Navigator.of(dialogContext).pop();
++                            showReaderSelectionHelp(context);
++                          },
++                        ),
++                        onTap: () {
++                          Navigator.of(dialogContext).pop();
++                          onApplyDefaultMarkup();
++                        },
++                      ),
++                      Divider(
++                        height: 8,
++                        color: theme.dividerColor.withValues(alpha: 0.55),
++                      ),
++                      Row(
++                        children: [
++                          Expanded(
++                            child: Padding(
++                              padding: const EdgeInsets.symmetric(vertical: 8),
++                              child: Column(
++                                crossAxisAlignment: CrossAxisAlignment.start,
++                                children: [
++                                  Text(
++                                    'Theme',
++                                    style: theme.textTheme.titleMedium
++                                        ?.copyWith(fontWeight: FontWeight.w700),
++                                  ),
++                                  const SizedBox(height: 2),
++                                  Text(
++                                    _themeLabel(themeMode),
++                                    style: theme.textTheme.bodySmall,
++                                  ),
++                                ],
++                              ),
++                            ),
+                           ),
+-                        );
+-                      },
+-                    ),
+-                    _ModeRow(
+-                      title: 'Bible Memory',
+-                      subtitle: 'Open',
+-                      onTap: () {
+-                        Navigator.of(dialogContext).pop();
+-                        onOpenBibleMemory();
+-                      },
+-                    ),
+-                    Divider(
+-                      height: 8,
+-                      color: theme.dividerColor.withValues(alpha: 0.55),
+-                    ),
+-                    _ModeRow(
+-                      title: 'Interlinear Settings',
+-                      subtitle: 'Open',
+-                      trailing: IconButton(
+-                        tooltip: 'Interlinear Settings',
+-                        onPressed: () {
+-                          Navigator.of(dialogContext).pop();
+-                          onOpenInterlinearSettings();
+-                        },
+-                        icon: const Icon(Icons.settings),
+-                      ),
+-                      onTap: () {
+-                        Navigator.of(dialogContext).pop();
+-                        onOpenInterlinearSettings();
+-                      },
+-                    ),
+-                    Divider(
+-                      height: 8,
+-                      color: theme.dividerColor.withValues(alpha: 0.55),
+-                    ),
+-                    _ModeRow(
+-                      title: 'Apply Markup',
+-                      subtitle: 'Highlight selection',
+-                      trailing: IconButton(
+-                        tooltip: 'Selection and highlighting help',
+-                        icon: const Icon(Icons.help_outline),
+-                        onPressed: () {
+-                          Navigator.of(dialogContext).pop();
+-                          showReaderSelectionHelp(context);
+-                        },
+-                      ),
+-                      onTap: () {
+-                        Navigator.of(dialogContext).pop();
+-                        onApplyDefaultMarkup();
+-                      },
+-                    ),
+-                    Divider(
+-                      height: 8,
+-                      color: theme.dividerColor.withValues(alpha: 0.55),
+-                    ),
+-                    Row(
+-                      children: [
+-                        Expanded(
+-                          child: Padding(
+-                            padding: const EdgeInsets.symmetric(vertical: 8),
+-                            child: Column(
+-                              crossAxisAlignment: CrossAxisAlignment.start,
+-                              children: [
+-                                Text(
+-                                  'Theme',
+-                                  style: theme.textTheme.titleMedium?.copyWith(
+-                                    fontWeight: FontWeight.w700,
+-                                  ),
+-                                ),
+-                                const SizedBox(height: 2),
+-                                Text(
+-                                  _themeLabel(themeMode),
+-                                  style: theme.textTheme.bodySmall,
+-                                ),
+-                              ],
++                          PopupMenuButton<AppThemeMode>(
++                            tooltip: 'Choose theme',
++                            initialValue: themeMode,
++                            onSelected: (nextTheme) {
++                              Navigator.of(dialogContext).pop();
++                              onThemeChanged(nextTheme);
++                            },
++                            itemBuilder: (context) => const [
++                              PopupMenuItem<AppThemeMode>(
++                                value: AppThemeMode.sepia,
++                                child: Text('Sepia'),
++                              ),
++                              PopupMenuItem<AppThemeMode>(
++                                value: AppThemeMode.night,
++                                child: Text('Night'),
++                              ),
++                            ],
++                            child: Container(
++                              padding: const EdgeInsets.symmetric(
++                                horizontal: 12,
++                                vertical: 8,
++                              ),
++                              decoration: BoxDecoration(
++                                border: Border.all(color: theme.dividerColor),
++                                borderRadius: BorderRadius.circular(8),
++                              ),
++                              child: Row(
++                                mainAxisSize: MainAxisSize.min,
++                                children: [
++                                  Text(
++                                    _themeLabel(themeMode),
++                                    style: theme.textTheme.bodyMedium,
++                                  ),
++                                  const SizedBox(width: 6),
++                                  const Icon(Icons.arrow_drop_down),
++                                ],
++                              ),
+                             ),
+                           ),
+-                        ),
+-                        PopupMenuButton<AppThemeMode>(
+-                          tooltip: 'Choose theme',
+-                          initialValue: themeMode,
+-                          onSelected: (nextTheme) {
+-                            Navigator.of(dialogContext).pop();
+-                            onThemeChanged(nextTheme);
+-                          },
+-                          itemBuilder: (context) => const [
+-                            PopupMenuItem<AppThemeMode>(
+-                              value: AppThemeMode.sepia,
+-                              child: Text('Sepia'),
+-                            ),
+-                            PopupMenuItem<AppThemeMode>(
+-                              value: AppThemeMode.night,
+-                              child: Text('Night'),
+-                            ),
+-                          ],
+-                          child: Container(
+-                            padding: const EdgeInsets.symmetric(
+-                              horizontal: 12,
+-                              vertical: 8,
+-                            ),
+-                            decoration: BoxDecoration(
+-                              border: Border.all(color: theme.dividerColor),
+-                              borderRadius: BorderRadius.circular(8),
+-                            ),
+-                            child: Row(
+-                              mainAxisSize: MainAxisSize.min,
+-                              children: [
+-                                Text(
+-                                  _themeLabel(themeMode),
+-                                  style: theme.textTheme.bodyMedium,
+-                                ),
+-                                const SizedBox(width: 6),
+-                                const Icon(Icons.arrow_drop_down),
+-                              ],
++                        ],
++                      ),
++                      Divider(
++                        height: 8,
++                        color: theme.dividerColor.withValues(alpha: 0.55),
++                      ),
++                      Row(
++                        children: [
++                          Expanded(
++                            child: Padding(
++                              padding: const EdgeInsets.symmetric(vertical: 8),
++                              child: Column(
++                                crossAxisAlignment: CrossAxisAlignment.start,
++                                children: [
++                                  Text(
++                                    'Presentation Ratio',
++                                    style: theme.textTheme.titleMedium
++                                        ?.copyWith(fontWeight: FontWeight.w700),
++                                  ),
++                                  const SizedBox(height: 2),
++                                  Text(
++                                    currentPresentationAspectRatio.label,
++                                    style: theme.textTheme.bodySmall,
++                                  ),
++                                ],
++                              ),
+                             ),
+                           ),
+-                        ),
+-                      ],
+-                    ),
+-                    Divider(
+-                      height: 8,
+-                      color: theme.dividerColor.withValues(alpha: 0.55),
+-                    ),
+-                    Row(
+-                      children: [
+-                        Expanded(
+-                          child: Padding(
+-                            padding: const EdgeInsets.symmetric(vertical: 8),
+-                            child: Column(
+-                              crossAxisAlignment: CrossAxisAlignment.start,
+-                              children: [
+-                                Text(
+-                                  'Presentation Ratio',
+-                                  style: theme.textTheme.titleMedium?.copyWith(
+-                                    fontWeight: FontWeight.w700,
+-                                  ),
+-                                ),
+-                                const SizedBox(height: 2),
+-                                Text(
+-                                  currentPresentationAspectRatio.label,
+-                                  style: theme.textTheme.bodySmall,
+-                                ),
+-                              ],
++                          PopupMenuButton<PresentationAspectRatioPreset>(
++                            tooltip: 'Choose presentation ratio',
++                            initialValue: currentPresentationAspectRatio,
++                            onSelected: (preset) {
++                              setStateDialog(
++                                () => currentPresentationAspectRatio = preset,
++                              );
++                              onPresentationAspectRatioChanged(preset);
++                            },
++                            itemBuilder: (context) =>
++                                PresentationAspectRatioPreset.values
++                                    .map(
++                                      (preset) =>
++                                          PopupMenuItem<
++                                            PresentationAspectRatioPreset
++                                          >(
++                                            value: preset,
++                                            child: Text(preset.label),
++                                          ),
++                                    )
++                                    .toList(growable: false),
++                            child: Container(
++                              padding: const EdgeInsets.symmetric(
++                                horizontal: 12,
++                                vertical: 8,
++                              ),
++                              decoration: BoxDecoration(
++                                border: Border.all(color: theme.dividerColor),
++                                borderRadius: BorderRadius.circular(8),
++                              ),
++                              child: Row(
++                                mainAxisSize: MainAxisSize.min,
++                                children: [
++                                  Text(
++                                    currentPresentationAspectRatio.label,
++                                    style: theme.textTheme.bodyMedium,
++                                  ),
++                                  const SizedBox(width: 6),
++                                  const Icon(Icons.arrow_drop_down),
++                                ],
++                              ),
+                             ),
+                           ),
+-                        ),
+-                        PopupMenuButton<PresentationAspectRatioPreset>(
+-                          tooltip: 'Choose presentation ratio',
+-                          initialValue: currentPresentationAspectRatio,
+-                          onSelected: (preset) {
+-                            setStateDialog(
+-                              () => currentPresentationAspectRatio = preset,
+-                            );
+-                            onPresentationAspectRatioChanged(preset);
+-                          },
+-                          itemBuilder: (context) =>
+-                              PresentationAspectRatioPreset.values
+-                                  .map(
+-                                    (preset) =>
+-                                        PopupMenuItem<
+-                                          PresentationAspectRatioPreset
+-                                        >(
+-                                          value: preset,
+-                                          child: Text(preset.label),
+-                                        ),
+-                                  )
+-                                  .toList(growable: false),
+-                          child: Container(
+-                            padding: const EdgeInsets.symmetric(
+-                              horizontal: 12,
+-                              vertical: 8,
+-                            ),
+-                            decoration: BoxDecoration(
+-                              border: Border.all(color: theme.dividerColor),
+-                              borderRadius: BorderRadius.circular(8),
+-                            ),
+-                            child: Row(
+-                              mainAxisSize: MainAxisSize.min,
+-                              children: [
+-                                Text(
+-                                  currentPresentationAspectRatio.label,
+-                                  style: theme.textTheme.bodyMedium,
+-                                ),
+-                                const SizedBox(width: 6),
+-                                const Icon(Icons.arrow_drop_down),
+-                              ],
+-                            ),
+-                          ),
+-                        ),
+-                      ],
+-                    ),
+-                    Divider(
+-                      height: 8,
+-                      color: theme.dividerColor.withValues(alpha: 0.55),
+-                    ),
+-                    _ModeRow(
+-                      title: 'Color Setup',
+-                      subtitle: 'Highlight groups',
+-                      onTap: () {
+-                        Navigator.of(dialogContext).pop();
+-                        onOpenColorSetup();
+-                      },
+-                    ),
+-                  ],
++                        ],
++                      ),
++                      Divider(
++                        height: 8,
++                        color: theme.dividerColor.withValues(alpha: 0.55),
++                      ),
++                      _ModeRow(
++                        title: 'Color Setup',
++                        subtitle: 'Highlight groups',
++                        onTap: () {
++                          Navigator.of(dialogContext).pop();
++                          onOpenColorSetup();
++                        },
++                      ),
++                    ],
++                  ),
+                 ),
+               );
+             },
+--- before/lib/features/reader/presentation/bible_loop_picker.dart
++++ after/lib/features/reader/presentation/bible_loop_picker.dart
+@@ -69,6 +69,7 @@
+     required this.selectedTargetLabel,
+     required this.announcements,
+     required this.onAnnouncementChanged,
++    this.showAnnouncements = true,
+   });
+ 
+   final String bookName;
+@@ -77,6 +78,7 @@
+   final BibleLoopUnit? selectedLoop;
+   final String selectedTargetLabel;
+   final BibleLoopAnnouncementSettings announcements;
++  final bool showAnnouncements;
+   final void Function(BibleLoopUnit unit, bool enabled) onAnnouncementChanged;
+ 
+   @override
+@@ -149,14 +151,16 @@
+             widget.bookName,
+             Icons.menu_book_outlined,
+           ),
+-          const Divider(height: 1),
+-          const ListTile(
+-            title: Text('Announce'),
+-            subtitle: Text('Speak labels during reading'),
+-          ),
+-          _announcementChoice(BibleLoopUnit.book),
+-          _announcementChoice(BibleLoopUnit.chapter),
+-          _announcementChoice(BibleLoopUnit.verse),
++          if (widget.showAnnouncements) ...[
++            const Divider(height: 1),
++            const ListTile(
++              title: Text('Announce'),
++              subtitle: Text('Speak labels during reading'),
++            ),
++            _announcementChoice(BibleLoopUnit.book),
++            _announcementChoice(BibleLoopUnit.chapter),
++            _announcementChoice(BibleLoopUnit.verse),
++          ],
+         ],
+       ),
+     ),
+--- before/lib/features/reader/presentation/bible_audio_settings.dart
++++ after/lib/features/reader/presentation/bible_audio_settings.dart
+@@ -0,0 +1,153 @@
++import 'package:flutter/material.dart';
++
++import '../../library/presentation/mac_reader_autoscroll_controller.dart';
++import 'bible_loop_announcement_settings.dart';
++
++/// Bible setup uses the existing preference stores; opening it changes nothing.
++class BibleAudioSettings extends StatefulWidget {
++  const BibleAudioSettings({
++    super.key,
++    required this.controller,
++    required this.onPreferencesChanged,
++    required this.onPronunciations,
++    required this.onAnnouncementChanged,
++    this.announcements,
++  });
++
++  final MacReaderAutoScrollController controller;
++  final ValueChanged<MacAutoscrollPreferences> onPreferencesChanged;
++  final VoidCallback onPronunciations;
++  final void Function(BibleLoopUnit, bool) onAnnouncementChanged;
++  // Recorded narration has independently saved book, chapter and verse cues.
++  // Generated speech retains its existing combined book/chapter preference.
++  final BibleLoopAnnouncementSettings? announcements;
++
++  @override
++  State<BibleAudioSettings> createState() => _BibleAudioSettingsState();
++}
++
++class _BibleAudioSettingsState extends State<BibleAudioSettings> {
++  late BibleLoopAnnouncementSettings? _announcements = widget.announcements;
++
++  void _update({bool? audio, double? rate, bool? chapter, bool? verses}) {
++    final c = widget.controller;
++    final next = MacAutoscrollPreferences(
++      baseSpeed: c.baseSpeed,
++      lastNonzeroStep: c.lastNonzeroStep,
++      maximumStep: c.maximumStep,
++      statusBannerMode: c.statusBannerMode,
++      audioEnabled: audio ?? c.audioEnabled,
++      speechRate: rate ?? c.speechRate,
++      announceChapter: chapter ?? c.announceChapter,
++      announceVerseNumbers: verses ?? c.announceVerseNumbers,
++    );
++    // Turning audio off must pause playback, never start silent scrolling.
++    if (audio == false) c.stopForManualInteraction();
++    c.updatePreferences(next);
++    widget.onPreferencesChanged(next);
++  }
++
++  Widget _announcement(BibleLoopUnit unit, String title) =>
++      SwitchListTile.adaptive(
++        key: ValueKey('bible-audio-announce-${unit.name}'),
++        title: Text(title),
++        value: _announcements!.enabledFor(unit),
++        onChanged: (enabled) {
++          setState(() {
++            _announcements = _announcements!.withValue(unit, enabled);
++          });
++          widget.onAnnouncementChanged(unit, enabled);
++        },
++      );
++
++  @override
++  Widget build(BuildContext context) => SafeArea(
++    child: SingleChildScrollView(
++      padding: EdgeInsets.fromLTRB(
++        16,
++        0,
++        16,
++        16 + MediaQuery.viewInsetsOf(context).bottom,
++      ),
++      child: ListenableBuilder(
++        listenable: widget.controller,
++        builder: (context, _) {
++          final controller = widget.controller;
++          return Column(
++            mainAxisSize: MainAxisSize.min,
++            crossAxisAlignment: CrossAxisAlignment.stretch,
++            children: [
++              ListTile(
++                contentPadding: EdgeInsets.zero,
++                title: Text(
++                  'Bible Audio Settings',
++                  style: Theme.of(context).textTheme.titleLarge,
++                ),
++                trailing: IconButton(
++                  tooltip: 'Close audio settings',
++                  icon: const Icon(Icons.close),
++                  onPressed: () => Navigator.of(context).pop(),
++                ),
++              ),
++              SwitchListTile.adaptive(
++                key: const ValueKey('bible-audio-enabled'),
++                title: const Text('Read aloud'),
++                subtitle: const Text(
++                  'Enable Bible audio. Use Play Bible to start.',
++                ),
++                value: controller.audioEnabled,
++                onChanged: (value) => _update(audio: value),
++              ),
++              ListTile(
++                title: const Text('Voice speed'),
++                trailing: Text('${controller.speechRate.toStringAsFixed(2)}×'),
++              ),
++              Slider(
++                key: const ValueKey('bible-audio-speed'),
++                value: controller.speechRate,
++                min: 0.75,
++                max: 1.5,
++                divisions: 15,
++                label: '${controller.speechRate.toStringAsFixed(2)}×',
++                onChanged: (value) => _update(rate: value),
++              ),
++              const Divider(),
++              const ListTile(title: Text('Announcements')),
++              if (_announcements != null) ...[
++                _announcement(BibleLoopUnit.book, 'Book name'),
++                _announcement(BibleLoopUnit.chapter, 'Chapter number'),
++                _announcement(BibleLoopUnit.verse, 'Verse number'),
++              ] else ...[
++                SwitchListTile.adaptive(
++                  title: const Text('Book and chapter'),
++                  value: controller.announceChapter,
++                  onChanged: (value) => _update(chapter: value),
++                ),
++                SwitchListTile.adaptive(
++                  title: const Text('Verse number'),
++                  value: controller.announceVerseNumbers,
++                  onChanged: (value) => _update(verses: value),
++                ),
++              ],
++              const Divider(),
++              ListTile(
++                key: const ValueKey('bible-audio-pronunciations'),
++                title: const Text('Pronunciations'),
++                subtitle: Text(
++                  _announcements != null
++                      ? 'For generated speech only. These edits do not change the recorded Bible voice.'
++                      : 'Edit pronunciation for generated speech.',
++                ),
++                trailing: const Icon(Icons.chevron_right),
++                onTap: () {
++                  Navigator.of(context).pop();
++                  widget.onPronunciations();
++                },
++              ),
++            ],
++          );
++        },
++      ),
++    ),
++  );
++}
+--- before/test/features/reader/presentation/bible_audio_settings_test.dart
++++ after/test/features/reader/presentation/bible_audio_settings_test.dart
+@@ -0,0 +1,182 @@
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:studybible2/core/theme/app_theme_mode.dart';
++import 'package:studybible2/features/library/presentation/mac_reader_autoscroll_controller.dart';
++import 'package:studybible2/features/library/presentation/mac_reader_autoscroll_controls.dart';
++import 'package:studybible2/features/library/presentation/reader_tilt_autoscroll_controller.dart';
++import 'package:studybible2/features/reader/presentation/bible_audio_settings.dart';
++import 'package:studybible2/features/reader/presentation/bible_loop_announcement_settings.dart';
++import 'package:studybible2/features/reader/presentation/viewer_mode_popup.dart';
++import 'package:studybible2/features/reader/presentation/viewer_presentation_settings.dart';
++
++class _Target implements ReaderAutoScrollTarget {
++  @override
++  bool get isAttached => true;
++  @override
++  bool scrollBy(double delta) => true;
++}
++
++void main() {
++  testWidgets('audio setup preserves saved choices and pauses when disabled', (
++    tester,
++  ) async {
++    final controller = MacReaderAutoScrollController(
++      scrollTarget: _Target(),
++      driveFrames: false,
++      narrationControlsPacing: true,
++      preferences: const MacAutoscrollPreferences(
++        audioEnabled: true,
++        speechRate: 1.25,
++        baseSpeed: 24,
++        maximumStep: 3,
++        lastNonzeroStep: 2,
++        announceChapter: true,
++      ),
++    );
++    addTearDown(controller.dispose);
++    final saved = <MacAutoscrollPreferences>[];
++    final announcements = <BibleLoopUnit, bool>{};
++    await tester.pumpWidget(
++      MaterialApp(
++        home: Scaffold(
++          body: BibleAudioSettings(
++            controller: controller,
++            announcements: const BibleLoopAnnouncementSettings(
++              book: false,
++              chapter: true,
++              verse: true,
++            ),
++            onPreferencesChanged: saved.add,
++            onAnnouncementChanged: (unit, value) => announcements[unit] = value,
++            onPronunciations: () {},
++          ),
++        ),
++      ),
++    );
++    expect(saved, isEmpty);
++    expect(
++      tester
++          .widget<Slider>(find.byKey(const ValueKey('bible-audio-speed')))
++          .value,
++      1.25,
++    );
++    expect(
++      tester
++          .widget<SwitchListTile>(
++            find.byKey(const ValueKey('bible-audio-announce-book')),
++          )
++          .value,
++      isFalse,
++    );
++    controller.setSignedStep(1);
++    await tester.pump();
++    await tester.tap(find.byKey(const ValueKey('bible-audio-enabled')));
++    await tester.pump();
++    expect(controller.audioEnabled, isFalse);
++    expect(controller.isScrolling, isFalse);
++    expect(saved.last.speechRate, 1.25);
++    expect(saved.last.baseSpeed, 24);
++    expect(saved.last.maximumStep, 3);
++    expect(saved.last.announceChapter, isTrue);
++    await tester.tap(find.byKey(const ValueKey('bible-audio-enabled')));
++    await tester.pump();
++    expect(controller.audioEnabled, isTrue);
++    expect(controller.isScrolling, isFalse);
++    expect(announcements, isEmpty);
++    await tester.tap(find.byKey(const ValueKey('bible-audio-announce-book')));
++    await tester.pump();
++    expect(announcements, {BibleLoopUnit.book: true});
++    expect(saved.length, 2);
++    expect(controller.announceChapter, isTrue);
++    expect(
++      find.textContaining('do not change the recorded Bible voice'),
++      findsOneWidget,
++    );
++    expect(tester.takeException(), isNull);
++  });
++
++  testWidgets('scroll-only dialog preserves hidden audio choices when saved', (
++    tester,
++  ) async {
++    MacAutoscrollPreferences? result;
++    await tester.pumpWidget(
++      MaterialApp(
++        home: Scaffold(
++          body: Builder(
++            builder: (context) => TextButton(
++              child: const Text('Open scroll'),
++              onPressed: () async =>
++                  result = await showMacAutoscrollSettingsDialog(
++                    context: context,
++                    showAudioSettings: false,
++                    initial: const MacAutoscrollPreferences(
++                      audioEnabled: true,
++                      speechRate: 1.3,
++                      announceChapter: true,
++                      announceVerseNumbers: true,
++                    ),
++                  ),
++            ),
++          ),
++        ),
++      ),
++    );
++    await tester.tap(find.text('Open scroll'));
++    await tester.pumpAndSettle();
++    expect(
++      find.byKey(const ValueKey('mac-autoscroll-audio-toggle')),
++      findsNothing,
++    );
++    expect(find.text('Narration'), findsNothing);
++    expect(
++      find.byKey(const ValueKey('mac-autoscroll-base-speed')),
++      findsOneWidget,
++    );
++    await tester.tap(find.byKey(const ValueKey('mac-autoscroll-save')));
++    await tester.pumpAndSettle();
++    expect(result!.audioEnabled, isTrue);
++    expect(result!.speechRate, 1.3);
++    expect(result!.announceChapter, isTrue);
++    expect(result!.announceVerseNumbers, isTrue);
++  });
++
++  testWidgets('gear audio entry works on a small screen without overflowing', (
++    tester,
++  ) async {
++    tester.view.physicalSize = const Size(360, 480);
++    tester.view.devicePixelRatio = 1;
++    addTearDown(tester.view.resetPhysicalSize);
++    addTearDown(tester.view.resetDevicePixelRatio);
++    var opened = 0;
++    await tester.pumpWidget(
++      MaterialApp(
++        home: Scaffold(
++          body: Builder(
++            builder: (context) => TextButton(
++              child: const Text('Gear'),
++              onPressed: () => showViewerModePopup(
++                context,
++                themeMode: AppThemeMode.sepia,
++                onThemeChanged: (_) {},
++                onOpenBibleMemory: () {},
++                onOpenAudioSettings: () => opened++,
++                onOpenInterlinearSettings: () {},
++                onOpenColorSetup: () {},
++                onApplyDefaultMarkup: () {},
++                presentationAspectRatio: PresentationAspectRatioPreset.auto,
++                onPresentationAspectRatioChanged: (_) {},
++              ),
++            ),
++          ),
++        ),
++      ),
++    );
++    await tester.tap(find.text('Gear'));
++    await tester.pumpAndSettle();
++    expect(tester.takeException(), isNull);
++    await tester.tap(find.text('Bible Audio Settings'));
++    await tester.pumpAndSettle();
++    expect(opened, 1);
++    expect(find.byType(Dialog), findsNothing);
++  });
++}

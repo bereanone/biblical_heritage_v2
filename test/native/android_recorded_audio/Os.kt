@@ -1,5 +1,5 @@
 package android.os
-object Build { object VERSION { var SDK_INT=36 }; object VERSION_CODES { const val O=26 } }
+object Build { const val MANUFACTURER="Fixture"; const val MODEL="DeterministicMediaPlayer"; object VERSION { var SDK_INT=36 }; object VERSION_CODES { const val O=26 } }
 class Looper { companion object { fun getMainLooper()=Looper() } }
 class Handler(v:Looper) {
  fun post(v:Runnable) { postDelayed(v, 0) }

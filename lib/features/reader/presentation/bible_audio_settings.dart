@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../library/presentation/mac_reader_autoscroll_controller.dart';
 import 'bible_loop_announcement_settings.dart';
@@ -12,8 +13,10 @@ class BibleAudioSettings extends StatefulWidget {
     required this.onPronunciations,
     required this.onAnnouncementChanged,
     this.announcements,
+    this.onDiagnosticReport,
   });
 
+  final Future<String> Function()? onDiagnosticReport;
   final MacReaderAutoScrollController controller;
   final ValueChanged<MacAutoscrollPreferences> onPreferencesChanged;
   final VoidCallback onPronunciations;
@@ -28,6 +31,63 @@ class BibleAudioSettings extends StatefulWidget {
 
 class _BibleAudioSettingsState extends State<BibleAudioSettings> {
   late BibleLoopAnnouncementSettings? _announcements = widget.announcements;
+
+  bool _openingReport = false;
+
+  Future<void> _openReport() async {
+    if (_openingReport) return;
+    setState(() => _openingReport = true);
+    String report;
+    try {
+      report = await widget.onDiagnosticReport!();
+    } catch (_) {
+      report = 'The audio report could not be read. Please try again.';
+    }
+    if (!mounted) return;
+    setState(() => _openingReport = false);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Audio report'),
+        content: SizedBox(
+          width: 420,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'This report shows playback status and recent audio events. It stays on your device unless you share it.',
+                ),
+                const SizedBox(height: 12),
+                SelectableText(report),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: report));
+              if (dialogContext.mounted) {
+                Navigator.of(dialogContext).pop();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Audio report copied.')),
+                  );
+                }
+              }
+            },
+            child: const Text('Copy report'),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _update({bool? audio, double? rate, bool? chapter, bool? verses}) {
     final c = widget.controller;
@@ -100,8 +160,35 @@ class _BibleAudioSettingsState extends State<BibleAudioSettings> {
               ),
               ListTile(
                 title: const Text('Voice speed'),
-                trailing: Text('${controller.speechRate.toStringAsFixed(2)}×'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('${controller.speechRate.toStringAsFixed(2)}×'),
+                    if (Theme.of(context).platform ==
+                        TargetPlatform.android) ...[
+                      const SizedBox(width: 8),
+                      TextButton(
+                        key: const ValueKey('android-bible-audio-normal-speed'),
+                        onPressed: controller.speechRate == 1.0
+                            ? null
+                            : () => _update(rate: 1.0),
+                        child: const Text('Use 1.00×'),
+                      ),
+                    ],
+                  ],
+                ),
               ),
+              if (Theme.of(context).platform == TargetPlatform.android)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(
+                    'Android compatibility: starts at 1.05× each app launch '
+                    'to prevent silent Bible audio on some phones. You can '
+                    'lower it for this session; restarting restores 1.05×.',
+                    key: const ValueKey('android-bible-audio-compatibility'),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
               Slider(
                 key: const ValueKey('bible-audio-speed'),
                 value: controller.speechRate,
@@ -127,6 +214,19 @@ class _BibleAudioSettingsState extends State<BibleAudioSettings> {
                   title: const Text('Verse number'),
                   value: controller.announceVerseNumbers,
                   onChanged: (value) => _update(verses: value),
+                ),
+              ],
+              if (widget.onDiagnosticReport != null) ...[
+                const Divider(),
+                ListTile(
+                  key: const ValueKey('bible-audio-report'),
+                  title: const Text('Audio report'),
+                  subtitle: const Text(
+                    'Help troubleshoot playback. Nothing is sent automatically.',
+                  ),
+                  trailing: const Icon(Icons.info_outline),
+                  enabled: !_openingReport,
+                  onTap: _openReport,
                 ),
               ],
               const Divider(),

@@ -1,8 +1,85 @@
+import 'dart:io';
+import 'package:path/path.dart' as p;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:studybible2/core/bootstrap/library_root_service.dart';
 
 void main() {
+  group('iOS app-managed library continuity', () {
+    late Directory documents;
+    setUp(() async {
+      documents = await Directory.systemTemp.createTemp(
+        'library-root-continuity-',
+      );
+    });
+    tearDown(() async {
+      await documents.delete(recursive: true);
+    });
+    String resolve({bool isIOS = true}) =>
+        LibraryRootService.resolveDefaultAppLibraryRoot(
+          documentsPath: documents.path,
+          isIOS: isIOS,
+        );
+    Future<void> databaseAt(String root, String name) async {
+      final file = File(p.join(root, name));
+      await file.parent.create(recursive: true);
+      await file.writeAsString('SQLite format 3');
+    }
+
+    test(
+      'recognizes books initialized after a first empty-root lookup',
+      () async {
+        expect(resolve(), documents.path);
+        final existing = p.join(documents.path, 'BiblicalHeritage', 'v2');
+        await databaseAt(existing, 'user.db');
+        await databaseAt(existing, 'eLibrary.db');
+        expect(resolve(), existing);
+        expect(resolve(isIOS: false), documents.path);
+      },
+    );
+    test(
+      'does not abandon a Documents database for an older child library',
+      () async {
+        final existing = p.join(documents.path, 'BiblicalHeritage', 'v2');
+        await databaseAt(existing, 'user.db');
+        await databaseAt(p.join(documents.path, 'Databases'), 'eLibrary.db');
+        expect(resolve(), documents.path);
+      },
+    );
+    test('preserves legacy databases directly under Documents', () async {
+      await databaseAt(
+        p.join(documents.path, 'BiblicalHeritage', 'v2'),
+        'user.db',
+      );
+      await databaseAt(documents.path, 'user.db');
+      expect(resolve(), documents.path);
+    });
+    test('repairs only the empty parent app-folder selection', () async {
+      final existing = p.join(documents.path, 'BiblicalHeritage', 'v2');
+      await databaseAt(existing, 'user.db');
+      bool repair({
+        LibraryRootSource source = LibraryRootSource.defaultAppFolder,
+        String? bookmark,
+        bool isIOS = true,
+        String? path,
+      }) => LibraryRootService.shouldRecoverDefaultAppSelection(
+        isIOS: isIOS,
+        source: source,
+        bookmark: bookmark,
+        storedPath: path ?? documents.path,
+        documentsPath: documents.path,
+        defaultRoot: resolve(),
+      );
+      expect(repair(), isTrue);
+      expect(repair(source: LibraryRootSource.userSelected), isFalse);
+      expect(repair(bookmark: 'external-access'), isFalse);
+      expect(repair(isIOS: false), isFalse);
+      expect(repair(path: p.join(documents.path, 'another-folder')), isFalse);
+      await databaseAt(p.join(documents.path, 'Databases'), 'user.db');
+      expect(repair(), isFalse);
+    });
+  });
+
   group('shouldFallBackToImplicitRoot', () {
     test('falls back on iOS when stored path is dead and has no bookmark', () {
       expect(

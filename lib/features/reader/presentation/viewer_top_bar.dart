@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'presentation_prep/presentation_ui_helpers.dart';
 import 'viewer_reference_title.dart';
 import 'highlight_render.dart';
+import 'highlight_paint_button.dart';
 import 'reader_tag_button.dart';
 import 'viewer_search_models.dart';
 
@@ -236,11 +237,10 @@ class ViewerTopBar extends StatelessWidget {
           );
     return [
       if (onColorSetup != null) ...[
-        IconButton(
+        HighlightPaintButton(
           key: const ValueKey('viewer-paint-selection'),
-          tooltip: 'Highlight selected text',
           onPressed: onPaintSelection,
-          icon: const Icon(Icons.brush_outlined),
+          compact: true,
         ),
         Tooltip(
           message: 'Color Setup: ${highlightName ?? 'choose a default color'}',
@@ -262,7 +262,7 @@ class ViewerTopBar extends StatelessWidget {
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Text(
-                  'Highlight',
+                  'Color Setup',
                   textScaler: TextScaler.noScaling,
                   style: TextStyle(fontSize: 11, color: preview?.textColor),
                 ),

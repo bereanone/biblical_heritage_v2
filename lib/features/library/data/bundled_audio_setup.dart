@@ -39,7 +39,9 @@ class BundledAudioSetup extends ChangeNotifier {
     // A loading/filtering catalog is not removal of installed companions.
     // Only a newly recognized optional source changes the download request.
     if (sourceHashes != null) {
-      _sources.addAll(sourceHashes.where(OptionalBookCompanions.matchesWor));
+      _sources.addAll(
+        sourceHashes.where(OptionalBookCompanions.hasPreparedRecordings),
+      );
     }
     if (!setEquals(_sources, _completedSources)) complete = false;
     if ((!bundledContentEnabled && _testInstall == null) || complete) {
@@ -49,6 +51,18 @@ class BundledAudioSetup extends ChangeNotifier {
       _pending = null;
       if (error == null && !complete) ensure();
     });
+  }
+
+  /// A direct book opening must wait for its own recording, even when the
+  /// request arrives during an earlier core-recordings pass.
+  Future<void> ensureForSource(String? sourceHash) async {
+    if (!OptionalBookCompanions.hasPreparedRecordings(sourceHash) ||
+        (!bundledContentEnabled && _testInstall == null))
+      return;
+    await ensure(sourceHashes: {sourceHash!});
+    while (!complete && error == null) {
+      await ensure();
+    }
   }
 
   Future<void> _run() async {
@@ -71,8 +85,8 @@ class BundledAudioSetup extends ChangeNotifier {
       final packages = (manifest['packages'] as List)
           .map((p) => Map<String, dynamic>.from(p as Map))
           .toList();
-      if (packages.where((p) => p['requires_source_sha256'] == null).length !=
-              (manifest['core_package_count'] as int? ?? 6) ||
+      if (packages.isEmpty ||
+          packages.map((p) => p['id']).toSet().length != packages.length ||
           packages.any((p) => p['url'] == null && p['delivery'] != 'assets')) {
         throw const FormatException(
           'Recording download manifest is incomplete',

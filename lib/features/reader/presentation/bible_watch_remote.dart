@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:async';
+import 'package:flutter/foundation.dart';
+import '../../library/presentation/watch_library_catalog.dart';
 import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
@@ -5,21 +9,28 @@ import 'package:flutter/services.dart';
 /// The iPhone reader owns ordinary playback; native iOS keeps a small recorded
 /// audio fallback for Watch commands delivered before the reader is mounted.
 class BibleWatchRemote {
-  BibleWatchRemote._();
+  BibleWatchRemote._()
+    : _channel = const MethodChannel('studybible/watch_remote'),
+      _supportedOverride = null;
+  @visibleForTesting
+  BibleWatchRemote.forTesting(this._channel) : _supportedOverride = true;
 
   static final BibleWatchRemote instance = BibleWatchRemote._();
-  static const MethodChannel _channel = MethodChannel(
-    'studybible/watch_remote',
-  );
+  final MethodChannel _channel;
+  final bool? _supportedOverride;
 
-  bool get supported => Platform.isIOS;
+  bool get supported => _supportedOverride ?? Platform.isIOS;
   bool _attached = false;
+  String? _lastPublished;
 
   Future<Map<String, Object?>?> attach(
     Future<void> Function(String command) onCommand,
   ) async {
     if (!supported) return null;
     _attached = true;
+    _lastPublished = null;
+    WatchLibraryCatalog.initialize();
+    unawaited(WatchLibraryCatalog.refresh());
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'command' && call.arguments is String) {
         await onCommand(call.arguments as String);
@@ -57,7 +68,7 @@ class BibleWatchRemote {
     required int loopTargetVerse,
   }) async {
     if (!supported || !_attached) return;
-    await _channel.invokeMethod<void>('publishState', {
+    final state = <String, Object?>{
       'book': book,
       'chapter': chapter,
       'verse': verse,
@@ -69,6 +80,16 @@ class BibleWatchRemote {
       'loopTargetBook': loopTargetBook,
       'loopTargetChapter': loopTargetChapter,
       'loopTargetVerse': loopTargetVerse,
-    });
+    };
+    final signature = jsonEncode(state);
+    if (_lastPublished == signature) return;
+    final previous = _lastPublished;
+    _lastPublished = signature;
+    try {
+      await _channel.invokeMethod<void>('publishState', state);
+    } catch (_) {
+      if (_lastPublished == signature) _lastPublished = previous;
+      rethrow;
+    }
   }
 }

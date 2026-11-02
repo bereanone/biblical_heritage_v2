@@ -11,6 +11,7 @@ import '../../../core/bootstrap/library_root_service.dart';
 import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/elibrary_read_resolver.dart';
 import '../../../core/database/elibrary_database.dart';
+import '../../../core/database/elibrary_publisher_text_corrections.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../../core/database/user_database.dart';
 import '../../library/data/library_author_resolver.dart';

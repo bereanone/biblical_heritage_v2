@@ -38,6 +38,42 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
     private var generation = 0
     private var rate = 1.0f
     private var pitch = 1.0f
+    private var appliedRate = 1.0f
+    private var appliedPitch = 1.0f
+    private val diagnosticEvents = java.util.ArrayDeque<String>()
+    private var loadedRecordingName: String? = null
+    private var loadedRecordingBytes = 0L
+    private fun trace(event: String) {
+        diagnosticEvents.addLast("${System.currentTimeMillis()} $event")
+        while (diagnosticEvents.size > 60) diagnosticEvents.removeFirst()
+    }
+    private fun diagnostics(): Map<String, Any?> {
+        fun <T> inspect(read: () -> T): T? = try { read() } catch (_: Exception) { null }
+        val player = chapterPlayer
+        return mapOf(
+            "androidApi" to Build.VERSION.SDK_INT,
+            "manufacturer" to Build.MANUFACTURER,
+            "model" to Build.MODEL,
+            "recording" to loadedRecordingName,
+            "recordingBytes" to loadedRecordingBytes,
+            "readingRequested" to reading,
+            "chapterPlaying" to player?.let { inspect { it.isPlaying } },
+            "positionMs" to player?.let { inspect { it.currentPosition } },
+            "durationMs" to player?.let { inspect { it.duration } },
+            "chapterOutputType" to player?.let { inspect { it.routedDevice?.type } },
+            "announcementOutputType" to cuePlayer?.let { inspect { it.routedDevice?.type } },
+            "chapterAudioSession" to player?.let { inspect { it.audioSessionId } },
+            "pendingSeekMs" to pendingSeekMs,
+            "dispatchedSeekMs" to dispatchedSeekMs,
+            "announcementActive" to (cuePlayer != null),
+            "rate" to rate,
+            "pitch" to pitch,
+            "appliedRate" to appliedRate,
+            "appliedPitch" to appliedPitch,
+            "events" to diagnosticEvents.toList(),
+            "audibleOutputVerified" to false,
+        )
+    }
     private var loopStartMs: Int? = null
     private var loopEndMs: Int? = null
 
@@ -143,6 +179,7 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
                         result.success(null)
                     }
                     "setAnnouncementEvents" -> result.success(setAnnouncementEvents(call))
+                    "diagnostics" -> result.success(diagnostics())
                     "state" -> result.success(mapOf(
                         "position" to ((chapterPlayer?.currentPosition ?: 0) / 1000.0),
                         "playing" to reading,
@@ -150,6 +187,7 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
                     else -> result.notImplemented()
                 }
             } catch (error: Exception) {
+                if (call.method == "play" || call.method == "setRate" || call.method == "setPitch") reportError(error)
                 result.error("ERROR", error.message ?: error.javaClass.simpleName, null)
             }
         }
@@ -175,6 +213,9 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
     private fun load(path: String) {
         stop()
         val player = playerFor(path)
+        loadedRecordingName = File(path).name
+        loadedRecordingBytes = File(path).length()
+        trace("load $loadedRecordingName bytes=$loadedRecordingBytes duration=${player.duration}")
         player.setOnCompletionListener { completed ->
             if (completed !== chapterPlayer || !reading) return@setOnCompletionListener
             playbackCallback {
@@ -191,6 +232,10 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
                 }
             }
         }
+        player.setOnInfoListener { source, what, extra ->
+            if (source === chapterPlayer) trace("chapter info what=$what extra=$extra")
+            false
+        }
         player.setOnErrorListener { failed, what, extra ->
             if (failed === chapterPlayer) {
                 reportError(IllegalStateException("Recording playback failed ($what/$extra)"))
@@ -201,6 +246,7 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
             if (completed !== chapterPlayer) return@setOnSeekCompleteListener
             val target = pendingSeekMs ?: return@setOnSeekCompleteListener
             playbackCallback {
+                trace("seek complete target=$target actual=${completed.currentPosition}")
                 if (target != dispatchedSeekMs) {
                     dispatchSeek(completed, target)
                 } else {
@@ -212,6 +258,10 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
             }
         }
         chapterPlayer = player
+        // A freshly prepared MediaPlayer already plays at natural speed/pitch.
+        // Leave that path untouched unless the listener actually changes it.
+        appliedRate = 1.0f
+        appliedPitch = 1.0f
         events = emptyList()
         nextEvent = 0
         loopStartMs = null
@@ -222,6 +272,7 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
         val player = chapterPlayer ?: error("No recording loaded")
         if (reading) return
         reading = true
+        trace("play announce=$announceAtStart pendingSeek=$pendingSeekMs")
         val position = pendingSeekMs ?: player.currentPosition
         if (announceAtStart) nextEvent = eventIndexAt(position)
         if (!playDueCue(position)) startChapter()
@@ -235,15 +286,32 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
         val player = chapterPlayer ?: return
         if (!player.isPlaying) player.start()
         applyPlaybackParams()
+        trace("chapter started position=${player.currentPosition} playing=${player.isPlaying}")
     }
 
     private fun applyPlaybackParams() {
         val player = chapterPlayer ?: return
-        if (!player.isPlaying) return
-        player.playbackParams = PlaybackParams().setSpeed(rate).setPitch(pitch)
+        if (!player.isPlaying || (rate == appliedRate && pitch == appliedPitch)) return
+        try {
+            // Android's DEFAULT fallback leaves unsupported-parameter handling
+            // to the device; MUTE is a supported fallback. Never accept silent
+            // advancement as success when a device cannot honor the adjustment.
+            player.playbackParams = PlaybackParams().allowDefaults()
+                .setAudioFallbackMode(PlaybackParams.AUDIO_FALLBACK_MODE_FAIL)
+                .setSpeed(rate).setPitch(pitch)
+            appliedRate = rate
+            appliedPitch = pitch
+            trace("playback parameters applied rate=$rate pitch=$pitch fallback=FAIL")
+        } catch (error: IllegalArgumentException) {
+            throw IllegalStateException(
+                "This phone could not apply the audio speed or pitch. Set voice speed to 1.0 and try Play Bible again.",
+                error,
+            )
+        }
     }
 
     private fun pause() {
+        trace("pause")
         reading = false
         ++generation
         handler.removeCallbacks(seekTimeout)
@@ -284,6 +352,7 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
 
     private fun dispatchSeek(player: MediaPlayer, target: Int) {
         dispatchedSeekMs = target
+        trace("seek requested target=$target")
         watchPendingSeek()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             player.seekTo(target.toLong(), MediaPlayer.SEEK_CLOSEST)
@@ -351,10 +420,12 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
         val path = cuePaths[cuePathIndex++]
         val token = generation
         val player = playerFor(path)
+        trace("announcement start ${File(path).name}")
         cuePlayer = player
         player.setOnCompletionListener {
             if (token != generation || it !== cuePlayer) return@setOnCompletionListener
             playbackCallback {
+                trace("announcement complete")
                 releaseCue()
                 startNextCue()
             }
@@ -374,6 +445,7 @@ class RecordedBibleAudioBridge(engine: FlutterEngine) {
     }
 
     private fun reportError(error: Exception) {
+        trace("error ${error.javaClass.simpleName}: ${error.message}")
         reading = false
         ++generation
         handler.removeCallbacks(seekTimeout)

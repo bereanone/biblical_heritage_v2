@@ -1,0 +1,102 @@
+{
+  "verified_date": "2026-10-21",
+  "download_data_through": "2026-10-19",
+  "downloads": {
+    "StudyBible": {
+      "apple_app_units": 266,
+      "apple_scope": "iOS and macOS",
+      "google_first_time_users": 58,
+      "sum": 324
+    },
+    "Bible Readings 1914": {
+      "apple_app_units": 130,
+      "apple_scope": "iOS",
+      "google_first_time_users": 30,
+      "sum": 160
+    },
+    "sum_across_apps_and_stores": 484,
+    "caveat": "Not deduplicated people across stores or apps; not active installations."
+  },
+  "apple_lifetime_usd": {
+    "StudyBible": {
+      "customer_sales": 34.98,
+      "estimated_proceeds": 24.5
+    },
+    "Bible Readings 1914": {
+      "customer_sales": 73.49,
+      "estimated_proceeds": 49.5
+    },
+    "total_customer_sales": 108.47,
+    "total_estimated_proceeds": 74.0,
+    "actual_payouts": "Not yet reconciled; proceeds are not bank receipts."
+  },
+  "google_lifetime_usd": {
+    "StudyBible_customer_payments_including_tax": 30.63,
+    "Bible_Readings_customer_payments_including_tax": 9.99,
+    "ledger_net_earnings": 32.27,
+    "issued_payment_date": "2026-04-15",
+    "issued_payment_amount": 32.27,
+    "bank_receipt": "User found matching April15 GooglePlayApps deposit in Regions2026 workbook; only one matching entry found by user."
+  },
+  "gmail_evidence": {
+    "Google_payment_notice": {
+      "message_id": "19d917c896208b10",
+      "date": "2026-04-15",
+      "subject": "Google: Check your recent payment"
+    },
+    "Apple_weekly_summary": {
+      "message_id": "1a138624b0cee2aa",
+      "period_start": "2026-10-05",
+      "period_end": "2026-10-11",
+      "subject": "App Store Connect: App Analytics Weekly Summary"
+    },
+    "Apple_financial_report_notice": {
+      "message_id": "1a06693424639406",
+      "report_month": "2026-08",
+      "subject": "Financial Reports are now available for August 2026."
+    }
+  },
+  "weekly_automation": {
+    "name": "Weekly app store report",
+    "schedule_local": "Monday 09:00 America/New_York",
+    "source_preference": "Gmail first; no routine store sign-in; mark gaps and deduplicate periods."
+  },
+  "apple_paid_records_2026": [
+    {
+      "report_month": "2026-02",
+      "payment_date": "2026-04-02",
+      "usd": 7.62
+    },
+    {
+      "report_month": "2026-03",
+      "payment_date": "2026-04-30",
+      "usd": 2.05
+    },
+    {
+      "report_month": "2026-04",
+      "payment_date": "2026-06-05",
+      "usd": 20.59
+    },
+    {
+      "report_month": "2026-05",
+      "payment_date": "2026-07-02",
+      "usd": 41.47
+    },
+    {
+      "report_month": "2026-08",
+      "payment_date": "2026-10-01",
+      "usd": 1.96
+    }
+  ],
+  "apple_payout_audit": {
+    "closed_2026_months_examined": "January through September",
+    "months_without_data": [
+      "2026-01",
+      "2026-06",
+      "2026-07",
+      "2026-09"
+    ],
+    "paid_records_total_usd": 73.69,
+    "limitation": "Store Paid status, not independently bank-reconciled. Earlier years not exhaustively checked. Current October period not closed. Estimated Sales and Trends proceeds differ by USD0.31 from actual payment records."
+  }
+}

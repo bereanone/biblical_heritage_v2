@@ -170,7 +170,9 @@ class MacReaderAutoScrollController extends ChangeNotifier {
   double _baseSpeed;
   double _speechRate;
   double get speechRate => _speechRate;
-  bool get isNarrationMode => narrationControlsPacing && _audioEnabled;
+  bool _silentScrollSession = false;
+  bool get isNarrationMode =>
+      narrationControlsPacing && _audioEnabled && !_silentScrollSession;
 
   void setSpeechRate(double value) {
     final next = normalizeSpeechRate(value);
@@ -206,7 +208,9 @@ class MacReaderAutoScrollController extends ChangeNotifier {
   // Keep the user's step ladder intact, but slow the visual rate only while
   // Audio is On so the centered text can stay with the spoken text.
   double get pixelsPerSecond {
-    if (!_audioEnabled) return _signedStep * _baseSpeed;
+    if (!_audioEnabled || _silentScrollSession) {
+      return _signedStep * _baseSpeed;
+    }
     if (narrationControlsPacing) {
       return 0;
     }
@@ -286,16 +290,18 @@ class MacReaderAutoScrollController extends ChangeNotifier {
     _showStatus();
   }
 
-  void toggle() {
+  void toggle({bool silent = false}) {
     if (_disposed) return;
     if (_enabled) {
       _disable(showStatus: true);
       return;
     }
+    _silentScrollSession = silent;
     _enabled = true;
     _signedStep = 0;
     _consecutiveBlockedFrames = 0;
     _disposeTicker();
+    if (isPixelScrolling) _ensureTicker();
     _showStatus();
   }
 

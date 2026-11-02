@@ -82,7 +82,7 @@ void main() {
       );
       expect(tester.getRect(color).right, lessThanOrEqualTo(width));
       expect(find.byTooltip('Color Setup: Sun'), findsOneWidget);
-      final sample = tester.widget<Text>(find.text('Highlight'));
+      final sample = tester.widget<Text>(find.text('Color Setup'));
       expect(
         sample.style?.color,
         resolveHighlightRender(Colors.amber, false).textColor,
@@ -145,13 +145,13 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      final text = tester.widget<Text>(find.text('Highlight'));
+      final text = tester.widget<Text>(find.text('Color Setup'));
       final spec = resolveHighlightRender(Colors.amber, dark);
       expect(text.style?.color, spec.textColor);
       final preview = tester.widget<Container>(
         find
             .ancestor(
-              of: find.text('Highlight'),
+              of: find.text('Color Setup'),
               matching: find.byType(Container),
             )
             .first,

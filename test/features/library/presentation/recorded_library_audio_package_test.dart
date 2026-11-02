@@ -155,6 +155,58 @@ void main() {
       isNull,
     );
   });
+  test('whole-paragraph LOF markers use continuous paragraph follow', () async {
+    final root = await Directory.systemTemp.createTemp('lof-follow-regression');
+    addTearDown(() => root.delete(recursive: true));
+    final folder = await Directory('${root.path}/lof').create();
+    await File('${folder.path}/chapter-01.mp3').writeAsBytes([1, 2, 3]);
+    const text =
+        'A long recorded paragraph must remain visible as its words are read.';
+    await File('${folder.path}/audio-manifest.json').writeAsString(
+      jsonEncode({
+        'title': 'Lessons on Faith',
+        'tracks': [
+          {
+            'chapter': 1,
+            'title': 'Test chapter',
+            'file': 'chapter-01.mp3',
+            'cues': [
+              {
+                'start_ms': 60000,
+                'end_ms': 120000,
+                'text': text,
+                'phrases': [
+                  {'start_ms': 60000, 'text': text},
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    final package = (await RecordedLibraryAudioPackage.findIn(
+      root,
+      'Lessons on Faith',
+    ))!;
+    final cue = package.tracks.single.cues.single;
+    expect(cue.start, const Duration(seconds: 60));
+    expect(
+      cue.phrases,
+      isEmpty,
+      reason:
+          'Absolute duplicate marker must not delay follow until 120 seconds',
+    );
+    expect(
+      recordedParagraphFollowOffset(
+        position: const Duration(seconds: 90),
+        start: cue.start,
+        end: const Duration(seconds: 120),
+        textLength: text.length,
+      ),
+      greaterThan(text.length ~/ 3),
+    );
+  });
+
   test('chapter timing and download completeness are preserved', () async {
     final root = await Directory.systemTemp.createTemp('recorded-timing-test');
     addTearDown(() => root.delete(recursive: true));

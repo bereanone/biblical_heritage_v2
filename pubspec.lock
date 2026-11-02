@@ -42,12 +42,11 @@ packages:
     source: hosted
     version: "5.2.1"
   audioplayers_darwin:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: audioplayers_darwin
-      sha256: c994b3bb3a921e4904ac40e013fbc94488e824fd7c1de6326f549943b0b44a91
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/audioplayers_darwin_exact_seek"
+      relative: true
+    source: path
     version: "6.4.0"
   audioplayers_linux:
     dependency: transitive

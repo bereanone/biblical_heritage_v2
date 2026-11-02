@@ -22,7 +22,6 @@ void main() {
                       endLabel: '2 Corinthians 4:10',
                     ),
                     fontScale: 1,
-                    enableStrongs: true,
                   );
                 },
                 child: const Text('Open'),
@@ -38,6 +37,7 @@ void main() {
         'Clear Markup': ViewerRangeAction.clearMarkup,
         'Add # Tag': ViewerRangeAction.addHashTag,
         'Choose # Tag': ViewerRangeAction.addDollarTag,
+        'View # Tags': ViewerRangeAction.viewTags,
         'Add to Memory': ViewerRangeAction.addToMemory,
         'Extend Range': ViewerRangeAction.extendRange,
         'Reset Range': ViewerRangeAction.resetRange,
@@ -46,11 +46,21 @@ void main() {
         await tester.tap(find.text('Open'));
         await tester.pumpAndSettle();
         expect(find.text("Strong's"), findsNothing);
+        expect(find.textContaining('Press and hold a word'), findsNothing);
+        await tester.tap(find.byTooltip('Selection help'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Press and hold a word'), findsOneWidget);
+        await tester.tap(find.text('Close'));
+        await tester.pumpAndSettle();
         await tester.scrollUntilVisible(
           find.text(action.key),
           100,
           scrollable: find.byType(Scrollable).last,
         );
+        await tester.ensureVisible(
+          find.widgetWithText(OutlinedButton, action.key),
+        );
+        await tester.pumpAndSettle();
         await tester.tap(find.text(action.key));
         await tester.pumpAndSettle();
         expect(chosen, action.value);

@@ -1,0 +1,42 @@
+[
+  {
+    "verse": 8,
+    "frames": 63864,
+    "old_first": 601,
+    "old_last": -1044,
+    "new_first": 0,
+    "new_last": 0,
+    "interior_identical": true,
+    "file_length_unchanged": true
+  },
+  {
+    "verse": 9,
+    "frames": 84048,
+    "old_first": 522,
+    "old_last": 29,
+    "new_first": 0,
+    "new_last": 0,
+    "interior_identical": true,
+    "file_length_unchanged": true
+  },
+  {
+    "verse": 10,
+    "frames": 360648,
+    "old_first": 36,
+    "old_last": -48,
+    "new_first": 0,
+    "new_last": 0,
+    "interior_identical": true,
+    "file_length_unchanged": true
+  },
+  {
+    "verse": 11,
+    "frames": 247776,
+    "old_first": -50,
+    "old_last": 2281,
+    "new_first": 0,
+    "new_last": 0,
+    "interior_identical": true,
+    "file_length_unchanged": true
+  }
+]

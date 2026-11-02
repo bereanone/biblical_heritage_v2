@@ -1,0 +1,335 @@
+--- a/android/app/src/main/kotlin/com/deanbowen/bibleappmac/RecordedBibleAudioBridge.kt
++++ b/android/app/src/main/kotlin/com/deanbowen/bibleappmac/RecordedBibleAudioBridge.kt
+@@ -41,6 +41,29 @@
+     private var loopStartMs: Int? = null
+     private var loopEndMs: Int? = null
+ 
++    // A device must acknowledge a seek before we can safely resume Scripture.
++    // Never guess the verse position if that callback is lost or stalls.
++    private val seekTimeout = Runnable {
++        if (reading && pendingSeekMs != null) {
++            reportError(IllegalStateException(
++                "Bible audio could not reach the selected verse. Try another chapter, then return."
++            ))
++        }
++    }
++
++    private fun watchPendingSeek() {
++        handler.removeCallbacks(seekTimeout)
++        if (reading && pendingSeekMs != null) handler.postDelayed(seekTimeout, 10_000L)
++    }
++
++    private fun playbackCallback(action: () -> Unit) {
++        try {
++            action()
++        } catch (error: Exception) {
++            reportError(error)
++        }
++    }
++
+     private val tick = object : Runnable {
+         override fun run() {
+             if (!reading) return
+@@ -154,31 +177,38 @@
+         val player = playerFor(path)
+         player.setOnCompletionListener { completed ->
+             if (completed !== chapterPlayer || !reading) return@setOnCompletionListener
+-            val start = loopStartMs
+-            if (start != null) {
+-                seekChapter(start)
+-                nextEvent = eventIndexAt(start)
+-                channel.invokeMethod("looped", null)
+-                if (!playDueCue(start)) startChapter()
+-            } else {
+-                reading = false
+-                handler.removeCallbacks(tick)
+-                channel.invokeMethod("complete", null)
+-            }
+-        }
+-        player.setOnErrorListener { _, what, extra ->
+-            reportError(IllegalStateException("Recording playback failed ($what/$extra)"))
++            playbackCallback {
++                val start = loopStartMs
++                if (start != null) {
++                    seekChapter(start)
++                    nextEvent = eventIndexAt(start)
++                    channel.invokeMethod("looped", null)
++                    if (!playDueCue(start)) startChapter()
++                } else {
++                    reading = false
++                    handler.removeCallbacks(tick)
++                    channel.invokeMethod("complete", null)
++                }
++            }
++        }
++        player.setOnErrorListener { failed, what, extra ->
++            if (failed === chapterPlayer) {
++                reportError(IllegalStateException("Recording playback failed ($what/$extra)"))
++            }
+             true
+         }
+         player.setOnSeekCompleteListener { completed ->
+             if (completed !== chapterPlayer) return@setOnSeekCompleteListener
+             val target = pendingSeekMs ?: return@setOnSeekCompleteListener
+-            if (target != dispatchedSeekMs) {
+-                dispatchSeek(completed, target)
+-            } else {
+-                pendingSeekMs = null
+-                dispatchedSeekMs = null
+-                startChapter()
++            playbackCallback {
++                if (target != dispatchedSeekMs) {
++                    dispatchSeek(completed, target)
++                } else {
++                    pendingSeekMs = null
++                    dispatchedSeekMs = null
++                    handler.removeCallbacks(seekTimeout)
++                    startChapter()
++                }
+             }
+         }
+         chapterPlayer = player
+@@ -197,6 +227,7 @@
+         if (!playDueCue(position)) startChapter()
+         handler.removeCallbacks(tick)
+         handler.post(tick)
++        watchPendingSeek()
+     }
+ 
+     private fun startChapter() {
+@@ -215,6 +246,7 @@
+     private fun pause() {
+         reading = false
+         ++generation
++        handler.removeCallbacks(seekTimeout)
+         handler.removeCallbacks(tick)
+         releaseCue()
+         chapterPlayer?.let { if (it.isPlaying) it.pause() }
+@@ -252,6 +284,7 @@
+ 
+     private fun dispatchSeek(player: MediaPlayer, target: Int) {
+         dispatchedSeekMs = target
++        watchPendingSeek()
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+             player.seekTo(target.toLong(), MediaPlayer.SEEK_CLOSEST)
+         } else {
+@@ -321,11 +354,15 @@
+         cuePlayer = player
+         player.setOnCompletionListener {
+             if (token != generation || it !== cuePlayer) return@setOnCompletionListener
+-            releaseCue()
+-            startNextCue()
+-        }
+-        player.setOnErrorListener { _, what, extra ->
+-            reportError(IllegalStateException("Qwen announcement failed ($what/$extra)"))
++            playbackCallback {
++                releaseCue()
++                startNextCue()
++            }
++        }
++        player.setOnErrorListener { failed, what, extra ->
++            if (token == generation && failed === cuePlayer) {
++                reportError(IllegalStateException("Qwen announcement failed ($what/$extra)"))
++            }
+             true
+         }
+         player.start()
+@@ -337,7 +374,18 @@
+     }
+ 
+     private fun reportError(error: Exception) {
+-        pause()
++        reading = false
++        ++generation
++        handler.removeCallbacks(seekTimeout)
++        handler.removeCallbacks(tick)
++        // A decoder error can also make cleanup throw. Invalidate callbacks
++        // first, attempt each cleanup independently, and retain the real error.
++        val cue = cuePlayer
++        cuePlayer = null
++        try { cue?.release() } catch (_: Exception) { }
++        try {
++            chapterPlayer?.let { if (it.isPlaying) it.pause() }
++        } catch (_: Exception) { }
+         channel.invokeMethod("error", error.message ?: "Recorded Bible playback failed")
+     }
+     /** Decode only requested intervals, preserving the shipped voice in PCM. */
+--- a/test/native/android_recorded_audio/Channel.kt
++++ b/test/native/android_recorded_audio/Channel.kt
+@@ -3,6 +3,7 @@
+ class MethodChannel(m:Any,n:String) {
+  interface Result { fun success(v:Any?); fun error(c:String,m:String?,d:Any?); fun notImplemented() }
+  fun setMethodCallHandler(h:(MethodCall,Result)->Unit){ handler=h }
+- fun invokeMethod(n:String,v:Any?){}
+- companion object { lateinit var handler:(MethodCall,Result)->Unit; fun call(n:String,a:Map<String,Any?> = emptyMap()){handler(MethodCall(n,a),object:Result {override fun success(v:Any?){};override fun error(c:String,m:String?,d:Any?){error("$c $m")};override fun notImplemented(){error("missing")}})} }
++ fun invokeMethod(n:String,v:Any?){notifications.add(n to v)}
++ companion object { val notifications=mutableListOf<Pair<String,Any?>>()
++ lateinit var handler:(MethodCall,Result)->Unit; fun call(n:String,a:Map<String,Any?> = emptyMap()){handler(MethodCall(n,a),object:Result {override fun success(v:Any?){};override fun error(c:String,m:String?,d:Any?){error("$c $m")};override fun notImplemented(){error("missing")}})} }
+ }
+--- a/test/native/android_recorded_audio/Media.kt
++++ b/test/native/android_recorded_audio/Media.kt
+@@ -2,17 +2,24 @@
+ class AudioAttributes { class Builder { fun setUsage(v:Int)=this; fun setContentType(v:Int)=this; fun build()=AudioAttributes() }; companion object { const val USAGE_MEDIA=1; const val CONTENT_TYPE_SPEECH=1 } }
+ class PlaybackParams { fun setSpeed(v:Float)=this; fun setPitch(v:Float)=this }
+ class MediaPlayer {
+- var currentPosition=0; val duration=100000; var isPlaying=false; var playbackParams=PlaybackParams()
++ var currentPosition=0; val duration=100000; var failIsPlaying=false; private var playing=false
++ var isPlaying:Boolean
++  get(){check(!failIsPlaying){"Simulated invalid native state"};return playing}
++  set(value){playing=value}
++  var playbackParams=PlaybackParams()
++ var failStart=false; var released=false
+  var path=""; var requested:Int?=null; var mode:Int?=null; var starts=mutableListOf<Int>()
++ private var errorListener:((MediaPlayer,Int,Int)->Boolean)?=null
+  private var completion:((MediaPlayer)->Unit)?=null; private var seekComplete:((MediaPlayer)->Unit)?=null
+  init { all.add(this) }
+  fun setAudioAttributes(v:AudioAttributes){}; fun setDataSource(v:String){path=v}; fun prepare(){}
+  fun setOnCompletionListener(v:(MediaPlayer)->Unit){completion=v}
+- fun setOnErrorListener(v:(MediaPlayer,Int,Int)->Boolean){}
++ fun setOnErrorListener(v:(MediaPlayer,Int,Int)->Boolean){errorListener=v}
++ fun fail(){errorListener?.invoke(this,1,2)}
+  fun setOnSeekCompleteListener(v:(MediaPlayer)->Unit){seekComplete=v}
+  fun seekTo(v:Int){requested=v}; fun seekTo(v:Long,m:Int){requested=v.toInt();mode=m}
+  fun finishSeek(){currentPosition=requested!!;requested=null;seekComplete?.invoke(this)}
+  fun finish(){isPlaying=false;completion?.invoke(this)}
+- fun start(){isPlaying=true;starts.add(currentPosition)}; fun pause(){isPlaying=false}; fun release(){isPlaying=false}
++ fun start(){check(!failStart){"Simulated decoder start failure"};isPlaying=true;starts.add(currentPosition)}; fun pause(){isPlaying=false}; fun release(){isPlaying=false;released=true}
+  companion object { const val SEEK_CLOSEST=3; val all=mutableListOf<MediaPlayer>() }
+ }
+--- a/test/native/android_recorded_audio/Os.kt
++++ b/test/native/android_recorded_audio/Os.kt
+@@ -1,4 +1,22 @@
+ package android.os
+ object Build { object VERSION { var SDK_INT=36 }; object VERSION_CODES { const val O=26 } }
+ class Looper { companion object { fun getMainLooper()=Looper() } }
+-class Handler(v:Looper) { fun post(v:Runnable){tasks.add(v)}; fun postDelayed(v:Runnable,ms:Long){}; fun removeCallbacks(v:Runnable){tasks.remove(v)}; companion object { val tasks=mutableListOf<Runnable>(); fun tick(){val copy=tasks.toList();tasks.clear();copy.forEach{it.run()}} } }
++class Handler(v:Looper) {
++ fun post(v:Runnable) { postDelayed(v, 0) }
++ fun postDelayed(v:Runnable,ms:Long) { tasks.add(Task(now+ms,v)) }
++ fun removeCallbacks(v:Runnable) { tasks.removeAll { it.runnable === v } }
++ companion object {
++  data class Task(val at:Long,val runnable:Runnable)
++  private val tasks=mutableListOf<Task>()
++  private var now=0L
++  fun tick() { advanceBy(0) }
++  fun advanceBy(ms:Long) {
++   val target=now+ms
++   while(true) {
++    val next=tasks.filter { it.at<=target }.minByOrNull { it.at } ?: break
++    tasks.remove(next); now=next.at; next.runnable.run()
++   }
++   now=target
++  }
++ }
++}
+--- a/test/native/android_recorded_audio/README.md
++++ b/test/native/android_recorded_audio/README.md
+@@ -1,4 +1,8 @@
+-These tests run the production Android bridge against a controllable asynchronous MediaPlayer double. They cover delayed cue polling, seek/cue completion order, rapid seeks, pause, stop, and verse looping. They establish scheduling behavior, not audible-word correctness or reviewed alignment.
++These tests run the production Android bridge against a controllable asynchronous MediaPlayer double. They cover delayed cue polling, seek/cue completion order, rapid seeks, pause, stop, verse looping, a missing seek callback, stale callbacks, and exceptions while resuming from a callback.
++
++A seek that remains pending for ten seconds while reading stops with an explicit error. It never resumes from an estimated position. Pausing cancels the deadline, resuming re-arms it, and a late seek completion cannot restart playback after an error. Selecting another chapter then returning creates a new player.
++
++The missing-callback cases are fault injection. They establish scheduling and error behavior, not a reproduction of the remote Sony report, device/API compatibility, audible-word correctness, or reviewed alignment. API values exercise code branches in the double, not actual Android versions.
+ 
+ Run: python3 test/native/android_recorded_audio/run.py /path/to/android.jar
+ Requires kotlinc and java.
+--- a/test/native/android_recorded_audio/Regression.kt
++++ b/test/native/android_recorded_audio/Regression.kt
+@@ -8,7 +8,7 @@
+ fun call(n:String,vararg args:Pair<String,Any?>)=MethodChannel.call(n,mapOf(*args))
+ fun fresh():MediaPlayer { RecordedBibleAudioBridge(FlutterEngine());call("load","path" to File(fixtureRoot,"chapter.m4a").path);return MediaPlayer.all.last() }
+ fun events(){call("setAnnouncementEvents","events" to listOf(mapOf("seconds" to 10.0,"paths" to listOf(File(fixtureRoot,"cue.m4a").path))))}
+-fun main(){
++fun baseline(){
+  File(File(fixtureRoot,"chapter.m4a").path).writeText("stub");File(File(fixtureRoot,"cue.m4a").path).writeText("stub")
+  var p=fresh();events();call("play");p.currentPosition=10380;Handler.tick();val cue=MediaPlayer.all.last()
+  check(!p.isPlaying);check(p.requested==10000){"Late cue did not restore verse start: ${p.requested}"};check(p.mode==MediaPlayer.SEEK_CLOSEST)
+@@ -36,3 +36,87 @@
+  p.currentPosition=450;Handler.tick();check(MediaPlayer.all.last().path==verseCue);MediaPlayer.all.last().finish();check(!p.isPlaying);p.finishSeek();check(p.starts.last()==240)
+  println("PASS book and chapter cues finish before first verse and boundary resume")
+ }
++
++fun errors() = MethodChannel.notifications.filter { it.first == "error" }
++fun readyWithAnnouncement(): MediaPlayer {
++ call("stop")
++ val p=fresh()
++ MethodChannel.notifications.clear()
++ call("setAnnouncementEvents", "events" to listOf(mapOf("seconds" to 10.0,
++  "paths" to listOf(File(fixtureRoot,"cue.m4a").path))))
++ call("seek","seconds" to 10.0)
++ call("play","announceAtStart" to true)
++ return p
++}
++fun main() {
++ baseline()
++ for (sdk in listOf(24,26,36)) {
++  android.os.Build.VERSION.SDK_INT=sdk
++  var p=readyWithAnnouncement()
++  MediaPlayer.all.last().finish()
++  Handler.advanceBy(9999)
++  check(errors().isEmpty() && p.starts.isEmpty())
++  Handler.advanceBy(1)
++  check(errors().size==1 && p.starts.isEmpty()) {"Missing seek must report once, never guess position"}
++  Handler.advanceBy(20000);check(errors().size==1)
++  p.finishSeek();check(p.starts.isEmpty()) {"Late seek must not restart after error"}
++  call("play");check(p.starts==listOf(10000))
++  println("PASS API branch $sdk: missing callback reports bounded error; late callback cannot autoplay")
++  call("stop")
++ }
++ var p=readyWithAnnouncement()
++ val cue=MediaPlayer.all.last()
++ Handler.advanceBy(10000)
++ check(errors().size==1 && cue.released && p.starts.isEmpty())
++ cue.finish();check(p.starts.isEmpty())
++ println("PASS timeout also stops remaining announcements")
++ p=readyWithAnnouncement()
++ MediaPlayer.all.last().finish()
++ call("pause");Handler.advanceBy(20000)
++ check(errors().isEmpty())
++ call("play");Handler.advanceBy(10000)
++ check(errors().size==1 && p.starts.isEmpty())
++ println("PASS pause cancels timeout; resume re-arms stalled seek timeout")
++ p=readyWithAnnouncement()
++ MediaPlayer.all.last().finish();p.finishSeek()
++ Handler.advanceBy(20000)
++ check(errors().isEmpty() && p.starts==listOf(10000))
++ println("PASS completed seek cancels timeout")
++ p=readyWithAnnouncement()
++ val old=p
++ call("stop");p=fresh();call("play")
++ old.finishSeek();old.fail();Handler.advanceBy(20000)
++ check(errors().isEmpty() && p.isPlaying)
++ println("PASS stop and replacement ignore stale seek, error, and timeout")
++ p=readyWithAnnouncement()
++ val oldCue=MediaPlayer.all.last()
++ call("pause");oldCue.fail()
++ check(errors().isEmpty())
++ println("PASS stale announcement errors ignored after pause")
++ p=readyWithAnnouncement()
++ MediaPlayer.all.last().finish();p.failStart=true
++ p.finishSeek()
++ check(errors().size==1 && p.starts.isEmpty())
++ println("PASS asynchronous seek callback start failure reports error instead of escaping")
++ p=readyWithAnnouncement()
++ p.finishSeek();p.failStart=true
++ MediaPlayer.all.last().finish()
++ check(errors().size==1 && p.starts.isEmpty())
++ println("PASS asynchronous cue completion start failure reports error instead of escaping")
++ p=readyWithAnnouncement()
++ MediaPlayer.all.last().finish();Handler.advanceBy(9000)
++ call("seek","seconds" to 20.0);p.finishSeek()
++ Handler.advanceBy(1000);check(errors().isEmpty())
++ p.finishSeek();check(p.starts==listOf(20000));Handler.advanceBy(10000)
++ check(errors().isEmpty())
++ println("PASS coalesced seek gets its own deadline and latest position wins")
++ p=readyWithAnnouncement()
++ MediaPlayer.all.last().finish();p.failIsPlaying=true
++ Handler.advanceBy(10000)
++ check(errors().size==1 && errors().single().second.toString().contains("could not reach the selected verse"))
++ check(p.starts.isEmpty())
++ p.finishSeek();check(p.starts.isEmpty())
++ p.failIsPlaying=false
++ println("PASS invalid native state during timeout cleanup still reports original error without autoplay")
++ call("stop")
++}

@@ -42,8 +42,15 @@ if (androidBillingEnabled) {
 }
 
 val playAssetDelivery = providers.gradleProperty("playAssetDelivery").orNull == "true"
+// Isolated USB test updates must never replace the Play-installed application.
+val usbTestApplicationId = providers.gradleProperty("usbTestApplicationId").orNull
+require(usbTestApplicationId == null ||
+    (testBedDebugSigning && usbTestApplicationId == "com.deanbowen.bibleappmac.ministrytest")) {
+    "USB test application ID requires explicit test signing and the existing test package."
+}
+
 android {
-    if (playAssetDelivery) assetPacks += setOf(":bible_audio_1", ":bible_audio_2", ":reader_voices")
+    if (playAssetDelivery) assetPacks += setOf(":bible_audio_1", ":bible_audio_2", ":reader_voices", ":library_audio_1", ":library_audio_2")
     namespace = "com.deanbowen.bibleappmac"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
@@ -58,12 +65,14 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.deanbowen.bibleappmac"
+        applicationId = usbTestApplicationId ?: "com.deanbowen.bibleappmac"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
+        versionCode = if (usbTestApplicationId != null) {
+            providers.gradleProperty("usbTestVersionCode").orNull?.toInt() ?: flutter.versionCode
+        } else flutter.versionCode
         versionName = flutter.versionName
         // Set these only for the validated Play production candidate.
         buildConfigField("String", "PLAY_LICENSE_PUBLIC_KEY", "\"${playLicensePublicKey}\"")
@@ -124,6 +133,7 @@ if (playAssetDelivery) {
             dependsOn(stagePlayAssets)
             exclude("flutter_assets/assets/audio/qwen_bible/**")
             exclude("flutter_assets/assets/audio/kokoro/**")
+            exclude("flutter_assets/assets/bundled_library/files/**")
         }
     }
 }

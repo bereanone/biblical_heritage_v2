@@ -1,3 +1,4 @@
+import 'watch_library_catalog.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

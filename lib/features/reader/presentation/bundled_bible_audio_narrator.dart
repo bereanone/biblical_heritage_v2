@@ -5,9 +5,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:crypto/crypto.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../core/audio/narration_media_session.dart';
+import '../../../core/audio/narration_diagnostics.dart';
 import 'bible_loop_announcement_settings.dart';
 import 'bundled_bible_recording_cache.dart';
 
@@ -218,6 +220,12 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
   }
 
   static const _channel = MethodChannel('studybible/recorded_audio');
+  // Experimental route for affected-device comparison, never enabled silently
+  // in a normal release merely because the workaround passed local checks.
+  static const _useAndroidPcmPlayback = bool.fromEnvironment(
+    'STUDYBIBLE_ANDROID_PCM_PLAYBACK',
+    defaultValue: false,
+  );
   static const _catalogAsset = 'assets/audio/qwen_bible/catalog.json';
   static final _cueRoot = Platform.isAndroid
       ? 'assets/audio/qwen_loop_cues_android'
@@ -254,6 +262,41 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
   BundledChapter? get current => _current;
 
   String _key(int book, int chapter) => '$book-$chapter';
+
+  Future<String> diagnosticReport({required bool audioEnabled}) async {
+    Map<Object?, Object?>? native;
+    String? error;
+    try {
+      native = await _channel.invokeMapMethod<Object?, Object?>('diagnostics');
+    } catch (failure) {
+      error = failure.toString();
+    }
+    final info = await PackageInfo.fromPlatform();
+    return const JsonEncoder.withIndent('  ').convert({
+      'reportVersion': 1,
+      'appVersion': info.version,
+      'build': info.buildNumber,
+      'audioEnabled': audioEnabled,
+      'playRequested': _playing,
+      'chapter': _current == null
+          ? null
+          : '${_current!.book}:${_current!.chapter}',
+      'positionSeconds': _position,
+      'format': Platform.isAndroid && _useAndroidPcmPlayback
+          ? 'PCM test'
+          : 'shipped recording',
+      'announcements': {
+        'book': _requestedAnnouncements.book,
+        'chapter': _requestedAnnouncements.chapter,
+        'verse': _requestedAnnouncements.verse,
+      },
+      'lastTagPlaybackSource': NarrationDiagnostics.lastTagPlaybackSource,
+      'native': native,
+      'diagnosticError': error,
+      'note':
+          'Player state cannot confirm audible sound. This report is local until you choose to share it.',
+    });
+  }
 
   Future<void> loadCatalog() => _catalogLoad ??= _readCatalog();
 
@@ -292,9 +335,16 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
     return _chapters[target];
   }
 
+  // Install-time Play assets are copied to files before MediaPlayer opens
+  // them. Android can evict cache files between copying and opening a cue,
+  // even during playback, so active recordings must not live in cacheDir.
+  Future<Directory> _playbackDirectory() => Platform.isAndroid
+      ? getApplicationSupportDirectory()
+      : getTemporaryDirectory();
+
   Future<String> _materialize(BundledChapter chapter) async {
     final directory = Directory(
-      '${(await getTemporaryDirectory()).path}/qwen_bible',
+      '${(await _playbackDirectory()).path}/qwen_bible',
     );
     await directory.create(recursive: true);
     final filename = chapter.asset.split('/').last;
@@ -310,12 +360,11 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
       final source = File('${external?.path}/qwen_bible/$filename');
       if (await source.exists()) {
         final hash = await sha256.bind(source.openRead()).first;
-        if (hash.toString() != chapter.audioSha256) {
-          throw StateError(
-            'Recorded Bible audio failed verification: $filename',
-          );
+        if (hash.toString() == chapter.audioSha256) {
+          return source.path;
         }
-        return source.path;
+        // An app update can supersede a tester's external recording.
+        // Preserve that file and fall through to the current bundled asset.
       }
     }
     return materializeVerifiedBibleRecording(
@@ -365,7 +414,7 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
       throw StateError('Qwen announcement unavailable: $name');
     }
     final directory = Directory(
-      '${(await getTemporaryDirectory()).path}/qwen_loop_cues',
+      '${(await _playbackDirectory()).path}/qwen_loop_cues',
     );
     await directory.create(recursive: true);
     final destination = File(
@@ -415,7 +464,23 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
         'Precise verse timing unavailable for $book:$chapter:$startVerse',
       );
     }
-    final path = await _materialize(item);
+    final sourcePath = await _materialize(item);
+    final path = Platform.isAndroid && _useAndroidPcmPlayback
+        ? await materializeBiblePcmPlayback(
+            directory: Directory(
+              '${(await getApplicationSupportDirectory()).path}/qwen_bible_pcm_v1',
+            ),
+            sourcePath: sourcePath,
+            sourceSha256: item.audioSha256,
+            render: (source, output) =>
+                _channel.invokeMethod<void>('exportSegments', {
+                  'segments': [
+                    {'path': source},
+                  ],
+                  'outputPath': output,
+                }),
+          )
+        : sourcePath;
     final announcementEvents = await _materializeAnnouncementEvents(
       item,
       announcements,
@@ -579,7 +644,12 @@ class BundledBibleAudioNarrator extends ChangeNotifier {
 
   Future<void> setRate(double value) async {
     _rate = value.clamp(0.75, 1.5);
-    await _channel.invokeMethod<void>('setRate', {'rate': _rate});
+    try {
+      await _channel.invokeMethod<void>('setRate', {'rate': _rate});
+    } on PlatformException catch (error) {
+      _playing = false;
+      onError(error.message ?? 'The phone could not change audio speed.');
+    }
     notifyListeners();
   }
 

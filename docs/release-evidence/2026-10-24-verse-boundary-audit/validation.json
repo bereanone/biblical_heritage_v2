@@ -1,0 +1,17 @@
+{
+  "valid": true,
+  "chapters": 1189,
+  "verse_boundaries": 31102,
+  "changed_candidates": 27643,
+  "uncertain_boundary_rows": 3002,
+  "high_energy_shift_candidates": 18263,
+  "chapter_tails_to_review": 28,
+  "source_catalog_unchanged": true,
+  "audio_hashes_preserved": true,
+  "chapter_metadata_preserved": true,
+  "verse_identity_and_order_preserved": true,
+  "strict_monotonicity": true,
+  "maximum_shift_ms": 250,
+  "listening_approved": false,
+  "installed": false
+}

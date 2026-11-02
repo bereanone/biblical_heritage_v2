@@ -1,4 +1,6 @@
 import 'library_reader_help.dart';
+import 'watch_library_catalog.dart';
+import 'watch_library_reader_coordinator.dart';
 // ignore_for_file: unused_element, dead_code
 
 import 'dart:async';
@@ -201,6 +203,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
   @override
   void initState() {
     super.initState();
+    WatchLibraryReaderNavigation.register(this, _openWatchBook);
     final searchTarget = widget.searchTarget;
     if (searchTarget != null) {
       debugPrint('search_target_received ${searchTarget.diagnosticSummary}');
@@ -235,6 +238,31 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
     unawaited(_loadCitationResolver());
   }
 
+  Future<bool> _openWatchBook(String bookId) async {
+    if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? false)) return false;
+    if (widget.item.id == bookId) return true;
+    final item = await LibraryCatalogService.instance.loadItemById(bookId);
+    if (!mounted ||
+        item == null ||
+        WatchLibraryCatalog.playback.value?.bookId != bookId ||
+        !(ModalRoute.of(context)?.isCurrent ?? false)) {
+      return false;
+    }
+    unawaited(
+      Navigator.of(context, rootNavigator: true).pushReplacement<void, void>(
+        MaterialPageRoute<void>(
+          builder: (_) => LibraryBookReaderScreen(
+            item: item,
+            onReturnToBible: widget.onReturnToBible,
+            themeMode: widget.themeMode,
+            onThemeChanged: widget.onThemeChanged,
+          ),
+        ),
+      ),
+    );
+    return true;
+  }
+
   // Loaded once per reader session, app-wide: every detected reference is
   // checked against this before it is ever underlined, so a reference that
   // cannot resolve in the popup is never shown as if it could.
@@ -258,6 +286,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
 
   @override
   void dispose() {
+    WatchLibraryReaderNavigation.unregister(this);
     for (final recognizer in _citationRecognizers.values) {
       recognizer.dispose();
     }
@@ -438,6 +467,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
           cursor: '$index:$blockIndex',
           nextCursor: '$index:${blockIndex + 1}',
           text: block.text,
+          isHeading: block.kind == 'heading',
         );
       }
     }
@@ -530,7 +560,7 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
 
   void _toggleSteadyAutoscroll() {
     if (!_steadyAutoScroll.isActive) _tiltAutoScroll.stop(notify: false);
-    _steadyAutoScroll.toggle();
+    _steadyAutoScroll.toggle(silent: true);
     _readerFocusNode.requestFocus();
   }
 
@@ -1184,11 +1214,20 @@ class _LibraryBookReaderScreenState extends State<LibraryBookReaderScreen>
             : _sections.indexWhere((s) => s.entryName == section.entryName);
         if (sectionIndex < 0) return;
         final cursor = '$sectionIndex:${first.blockIndex}';
+        if (first.blockIndex < 0 || first.blockIndex >= sectionBlocks.length)
+          return;
+        final run = _splitLibraryTextRuns(
+          sectionBlocks[first.blockIndex].text,
+        ).where((run) => run.tokenIndex == first.tokenIndex).firstOrNull;
+        final selectedOffset = run?.startOffset ?? 0;
         setState(() {
           _selectedRecordedCursor = cursor;
           _rangeSelection = _rangeSelection.clear();
         });
-        await _paragraphPlaybackKey.currentState?.playFromParagraph(cursor);
+        await _paragraphPlaybackKey.currentState?.playFromParagraph(
+          cursor,
+          startOffset: selectedOffset,
+        );
         return;
       case LibrarySelectionRangeAction.copyNoCitation:
         await _copyLibrarySelectionToClipboard(selectedText);

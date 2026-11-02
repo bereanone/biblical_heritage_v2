@@ -126,6 +126,79 @@ void main() {
       expect(await destination.rawQuery('PRAGMA foreign_key_check'), isEmpty);
     },
   );
+  test(
+    'book-specific revision leaves the other installed book untouched',
+    () async {
+      await book(source, 'bundled', 'Corrected BRHC');
+      await book(source, 'second', 'Donor copy must not replace this');
+      await book(destination, 'bundled', 'Older BRHC');
+      await book(destination, 'second', 'Current other book');
+      await destination.execute(
+        'CREATE TABLE bundled_library_updates ('
+        'library_item_id TEXT PRIMARY KEY, revision TEXT NOT NULL)',
+      );
+      for (final id in ['bundled', 'second']) {
+        await destination.insert('bundled_library_updates', {
+          'library_item_id': id,
+          'revision': 'v1',
+        });
+      }
+      final before = await destination.query(
+        'library_items',
+        where: 'id=?',
+        whereArgs: ['second'],
+      );
+      expect(
+        await BundledLibraryCatalogUpdate.apply(
+          destination: destination,
+          source: source,
+          managedItemIds: {'bundled', 'second'},
+          revision: 'v1',
+          itemRevisions: {'bundled': 'corrected-brhc'},
+        ),
+        1,
+      );
+      expect(
+        await destination.query(
+          'library_items',
+          where: 'id=?',
+          whereArgs: ['second'],
+        ),
+        before,
+      );
+    },
+  );
+  test(
+    'reading anchor follows its block when chapter artwork changes row order',
+    () async {
+      await book(source, 'bundled', 'New text');
+      await book(destination, 'bundled', 'Old text');
+      await destination.update(
+        'library_items',
+        {
+          'anchor_id': 'canonical:saved-block',
+          'paragraph_index': 428,
+          'epub_href': 'old-chapter',
+        },
+        where: 'id=?',
+        whereArgs: ['bundled'],
+      );
+      await source.insert('library_document_blocks', {
+        'id': 'saved-block',
+        'library_item_id': 'bundled',
+        'section_id': 'section',
+        'display_order': 437,
+        'block_type': 'heading',
+        'plain_text': 'Chapter 1. The Scriptures',
+        'source_href': 'epub/text/ch004.xhtml',
+      });
+      expect(await update(), 1);
+      final row = (await destination.query('library_items')).single;
+      expect(row['anchor_id'], 'canonical:saved-block');
+      expect(row['paragraph_index'], 437);
+      expect(row['epub_href'], 'epub/text/ch004.xhtml');
+    },
+  );
   test('content update does not resurrect a user-trashed book', () async {
     await book(source, 'bundled', 'New text');
     await book(destination, 'bundled', 'Old text', deleted: 'user-trash-time');

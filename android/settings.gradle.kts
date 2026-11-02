@@ -26,7 +26,7 @@ plugins {
 include(":app")
 
 if (providers.gradleProperty("playAssetDelivery").orNull == "true") {
-    listOf("bible_audio_1", "bible_audio_2", "reader_voices").forEach { pack ->
+    listOf("bible_audio_1", "bible_audio_2", "reader_voices", "library_audio_1", "library_audio_2").forEach { pack ->
         include(":$pack")
         project(":$pack").projectDir = file("play_assetpacks/$pack")
     }

@@ -928,6 +928,33 @@ void main() {
     },
   );
 
+  test(
+    'authored chapter-001 anchor wins over a later visible Chapter 48',
+    () async {
+      await source.writeAsString('''<html><body>
+      <h1>Preface</h1><p>Publisher information.</p>
+      <h1 id="chapter-001">The Scriptures</h1><p>First chapter body.</p>
+      <h1 id="chapter-048">Chapter 48. Nebuchadnezzar's Dream</h1><p>Later chapter body.</p>
+    </body></html>''');
+      await const LibraryDocumentCanonicalizer().canonicalize(
+        db: db,
+        libraryItemId: 'anchored-chapter-one',
+        source: source,
+      );
+      final repository = LibraryDocumentRepository(db);
+      final order = await repository.openingDisplayOrder(
+        'anchored-chapter-one',
+      );
+      expect(order, isNotNull);
+      final location = await repository.resolveLocation(
+        'anchored-chapter-one',
+        order!,
+      );
+      expect(location!.block.plainText, 'The Scriptures');
+      expect(location.block.sourceAnchor, 'chapter-001');
+    },
+  );
+
   test('canonical ordinary opening skips front matter for Chapter 1', () async {
     await source.writeAsString('''
       <html><body>

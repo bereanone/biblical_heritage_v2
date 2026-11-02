@@ -11,6 +11,7 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
     bool preserveHeadingBlocks = false,
   }) async {
     final bytes = await file.readAsBytes();
+    final sourceHash = sha256.convert(bytes).toString();
     final archive = ZipDecoder().decodeBytes(bytes, verify: false);
     final packageInfo = _readEpubPackageInfo(archive);
     final sections = <_EpubSectionChunk>[];
@@ -36,7 +37,11 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
         continue;
       }
 
-      final raw = utf8.decode(entry.content as List<int>, allowMalformed: true);
+      final raw = ELibraryPublisherTextCorrections.correctedEpubHtml(
+        sourceHash: sourceHash,
+        href: entryName,
+        html: utf8.decode(entry.content as List<int>, allowMalformed: true),
+      );
       final title =
           _extractSectionTitle(raw) ?? p.basenameWithoutExtension(entryName);
       final decision = _classifyEpubSection(
@@ -343,7 +348,15 @@ mixin _CommentaryResearchLibraryServiceEpubParsingSupport {
       final href = _attributeValue(tag, 'href');
       final properties = _attributeValue(tag, 'properties');
       if (id == null || href == null) continue;
-      final normalizedPath = p.normalize(p.join(opfDir, href));
+      // OPF hrefs are URI references; ZIP entry names contain decoded paths.
+      // Keep valid encoded names in the spine instead of silently omitting them.
+      String resourcePath;
+      try {
+        resourcePath = Uri.decodeComponent(href);
+      } on FormatException {
+        resourcePath = href;
+      }
+      final normalizedPath = p.normalize(p.join(opfDir, resourcePath));
       manifest[id] = _EpubManifestItem(
         href: normalizedPath,
         properties: properties ?? '',

@@ -1482,7 +1482,10 @@ class _CanonicalLibraryReaderScreenState
       return LibrarySpeechItem(
         cursor: '$order',
         nextCursor: '${order + 1}',
-        text: block.plainText,
+        isHeading: block.isHeading,
+        text:
+            block.formatted.metadata['publisher_original_text'] as String? ??
+            block.plainText,
       );
     }
     return null;
@@ -1497,7 +1500,38 @@ class _CanonicalLibraryReaderScreenState
     if (recorded) {
       await _controller.ensureNavigationWindow(order);
       if (!mounted) return;
-      final block = _controller.blockAt(order);
+      final sourceBlock = _controller.blockAt(order);
+      final joinedOrder =
+          (sourceBlock?.formatted.metadata['publisher_joined_head_order']
+                  as num?)
+              ?.toInt();
+      final displayOrder = joinedOrder ?? order;
+      final block = _controller.blockAt(displayOrder);
+      final joinedOffset =
+          (sourceBlock?.formatted.metadata['publisher_joined_offset'] as num?)
+              ?.toInt() ??
+          0;
+      final originalLength =
+          sourceBlock?.plainText.length ?? item.sourceLength ?? 0;
+      final sourceProgress = librarySpeechProgress(
+        item.startOffset,
+        item.sourceLength,
+      );
+      final displayProgress = block == null
+          ? sourceProgress
+          : (joinedOffset +
+                    sourceProgress *
+                        (sourceBlock
+                                    ?.formatted
+                                    .metadata['publisher_original_text']
+                                is String
+                            ? (sourceBlock!
+                                          .formatted
+                                          .metadata['publisher_original_text']
+                                      as String)
+                                  .length
+                            : originalLength)) /
+                block.plainText.length;
       final marginNotesBlockId = item.showMarginNotes ? block?.id : null;
       final marginNotesChanged =
           _spokenMarginNotesBlockId != marginNotesBlockId;
@@ -1548,8 +1582,8 @@ class _CanonicalLibraryReaderScreenState
           ? _controller.headingAtOrBefore(order)
           : null;
       await _speechFollow.follow(
-        heading?.displayOrder ?? order,
-        librarySpeechProgress(item.startOffset, item.sourceLength),
+        heading?.displayOrder ?? displayOrder,
+        displayProgress,
       );
       return;
     }
@@ -1634,7 +1668,7 @@ class _CanonicalLibraryReaderScreenState
 
   void _toggleSteadyAutoscroll() {
     if (!_macAutoScroll!.isActive) _autoScroll.stop(notify: false);
-    _macAutoScroll!.toggle();
+    _macAutoScroll!.toggle(silent: true);
     _readerFocusNode.requestFocus();
   }
 
@@ -2027,9 +2061,22 @@ class _CanonicalLibraryReaderScreenState
     if (!mounted || action == null) return;
     switch (action) {
       case LibrarySelectionRangeAction.playFromHere:
-        final cursor = '${block.displayOrder}';
+        var order = block.displayOrder;
+        var offset = start;
+        final original = block.formatted.metadata['publisher_original_text'];
+        if (block.formatted.metadata['publisher_joined_tail_id'] != null &&
+            original is String &&
+            offset >= original.length) {
+          order++;
+          offset -= original.length;
+        }
+        final cursor = '$order';
         setState(() => _selectedRecordedCursor = cursor);
-        await _paragraphPlaybackKey.currentState?.playFromParagraph(cursor);
+        await _paragraphPlaybackKey.currentState?.playFromParagraph(
+          cursor,
+          startOffset: offset,
+          paragraphCursor: '${block.displayOrder}',
+        );
         return;
       case LibrarySelectionRangeAction.copyNoCitation:
       case LibrarySelectionRangeAction.copyWithMarkup:

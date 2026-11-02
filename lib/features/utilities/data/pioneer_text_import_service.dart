@@ -4637,6 +4637,12 @@ bool _shouldExtractEpubFromZip(
       contentType.startsWith('application/zip;');
 }
 
+@visibleForTesting
+Uint8List? extractPioneerEpubFromZipForTesting({
+  required PioneerSourceWork work,
+  required Uint8List zipBytes,
+}) => _extractBestEpubFromZipCollection(work: work, zipBytes: zipBytes);
+
 Uint8List? _extractBestEpubFromZipCollection({
   required PioneerSourceWork work,
   required Uint8List zipBytes,
@@ -4668,9 +4674,6 @@ Uint8List? _extractBestEpubFromZipCollection({
       })
       .toList(growable: false);
   if (epubEntries.isEmpty) return null;
-  if (epubEntries.length == 1) {
-    return Uint8List.fromList(epubEntries.single.content as List<int>);
-  }
 
   final scoredEntries =
       epubEntries
@@ -4685,6 +4688,13 @@ Uint8List? _extractBestEpubFromZipCollection({
           return left.key.compareTo(right.key);
         });
 
+  // A shared word or author name is not a book identity. In particular,
+  // "Our Faith and Hope" must never be imported as "Lessons on Faith".
+  if (scoredEntries.first.value < 100 ||
+      (scoredEntries.length > 1 &&
+          scoredEntries[1].value == scoredEntries.first.value)) {
+    return null;
+  }
   final bestName = scoredEntries.first.key;
   final bestEntry = archive.findFile(bestName);
   if (bestEntry == null || !bestEntry.isFile) return null;
@@ -4718,9 +4728,11 @@ int _scoreEpubEntryForWork(String entryName, PioneerSourceWork work) {
   if (normalizedTitle.isNotEmpty && normalizedEntry.contains(normalizedTitle)) {
     score += 100;
   }
-  if (normalizedAbbreviation.isNotEmpty &&
-      normalizedEntry.contains(normalizedAbbreviation)) {
-    score += 40;
+  if (normalizedAbbreviation.length >= 3 &&
+      RegExp(
+        r'\b' + RegExp.escape(normalizedAbbreviation) + r'\b',
+      ).hasMatch(normalizedEntry)) {
+    score += 100;
   }
   if (normalizedAuthor.isNotEmpty &&
       normalizedEntry.contains(normalizedAuthor)) {

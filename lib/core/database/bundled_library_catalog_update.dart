@@ -25,6 +25,7 @@ class BundledLibraryCatalogUpdate {
     required Database source,
     required Set<String> managedItemIds,
     required String revision,
+    Map<String, String> itemRevisions = const {},
     String? resourceRoot,
   }) async {
     if (revision.trim().isEmpty ||
@@ -36,7 +37,7 @@ class BundledLibraryCatalogUpdate {
     }
     final items = <String, Map<String, Object?>>{};
     final rowsByItem = <String, Map<String, List<Map<String, Object?>>>>{};
-    final blobs = <String, Map<String, Object?>>{};
+    final blobHashes = <String>{};
     final sourceHashes = <String>{};
     final witnesses = <String, List<Map<String, Object?>>>{};
     // Fully validate the donor before beginning any destination mutation.
@@ -64,7 +65,7 @@ class BundledLibraryCatalogUpdate {
       }
       for (final asset in content['library_document_assets']!) {
         final hash = asset['asset_sha256'] as String;
-        if (blobs.containsKey(hash)) continue;
+        if (blobHashes.contains(hash)) continue;
         final assetRows = await source.query(
           'library_asset_blobs',
           where: 'sha256 = ?',
@@ -78,7 +79,7 @@ class BundledLibraryCatalogUpdate {
             sha256.convert(data).toString() != hash) {
           throw const FormatException('Bundled image integrity check failed');
         }
-        blobs[hash] = blob;
+        blobHashes.add(hash);
       }
       for (final conversion in content['library_document_conversion']!) {
         if (conversion['status'] != 'complete' ||
@@ -111,6 +112,28 @@ class BundledLibraryCatalogUpdate {
         'library_item_id TEXT PRIMARY KEY, revision TEXT NOT NULL)',
       );
       var changed = 0;
+      // Validate first, then stream image blobs once. Keeping every full-size
+      // historical illustration in a map multiplies peak mobile memory.
+      for (final hash in blobHashes) {
+        final present = await txn.query(
+          'library_asset_blobs',
+          columns: ['sha256'],
+          where: 'sha256=?',
+          whereArgs: [hash],
+          limit: 1,
+        );
+        if (present.isNotEmpty) continue;
+        final blob = (await source.query(
+          'library_asset_blobs',
+          where: 'sha256=?',
+          whereArgs: [hash],
+        )).single;
+        await txn.insert(
+          'library_asset_blobs',
+          blob,
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
       for (final entry in witnesses.entries) {
         for (final row in entry.value) {
           await txn.insert(
@@ -121,12 +144,17 @@ class BundledLibraryCatalogUpdate {
         }
       }
       for (final id in managedItemIds) {
+        final itemRevision = itemRevisions[id] ?? revision;
+        if (itemRevision.trim().isEmpty) {
+          throw const FormatException('Empty managed book revision');
+        }
         final installed = await txn.query(
           'bundled_library_updates',
           where: 'library_item_id = ?',
           whereArgs: [id],
         );
-        if (installed.isNotEmpty && installed.single['revision'] == revision)
+        if (installed.isNotEmpty &&
+            installed.single['revision'] == itemRevision)
           continue;
         final existing = await txn.query(
           'library_items',
@@ -145,6 +173,34 @@ class BundledLibraryCatalogUpdate {
         if (existing.isNotEmpty) {
           for (final field in ['last_opened', 'date_added', 'created_at']) {
             item[field] = existing.single[field];
+          }
+          // Reading anchors are portable identities; paragraph numbers are not.
+          // Resolve the saved block in the incoming edition before replacing
+          // publisher content. Unrelated study data is never opened here.
+          final saved = existing.single;
+          if (saved['last_opened'] != null) {
+            final anchor = saved['anchor_id']?.toString() ?? '';
+            final incoming = rowsByItem[id]!['library_document_blocks']!;
+            final matches = anchor.startsWith('canonical:')
+                ? incoming.where((block) => block['id'] == anchor.substring(10))
+                : const <Map<String, Object?>>[];
+            if (matches.length == 1) {
+              final block = matches.single;
+              item['anchor_id'] = anchor;
+              item['paragraph_index'] = block['display_order'];
+              item['epub_href'] = block['source_href'];
+            } else if (saved['file_hash'] != null &&
+                saved['file_hash'] == item['file_hash']) {
+              for (final field in [
+                'epub_href',
+                'epub_cfi',
+                'anchor_id',
+                'spine_index',
+                'paragraph_index',
+              ]) {
+                item[field] = saved[field];
+              }
+            }
           }
           // UPDATE, never REPLACE: replacing the parent can cascade into notes.
           await txn.update(
@@ -177,13 +233,6 @@ class BundledLibraryCatalogUpdate {
             whereArgs: [id],
           );
         }
-        for (final blob in blobs.values) {
-          await txn.insert(
-            'library_asset_blobs',
-            blob,
-            conflictAlgorithm: ConflictAlgorithm.ignore,
-          );
-        }
         for (final table in contentTables) {
           for (final sourceRow in rowsByItem[id]![table]!) {
             final row = Map<String, Object?>.of(sourceRow);
@@ -195,7 +244,7 @@ class BundledLibraryCatalogUpdate {
         }
         await txn.insert('bundled_library_updates', {
           'library_item_id': id,
-          'revision': revision,
+          'revision': itemRevision,
         }, conflictAlgorithm: ConflictAlgorithm.replace);
         changed++;
       }

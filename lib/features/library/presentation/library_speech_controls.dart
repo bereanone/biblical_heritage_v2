@@ -1,3 +1,5 @@
+import 'reading_speed_button.dart';
+import '../../../core/audio/watch_playback_handoff.dart';
 import 'dart:async';
 import '../../../core/audio/local_narration_policy.dart';
 import 'package:flutter/material.dart';
@@ -35,7 +37,10 @@ class LibrarySpeechControls extends StatefulWidget {
     this.author,
     this.bookSourceHash,
     this.tiltController,
+    this.prepareRecording,
   });
+  @visibleForTesting
+  final Future<RecordedLibraryAudioPackage?> Function()? prepareRecording;
   final VoidCallback? onRecordedPlay;
   final MacReaderAutoScrollController controller;
   final String Function() initialCursor;
@@ -95,8 +100,10 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
   }
 
   Future<void> playMarginNotesFromParagraph(String cursor) async {
+    if (!widget.controller.audioEnabled) return;
     await _ready;
-    if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !widget.controller.audioEnabled) return;
     final recorded = _recordedKey.currentState;
     if (recorded == null) return;
     await recorded.playMarginNotesFromParagraph(cursor);
@@ -107,8 +114,10 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
     required int noteOrder,
     required int lineIndex,
   }) async {
+    if (!widget.controller.audioEnabled) return;
     await _ready;
-    if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !widget.controller.audioEnabled) return;
     final recorded = _recordedKey.currentState;
     if (recorded == null) return;
     await recorded.playMarginNoteFromParagraph(
@@ -118,12 +127,22 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
     );
   }
 
-  Future<void> playFromParagraph(String cursor) async {
+  Future<void> playFromParagraph(
+    String cursor, {
+    int startOffset = 0,
+    String? paragraphCursor,
+  }) async {
+    if (!widget.controller.audioEnabled) return;
     await _ready;
-    if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !widget.controller.audioEnabled) return;
     final recorded = _recordedKey.currentState;
     if (recorded != null) {
-      await recorded.playFromParagraph(cursor);
+      await recorded.playFromParagraph(
+        cursor,
+        startOffset: startOffset,
+        paragraphCursor: paragraphCursor,
+      );
       return;
     }
     if (!LocalNarrationPolicy.canGenerateBooks) {
@@ -131,17 +150,19 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
       return;
     }
     await _queue.stop();
-    if (!mounted) return;
+    if (!mounted || !widget.controller.audioEnabled) return;
     final c = widget.controller;
     c.stopForManualInteraction();
-    _requestedParagraph = cursor;
+    _requestedParagraph = startOffset > 0
+        ? '$cursor|speech:$startOffset'
+        : cursor;
     c.updatePreferences(
       MacAutoscrollPreferences(
         baseSpeed: c.baseSpeed,
         lastNonzeroStep: c.lastNonzeroStep,
         maximumStep: c.maximumStep,
         statusBannerMode: c.statusBannerMode,
-        audioEnabled: true,
+        audioEnabled: c.audioEnabled,
         announceChapter: c.announceChapter,
         announceVerseNumbers: c.announceVerseNumbers,
         speechRate: c.speechRate,
@@ -172,19 +193,31 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
   late final LibraryNarrationMediaControls _media;
   RecordedLibraryAudioPackage? _recordedPackage;
   bool _firstSegment = true;
-  late final Future<void> _ready;
+  late Future<void> _ready;
+  bool _loadingRecording = true;
+  String? _recordingError;
+  int _recordingRevision = 0;
   bool _editing = false;
   int _session = 0;
 
   @override
   void initState() {
     super.initState();
+    WatchPlaybackHandoff.register(this, () async {
+      widget.controller.pauseNarrationForInteraction();
+      await _queue.stop();
+      await _recordedKey.currentState?.pauseForInteraction();
+    });
     WidgetsBinding.instance.addObserver(this);
     _segments = LibrarySpeechSegmenter((cursor) => widget.load(cursor));
     _queue = LibrarySpeechQueue(
       load: _segments.load,
       reveal: (item) => widget.reveal(item),
       speak: (item) async {
+        if (item.spokenText.isEmpty) {
+          await _queue.completed();
+          return;
+        }
         if (!LocalNarrationPolicy.canGenerateBooks) {
           throw const SavedAudioUnavailable(
             'Download a recording for this book to listen on this device.',
@@ -195,18 +228,18 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
         if (_firstSegment) {
           _firstSegment = false;
           // Buffer a bounded current and next segment before the first play.
-          await _narrator.prepare(text: item.text, speed: speed);
+          await _narrator.prepare(text: item.spokenText, speed: speed);
           if (!_queue.running || session != _session) return;
           final next = await _segments.load(item.nextCursor);
           if (!_queue.running || session != _session) return;
-          if (next != null) {
-            await _narrator.prepare(text: next.text, speed: speed);
+          if (next != null && next.spokenText.isNotEmpty) {
+            await _narrator.prepare(text: next.spokenText, speed: speed);
           }
         }
         if (!_queue.running || session != _session) return;
         await _narrator.speak(
           verseKey: 'library-${widget.bookId}-$session-${item.cursor}',
-          text: item.text,
+          text: item.spokenText,
           speed: speed,
         );
         if (_queue.running && session == _session) {
@@ -240,7 +273,7 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
       next: () => unawaited(_skip(next: true)),
       previous: () => unawaited(_skip(next: false)),
     );
-    _ready = _loadRules();
+    _ready = _initialize();
     BundledAudioSetup.instance.addListener(_recordingsChanged);
     widget.controller.addListener(_changed);
     WidgetsBinding.instance.addPostFrameCallback((_) => _changed());
@@ -258,7 +291,9 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
             next == null) {
           return;
         }
-        await _narrator.prepare(text: next.text, speed: speed);
+        if (next.spokenText.isNotEmpty) {
+          await _narrator.prepare(text: next.spokenText, speed: speed);
+        }
         cursor = next.nextCursor;
       }
     } catch (_) {
@@ -266,20 +301,56 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
     }
   }
 
+  Future<void> _initialize() async {
+    // Saved recordings do not use synthesis pronunciation settings. Avoid
+    // loading or migrating those settings for a saved-audio-only session.
+    await _refreshRecordedPackage();
+    if (_recordedPackage == null && LocalNarrationPolicy.canGenerateBooks) {
+      await _loadRules();
+    }
+  }
+
   void _recordingsChanged() {
     if (mounted &&
+        !_loadingRecording &&
         _recordedPackage == null &&
         BundledAudioSetup.instance.complete) {
-      unawaited(_refreshRecordedPackage());
+      _ready = _refreshRecordedPackage();
     }
   }
 
   Future<void> _refreshRecordedPackage() async {
-    final package = await RecordedLibraryAudioPackage.find(
-      widget.title,
-      sourceHash: widget.bookSourceHash,
-    );
-    if (mounted) setState(() => _recordedPackage = package);
+    final revision = ++_recordingRevision;
+    if (mounted)
+      setState(() {
+        _loadingRecording = true;
+        _recordingError = null;
+      });
+    try {
+      final RecordedLibraryAudioPackage? package;
+      if (widget.prepareRecording != null) {
+        package = await widget.prepareRecording!();
+      } else {
+        await BundledAudioSetup.instance.ensureForSource(widget.bookSourceHash);
+        package = await RecordedLibraryAudioPackage.find(
+          widget.title,
+          sourceHash: widget.bookSourceHash,
+        );
+      }
+      if (!mounted || revision != _recordingRevision) return;
+      setState(() {
+        _recordedPackage = package;
+        _loadingRecording = false;
+        _recordingError = BundledAudioSetup.instance.error;
+      });
+    } catch (error) {
+      NarrationDiagnostics.log('library recording preparation FAILED: $error');
+      if (!mounted || revision != _recordingRevision) return;
+      setState(() {
+        _loadingRecording = false;
+        _recordingError = 'Recording preparation could not finish.';
+      });
+    }
   }
 
   Future<void> _loadRules() async {
@@ -287,11 +358,6 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
     final rules = decodeNarrationPronunciations(
       await store.loadRawSetting('narration_pronunciations_v1'),
     );
-    final package = await RecordedLibraryAudioPackage.find(
-      widget.title,
-      sourceHash: widget.bookSourceHash,
-    );
-    if (mounted) setState(() => _recordedPackage = package);
     _rules = rules;
     _deferredRules = await loadDeferredNarrationPronunciations(
       rules: rules,
@@ -425,6 +491,7 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
 
   @override
   void dispose() {
+    WatchPlaybackHandoff.unregister(this);
     BundledAudioSetup.instance.removeListener(_recordingsChanged);
     _speechTilt?.dispose();
     _media.dispose();
@@ -440,30 +507,64 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
     final c = widget.controller;
     final package = _recordedPackage;
     if (package != null) {
-      return RecordedLibraryAudioControls(
-        key: _recordedKey,
-        package: package,
-        bookId: widget.bookId,
-        load: widget.load,
-        reveal: widget.revealRecorded ?? widget.reveal,
-        startCursor: widget.recordedStartCursor ?? widget.initialCursor(),
-        selectedCursor: widget.selectedRecordedCursor ?? () => null,
-        readerCursor: widget.initialCursor,
-        beforePlay: () async {
-          widget.onRecordedPlay?.call();
-          c.stopForManualInteraction();
-          await _queue.stop();
-          await _speechEngine?.stop();
-        },
+      return Offstage(
+        offstage: !c.audioEnabled,
+        child: RecordedLibraryAudioControls(
+          key: _recordedKey,
+          playbackEnabled: c.audioEnabled,
+          canPlay: () => c.audioEnabled,
+          package: package,
+          bookId: widget.bookId,
+          playbackRate: c.speechRate,
+          onPlaybackRateChanged: c.setSpeechRate,
+          load: widget.load,
+          reveal: widget.revealRecorded ?? widget.reveal,
+          startCursor: widget.recordedStartCursor ?? widget.initialCursor(),
+          selectedCursor: widget.selectedRecordedCursor ?? () => null,
+          readerCursor: widget.initialCursor,
+          beforePlay: () async {
+            widget.onRecordedPlay?.call();
+            c.stopForManualInteraction();
+            await _queue.stop();
+            await _speechEngine?.stop();
+          },
+        ),
       );
     }
-    if (!LocalNarrationPolicy.canGenerateBooks) {
-      return const SizedBox.shrink();
-    }
-    if (!c.audioEnabled) {
-      return Align(
-        alignment: Alignment.centerLeft,
-        child: ReaderNarrationButton(controller: c),
+    if (!c.audioEnabled) return const SizedBox.shrink();
+    if (_loadingRecording || !LocalNarrationPolicy.canGenerateBooks) {
+      return SizedBox(
+        height: 56,
+        child: Row(
+          children: [
+            TextButton.icon(
+              onPressed: null,
+              icon: Icon(Icons.play_arrow),
+              label: Text('Play'),
+            ),
+            if (_loadingRecording) ...[
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 8),
+              const Flexible(child: Text('Preparing recording…')),
+            ] else ...[
+              Flexible(
+                child: Text(
+                  _recordingError ?? 'Recording is not available yet.',
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  _ready = _refreshRecordedPackage();
+                },
+                child: const Text('Retry'),
+              ),
+            ],
+          ],
+        ),
       );
     }
     return SizedBox(
@@ -476,17 +577,19 @@ class LibrarySpeechControlsState extends State<LibrarySpeechControls>
             pauseLabel: 'Voice',
             onPause: c.stopForManualInteraction,
           ),
-          Expanded(
-            child: Slider(
-              value: c.speechRate,
-              min: .75,
-              max: 1.5,
-              divisions: 15,
-              label: '${c.speechRate.toStringAsFixed(2)}×',
-              onChanged: c.setSpeechRate,
-            ),
-          ),
-          Text('${c.speechRate.toStringAsFixed(2)}×'),
+          if (Theme.of(context).platform == TargetPlatform.macOS)
+            Expanded(
+              child: Center(
+                child: ReadingSpeedButton(
+                  speed: c.speechRate,
+                  onChanged: c.setSpeechRate,
+                ),
+              ),
+            )
+          else ...[
+            ReadingSpeedButton(speed: c.speechRate, onChanged: c.setSpeechRate),
+            const Spacer(),
+          ],
           TextButton.icon(
             onPressed: _edit,
             icon: const Icon(Icons.record_voice_over),

@@ -30,12 +30,20 @@ Future<void> showViewerModePopup(
         backgroundColor: theme.colorScheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: BoxConstraints(
+            maxWidth: 420,
+            maxHeight:
+                (MediaQuery.sizeOf(dialogContext).height -
+                        MediaQuery.viewInsetsOf(dialogContext).vertical -
+                        MediaQuery.paddingOf(dialogContext).vertical -
+                        48)
+                    .clamp(1.0, double.infinity),
+          ),
           child: StatefulBuilder(
             builder: (context, setStateDialog) {
               return Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
-                child: SingleChildScrollView(
+                child: _ScrollableModeContents(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -269,6 +277,39 @@ Future<void> showViewerModePopup(
         ),
       );
     },
+  );
+}
+
+// Own the scroll position so reopening the menu always starts at its first
+// option, independently of the Bible reader or another route's scrolling.
+class _ScrollableModeContents extends StatefulWidget {
+  const _ScrollableModeContents({required this.child});
+  final Widget child;
+
+  @override
+  State<_ScrollableModeContents> createState() =>
+      _ScrollableModeContentsState();
+}
+
+class _ScrollableModeContentsState extends State<_ScrollableModeContents> {
+  final _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scrollbar(
+    controller: _controller,
+    thumbVisibility: true,
+    interactive: true,
+    child: SingleChildScrollView(
+      controller: _controller,
+      primary: false,
+      child: widget.child,
+    ),
   );
 }
 

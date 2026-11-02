@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'lessons_reading_edition.dart';
 import 'package:flutter/services.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -8,6 +9,16 @@ class OptionalBookCompanions {
   static const worSource =
       '887a248acb34648cc510af7a0d729964d4a3736e9698e36a71583b3a6b34b4d6';
   static bool matchesWor(String? hash) => hash == worSource;
+  static const worSingleReaderSource =
+      '49474b9b27e5fc4828aac88f07753acaf9b1930ef2efa3ea9bc5132ba9a70b83';
+  static bool matchesWorAudio(String? hash) =>
+      matchesWor(hash) || hash == worSingleReaderSource;
+  static const brhc1914Source =
+      'e559dec92473f715c54f1370bd2a8833339a488b0788feeb5d9dc5907da70255';
+  static bool hasPreparedRecordings(String? hash) =>
+      matchesWorAudio(hash) ||
+      hash == brhc1914Source ||
+      hash == LessonsReadingEdition.sourceHash;
   static String? sourceFingerprint(String? fileHash, String? sourceWorkId) {
     if (fileHash != null && RegExp(r'^[a-f0-9]{64}$').hasMatch(fileHash))
       return fileHash;

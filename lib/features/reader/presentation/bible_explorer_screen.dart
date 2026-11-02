@@ -1,3 +1,5 @@
+import '../../../core/audio/watch_playback_handoff.dart';
+import '../../library/presentation/watch_library_catalog.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -7,7 +9,6 @@ import 'package:flutter/scheduler.dart';
 
 import '../../../core/audio/narration_diagnostics.dart';
 import '../../../core/audio/narration_media_session.dart';
-import '../../../core/bootstrap/local_settings_store.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../../core/theme/app_settings_service.dart';
 import '../../../core/theme/app_theme_mode.dart';
@@ -21,6 +22,7 @@ import '../../library/presentation/reader_tilt_motion_source.dart';
 import '../../library/presentation/reader_tilt_preferences.dart';
 import '../../library/presentation/speech_tilt_binding.dart';
 import '../data/highlights_repository.dart';
+import '../data/bible_markup_repository.dart';
 import '../data/highlight_groups_repository.dart';
 import '../data/history_log_service.dart';
 import '../data/navigation_history_service.dart';
@@ -29,6 +31,7 @@ import 'bible_memory_screen.dart';
 import 'bible_narration_media_controls.dart';
 import 'bible_loop_announcement_settings.dart';
 import 'bible_audio_settings.dart';
+import 'bible_audio_startup_preferences.dart';
 import 'bible_loop_picker.dart';
 import 'bible_playback_skip.dart';
 import 'bible_watch_remote.dart';
@@ -315,8 +318,21 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       )..addListener(_onMacAutoscrollChanged);
       _audioPreferencesReady = AppSettingsService.instance
           .loadMacAutoscrollPreferences()
-          .then((value) {
-            if (mounted) _macAutoScroll?.updatePreferences(value);
+          .then((value) async {
+            if (mounted) {
+              final startup = BibleAudioStartupPreferences.currentProcess.apply(
+                value,
+                android: Platform.isAndroid,
+              );
+              _macAutoScroll?.updatePreferences(startup);
+              // Keep this launch's startup choice when the reader is reopened.
+              // Subsequent manual changes use the existing preference saver.
+              if (!identical(startup, value)) {
+                await AppSettingsService.instance.saveMacAutoscrollPreferences(
+                  startup,
+                );
+              }
+            }
           });
     }
     if (_usesBundledBibleAudio && _macAutoScroll != null) {
@@ -334,6 +350,11 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
       );
     }
     if (Platform.isIOS) {
+      WatchPlaybackHandoff.register(this, () async {
+        _macAutoScroll?.setSignedStep(0);
+        await _bundledNarrator?.pause();
+        await _kokoroNarrator.stop();
+      });
       unawaited(
         _watchRemote.attach(_handleWatchCommand).then((state) {
           if (!mounted) return;
@@ -777,6 +798,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
 
   @override
   void dispose() {
+    WatchPlaybackHandoff.unregister(this);
     unawaited(_watchRemote.detach());
     WidgetsBinding.instance.removeObserver(this);
     _speechTilt?.dispose();
@@ -910,6 +932,7 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
     final session = ++_narrationSession;
     _spokenBundledLocation = location;
     try {
+      await WatchLibraryCatalog.pauseNative();
       await _loopAnnouncementsReady;
       if (!_narrationIsCurrent(session)) return;
       await narrator.setRate(controller.speechRate);
@@ -1284,6 +1307,11 @@ class _BibleExplorerScreenState extends State<BibleExplorerScreen>
         showDragHandle: true,
         builder: (_) => BibleAudioSettings(
           controller: controller,
+          onDiagnosticReport: Platform.isAndroid && _bundledNarrator != null
+              ? () => _bundledNarrator!.diagnosticReport(
+                  audioEnabled: controller.audioEnabled,
+                )
+              : null,
           announcements: _usesBundledBibleAudio ? _loopAnnouncements : null,
           onPreferencesChanged: (preferences) => unawaited(
             AppSettingsService.instance.saveMacAutoscrollPreferences(

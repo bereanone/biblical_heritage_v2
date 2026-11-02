@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import shutil
 
-PACKS = ('bible_audio_1', 'bible_audio_2', 'reader_voices')
+PACKS = ('bible_audio_1', 'bible_audio_2', 'reader_voices', 'library_audio_1', 'library_audio_2')
 LIMIT = 1400 * 1000 * 1000  # Margin below Play's individual pack limit.
 
 def stage(source: Path, destination: Path):
@@ -24,11 +24,17 @@ def stage(source: Path, destination: Path):
         groups[name].append(path); totals[name] += path.stat().st_size
     groups['reader_voices'] = voices
     totals['reader_voices'] = sum(p.stat().st_size for p in voices)
+    # Library recordings share the original Flutter paths, but must not grow
+    # the base APK beyond Android's signed-APK parser limit.
+    library = [p for p in (source / 'assets/bundled_library/files').rglob('*') if p.is_file()]
+    for path in sorted(library, key=lambda p: (-p.stat().st_size, str(p))):
+        name = min(PACKS[3:], key=lambda n: (totals[n], n))
+        groups[name].append(path); totals[name] += path.stat().st_size
     if max(totals.values()) > LIMIT:
         raise ValueError(f'Asset pack exceeds conservative size limit: {totals}')
     result = {'packs': {}, 'total_bytes': sum(totals.values())}
     for name, paths in groups.items():
-        folder = destination / name / 'src/main/assets'
+        folder = (destination / name / 'src/main/assets').resolve()
         # Only generated staging content; never touch compiled/source assets.
         if folder.exists(): shutil.rmtree(folder)
         entries = []

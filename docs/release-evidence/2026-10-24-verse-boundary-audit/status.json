@@ -1,0 +1,21 @@
+{
+  "state": "complete",
+  "pid": 73322,
+  "total": 1189,
+  "completed": 1189,
+  "failed": {},
+  "elapsed_seconds": 56,
+  "last_chapter": "66-022",
+  "verses": 31102,
+  "candidate_changed_boundaries": 27643,
+  "flags": {
+    "cut_near_active_audio": 29399,
+    "ambiguous_quiet_gaps": 1785,
+    "no_suitable_nearby_quiet_gap": 977,
+    "only_later_gap_needs_word_review": 44,
+    "low_alignment_similarity": 224
+  },
+  "source_catalog_sha256": "71b5ba363483be574eb8ea94954fec937744ee17d5c58d77dc45e16301988ab9",
+  "source_catalog_unchanged": true,
+  "limitation": "Acoustic triage only. No words or boundaries are listening-approved. No app files changed."
+}

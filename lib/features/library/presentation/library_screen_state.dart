@@ -40,12 +40,6 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   bool _captureImportDialogVisible = false;
   PageRoute<dynamic>? _observedRoute;
 
-  // Compact-layout secondary control collapse (see build()). Secondary
-  // controls hide on downward scroll and restore on upward scroll once the
-  // accumulated delta crosses a hysteresis threshold, to avoid jitter.
-  bool _secondaryControlsCollapsed = false;
-  double _scrollHysteresisAccumulator = 0;
-  bool _wasCompactLayout = false;
   // macOS enforces a 900x700 minimum window size (MainFlutterWindow.swift),
   // which leaves ~568 logical px of height for this LayoutBuilder at the
   // smallest window the OS allows. The height threshold must sit above
@@ -53,7 +47,6 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
   // macOS window at all, even at the smallest size a user can drag to.
   static const double _kCompactHeightThreshold = 650;
   static const double _kCompactWidthThreshold = 640;
-  static const double _kScrollCollapseThreshold = 28;
 
   @override
   void initState() {
@@ -109,6 +102,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
         _loadingStatus = 'Loading library...';
         _loadingError = null;
       });
+      unawaited(WatchLibraryCatalog.refresh());
     }
     try {
       final selectionFuture = LibraryRootService.instance.loadSelection();
@@ -119,7 +113,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
       final collectionFilterFuture = AppSettingsService.instance
           .loadElibraryCollectionFilter();
       final itemsFuture = _service.loadItems(hydrateMetadata: false);
-      final selection = await selectionFuture;
+      await selectionFuture;
       final viewerFontScale = await viewerFontScaleFuture;
       final fileTypeFilter = normalizeLibraryMediaFilter(
         await fileTypeFilterFuture,
@@ -129,8 +123,9 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
           ? _collectionFilter
           : _normalizeCollectionFilterSelection(storedCollectionFilter);
       final items = await itemsFuture;
-      final topShelfRaw = await AppSettingsService.instance.loadRawSetting(
-        'elibrary_top_shelf_v1',
+      final selection = await LibraryRootService.instance.loadSelection();
+      final topShelfRaw = await AppSettingsService.instance.loadTopShelf(
+        availableItemIds: items.map((i) => i.id).toSet(),
       );
       List<String> topShelf = [];
       try {
@@ -145,6 +140,12 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
         _selection = selection;
         _items = items;
         _topShelfIds = topShelf;
+        // New users should see the included books before curating a shelf.
+        if (topShelfRaw == null &&
+            topShelf.isEmpty &&
+            _tab == _LibraryTab.topShelf) {
+          _tab = _LibraryTab.books;
+        }
         _viewerFontScale = viewerFontScale;
         _fileTypeFilter = fileTypeFilter;
         _collectionFilter = collectionFilter;
@@ -179,8 +180,22 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
 
   Future<void> _reloadItems() async {
     final items = await _service.loadItems(hydrateMetadata: false);
+    final topShelfRaw = await AppSettingsService.instance.loadTopShelf(
+      availableItemIds: items.map((i) => i.id).toSet(),
+    );
+    List<String> topShelf = [];
+    try {
+      topShelf = (jsonDecode(topShelfRaw ?? '[]') as List)
+          .whereType<String>()
+          .toSet()
+          .toList();
+    } catch (_) {}
     if (!mounted) return;
-    setState(() => _items = items);
+    setState(() {
+      _items = items;
+      _topShelfIds = topShelf;
+    });
+    unawaited(WatchLibraryCatalog.refresh());
     await _refreshCaptureImportReport(promptOnDiscovery: false);
     await _syncSelectionAndNavigation(
       _filteredBooks,
@@ -729,6 +744,7 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
         jsonEncode(ids),
       );
       if (mounted) setState(() => _topShelfIds = ids);
+      unawaited(WatchLibraryCatalog.refresh());
     } catch (_) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
@@ -750,43 +766,6 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
 
   void _setInitialLetter(String? letter) {
     setState(() => _selectedInitialLetter = letter);
-  }
-
-  // Collapses/restores the compact-layout secondary control panel based on
-  // book-list scroll direction, with a pixel threshold (hysteresis) so small
-  // back-and-forth movements don't cause jitter. Snapping back to the top
-  // always restores the full controls immediately.
-  bool _handleBookListScrollNotification(ScrollNotification notification) {
-    if (notification is! ScrollUpdateNotification) return false;
-    final metrics = notification.metrics;
-    if (metrics.pixels <= metrics.minScrollExtent + 1) {
-      _scrollHysteresisAccumulator = 0;
-      if (_secondaryControlsCollapsed) {
-        setState(() => _secondaryControlsCollapsed = false);
-      }
-      return false;
-    }
-    final delta = notification.scrollDelta ?? 0;
-    if (delta == 0) return false;
-    if (delta > 0) {
-      _scrollHysteresisAccumulator = _scrollHysteresisAccumulator < 0
-          ? delta
-          : _scrollHysteresisAccumulator + delta;
-    } else {
-      _scrollHysteresisAccumulator = _scrollHysteresisAccumulator > 0
-          ? delta
-          : _scrollHysteresisAccumulator + delta;
-    }
-    if (_scrollHysteresisAccumulator >= _kScrollCollapseThreshold &&
-        !_secondaryControlsCollapsed) {
-      _scrollHysteresisAccumulator = 0;
-      setState(() => _secondaryControlsCollapsed = true);
-    } else if (_scrollHysteresisAccumulator <= -_kScrollCollapseThreshold &&
-        _secondaryControlsCollapsed) {
-      _scrollHysteresisAccumulator = 0;
-      setState(() => _secondaryControlsCollapsed = false);
-    }
-    return false;
   }
 
   Future<void> _selectBook(LibraryCatalogItem item) async {
@@ -1138,19 +1117,6 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
                               constraints.maxHeight <
                                   _kCompactHeightThreshold ||
                               constraints.maxWidth < _kCompactWidthThreshold;
-                          if (isCompact != _wasCompactLayout) {
-                            _wasCompactLayout = isCompact;
-                            if (isCompact && _secondaryControlsCollapsed) {
-                              _scrollHysteresisAccumulator = 0;
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                if (!mounted) return;
-                                setState(
-                                  () => _secondaryControlsCollapsed = false,
-                                );
-                              });
-                            }
-                          }
-
                           final catalogPane = AnimatedSwitcher(
                             duration: const Duration(milliseconds: 180),
                             child: switch (_tab) {
@@ -1362,12 +1328,9 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
                             );
                           }
 
-                          // Short or narrow layout: a compact sticky toolbar
-                          // (collection, search access, Books/Recent,
-                          // Shelf/List) stays visible at all times; secondary
-                          // controls (title, file-type filter, title search
-                          // box, alphabet row) collapse on downward scroll
-                          // and restore on upward scroll or at the top.
+                          // Keep the compact controls fixed while books scroll.
+                          // Resizing a short shelf during a drag shrinks its scroll
+                          // extent, clamps the offset, and can bounce it to the top.
                           final stickyToolbar = Column(
                             key: const ValueKey('library-sticky-toolbar'),
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1465,32 +1428,18 @@ class _LibraryScreenState extends State<LibraryScreen> with RouteAware {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               stickyToolbar,
-                              AnimatedSize(
-                                duration: const Duration(milliseconds: 200),
-                                curve: Curves.easeInOut,
-                                alignment: Alignment.topCenter,
-                                child: _secondaryControlsCollapsed
-                                    ? const SizedBox(width: double.infinity)
-                                    : Padding(
-                                        key: const ValueKey(
-                                          'library-secondary-controls',
-                                        ),
-                                        padding: const EdgeInsets.only(top: 10),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: secondaryControls,
-                                        ),
-                                      ),
-                              ),
-                              const SizedBox(height: 10),
-                              Expanded(
-                                child: NotificationListener<ScrollNotification>(
-                                  onNotification:
-                                      _handleBookListScrollNotification,
-                                  child: catalogPane,
+                              Padding(
+                                key: const ValueKey(
+                                  'library-secondary-controls',
+                                ),
+                                padding: const EdgeInsets.only(top: 10),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: secondaryControls,
                                 ),
                               ),
+                              const SizedBox(height: 10),
+                              Expanded(child: catalogPane),
                             ],
                           );
                         },

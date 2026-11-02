@@ -814,8 +814,24 @@ final class RecordedBibleAudioBridge: NSObject, AVAudioPlayerDelegate {
     }
 
     engine.prepare()
-    try engine.start()
-    playerNode.play()
+    do {
+      try engine.start()
+      if #available(iOS 27.0, *) {
+        // The legacy play() aborts the process if a simulator/output route
+        // never supplies an I/O cycle. iOS 27 exposes a recoverable error.
+        try playerNode.playAudio()
+      } else {
+        playerNode.play()
+      }
+    } catch {
+      // Discard the failed schedule, retain the passage, and rebuild on retry.
+      generation += 1
+      playerNode.stop()
+      engine.stop()
+      playing = false
+      needsGraphRebuild = true
+      throw error
+    }
     playing = true
     result(nil)
   }

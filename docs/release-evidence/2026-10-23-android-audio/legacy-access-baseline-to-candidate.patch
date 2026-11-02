@@ -1,0 +1,502 @@
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -104,6 +104,7 @@
+ 
+ dependencies {
+     implementation("com.android.billingclient:billing:8.0.0")
++    implementation("com.google.android.gms:play-services-auth-blockstore:16.4.0")
+     testImplementation("junit:junit:4.12")
+ }
+ 
+--- a/android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayPurchaseBridge.kt
++++ b/android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayPurchaseBridge.kt
+@@ -24,6 +24,9 @@
+     private val state: JSONObject = try {
+         if (stateFile.baseFile.exists()) JSONObject(stateFile.openRead().bufferedReader().use { it.readText() }) else JSONObject()
+     } catch (_: Exception) { JSONObject().put("unreadable", true) }
++    private val legacyRecovery = PlayLegacyAccessRecovery(PlayLegacyBlockStore(activity))
++    private var closed = false
++    private var legacyRecoveryUnavailable = false
+     private val unlockId = "studybible_full_access"
+     private var details: ProductDetails? = null
+     private var ministryId: String? = null
+@@ -40,17 +43,63 @@
+             try {
+                 check(!state.optBoolean("unreadable"))
+                 ministryId = call.argument<String>("ministryId")
+-                when (call.method) {
+-                    "initialize", "refresh", "restore" -> refresh(reply)
+-                    "startTrial" -> {
+-                        if (!state.has("trialEndsAt")) {
+-                            state.put("trialEndsAt", now() + 14L * 24 * 60 * 60 * 1000)
+-                            persist()
++                if (call.method !in setOf("initialize", "refresh", "restore", "startTrial", "purchase")) {
++                    reply.notImplemented()
++                    return@setMethodCallHandler
++                }
++                withRecoveredLegacy(call.method, reply) {
++                    when (call.method) {
++                        "initialize", "refresh", "restore" -> refresh(reply)
++                        "startTrial" -> {
++                            if (!state.has("trialEndsAt")) {
++                                state.put("trialEndsAt", now() + 14L * 24 * 60 * 60 * 1000)
++                                persist()
++                            }
++                            reply.success(snapshot())
+                         }
++                        "purchase" -> purchase(reply)
++                    }
++                }
++            } catch (_: Exception) {
++                reply.error("access_unavailable", "Saved access could not be checked. Please try again.", null)
++            }
++        }
++        // Record established free users even in a build whose Dart payment gate
++        // is disabled. New installs remain untouched; no billing connection opens.
++        try {
++            if (!state.optBoolean("unreadable")) {
++                legacyRecovery.enrollEstablishedLegacy(legacyFromInstallation()) {
++                    state.put("legacy", true)
++                    persist()
++                }
++            }
++        } catch (_: Exception) {
++            // A later access request retries; enrollment must not break startup.
++        }
++    }
++    private fun withRecoveredLegacy(method: String, reply: MethodChannel.Result, proceed: () -> Unit) {
++        // Capture upgrade eligibility before any asynchronous store operation.
++        val local = snapshot()
++        legacyRecovery.resolve(local["legacy"] == true) { recovered ->
++            if (closed) {
++                reply.error("closed", "Access check closed. Please try again.", null)
++            } else try {
++                legacyRecoveryUnavailable = recovered.unavailable
++                when {
++                    recovered.legacy -> {
++                        state.put("legacy", true)
+                         reply.success(snapshot())
+                     }
+-                    "purchase" -> purchase(reply)
+-                    else -> reply.notImplemented()
++                    recovered.unavailable && method == "purchase" -> {
++                        reply.error("legacy_recovery_unavailable",
++                            "Previous free access could not be checked. Please try again before purchasing.", null)
++                    }
++                    recovered.useKnownLocalAccess(method, local["paid"] == true || state.optLong("trialEndsAt") > now()) -> {
++                        reply.success(snapshot())
++                    }
++                    // An outage neither grants legacy rights nor prevents an
++                    // explicit temporary trial or a normal paid-purchase restore.
++                    else -> proceed()
+                 }
+             } catch (_: Exception) {
+                 reply.error("access_unavailable", "Saved access could not be checked. Please try again.", null)
+@@ -62,7 +111,18 @@
+         state.put("lastSeen", value)
+         return value
+     }
++    private fun legacyFromInstallation(): Boolean {
++        val installation = activity.packageManager.getPackageInfo(activity.packageName, 0)
++        return PlayLegacyAccessPolicy.allows(
++            hadSavedAccessState, state.optBoolean("legacy"),
++            installation.firstInstallTime, installation.lastUpdateTime,
++            BuildConfig.PLAY_LEGACY_CUTOFF_MS,
++        )
++    }
+     private fun persist() {
++        // Capture migration rights in every atomic billing write, even if the
++        // process stops after queryOwned/startTrial and before snapshot.
++        state.put("legacy", legacyFromInstallation())
+         val output = stateFile.startWrite()
+         try {
+             output.write(state.toString().toByteArray(Charsets.UTF_8))
+@@ -75,22 +135,14 @@
+         // Keep a previously verified permanent purchase usable offline. A
+         // successful authoritative query revokes it after a refund/revocation.
+         val paid = state.optBoolean("paid") && verified > 0
+-        // Capture the presence of billing state before queryOwned can create it.
+-        // An OS-recorded update with no prior billing state is migration from
+-        // the free edition. This also covers installs made while review/upload
+-        // was pending, rather than depending only on a frozen build-time cutoff.
+-        val installation = activity.packageManager.getPackageInfo(activity.packageName, 0)
+-        val legacy = PlayLegacyAccessPolicy.allows(
+-            hadSavedAccessState, state.optBoolean("legacy"),
+-            installation.firstInstallTime, installation.lastUpdateTime,
+-            BuildConfig.PLAY_LEGACY_CUTOFF_MS,
+-        )
+-        state.put("legacy", legacy)
+         persist()
++        val legacy = state.optBoolean("legacy")
+         return mapOf("paid" to paid, "legacy" to legacy, "checkedAt" to current,
+             "trialEndsAt" to if (state.has("trialEndsAt")) state.getLong("trialEndsAt") else null,
+             "trialAvailable" to !state.has("trialEndsAt"),
+-            "price" to selectedOffer()?.formattedPrice,
++            "price" to if (legacyRecoveryUnavailable) null else selectedOffer()?.formattedPrice,
++            "accessWarning" to if (legacyRecoveryUnavailable)
++                "Previous free access could not be checked. Try again before purchasing." else null,
+             "outcome" to outcome)
+     }
+     private fun connect(ready: () -> Unit, failed: (String) -> Unit) {
+@@ -210,6 +262,7 @@
+         }
+     }
+     fun close() {
++        closed = true
+         purchaseReply?.error("closed", "Purchase connection closed. Use Restore Purchases when you return.", null)
+         purchaseReply = null; channel.setMethodCallHandler(null); client.endConnection()
+     }
+--- a/android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessPolicy.kt
++++ b/android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessPolicy.kt
+@@ -9,6 +9,6 @@
+         lastUpdateTime: Long,
+         originalCutoff: Long,
+     ): Boolean = savedLegacy ||
+-        (originalCutoff > 0 && firstInstallTime < originalCutoff) ||
++        (originalCutoff > 0 && firstInstallTime > 0 && firstInstallTime < originalCutoff) ||
+         (!hadSavedAccessState && firstInstallTime > 0 && lastUpdateTime > firstInstallTime)
+ }
+--- /dev/null
++++ b/android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessRecovery.kt
+@@ -0,0 +1,53 @@
++package com.deanbowen.bibleappmac
++
++/** App-private persistence; never a study-data export or a Google purchase. */
++interface PlayLegacyAccessStore {
++    fun read(found: (ByteArray?) -> Unit, unavailable: () -> Unit)
++    fun write(marker: ByteArray, complete: (Boolean) -> Unit)
++}
++
++data class PlayLegacyRecoveryResult(val legacy: Boolean, val unavailable: Boolean = false) {
++    fun useKnownLocalAccess(method: String, hasLocalAccess: Boolean): Boolean =
++        unavailable && hasLocalAccess && method != "restore" && method != "purchase"
++}
++
++/** Only already-established free access can enroll. Missing/invalid data grants nothing. */
++class PlayLegacyAccessRecovery(private val store: PlayLegacyAccessStore) {
++    private var enrolled = false
++    private var enrolling = false
++
++    fun enrollEstablishedLegacy(knownLegacy: Boolean, saveLocal: () -> Unit) {
++        if (!knownLegacy) return
++        saveLocal()
++        enroll()
++    }
++
++    fun resolve(knownLegacy: Boolean, complete: (PlayLegacyRecoveryResult) -> Unit) {
++        if (knownLegacy) {
++            // A recovery-service outage must never revoke known local access.
++            complete(PlayLegacyRecoveryResult(true))
++            enroll()
++            return
++        }
++        store.read({ bytes ->
++            val restored = bytes?.contentEquals(marker()) == true
++            if (restored) enrolled = true
++            complete(PlayLegacyRecoveryResult(restored))
++        }, { complete(PlayLegacyRecoveryResult(false, unavailable = true)) })
++    }
++
++    private fun enroll() {
++        if (enrolled || enrolling) return
++        enrolling = true
++        store.write(marker()) { saved ->
++            enrolled = saved
++            enrolling = false // A failed write may be retried on the next refresh.
++        }
++    }
++
++    companion object {
++        // A versioned format marker, not a secret. Google checks package/signature
++        // before returning it. Never accept this marker from user-selected files.
++        private fun marker() = "StudyBible:existing-free-access:v1".toByteArray(Charsets.UTF_8)
++    }
++}
+--- /dev/null
++++ b/android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayLegacyBlockStore.kt
+@@ -0,0 +1,58 @@
++package com.deanbowen.bibleappmac
++
++import android.content.Context
++import android.os.Handler
++import android.os.Looper
++import com.google.android.gms.auth.blockstore.Blockstore
++import com.google.android.gms.auth.blockstore.RetrieveBytesRequest
++import com.google.android.gms.auth.blockstore.StoreBytesData
++
++/** Same-device recovery requires device Backup enabled for uninstall retention.
++ * Cloud upload is disabled; Google may also transfer this marker during a user
++ * initiated device restore. This cannot recover an unenrolled install. */
++class PlayLegacyBlockStore(context: Context) : PlayLegacyAccessStore {
++    private val appContext = context.applicationContext
++    private val client by lazy { Blockstore.getClient(appContext) }
++    private val handler = Handler(Looper.getMainLooper())
++    private val key = "${context.packageName}.existing_free_access_v1"
++
++    override fun read(found: (ByteArray?) -> Unit, unavailable: () -> Unit) {
++        val finish = once<ByteArray?>({ unavailable() }, found)
++        try {
++            client.retrieveBytes(RetrieveBytesRequest.Builder().setKeys(listOf(key)).build())
++                .addOnSuccessListener { response -> finish(true, response.blockstoreDataMap[key]?.bytes) }
++                .addOnFailureListener { finish(false, null) }
++                .addOnCanceledListener { finish(false, null) }
++        } catch (_: Exception) { finish(false, null) }
++    }
++
++    override fun write(marker: ByteArray, complete: (Boolean) -> Unit) {
++        val finish = once<Boolean>({ complete(false) }, complete)
++        try {
++            val request = StoreBytesData.Builder().setKey(key).setBytes(marker)
++                .setShouldBackupToCloud(false).build()
++            client.storeBytes(request)
++                .addOnSuccessListener { stored -> finish(true, stored == marker.size) }
++                .addOnFailureListener { finish(false, null) }
++                .addOnCanceledListener { finish(false, null) }
++        } catch (_: Exception) { finish(false, null) }
++    }
++
++    private fun <T> once(failed: () -> Unit, success: (T) -> Unit): (Boolean, T?) -> Unit {
++        var settled = false
++        val timeout = Runnable {
++            if (!settled) { settled = true; failed() }
++        }
++        handler.postDelayed(timeout, 5_000)
++        return { ok, value ->
++            if (!settled) {
++                settled = true
++                handler.removeCallbacks(timeout)
++                if (ok) {
++                    @Suppress("UNCHECKED_CAST")
++                    success(value as T)
++                } else failed()
++            }
++        }
++    }
++}
+--- a/android/app/src/test/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessPolicyTest.kt
++++ b/android/app/src/test/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessPolicyTest.kt
+@@ -22,4 +22,20 @@
+     @Test fun missingInstallTimeDoesNotImplyAnUpdate() {
+         assertFalse(PlayLegacyAccessPolicy.allows(false, false, 0, 500, 0))
+     }
++    @Test fun missingInstallTimeCannotQualifyAgainstAConfiguredCutoff() {
++        assertFalse(PlayLegacyAccessPolicy.allows(false, false, 0, 500, 200))
++        assertFalse(PlayLegacyAccessPolicy.allows(false, false, -1, 500, 200))
++    }
++    @Test fun freeUpgradeCapturedWithFirstBillingWriteSurvivesRestart() {
++        // First write can be Google's no-purchase result, before snapshot runs.
++        val capturedLegacy = PlayLegacyAccessPolicy.allows(false, false, 300, 400, 200)
++        // The restarted process now sees a saved state file.
++        assertTrue(PlayLegacyAccessPolicy.allows(true, capturedLegacy, 300, 400, 200))
++    }
++    @Test fun freshInstallAtCutoffIsNotAnOriginalFreeInstall() {
++        assertFalse(PlayLegacyAccessPolicy.allows(false, false, 200, 200, 200))
++    }
++    @Test fun reinstallWithoutRecoverableEvidenceDoesNotInventLegacyRights() {
++        assertFalse(PlayLegacyAccessPolicy.allows(false, false, 600, 600, 200))
++    }
+ }
+--- /dev/null
++++ b/android/app/src/test/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessRecoveryTest.kt
+@@ -0,0 +1,129 @@
++package com.deanbowen.bibleappmac
++
++import org.junit.Assert.*
++import org.junit.Test
++
++class PlayLegacyAccessRecoveryTest {
++    private class Store : PlayLegacyAccessStore {
++        var bytes: ByteArray? = null
++        var reads = 0
++        var writes = 0
++        var failRead = false
++        var failWrite = false
++        var deferredRead: (() -> Unit)? = null
++        var defer = false
++        override fun read(found: (ByteArray?) -> Unit, unavailable: () -> Unit) {
++            reads++
++            val action = { if (failRead) unavailable() else found(bytes) }
++            if (defer) deferredRead = action else action()
++        }
++        override fun write(marker: ByteArray, complete: (Boolean) -> Unit) {
++            writes++
++            if (!failWrite) bytes = marker.copyOf()
++            complete(!failWrite)
++        }
++    }
++    private fun resolve(recovery: PlayLegacyAccessRecovery, legacy: Boolean): PlayLegacyRecoveryResult {
++        var result: PlayLegacyRecoveryResult? = null
++        recovery.resolve(legacy) { result = it }
++        return requireNotNull(result)
++    }
++    @Test fun existingFreeUserEnrollsOnlyTheEntitlementMarker() {
++        val store = Store()
++        assertTrue(resolve(PlayLegacyAccessRecovery(store), true).legacy)
++        assertEquals(0, store.reads)
++        assertEquals("StudyBible:existing-free-access:v1", String(requireNotNull(store.bytes)))
++        // No trial date, purchase token, study records, or account data is accepted by this API.
++        assertEquals(1, store.writes)
++    }
++    @Test fun reinstallCanRecoverWithoutAnyLocalAccessState() {
++        val store = Store()
++        resolve(PlayLegacyAccessRecovery(store), true)
++        assertTrue(resolve(PlayLegacyAccessRecovery(store), false).legacy)
++        assertEquals(1, store.writes)
++    }
++    @Test fun freshInstallDoesNotGrantOrEnroll() {
++        val store = Store()
++        assertFalse(resolve(PlayLegacyAccessRecovery(store), false).legacy)
++        assertEquals(0, store.writes)
++    }
++    @Test fun trialsAndPaidOnlyUsersDoNotEnroll() {
++        val store = Store()
++        repeat(3) { assertFalse(resolve(PlayLegacyAccessRecovery(store), false).legacy) }
++        assertNull(store.bytes)
++        assertEquals(0, store.writes)
++    }
++    @Test fun invalidOrFutureMarkersNeverUnlock() {
++        val store = Store()
++        for (value in listOf("", "true", "StudyBible:existing-free-access:v2", "{\"legacy\":true}", "StudyBible:existing-free-access:v1\n")) {
++            store.bytes = value.toByteArray()
++            val result = resolve(PlayLegacyAccessRecovery(store), false)
++            assertFalse(result.legacy)
++            assertFalse(result.unavailable)
++        }
++        assertEquals(0, store.writes)
++    }
++    @Test fun readFailureIsUnknownNotAFreeGrantOrConfirmedNewUser() {
++        val store = Store().apply { failRead = true }
++        val result = resolve(PlayLegacyAccessRecovery(store), false)
++        assertFalse(result.legacy)
++        assertTrue(result.unavailable)
++        assertEquals(0, store.writes)
++    }
++    @Test fun storageFailureDoesNotRevokeExistingAccessAndCanRetry() {
++        val store = Store().apply { failWrite = true }
++        val recovery = PlayLegacyAccessRecovery(store)
++        assertTrue(resolve(recovery, true).legacy)
++        assertNull(store.bytes)
++        store.failWrite = false
++        assertTrue(resolve(recovery, true).legacy)
++        assertNotNull(store.bytes)
++        assertEquals(2, store.writes)
++    }
++    @Test fun successfulEnrollmentIsNotWrittenOnEveryRefresh() {
++        val store = Store()
++        val recovery = PlayLegacyAccessRecovery(store)
++        repeat(3) { assertTrue(resolve(recovery, true).legacy) }
++        assertEquals(1, store.writes)
++    }
++    @Test fun accessDecisionWaitsForRecoveryRead() {
++        val store = Store()
++        resolve(PlayLegacyAccessRecovery(store), true)
++        store.defer = true
++        var result: PlayLegacyRecoveryResult? = null
++        PlayLegacyAccessRecovery(store).resolve(false) { result = it }
++        assertNull(result)
++        requireNotNull(store.deferredRead).invoke()
++        assertTrue(requireNotNull(result).legacy)
++    }
++    @Test fun startupEnrollsEstablishedLegacyWithoutReadingOrBilling() {
++        val store = Store()
++        var localSaved = false
++        PlayLegacyAccessRecovery(store).enrollEstablishedLegacy(true) { localSaved = true }
++        assertTrue(localSaved)
++        assertEquals(0, store.reads)
++        assertEquals(1, store.writes)
++    }
++    @Test fun startupLeavesNewUserStateAndRecoveryStoreUntouched() {
++        val store = Store()
++        PlayLegacyAccessRecovery(store).enrollEstablishedLegacy(false) { fail("Must not write new-user state") }
++        assertEquals(0, store.reads)
++        assertEquals(0, store.writes)
++    }
++    @Test fun failedLocalEnrollmentDoesNotPublishRecoveryMarker() {
++        val store = Store()
++        try {
++            PlayLegacyAccessRecovery(store).enrollEstablishedLegacy(true) { throw IllegalStateException("disk full") }
++            fail("Expected failed persistence")
++        } catch (_: IllegalStateException) { }
++        assertEquals(0, store.writes)
++    }
++    @Test fun outagePreservesAccessButNeverInterceptsExplicitPaidRestore() {
++        val unavailable = PlayLegacyRecoveryResult(false, unavailable = true)
++        assertTrue(unavailable.useKnownLocalAccess("initialize", true))
++        assertTrue(unavailable.useKnownLocalAccess("refresh", true))
++        assertFalse(unavailable.useKnownLocalAccess("restore", true))
++        assertFalse(unavailable.useKnownLocalAccess("purchase", true))
++        assertFalse(unavailable.useKnownLocalAccess("initialize", false))
++    }
++}
+--- a/lib/features/purchases/data/android_purchase_service.dart
++++ b/lib/features/purchases/data/android_purchase_service.dart
+@@ -67,6 +67,7 @@
+     access = AndroidAccess.fromMap(data);
+     price = data['price'] as String?;
+     trialAvailable = data['trialAvailable'] == true;
++    message = data['accessWarning'] as String?;
+   }
+ 
+   Future<void> _run(String method, [Map<String, Object?>? arguments]) async {
+@@ -84,6 +85,7 @@
+         message =
+             'Your payment is awaiting approval. Access unlocks after Google Play confirms it.';
+       } else if (method == 'restore' &&
++          message == null &&
+           access?.paid != true &&
+           access?.legacy != true) {
+         message = 'No permanent unlock was found for this Google Account.';
+--- a/test/features/purchases/android_purchase_service_test.dart
++++ b/test/features/purchases/android_purchase_service_test.dart
+@@ -118,4 +118,51 @@
+       expect(calls.last.arguments['ministryId'], 'heritage_and_hope');
+     },
+   );
++  test(
++    'recovery outage warns without preventing explicit trial or paid restore',
++    () async {
++      messenger.setMockMethodCallHandler(
++        channel,
++        (call) async => {
++          ...state(
++            paid: call.method == 'restore',
++            end: call.method == 'startTrial'
++                ? now.add(const Duration(days: 14))
++                : null,
++          ),
++          'price': null,
++          'accessWarning':
++              'Previous free access could not be checked. Try again before purchasing.',
++        },
++      );
++      final service = AndroidPurchaseService(channel: channel);
++      await service.initialize();
++      expect(service.access!.allows(now), false);
++      expect(service.price, isNull);
++      expect(service.trialAvailable, true);
++      expect(service.message, contains('Previous free access'));
++      await service.startTrial();
++      expect(service.access!.allows(now), true);
++      await service.restore();
++      expect(service.access!.paid, true);
++      expect(service.message, contains('Previous free access'));
++    },
++  );
++  test(
++    'failed paid restore preserves recovery warning instead of claiming no entitlement',
++    () async {
++      messenger.setMockMethodCallHandler(
++        channel,
++        (_) async => {
++          ...state(),
++          'price': null,
++          'accessWarning': 'Previous free access could not be checked.',
++        },
++      );
++      final service = AndroidPurchaseService(channel: channel);
++      await service.restore();
++      expect(service.message, 'Previous free access could not be checked.');
++      expect(service.access!.legacy, false);
++    },
++  );
+ }

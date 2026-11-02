@@ -1,0 +1,28 @@
+{
+  "status": "isolated listening candidate only; not applied to app catalog",
+  "source_sha256": "e62ea61d5e820d44d7a72a7fcb86993a0d0e703e15ba694e2ad6de6c88d35373",
+  "book": 2,
+  "chapter": 20,
+  "ranges": [
+    {
+      "verse": 8,
+      "start": 44.1,
+      "end": 46.7
+    },
+    {
+      "verse": 9,
+      "start": 46.7,
+      "end": 50.342
+    },
+    {
+      "verse": 10,
+      "start": 50.342,
+      "end": 65.369
+    },
+    {
+      "verse": 11,
+      "start": 65.369,
+      "end": 75.6
+    }
+  ]
+}

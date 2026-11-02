@@ -1,0 +1,142 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" android:compileSdkVersion="36" android:compileSdkVersionCodename="16" android:versionCode="151" android:versionName="2.0.6" package="com.deanbowen.bibleappmac" platformBuildVersionCode="36" platformBuildVersionName="16">
+      
+  <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="36"/>
+      
+    
+  <uses-permission android:name="android.permission.INTERNET"/>
+      
+    
+  <queries>
+            
+    <intent>
+                  
+      <action android:name="android.intent.action.PROCESS_TEXT"/>
+                  
+      <data android:mimeType="text/plain"/>
+              
+    </intent>
+            
+    <intent>
+                  
+      <action android:name="android.intent.action.GET_CONTENT"/>
+                  
+      <data android:mimeType="*/*"/>
+              
+    </intent>
+            
+    <intent>
+                  
+      <action android:name="com.android.vending.billing.InAppBillingService.BIND"/>
+              
+    </intent>
+            
+    <intent>
+                  
+      <action android:name="com.google.android.apps.play.billingtestcompanion.BillingOverrideService.BIND"/>
+              
+    </intent>
+        
+  </queries>
+      
+  <uses-permission android:name="com.android.vending.BILLING"/>
+      
+  <permission android:name="com.deanbowen.bibleappmac.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" android:protectionLevel="0x00000002"/>
+      
+  <uses-permission android:name="com.deanbowen.bibleappmac.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"/>
+   
+    
+    
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+      
+  <application android:allowBackup="false" android:appComponentFactory="androidx.core.app.CoreComponentFactory" android:dataExtractionRules="@xml/data_extraction_rules" android:extractNativeLibs="false" android:fullBackupContent="false" android:icon="@mipmap/ic_launcher" android:label="Biblical Heritage #StudyBible" android:name="android.app.Application" android:roundIcon="@mipmap/ic_launcher">
+            
+    <provider android:authorities="com.deanbowen.bibleappmac.note_clipboard" android:exported="false" android:grantUriPermissions="true" android:name="androidx.core.content.FileProvider">
+                  
+      <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/note_clipboard_paths"/>
+              
+    </provider>
+            
+    <activity android:configChanges="0x40003fb4" android:exported="true" android:hardwareAccelerated="true" android:launchMode="1" android:name="com.deanbowen.bibleappmac.MainActivity" android:taskAffinity="" android:theme="@style/LaunchTheme" android:windowSoftInputMode="0x00000010">
+                  
+            
+      <meta-data android:name="io.flutter.embedding.android.NormalTheme" android:resource="@style/NormalTheme"/>
+                  
+      <intent-filter>
+                        
+        <action android:name="android.intent.action.MAIN"/>
+                        
+        <category android:name="android.intent.category.LAUNCHER"/>
+                    
+      </intent-filter>
+              
+    </activity>
+            
+        
+    <meta-data android:name="flutterEmbedding" android:value="2"/>
+            
+    <activity android:exported="false" android:name="io.flutter.plugins.urllauncher.WebViewActivity" android:theme="@android:style/Theme.NoTitleBar.Fullscreen"/>
+            
+    <meta-data android:name="com.google.android.play.billingclient.version" android:value="8.0.0"/>
+            
+    <activity android:configChanges="0x000005b0" android:exported="false" android:name="com.android.billingclient.api.ProxyBillingActivity" android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
+            
+    <activity android:configChanges="0x000005b0" android:exported="false" android:name="com.android.billingclient.api.ProxyBillingActivityV2" android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
+            
+    <activity android:exported="false" android:name="com.google.android.gms.common.api.GoogleApiActivity" android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
+            
+    <meta-data android:name="com.google.android.gms.version" android:value="@integer/google_play_services_version"/>
+            
+    <uses-library android:name="androidx.window.extensions" android:required="false"/>
+            
+    <uses-library android:name="androidx.window.sidecar" android:required="false"/>
+            
+    <provider android:authorities="com.deanbowen.bibleappmac.androidx-startup" android:exported="false" android:name="androidx.startup.InitializationProvider">
+                  
+      <meta-data android:name="androidx.lifecycle.ProcessLifecycleInitializer" android:value="androidx.startup"/>
+                  
+      <meta-data android:name="androidx.profileinstaller.ProfileInstallerInitializer" android:value="androidx.startup"/>
+              
+    </provider>
+            
+    <service android:exported="false" android:name="com.google.android.datatransport.runtime.backends.TransportBackendDiscovery">
+                  
+      <meta-data android:name="backend:com.google.android.datatransport.cct.CctBackendFactory" android:value="cct"/>
+              
+    </service>
+            
+    <service android:exported="false" android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.JobInfoSchedulerService" android:permission="android.permission.BIND_JOB_SERVICE">
+        </service>
+            
+    <receiver android:exported="false" android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.AlarmManagerSchedulerBroadcastReceiver"/>
+            
+    <receiver android:directBootAware="false" android:enabled="true" android:exported="true" android:name="androidx.profileinstaller.ProfileInstallReceiver" android:permission="android.permission.DUMP">
+                  
+      <intent-filter>
+                        
+        <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE"/>
+                    
+      </intent-filter>
+                  
+      <intent-filter>
+                        
+        <action android:name="androidx.profileinstaller.action.SKIP_FILE"/>
+                    
+      </intent-filter>
+                  
+      <intent-filter>
+                        
+        <action android:name="androidx.profileinstaller.action.SAVE_PROFILE"/>
+                    
+      </intent-filter>
+                  
+      <intent-filter>
+                        
+        <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION"/>
+                    
+      </intent-filter>
+              
+    </receiver>
+        
+  </application>
+  
+</manifest>

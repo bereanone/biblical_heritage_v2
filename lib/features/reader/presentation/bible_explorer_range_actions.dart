@@ -254,7 +254,6 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       selectedLines.first,
       selectedLines.last,
     );
-    final selectedStrongs = _selectedSingleStrongs(selectedLines);
 
     final action = await showViewerRangeActionsSheet(
       context,
@@ -265,7 +264,6 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
         endLabel: verseRefs.last,
       ),
       fontScale: _fontScale,
-      enableStrongs: selectedStrongs != null,
     );
     if (!mounted || action == null) return;
 
@@ -321,18 +319,49 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
       case ViewerRangeAction.addToMemory:
         await _addRangeToMemory(passage.bookName, selectedLines);
         break;
-      case ViewerRangeAction.strongs:
-        if (selectedStrongs == null) {
-          _showRangeActionMessage(
-            "Strong's is available for a single token selection.",
+      case ViewerRangeAction.viewTags:
+        try {
+          final tags = await BibleMarkupRepository().loadTagNamesForVerses(
+            selectedLines,
           );
-          return;
+          if (!mounted) return;
+          await showDialog<void>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+              title: Text('# Tags for $label'),
+              content: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: tags.isEmpty
+                        ? [const Text('These verses are not in any # tags.')]
+                        : [
+                            for (final tag in tags)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 6,
+                                ),
+                                child: Text('#$tag'),
+                              ),
+                          ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+          );
+        } catch (_) {
+          if (mounted) {
+            _showRangeActionMessage('Unable to load # tags. Please try again.');
+          }
         }
-        await showViewerStrongsPageOne(
-          context,
-          strongsId: selectedStrongs,
-          onSelectBlockId: _openBlockId,
-        );
         return;
       case ViewerRangeAction.extendRange:
         ScaffoldMessenger.of(context).clearSnackBars();
@@ -609,47 +638,6 @@ extension _BibleExplorerScreenRangeActions on _BibleExplorerScreenState {
     }
     if (pieces.isEmpty) return null;
     return pieces.join(includeVerseNumbers ? '\n' : ' ');
-  }
-
-  String? _selectedSingleStrongs(List<VerseLine> lines) {
-    if (!_rangeSelection.isSingleToken) return null;
-    for (final line in lines) {
-      final blockId = line.blockId ?? 0;
-      for (final segment in parseViewerMarkupSegments(
-        html: line.html,
-        fallbackText: line.text,
-        baseStyle: const TextStyle(),
-        redLetterColor: Colors.red,
-        splitWords: _rangeSelection.usesWordIndices,
-      )) {
-        final tokenIndex = _rangeSelection.usesWordIndices
-            ? segment.wordIndex
-            : segment.tokenIndex;
-        if (tokenIndex == null) continue;
-        if (_rangeSelection.containsTokenPosition(blockId, tokenIndex)) {
-          final strongs = _preferredStrongs(segment.strongs);
-          if (strongs != null && strongs.isNotEmpty) {
-            return strongs;
-          }
-        }
-      }
-    }
-    return null;
-  }
-
-  String? _preferredStrongs(Set<String>? strongs) {
-    if (strongs == null || strongs.isEmpty) return null;
-    if (strongs.length == 1) return strongs.first;
-
-    const ignore = {'G3588', 'H853', 'H136'};
-    final preferred = strongs
-        .where((value) => !ignore.contains(value))
-        .toList();
-    if (preferred.isNotEmpty) {
-      return preferred.first;
-    }
-
-    return strongs.first;
   }
 
   List<TokenHighlightSelection> _buildTokenHighlightSelections(

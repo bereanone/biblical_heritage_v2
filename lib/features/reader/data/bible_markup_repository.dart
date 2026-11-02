@@ -3,12 +3,32 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../../../core/database/user_database.dart';
 import '../presentation/viewer_passage_models.dart';
 
+class BibleVerseMarkup {
+  const BibleVerseMarkup({
+    this.markedVerseKeys = const {},
+    this.taggedVerseKeys = const {},
+  });
+  final Set<String> markedVerseKeys;
+  final Set<String> taggedVerseKeys;
+}
+
 class BibleMarkupRepository {
+  BibleMarkupRepository({Database? database}) : _database = database;
+  final Database? _database;
+
   Future<Set<String>> loadMarkedVerseKeys({
     required List<VerseLine> lines,
     required Map<int, String> bookNamesByNumber,
+  }) async => (await loadVerseMarkup(
+    lines: lines,
+    bookNamesByNumber: bookNamesByNumber,
+  )).markedVerseKeys;
+
+  Future<BibleVerseMarkup> loadVerseMarkup({
+    required List<VerseLine> lines,
+    required Map<int, String> bookNamesByNumber,
   }) async {
-    if (lines.isEmpty) return const <String>{};
+    if (lines.isEmpty) return const BibleVerseMarkup();
 
     final displayRefToVerseKey = <String, String>{};
     final numericRefToVerseKey = <String, String>{};
@@ -38,10 +58,11 @@ class BibleMarkupRepository {
           .add(verse);
     }
 
-    if (groupsByChapter.isEmpty) return const <String>{};
+    if (groupsByChapter.isEmpty) return const BibleVerseMarkup();
 
-    final db = await UserDatabase.instance.database;
+    final db = _database ?? await UserDatabase.instance.database;
     final markedVerseKeys = <String>{};
+    final taggedVerseKeys = <String>{};
 
     await _loadHighlightVerseKeys(
       db,
@@ -55,7 +76,7 @@ class BibleMarkupRepository {
         db,
         tableName: tableName,
         groupsByChapter: groupsByChapter,
-        markedVerseKeys: markedVerseKeys,
+        markedVerseKeys: taggedVerseKeys,
       );
     }
 
@@ -64,11 +85,58 @@ class BibleMarkupRepository {
         db,
         tableName: tableName,
         groupsByChapter: groupsByChapter,
-        markedVerseKeys: markedVerseKeys,
+        markedVerseKeys: tableName == 'tag_items'
+            ? taggedVerseKeys
+            : markedVerseKeys,
       );
     }
 
-    return markedVerseKeys;
+    markedVerseKeys.addAll(taggedVerseKeys);
+    return BibleVerseMarkup(
+      markedVerseKeys: markedVerseKeys,
+      taggedVerseKeys: taggedVerseKeys,
+    );
+  }
+
+  Future<List<String>> loadTagNamesForVerses(List<VerseLine> lines) async {
+    if (lines.isEmpty) return const [];
+    final db = _database ?? await UserDatabase.instance.database;
+    final names = <String>{};
+    for (final line in lines) {
+      for (final table in const ['hash_tags', 'dollar_tags']) {
+        final rows = await db.query(
+          table,
+          columns: ['tag'],
+          where:
+              "book_number = ? AND chapter_number = ? AND verse_number = ? AND deleted_at_utc IS NULL AND COALESCE(trashed_at_utc, '') = ''",
+          whereArgs: [line.bookNumber, line.chapter, line.verse],
+        );
+        for (final row in rows) {
+          final name = row['tag']?.toString().trim() ?? '';
+          if (name.isNotEmpty) {
+            names.add(name.replaceFirst(RegExp(r'^[#\$]+'), ''));
+          }
+        }
+      }
+      final rows = await db.rawQuery(
+        """
+        SELECT g.name FROM tag_items i JOIN tag_groups g ON g.id = i.tag_group_id
+        WHERE i.book_id = ? AND i.chapter = ? AND i.verse_start <= ? AND MAX(i.verse_start, i.verse_end) >= ?
+        AND i.deleted_at IS NULL AND g.deleted_at IS NULL
+        AND COALESCE(i.trashed_at, '') = '' AND COALESCE(g.trashed_at, '') = ''
+        AND g.tag_kind NOT IN ('import_root', 'import_package')
+      """,
+        [line.bookNumber, line.chapter, line.verse, line.verse],
+      );
+      for (final row in rows) {
+        final name = row['name']?.toString().trim() ?? '';
+        if (name.isNotEmpty) {
+          names.add(name.replaceFirst(RegExp(r'^[#\$]+'), ''));
+        }
+      }
+    }
+    return names.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
   }
 
   Future<void> _loadHighlightVerseKeys(
@@ -117,6 +185,7 @@ class BibleMarkupRepository {
           book_number = ?
           AND chapter_number = ?
           AND deleted_at_utc IS NULL
+          AND COALESCE(trashed_at_utc, '') = ''
           AND verse_number IN ($placeholders)
         ''',
         whereArgs: [group.bookNumber, group.chapter, ...verses],

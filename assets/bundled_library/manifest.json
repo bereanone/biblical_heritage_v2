@@ -1,7 +1,7 @@
 {
   "revision": "core-seven-brhc1914-20261023-v1",
   "catalog_asset": "assets/bundled_library/catalog.db",
-  "catalog_sha256": "aedcc70cfd93d0d2cb843136c7ff95b1d3ff3455d06efbb3d1a22e3d7a88ad82",
+  "catalog_sha256": "cfe29816f42abd637b4bf3922e72cdd01c7a15e936ea2d120b9256d97ca58427",
   "books": [
     {
       "id": "library_item_research_pioneer_uriah_smith_DAR_US",
@@ -26,17 +26,31 @@
     {
       "id": "library_item_research_epubs_egw_egw_books_en_sc_epub",
       "title": "Steps to Christ",
-      "source_mode": "file"
+      "source_mode": "file",
+      "cover_path": "Research/ManagedBundles/core-20261018-10269f2e5439/covers/library_item_research_epubs_egw_egw_books_en_sc_epub.jpg"
     },
     {
       "id": "library_item_research_pioneer_stephen_n_haskell_the_story_of_daniel_the_prophet",
       "title": "The Story of Daniel the Prophet",
-      "source_mode": "file"
+      "source_mode": "file",
+      "cover_path": "Research/ManagedBundles/core-20261018-10269f2e5439/covers/SDP-square-titled-20261013.png"
     },
     {
       "id": "library_item_research_pioneer_bible_readings_home_circle_1914",
       "title": "Bible Readings for the Home Circle (1914)",
-      "source_mode": "file"
+      "source_mode": "file",
+      "cover_path": "Research/ManagedBundles/brhc-1914-20261023/BRHC1914-cover.jpg",
+      "revision": "brhc1914-revision7-e559dec92473"
+    },
+    {
+      "id": "library_item_publisher_lof_complete_2017",
+      "title": "Lessons on Faith",
+      "source_mode": "file",
+      "revision": "lof-reading-copy-v1",
+      "resource_prefix": "Research/ManagedBundles/lof-reading-copy-v1/",
+      "cover_path": "Research/ManagedBundles/lof-reading-copy-v1/cover.png",
+      "original_source_sha256": "87da6f29b456315a877c25274ebabd2d5e73fc527669d1dde67735e15083ff2c",
+      "reading_copy_sha256": "14a067c0b0a6cdf8cdf8fbbcf3205bdf261d69d7288512ffe041c7034a4a1c66"
     }
   ],
   "resources": [
@@ -119,16 +133,34 @@
       "bytes": 2489230
     },
     {
-      "asset": "assets/bundled_library/files/b52676589160921340d0697068c831d3c765c39470c228b2d331933ff8640e27",
+      "asset": "assets/bundled_library/files/e559dec92473f715c54f1370bd2a8833339a488b0788feeb5d9dc5907da70255",
       "destination": "Research/ManagedBundles/brhc-1914-20261023/Bible-Readings-for-the-Home-Circle-1914.epub",
-      "sha256": "b52676589160921340d0697068c831d3c765c39470c228b2d331933ff8640e27",
-      "bytes": 1506445
+      "sha256": "e559dec92473f715c54f1370bd2a8833339a488b0788feeb5d9dc5907da70255",
+      "bytes": 428679860
     },
     {
       "asset": "assets/bundled_library/files/a9b43d5d43ab23a391c54d4c88d450e3ee1d03fa1ab571e99f4a09a9d76b7944",
       "destination": "Research/ManagedBundles/brhc-1914-20261023/BRHC1914-cover.jpg",
       "sha256": "a9b43d5d43ab23a391c54d4c88d450e3ee1d03fa1ab571e99f4a09a9d76b7944",
       "bytes": 36630
+    },
+    {
+      "asset": "assets/bundled_library/files/14a067c0b0a6cdf8cdf8fbbcf3205bdf261d69d7288512ffe041c7034a4a1c66",
+      "sha256": "14a067c0b0a6cdf8cdf8fbbcf3205bdf261d69d7288512ffe041c7034a4a1c66",
+      "bytes": 3397899,
+      "destination": "Research/ManagedBundles/lof-reading-copy-v1/Lessons-on-Faith.epub"
+    },
+    {
+      "asset": "assets/bundled_library/files/c871cf050f9e9e72e0e303efb9959cf42c62fe80f480c160f86e38fc68b467bd",
+      "sha256": "c871cf050f9e9e72e0e303efb9959cf42c62fe80f480c160f86e38fc68b467bd",
+      "bytes": 1438993,
+      "destination": "Research/ManagedBundles/lof-reading-copy-v1/cover.png"
+    },
+    {
+      "asset": "assets/bundled_library/files/87da6f29b456315a877c25274ebabd2d5e73fc527669d1dde67735e15083ff2c",
+      "sha256": "87da6f29b456315a877c25274ebabd2d5e73fc527669d1dde67735e15083ff2c",
+      "bytes": 3396159,
+      "destination": "Research/ManagedBundles/lof-reading-copy-v1/original/Lessons-on-Faith-APLib-2017.epub"
     }
   ],
   "optional_download_only": [

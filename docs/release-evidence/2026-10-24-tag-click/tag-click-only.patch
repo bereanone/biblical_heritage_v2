@@ -1,0 +1,269 @@
+--- a/lib/features/reader/presentation/tag_playback/tag_qwen_audio_cache.dart
++++ b/lib/features/reader/presentation/tag_playback/tag_qwen_audio_cache.dart
+@@ -9,6 +9,7 @@
+ import '../../../../core/database/study_bible_database.dart';
+ import '../bundled_bible_audio_narrator.dart';
+ import 'tag_playback_models.dart';
++import 'tag_pcm_clip_edges.dart';
+ import 'tag_playback_planner.dart';
+ 
+ /// Only an exact verse may reuse its recording. Edited excerpts keep their
+@@ -136,7 +137,7 @@
+           .convert(
+             utf8.encode(
+               jsonEncode([
+-                'qwen-tag-pcm-v1',
++                tagQwenPcmCacheVersion,
+                 chapter.audioSha256,
+                 range.$1,
+                 range.$2,
+@@ -197,6 +198,9 @@
+       if (!await part.exists() || await part.length() <= 44) {
+         throw StateError('Empty Qwen verse clip');
+       }
++      final wav = await part.readAsBytes();
++      softenTagPcmClipEdges(wav);
++      await part.writeAsBytes(wav, flush: true);
+       await part.rename(target.path);
+       debugPrint(
+         'Tag playback using Qwen: ${chapter.book}:${chapter.chapter} at ${range.$1}s',
+--- /dev/null
++++ b/lib/features/reader/presentation/tag_playback/tag_pcm_clip_edges.dart
+@@ -0,0 +1,80 @@
++import 'dart:math' as math;
++import 'dart:typed_data';
++
++// Change the generated-file identity so older hard-cut clips are not reused.
++const tagQwenPcmCacheVersion = 'qwen-tag-pcm-v2-soft-edges';
++
++/// Taper only the outer 5 ms of a generated verse clip. Keep its sample count,
++/// timing, headers and interior unchanged; never edit shipped chapter audio.
++void softenTagPcmClipEdges(Uint8List wav) {
++  final data = ByteData.sublistView(wav);
++  bool tag(int offset, String text) {
++    if (offset + text.length > wav.length) return false;
++    for (var i = 0; i < text.length; i++) {
++      if (wav[offset + i] != text.codeUnitAt(i)) return false;
++    }
++    return true;
++  }
++
++  if (wav.length < 12 || !tag(0, 'RIFF') || !tag(8, 'WAVE')) {
++    throw const FormatException('Expected a PCM WAV verse clip');
++  }
++  int? sampleRate, sampleOffset, sampleBytes;
++  var validFormat = false;
++  for (var offset = 12; offset + 8 <= wav.length;) {
++    final size = data.getUint32(offset + 4, Endian.little);
++    final start = offset + 8;
++    if (size > wav.length - start) {
++      throw const FormatException('Truncated WAV verse clip');
++    }
++    if (tag(offset, 'fmt ')) {
++      if (size < 16) throw const FormatException('Invalid WAV format');
++      final encoding = data.getUint16(start, Endian.little);
++      // AVAudioFile may use the extensible PCM format; accept only PCM16 mono.
++      final pcm =
++          encoding == 1 ||
++          (encoding == 0xfffe &&
++              size >= 40 &&
++              data.getUint16(start + 16, Endian.little) >= 22 &&
++              data.getUint16(start + 18, Endian.little) == 16 &&
++              List.generate(16, (i) => wav[start + 24 + i]).join(',') ==
++                  '1,0,0,0,0,0,16,0,128,0,0,170,0,56,155,113');
++      sampleRate = data.getUint32(start + 4, Endian.little);
++      validFormat =
++          pcm &&
++          data.getUint16(start + 2, Endian.little) == 1 &&
++          data.getUint16(start + 12, Endian.little) == 2 &&
++          data.getUint16(start + 14, Endian.little) == 16 &&
++          sampleRate == 24000;
++    } else if (tag(offset, 'data')) {
++      if (sampleOffset != null) {
++        throw const FormatException('Multiple WAV data chunks');
++      }
++      sampleOffset = start;
++      sampleBytes = size;
++    }
++    offset = start + size + (size.isOdd ? 1 : 0);
++  }
++  if (!validFormat ||
++      sampleOffset == null ||
++      sampleBytes == null ||
++      sampleBytes < 4 ||
++      sampleBytes.isOdd) {
++    throw const FormatException('Expected nonempty 24 kHz mono PCM16 audio');
++  }
++  final frames = sampleBytes ~/ 2;
++  final fadeFrames = math.min(sampleRate! ~/ 200, frames ~/ 2);
++  for (var i = 0; i < fadeFrames; i++) {
++    final gain = fadeFrames == 1
++        ? 0.0
++        : 0.5 - 0.5 * math.cos(math.pi * i / (fadeFrames - 1));
++    for (final frame in [i, frames - 1 - i]) {
++      final offset = sampleOffset + frame * 2;
++      data.setInt16(
++        offset,
++        (data.getInt16(offset, Endian.little) * gain).round(),
++        Endian.little,
++      );
++    }
++  }
++}
+--- /dev/null
++++ b/test/features/reader/presentation/tag_playback/tag_pcm_clip_edges_test.dart
+@@ -0,0 +1,131 @@
++import 'dart:typed_data';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:studybible2/features/reader/presentation/tag_playback/tag_pcm_clip_edges.dart';
++
++Uint8List wave({
++  int frames = 1000,
++  bool extra = false,
++  bool extensible = false,
++}) {
++  final fmtSize = extensible ? 40 : 16;
++  final dataStart = 12 + 8 + fmtSize + (extra ? 12 : 0) + 8;
++  final bytes = Uint8List(dataStart + frames * 2);
++  final b = ByteData.sublistView(bytes);
++  void text(int at, String s) => bytes.setRange(at, at + s.length, s.codeUnits);
++  text(0, 'RIFF');
++  b.setUint32(4, bytes.length - 8, Endian.little);
++  text(8, 'WAVE');
++  text(12, 'fmt ');
++  b.setUint32(16, fmtSize, Endian.little);
++  b.setUint16(20, extensible ? 0xfffe : 1, Endian.little);
++  b.setUint16(22, 1, Endian.little);
++  b.setUint32(24, 24000, Endian.little);
++  b.setUint32(28, 48000, Endian.little);
++  b.setUint16(32, 2, Endian.little);
++  b.setUint16(34, 16, Endian.little);
++  if (extensible) {
++    b.setUint16(36, 22, Endian.little);
++    b.setUint16(38, 16, Endian.little);
++    bytes.setRange(44, 60, [
++      1,
++      0,
++      0,
++      0,
++      0,
++      0,
++      16,
++      0,
++      128,
++      0,
++      0,
++      170,
++      0,
++      56,
++      155,
++      113,
++    ]);
++  }
++  if (extra) {
++    text(dataStart - 20, 'JUNK');
++    b.setUint32(dataStart - 16, 3, Endian.little);
++    bytes.setRange(dataStart - 12, dataStart - 9, [7, 8, 9]);
++  }
++  text(dataStart - 8, 'data');
++  b.setUint32(dataStart - 4, frames * 2, Endian.little);
++  for (var i = 0; i < frames; i++) {
++    b.setInt16(
++      dataStart + i * 2,
++      i < frames ~/ 2 ? 12000 : -9000,
++      Endian.little,
++    );
++  }
++  return bytes;
++}
++
++void main() {
++  test(
++    'edges reach silence smoothly without changing duration or interior',
++    () {
++      final bytes = wave();
++      final before = Uint8List.fromList(bytes);
++      softenTagPcmClipEdges(bytes);
++      final b = ByteData.sublistView(bytes);
++      expect(bytes.length, before.length);
++      expect(bytes.sublist(0, 44), before.sublist(0, 44));
++      expect(
++        bytes.sublist(44 + 240, bytes.length - 240),
++        before.sublist(44 + 240, before.length - 240),
++      );
++      expect(b.getInt16(44, Endian.little), 0);
++      expect(b.getInt16(bytes.length - 2, Endian.little), 0);
++      // A 12000 -> silence hard cut becomes a gradual slope, not a shifted cut.
++      for (var i = 1; i < 120; i++) {
++        final previous = b.getInt16(44 + (i - 1) * 2, Endian.little);
++        final current = b.getInt16(44 + i * 2, Endian.little);
++        expect(current, greaterThanOrEqualTo(previous));
++        expect(current - previous, lessThan(200));
++      }
++    },
++  );
++  test('unknown odd-sized metadata is preserved', () {
++    final bytes = wave(extra: true);
++    final header = bytes.sublist(0, 56);
++    softenTagPcmClipEdges(bytes);
++    expect(bytes.sublist(0, 56), header);
++    expect(ByteData.sublistView(bytes).getInt16(56, Endian.little), 0);
++  });
++  test('extensible PCM16 mono is supported', () {
++    final bytes = wave(extensible: true);
++    softenTagPcmClipEdges(bytes);
++    expect(ByteData.sublistView(bytes).getInt16(68, Endian.little), 0);
++  });
++  test('short clips do not overlap ramps or change frame count', () {
++    for (final frames in [2, 3, 20, 239, 240]) {
++      final bytes = wave(frames: frames);
++      softenTagPcmClipEdges(bytes);
++      expect(bytes.length, 44 + frames * 2);
++      final b = ByteData.sublistView(bytes);
++      expect(b.getInt16(44, Endian.little), 0);
++      expect(b.getInt16(bytes.length - 2, Endian.little), 0);
++    }
++  });
++  test('invalid and unsupported files fail before mutation', () {
++    final badEncoding = wave();
++    ByteData.sublistView(badEncoding).setUint16(20, 3, Endian.little);
++    final wrongRate = wave();
++    ByteData.sublistView(wrongRate).setUint32(24, 48000, Endian.little);
++    for (final bytes in [
++      Uint8List(0),
++      wave().sublist(0, 50),
++      badEncoding,
++      wrongRate,
++    ]) {
++      final before = Uint8List.fromList(bytes);
++      expect(() => softenTagPcmClipEdges(bytes), throwsFormatException);
++      expect(bytes, before);
++    }
++  });
++  test('new cache identity excludes earlier hard-cut outputs', () {
++    expect(tagQwenPcmCacheVersion, isNot('qwen-tag-pcm-v1'));
++  });
++}
+--- a/BUGS.md
++++ b/BUGS.md
+@@ -12,6 +12,20 @@
+ Still open: source-specific verification of SL27 and the anomalous EPUB cohort, unresolved Greek/Strong's candidates, desktop long-session/recovery acceptance, physical-device note creation/playback and heat/battery checks, and release packaging/store readiness. No TestFlight upload is established by this review.
+ 
+ Automated fixtures expecting an empty, explicitly seeded catalog now run without automatic mobile bundled-book provisioning. Existing assertions remain intact; mobile delivery remains covered separately.
++
++## Verification Needed — October 24, 2026
++
++### Clicks between verses in hashtag playback (#Sabbath99)
++
++**Report:** Dean hears frequent clicks between verses when playing a two-item hashtag: Exodus 20:8–11 with Sabbath Note 1, then Exodus 20:8–10 with Sabbath Note 2. Device/platform and reference-announcement setting have not yet been supplied. This is separate from the remote Sony silence report.
++
++**Confirmed implementation weakness:** The Qwen hashtag exporter cuts each measured verse interval directly into a PCM WAV and does not taper its endpoints. Real Apple AVAudioFile exports of Exodus 20:8–11 have nonzero boundary samples: verse 8 ends at -1044 and verse 11 at +2281 (16-bit PCM). Abrupt transitions to/from silence are a plausible source of clicks; the user's audible symptom has not been reproduced on a phone. Timing alignment itself is unchanged and is not newly certified by this work.
++
++**Local candidate, not shipped:** Shared Dart postprocessing applies a five-millisecond cosine fade to the outer edges of generated verse clips, for Android/iOS/macOS, preserving frame count, WAV metadata and interior samples. Cache identity changes from v1 to v2-soft-edges so old generated clips are not reused. Original chapter/cue recordings, stored notes and verse timing are untouched. This treats clip edges; it does not claim to cure decoder/device noises or clicks already inside recordings.
++
++**Verification:** 34 focused tests passed, including fade continuity, unchanged duration/interior, extra WAV chunks, extensible PCM, short clips, rejection of unsupported/truncated WAVs, cache identity and existing hashtag planning. Focused analysis found no issues. Four actual Apple exports of Exodus 20:8–11 passed the production Dart treatment: endpoints zero, identical frame/file lengths and byte-identical interior outside the outer five milliseconds. No listening or physical-phone acceptance claimed; no app build/install/release performed. Evidence and before/after samples are in `docs/release-evidence/2026-10-24-tag-click/`.
++
++**Next verification:** Replay #Sabbath99 with announcements both on and off and confirm clean verse transitions without clipped consonants. Include the two notes, passage repetition, and ordinary playback speed. Keep open until heard on the affected phone.
+ 
+ ## Verification Needed — October 23, 2026
+ 

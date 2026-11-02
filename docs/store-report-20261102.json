@@ -1,0 +1,171 @@
+{
+  "report_date": "2026-11-02",
+  "checked_at_utc": "2026-11-02T14:02:49.829Z",
+  "source_mailbox_verified": "bereanone@gmail.com",
+  "method": "Read-only Gmail searches; baseline and previous dated snapshot read. No store portals opened, no email mutations, no app/source/data changes.",
+  "email_search_window": {
+    "after": "2026-10-19",
+    "before": "2026-11-03",
+    "pagination": "Six focused searches exhausted; no next-page tokens."
+  },
+  "prior_snapshot": "store-report-20261026.json",
+  "baseline_file": "store-report-baseline-20261021.json",
+  "new_reporting_emails": [],
+  "deduplicated_emails": [
+    {
+      "message_id": "1a165f0d75464b40",
+      "subject": "App Store Connect: App Analytics Weekly Summary",
+      "period": "2026-10-12 through 2026-10-18",
+      "reason": "Already processed October 26; units overlap lifetime baseline through October 19."
+    }
+  ],
+  "latest_available_email_activity": {
+    "message_id": "1a165f0d75464b40",
+    "received_utc": "2026-10-22T23:27:24Z",
+    "subject": "App Store Connect: App Analytics Weekly Summary",
+    "period_start": "2026-10-12",
+    "period_end": "2026-10-18",
+    "apps": [
+      {
+        "app": "Biblical Heritage #StudyBible",
+        "store": "Apple",
+        "platforms": [
+          "iOS",
+          "macOS"
+        ],
+        "first_time_app_units": 9,
+        "email_proceeds": 0,
+        "sales": "Not stated",
+        "payout_issued": "Not stated",
+        "impressions": 1260,
+        "sessions_opt_in_only": 27,
+        "crashes_opt_in_only": 0
+      },
+      {
+        "app": "Bible Readings 1914",
+        "store": "Apple",
+        "platforms": [
+          "iOS"
+        ],
+        "first_time_app_units": 1,
+        "email_proceeds": 0,
+        "sales": "Not stated",
+        "payout_issued": "Not stated",
+        "impressions": 232,
+        "sessions_opt_in_only": 4,
+        "crashes_opt_in_only": 0
+      }
+    ],
+    "proceeds_note": "Email displays 0 without a currency symbol. This is period proceeds, not an issued payment.",
+    "url": "https://mail.google.com/mail/u/?authuser=bereanone%40gmail.com#all/1a165f0d75464b40"
+  },
+  "current_week_activity": [
+    {
+      "app": "Biblical Heritage #StudyBible",
+      "store": "Apple",
+      "reporting_period": "2026-10-26 through 2026-11-01",
+      "first_time_app_units": "Unavailable in searched email",
+      "sales": "Unavailable in searched email",
+      "proceeds": "Unavailable in searched email",
+      "payout_issued": "No new issued payment verified; not assumed zero"
+    },
+    {
+      "app": "Biblical Heritage #StudyBible",
+      "store": "Google Play",
+      "reporting_period": "2026-10-26 through 2026-11-01",
+      "first_time_app_units": "Unavailable in searched email",
+      "sales": "Unavailable in searched email",
+      "proceeds": "Unavailable in searched email",
+      "payout_issued": "No new issued payment verified; not assumed zero"
+    },
+    {
+      "app": "Bible Readings 1914",
+      "store": "Apple",
+      "reporting_period": "2026-10-26 through 2026-11-01",
+      "first_time_app_units": "Unavailable in searched email",
+      "sales": "Unavailable in searched email",
+      "proceeds": "Unavailable in searched email",
+      "payout_issued": "No new issued payment verified; not assumed zero"
+    },
+    {
+      "app": "Bible Readings 1914",
+      "store": "Google Play",
+      "reporting_period": "2026-10-26 through 2026-11-01",
+      "first_time_app_units": "Unavailable in searched email",
+      "sales": "Unavailable in searched email",
+      "proceeds": "Unavailable in searched email",
+      "payout_issued": "No new issued payment verified; not assumed zero"
+    }
+  ],
+  "cumulative_download_baseline": {
+    "verified_date": "2026-10-21",
+    "data_through": "2026-10-19",
+    "StudyBible": {
+      "apple_ios_macos": 266,
+      "google_first_time_users": 58,
+      "sum": 324
+    },
+    "Bible Readings 1914": {
+      "apple_ios": 130,
+      "google_first_time_users": 30,
+      "sum": 160
+    },
+    "combined_store_units": 484,
+    "deduplication": "October 12-18 weekly units overlap lifetime coverage through October 19; do not add them to baseline.",
+    "limitation": "Store units are not deduplicated people or active installations."
+  },
+  "financial_baseline_usd": {
+    "apple_customer_sales": 108.47,
+    "apple_estimated_proceeds": 74.0,
+    "google_customer_payments_including_tax": 40.62,
+    "google_ledger_net_earnings": 32.27,
+    "apple_store_paid_records_2026": 73.69,
+    "google_issued_payment": 32.27,
+    "combined_store_recorded_issued_payments": 105.96,
+    "limitation": "Historical baseline only; no new payment amount verified this week. Apple Paid status is not independent bank reconciliation. Sales, estimated proceeds and issued payments are separate measures."
+  },
+  "baseline_financial_app_breakdown": {
+    "apple": {
+      "StudyBible": {
+        "customer_sales": 34.98,
+        "estimated_proceeds": 24.5
+      },
+      "Bible Readings 1914": {
+        "customer_sales": 73.49,
+        "estimated_proceeds": 49.5
+      },
+      "total_customer_sales": 108.47,
+      "total_estimated_proceeds": 74.0,
+      "actual_payouts": "Not yet reconciled; proceeds are not bank receipts."
+    },
+    "google": {
+      "StudyBible_customer_payments_including_tax": 30.63,
+      "Bible_Readings_customer_payments_including_tax": 9.99,
+      "ledger_net_earnings": 32.27,
+      "issued_payment_date": "2026-04-15",
+      "issued_payment_amount": 32.27,
+      "bank_receipt": "User found matching April15 GooglePlayApps deposit in Regions2026 workbook; only one matching entry found by user."
+    }
+  },
+  "coverage_gaps": [
+    "No Apple summaries for October 19-25 or October 26-November 1 found. Latest available email remains October 12-18.",
+    "No new Google developer earnings/download report or payment notice found. Missing email coverage does not prove zero activity.",
+    "No new Apple monthly financial-report-ready notice found. Any future report-ready notice must be deduplicated by month and does not itself prove an amount or payout.",
+    "Cumulative download coverage remains October 19; financial amounts remain the historical baseline, not current-week income. No bank reconciliation performed."
+  ],
+  "excluded_messages": [
+    {
+      "message_id": "1a16649b488c3440",
+      "subject": "Test: Your Google Play Order Receipt from Oct 22, 2026",
+      "reason": "Test purchase receipt; not developer income or a real payout."
+    }
+  ],
+  "next_run": {
+    "overlap_email_search_from": "2026-10-19",
+    "last_processed_apple_week_end": "2026-10-18",
+    "processed_weekly_message_ids": [
+      "1a138624b0cee2aa",
+      "1a165f0d75464b40"
+    ]
+  }
+}

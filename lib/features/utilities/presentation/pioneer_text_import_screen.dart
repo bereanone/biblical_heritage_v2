@@ -96,7 +96,8 @@ class _PioneerTextImportScreenState extends State<PioneerTextImportScreen> {
     if (installStatus?.isVerifiedInstalled == true) {
       return false;
     }
-    return work.hasUsableSourcePath ||
+    return work.isImportable ||
+        work.hasUsableSourcePath ||
         work.textCaptureAvailable ||
         _canUseCopiedRangePath(work);
   }

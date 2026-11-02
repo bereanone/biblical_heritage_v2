@@ -1,0 +1,6 @@
+{
+  "lib/features/reader/presentation/tag_playback/tag_qwen_audio_cache.dart": "e90c294bc7ce9e1f0742532d3f05b23581df4f88c7659634c6cf0b15f5683498",
+  "lib/features/reader/presentation/tag_playback/tag_pcm_clip_edges.dart": "c1c43cc5ade5e60d8bd81f722cc3392b3047a23928da18b492e1ce2fe8e65522",
+  "test/features/reader/presentation/tag_playback/tag_pcm_clip_edges_test.dart": "5d46bb3643516cce563cea81a64f02fdb757fceb4c10e297eb55604e60a87dcc",
+  "BUGS.md": "daf1efdabe8d81befd4b044bdc4debf9d3f9f10896be15a55c3b60a82e84700e"
+}

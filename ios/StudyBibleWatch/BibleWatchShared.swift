@@ -7,6 +7,12 @@ import AppIntents
 final class BibleWatchSession: NSObject, ObservableObject, WCSessionDelegate {
   static let shared = BibleWatchSession()
 
+  @Published var mode = "bible"
+  @Published var libraryBookID = ""
+  @Published var libraryBooks: [WatchAudioBook] = []
+  @Published var libraryTOC: [WatchAudioContents] = []
+  @Published var libraryParagraphs: [WatchAudioContents] = []
+  private var foreground = false
   @Published var bookNumber = 1
   @Published var chapterNumber = 1
   @Published var verseNumber = 1
@@ -30,7 +36,16 @@ final class BibleWatchSession: NSObject, ObservableObject, WCSessionDelegate {
     hasLocalLoopSelection = true
   }
 
-  var skipUnit: String { draftLoopUnit }
+  var skipUnit: String { mode == "library" && draftLoopUnit == "verse" ? "paragraph" : draftLoopUnit }
+
+  func setForeground(_ active: Bool) {
+    let changed = foreground != active
+    foreground = active
+    if active {
+      activate()
+      if changed && WCSession.default.activationState == .activated { command("state") }
+    }
+  }
 
   func activate() {
     guard WCSession.isSupported() else {
@@ -60,11 +75,15 @@ final class BibleWatchSession: NSObject, ObservableObject, WCSessionDelegate {
     message = "Contacting iPhone…"
     do {
       let reply: [String: Any] = try await withCheckedThrowingContinuation { continuation in
-        session.sendMessage(["command": name]) { continuation.resume(returning: $0) }
-          errorHandler: { continuation.resume(throwing: $0) }
+        let reply = WatchCommandReply(continuation)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) {
+          reply.finish(.failure(WatchCommandError.timedOut))
+        }
+        session.sendMessage(["command": name]) { reply.finish(.success($0)) }
+          errorHandler: { reply.finish(.failure($0)) }
       }
       apply(reply, fromReply: true)
-      if !confirmed { throw WatchCommandError.unconfirmed }
+      if !confirmed && reply["pending"] as? Bool != true { throw WatchCommandError.unconfirmed }
     } catch {
       confirmed = false
       message = "Cannot reach iPhone — command not confirmed."
@@ -80,6 +99,23 @@ final class BibleWatchSession: NSObject, ObservableObject, WCSessionDelegate {
 
   private func apply(_ state: [String: Any], fromReply: Bool = false) {
     confirmed = state["error"] == nil && (state["pending"] as? Bool != true)
+    if let mode = state["mode"] as? String, ["bible","library"].contains(mode) {
+      if self.mode != mode { hasLocalLoopSelection = false }
+      self.mode = mode
+    }
+    libraryBookID = state["libraryBookID"] as? String ?? ""
+    libraryBooks = (state["libraryBooks"] as? [[String:Any]] ?? []).compactMap {
+      guard let id = $0["id"] as? String, let title = $0["title"] as? String else { return nil }
+      return WatchAudioBook(id:id,title:title)
+    }
+    libraryTOC = (state["libraryTOC"] as? [[String:Any]] ?? []).enumerated().compactMap { index,row in
+      guard let c = row["chapter"] as? Int, let p = row["paragraph"] as? Int, let title = row["title"] as? String else { return nil }
+      return WatchAudioContents(id:"\(index):\(c):\(p)",title:title,chapter:c,paragraph:p)
+    }
+    libraryParagraphs = (state["libraryParagraphs"] as? [[String:Any]] ?? []).compactMap {
+      guard let p = $0["number"] as? Int, let title = $0["title"] as? String else { return nil }
+      return WatchAudioContents(id:String(p),title:title,chapter:state["chapter"] as? Int ?? 1,paragraph:p)
+    }
     if let book = state["book"] as? Int { bookNumber = book }
     if let chapter = state["chapter"] as? Int { chapterNumber = chapter }
     if let verse = state["verse"] as? Int { verseNumber = verse }
@@ -95,7 +131,7 @@ final class BibleWatchSession: NSObject, ObservableObject, WCSessionDelegate {
     if let playing = state["playing"] as? Bool { self.playing = playing }
     if let error = state["error"] as? String { message = error }
     else if state["pending"] as? Bool == true { message = "Waiting for iPhone to update…" }
-    else if fromReply { message = "iPhone connected" }
+    else if fromReply || message == "Waiting for iPhone to update…" { message = "iPhone connected" }
     saveComplicationState()
   }
 
@@ -107,7 +143,7 @@ final class BibleWatchSession: NSObject, ObservableObject, WCSessionDelegate {
       }
       else if state == .activated {
         apply(session.receivedApplicationContext)
-        command("state")
+        if foreground { command("state") }
       }
     }
   }
@@ -118,8 +154,8 @@ final class BibleWatchSession: NSObject, ObservableObject, WCSessionDelegate {
 
   nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
     Task { @MainActor in
-      if session.isReachable { command("state") }
-      else if confirmed {
+      if session.isReachable && foreground { command("state") }
+      else if !session.isReachable && confirmed {
         confirmed = false
         message = "iPhone unavailable"
       }
@@ -127,7 +163,24 @@ final class BibleWatchSession: NSObject, ObservableObject, WCSessionDelegate {
   }
 }
 
-private enum WatchCommandError: Error { case busy, unavailable, unconfirmed }
+private enum WatchCommandError: Error { case busy, unavailable, unconfirmed, timedOut }
+
+// WatchConnectivity can deliver an error or a late reply after the deadline.
+// Resume exactly once so a lost phone reply never leaves controls disabled.
+private final class WatchCommandReply: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<[String: Any], Error>?
+  init(_ continuation: CheckedContinuation<[String: Any], Error>) {
+    self.continuation = continuation
+  }
+  func finish(_ result: Result<[String: Any], Error>) {
+    lock.lock()
+    let pending = continuation
+    continuation = nil
+    lock.unlock()
+    pending?.resume(with: result)
+  }
+}
 
 struct WatchComplicationState {
   static let suite = "group.com.deanbowen.bibleAppMac.watchremote"
@@ -145,12 +198,19 @@ struct WatchComplicationState {
   }
   static func save(title: String, loop: String, lastLoop: String,
     playing: Bool, confirmed: Bool, message: String?) {
-    UserDefaults(suiteName: suite)?.set([
+    let previous = UserDefaults(suiteName:suite)?.dictionary(forKey:"remoteState")
+    let next: [String:Any] = [
       "title": title, "loop": loop, "lastLoop": lastLoop,
       "playing": playing, "confirmed": confirmed,
       "message": message ?? ""
-    ], forKey: "remoteState")
-    WidgetCenter.shared.reloadTimelines(ofKind: kind)
+    ]
+    if let previous, NSDictionary(dictionary:previous).isEqual(to:next) { return }
+    UserDefaults(suiteName:suite)?.set(next,forKey:"remoteState")
+    // Connection messages do not change anything displayed by the complication.
+    let visible = ["title","loop","playing","confirmed"]
+    if previous == nil || visible.contains(where: { !NSObjectEqual(previous?[$0],next[$0]) }) {
+      WidgetCenter.shared.reloadTimelines(ofKind:kind)
+    }
   }
 }
 
@@ -179,3 +239,10 @@ struct BibleRemoteIntent: AudioPlaybackIntent {
     return .result()
   }
 }
+
+private func NSObjectEqual(_ a:Any?,_ b:Any?) -> Bool {
+  guard let a, let b else { return a == nil && b == nil }
+  return NSDictionary(dictionary:["value":a]).isEqual(to:["value":b])
+}
+struct WatchAudioBook: Identifiable { let id:String; let title:String }
+struct WatchAudioContents: Identifiable { let id:String; let title:String; let chapter:Int; let paragraph:Int }

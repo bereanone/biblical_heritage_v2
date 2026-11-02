@@ -97,6 +97,23 @@ final class RunnerTests: XCTestCase {
     XCTAssertEqual(state["accessAllowed"] as? Bool, true)
   }
 
+  func testWatchNativeBookSelectionSchedulesBookAndChapterAnnouncements() {
+    XCTAssertEqual(
+      WatchRemoteBridge.openingAnnouncementAssets(book: 45, chapter: 1, verse: 1),
+      [
+        "assets/audio/qwen_loop_cues/book_45.m4a",
+        "assets/audio/qwen_loop_cues/chapter_001.m4a",
+      ]
+    )
+    XCTAssertEqual(
+      WatchRemoteBridge.openingAnnouncementAssets(book: 45, chapter: 2, verse: 1),
+      ["assets/audio/qwen_loop_cues/chapter_002.m4a"]
+    )
+    XCTAssertTrue(
+      WatchRemoteBridge.openingAnnouncementAssets(book: 45, chapter: 1, verse: 3).isEmpty
+    )
+  }
+
   private func product(_ id: String, price: String, family: Bool) -> [String: Any] {
     ["displayPrice": price, "familyShareable": family, "internalID": UUID().uuidString,
      "localizations": [["description": "StudyBible payment verification", "displayName": id, "locale": "en_US"]],

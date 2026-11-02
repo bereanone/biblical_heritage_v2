@@ -59,7 +59,6 @@ void main() {
                                     endLabel: 'Genesis 1:1',
                                   ),
                                   fontScale: 1,
-                                  enableStrongs: selected == 1,
                                 ),
                           ),
                         ),
@@ -86,7 +85,8 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Copy No Citation'), findsOneWidget);
         expect(find.text('Highlight'), findsOneWidget);
-        expect(find.text("Strong's"), findsOneWidget);
+        expect(find.text("Strong's"), findsNothing);
+        expect(find.text("View # Tags"), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
     );

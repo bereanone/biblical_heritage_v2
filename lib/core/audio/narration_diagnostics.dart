@@ -11,6 +11,16 @@ import 'package:path_provider/path_provider.dart';
 class NarrationDiagnostics {
   NarrationDiagnostics._();
 
+  static String? _lastTagPlaybackSource;
+  static String? get lastTagPlaybackSource => _lastTagPlaybackSource;
+
+  /// Records the source selected after a tag player acknowledges start. This
+  /// does not establish that the user heard it, and contains no note/tag text.
+  static void recordTagPlaybackSource(String source) {
+    _lastTagPlaybackSource = source;
+    log('tag playback source=$source');
+  }
+
   static const _maxBytes = 1024 * 1024;
   static Future<File?>? _file;
 

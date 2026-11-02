@@ -17,6 +17,63 @@ class _Target implements ReaderAutoScrollTarget {
 }
 
 void main() {
+  for (final platform in [
+    TargetPlatform.android,
+    TargetPlatform.iOS,
+    TargetPlatform.macOS,
+  ]) {
+    testWidgets(
+      'audio compatibility notice is Android-only and speed stays adjustable: ${platform.name}',
+      (tester) async {
+        tester.view.physicalSize = const Size(640, 360);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final controller = MacReaderAutoScrollController(
+          scrollTarget: _Target(),
+          driveFrames: false,
+          narrationControlsPacing: true,
+          preferences: const MacAutoscrollPreferences(speechRate: 1.05),
+        );
+        addTearDown(controller.dispose);
+        final saved = <MacAutoscrollPreferences>[];
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(platform: platform),
+            home: Scaffold(
+              body: BibleAudioSettings(
+                controller: controller,
+                onPreferencesChanged: saved.add,
+                onPronunciations: () {},
+                onAnnouncementChanged: (_, _) {},
+              ),
+            ),
+          ),
+        );
+        expect(
+          find.byKey(const ValueKey('android-bible-audio-compatibility')),
+          platform == TargetPlatform.android ? findsOneWidget : findsNothing,
+        );
+        final normalSpeed = find.byKey(
+          const ValueKey('android-bible-audio-normal-speed'),
+        );
+        final speed = find.byKey(const ValueKey('bible-audio-speed'));
+        if (platform == TargetPlatform.android) {
+          await tester.ensureVisible(normalSpeed);
+          await tester.tap(normalSpeed);
+        } else {
+          expect(normalSpeed, findsNothing);
+          await tester.ensureVisible(speed);
+          tester.widget<Slider>(speed).onChanged!(1.0);
+        }
+        await tester.pump();
+        expect(controller.speechRate, 1.0);
+        expect(saved.single.speechRate, 1.0);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('audio setup preserves saved choices and pauses when disabled', (
     tester,
   ) async {

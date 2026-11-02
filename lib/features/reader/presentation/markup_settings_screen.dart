@@ -3,10 +3,15 @@ import 'package:flutter/material.dart';
 import '../data/highlight_groups_repository.dart';
 import '../../../core/theme/app_settings_service.dart';
 import 'highlight_render.dart';
+import 'highlight_paint_button.dart';
+import 'reader_selection_help.dart';
 import 'viewer_search_dialog.dart';
 
 class MarkupSettingsScreen extends StatefulWidget {
-  const MarkupSettingsScreen({super.key});
+  const MarkupSettingsScreen({super.key, this.canApplyHighlight = false});
+
+  /// Only the Bible reader can supply a live selection to apply on return.
+  final bool canApplyHighlight;
 
   @override
   State<MarkupSettingsScreen> createState() => _MarkupSettingsScreenState();
@@ -127,12 +132,50 @@ class _MarkupSettingsScreenState extends State<MarkupSettingsScreen> {
     );
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Markup Settings')),
+      appBar: AppBar(
+        title: const Text('Color Setup'),
+        actions: [
+          IconButton(
+            tooltip: 'Highlighting help',
+            onPressed: () => showReaderSelectionHelp(context),
+            icon: const Icon(Icons.help_outline),
+          ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
               children: [
+                Card(
+                  margin: const EdgeInsets.only(bottom: 18),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        HighlightPaintButton(
+                          key: const ValueKey('setup-apply-highlight'),
+                          onPressed:
+                              widget.canApplyHighlight && _groups.isNotEmpty
+                              ? () => Navigator.of(context).pop(true)
+                              : null,
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'The paintbrush applies highlighting to selected text. '
+                          'The color sample opens this setup screen.',
+                        ),
+                        if (!widget.canApplyHighlight) ...[
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Select text in the Bible first, then tap Paint.',
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
                 Text(
                   'Highlight Groups',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(

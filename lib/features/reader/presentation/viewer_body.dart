@@ -175,7 +175,8 @@ class _ViewerBodyState extends State<ViewerBody> {
       <String, Map<String, VerseHighlightRecord>>{};
   final Map<String, Map<String, List<VerseHighlightRecord>>>
   _tokenHighlightCache = <String, Map<String, List<VerseHighlightRecord>>>{};
-  final Map<String, Set<String>> _verseMarkupCache = <String, Set<String>>{};
+  final Map<String, BibleVerseMarkup> _verseMarkupCache = {};
+  int _verseMarkupGeneration = 0;
   // Keyed like the caches above, so a rebuild triggered by something other
   // than an actual change to the loaded window (e.g. a parent-level
   // setState during fast autoscroll) reuses the prior result instead of
@@ -430,7 +431,8 @@ class _ViewerBodyState extends State<ViewerBody> {
         final cacheKey = '${loadedIds.first}-${loadedIds.last}';
         _highlightCache.remove(cacheKey);
         _tokenHighlightCache.remove(cacheKey);
-        _verseMarkupCache.remove(cacheKey);
+        _verseMarkupCache.clear();
+        _verseMarkupGeneration++;
       }
     }
   }
@@ -784,16 +786,18 @@ class _ViewerBodyState extends State<ViewerBody> {
             }
           });
         }
+        final markupGeneration = _verseMarkupGeneration;
+        final markupRequestKey = "$cacheKey:$markupGeneration";
         if (cachedVerseMarkups == null &&
-            _verseMarkupFetchInFlight.add(cacheKey)) {
+            _verseMarkupFetchInFlight.add(markupRequestKey)) {
           WidgetsBinding.instance.addPostFrameCallback((_) async {
             final markedVerseKeys = await BibleMarkupRepository()
-                .loadMarkedVerseKeys(
+                .loadVerseMarkup(
                   lines: loadedLines,
                   bookNamesByNumber: widget.bookNamesByNumber,
                 );
-            _verseMarkupFetchInFlight.remove(cacheKey);
-            if (!mounted) return;
+            _verseMarkupFetchInFlight.remove(markupRequestKey);
+            if (!mounted || markupGeneration != _verseMarkupGeneration) return;
             setState(() {
               _verseMarkupCache[cacheKey] = markedVerseKeys;
             });
@@ -973,10 +977,15 @@ class _ViewerBodyState extends State<ViewerBody> {
                                     List<VerseHighlightRecord>
                                   >{})[verseKey] ??
                               const <VerseHighlightRecord>[],
-                          hasUserMarkup:
-                              (cachedVerseMarkups ?? const <String>{}).contains(
+                          isTagged:
+                              cachedVerseMarkups?.taggedVerseKeys.contains(
                                 numericVerseKey,
-                              ),
+                              ) ??
+                              false,
+                          hasUserMarkup:
+                              (cachedVerseMarkups?.markedVerseKeys ??
+                                      const <String>{})
+                                  .contains(numericVerseKey),
                           showChapterNumber: showChapterNumber,
                           startsInRedLetter:
                               blockContext?.startsInRedLetter ?? false,

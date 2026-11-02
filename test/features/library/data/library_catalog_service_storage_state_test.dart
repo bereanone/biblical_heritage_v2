@@ -1,3 +1,5 @@
+import 'package:crypto/crypto.dart';
+import 'package:studybible2/features/library/data/library_document_assets.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:io';
 
@@ -63,6 +65,9 @@ void main() {
       documentsDir: documentsDir,
     );
     await LibraryRootService.instance.setLibraryRoot(path: rootDir.path);
+    // Own the fixture catalog even when the shipped seed gains new books.
+    final db = await ELibraryDatabase.instance.database;
+    await db.delete('library_items');
   });
 
   tearDown(() async {
@@ -102,6 +107,93 @@ void main() {
     });
     return itemId;
   }
+
+  test(
+    'hydration keeps explicit publisher artwork above an embedded fallback',
+    () async {
+      final id = await seedRemovedAfterIndexItem();
+      final db = await ELibraryDatabase.instance.database;
+      const cover = 'assets/icons/GoldLogo.png';
+      await db.update(
+        'library_items',
+        {'cover_path': cover, 'author': 'Author'},
+        where: 'id=?',
+        whereArgs: [id],
+      );
+      final sourceHash = 'a' * 64;
+      final bytes = await File(cover).readAsBytes();
+      final asset = LibraryDocumentAsset('${sha256.convert(bytes)}.png', bytes);
+      await db.insert('library_document_conversion', {
+        'library_item_id': id,
+        'canonicalizer_version': 1,
+        'source_hash': sourceHash,
+        'status': 'complete',
+      });
+      await LibraryDocumentAssets.store(
+        db,
+        itemId: id,
+        sourceHash: sourceHash,
+        assets: [asset],
+        coverAssetName: asset.name,
+      );
+      final items = await LibraryCatalogService.instance.loadItems();
+      expect(items.singleWhere((item) => item.id == id).coverPath, cover);
+      expect(
+        (await db.query(
+          'library_items',
+          where: 'id=?',
+          whereArgs: [id],
+        )).single['cover_path'],
+        cover,
+      );
+    },
+  );
+
+  test(
+    'retained EPUB with readable canonical text does not need legacy reindexing',
+    () async {
+      final id = await seedRemovedAfterIndexItem();
+      final db = await ELibraryDatabase.instance.database;
+      await db.update(
+        'library_items',
+        {'epub_storage_state': 'present', 'index_status': 'indexed'},
+        where: 'id=?',
+        whereArgs: [id],
+      );
+      await db.insert('library_document_sections', {
+        'id': 'section',
+        'library_item_id': id,
+        'display_order': 0,
+      });
+      await db.insert('library_document_blocks', {
+        'id': 'body',
+        'library_item_id': id,
+        'section_id': 'section',
+        'display_order': 0,
+        'block_type': 'paragraph',
+        'plain_text': 'The included book is already ready to read and search.',
+      });
+      expect(
+        await LibraryCatalogService.instance.countUnindexedManagedItems(),
+        0,
+      );
+      expect(
+        await LibraryCatalogService.instance.listUnindexedManagedItems(),
+        isEmpty,
+      );
+      await db.delete('library_document_blocks');
+      expect(
+        await LibraryCatalogService.instance.countUnindexedManagedItems(),
+        1,
+      );
+      expect(
+        (await LibraryCatalogService.instance.listUnindexedManagedItems())
+            .single
+            .id,
+        id,
+      );
+    },
+  );
 
   test(
     'a canonically-indexed item with its EPUB removed is excluded from unindexed counts/lists',

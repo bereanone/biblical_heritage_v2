@@ -1,1 +1,1 @@
-assets/databases/bible_base.db filter=lfs diff=lfs merge=lfs -text
+# Large build payloads are restored from Google Drive via data/cloud-data-20261102.json.

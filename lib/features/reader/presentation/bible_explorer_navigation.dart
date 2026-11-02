@@ -613,10 +613,18 @@ extension _BibleExplorerScreenNavigation on _BibleExplorerScreenState {
   }
 
   Future<void> _openMarkupSettings() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const MarkupSettingsScreen()),
+    final apply = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => MarkupSettingsScreen(
+          canApplyHighlight: _rangeSelection.hasCompletedRange,
+        ),
+      ),
     );
+    if (!mounted) return;
     await _reloadDefaultHighlight();
+    if (apply == true && mounted && _rangeSelection.hasCompletedRange) {
+      await _applyDefaultMarkup();
+    }
   }
 
   Future<void> _openSavedPresentations() async {

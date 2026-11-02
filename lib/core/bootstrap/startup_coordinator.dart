@@ -1123,10 +1123,17 @@ class StartupCoordinator {
       await legacyFile.copy(targetFile.path);
       final sourceStat = await legacyFile.stat();
       final targetStat = await targetFile.stat();
-      if (sourceStat.size > 0 && targetStat.size != sourceStat.size) {
+      if (targetStat.size != sourceStat.size) {
         throw StateError('Backup verification failed for ${legacyFile.path}.');
       }
-      if (sourceStat.size <= 0 && targetStat.size <= 0) {
+      // SQLite can legitimately leave an empty rollback journal or WAL/SHM
+      // sidecar. Preserve it in the backup without treating it as an empty
+      // main database. Never relax verification for other zero-byte files.
+      final emptySqliteSidecar = RegExp(
+        r'\.(?:db|sqlite|sqlite3)-(?:journal|wal|shm)$',
+        caseSensitive: false,
+      ).hasMatch(p.basename(legacyFile.path));
+      if (sourceStat.size <= 0 && !emptySqliteSidecar) {
         throw StateError('Backup verification failed for ${legacyFile.path}.');
       }
       backupEntries.add(<String, Object?>{

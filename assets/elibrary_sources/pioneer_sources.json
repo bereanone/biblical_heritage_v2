@@ -247,29 +247,16 @@
           "cached_cover_path": "assets/library_covers/LOF_ATJ.png",
           "group": "Pioneer Authors",
           "subgroup": "Righteousness by Faith",
-          "availability_status": "available",
+          "availability_status": "source_needed",
           "source_type": "epub",
           "source_family": "APLIB",
           "collection_url": "https://www.aplib.org/resources/pioneers-ebooks/",
-          "source_url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
+          "source_url": null,
           "source_label": "APLIB",
-          "verified": true,
-          "importable": true,
-          "source_candidates": [
-            {
-              "provider": "aplib",
-              "source_type": "epub",
-              "url": "https://adventaudio.org/files/ebooks/zip/Epub.zip",
-              "priority": 10,
-              "quality_tier": "epub",
-              "availability": "available",
-              "requires_verification": false,
-              "destructive_replacement_allowed": false,
-              "is_repair_source": false,
-              "user_must_confirm_replacement": true,
-              "notes": "APLIB complete Pioneer collection EPUB ZIP."
-            }
-          ]
+          "verified": false,
+          "importable": false,
+          "source_candidates": [],
+          "notes": "Lessons on Faith is not in the verified online Pioneer ZIP. Import your verified local EPUB or StudyBible book package instead."
         },
         {
           "work_id": "SL27",

@@ -17,21 +17,46 @@ class BundledLibraryContent {
     required Database destination,
     required String libraryRoot,
     AssetBundle? assets,
+    Set<String>? onlyItemIds,
   }) async {
     final bundle = assets ?? rootBundle;
     final manifest =
         jsonDecode(await bundle.loadString(manifestAsset))
             as Map<String, dynamic>;
     final revision = manifest['revision'] as String;
-    final ids = (manifest['books'] as List)
-        .map((book) => book['id'] as String)
-        .toSet();
+    final allBooks = (manifest['books'] as List).cast<Map>();
+    if (onlyItemIds != null &&
+        (onlyItemIds.isEmpty ||
+            !allBooks.map((b) => b['id']).toSet().containsAll(onlyItemIds))) {
+      throw const FormatException('Unknown selected publisher book');
+    }
+    final books = allBooks
+        .where(
+          (book) => onlyItemIds == null || onlyItemIds.contains(book['id']),
+        )
+        .toList();
+    final prefixes = [
+      for (final book in books)
+        if (book['resource_prefix'] is String)
+          book['resource_prefix'] as String,
+    ];
+    if (onlyItemIds != null && prefixes.length != books.length) {
+      throw const FormatException(
+        'Selected publisher book has no resource boundary',
+      );
+    }
+    final ids = books.map((book) => book['id'] as String).toSet();
     if (revision.isEmpty || ids.isEmpty)
       throw const FormatException('Invalid bundled catalog manifest');
-    final resources = <String, Uint8List>{};
+    final itemRevisions = <String, String>{
+      for (final raw in books)
+        raw['id'] as String: raw['revision'] as String? ?? revision,
+    };
+    final resources = <String, Map<String, dynamic>>{};
     for (final raw in manifest['resources'] as List) {
       final row = raw as Map<String, dynamic>;
       final relative = row['destination'] as String;
+      if (onlyItemIds != null && !prefixes.any(relative.startsWith)) continue;
       // Bundles own only this subtree, never Databases, notes, or user imports.
       if (!relative.startsWith('Research/ManagedBundles/') ||
           p.isAbsolute(relative) ||
@@ -55,19 +80,65 @@ class BundledLibraryContent {
       }
       if (resources.containsKey(output))
         throw const FormatException('Duplicate bundled resource destination');
-      resources[output] = bytes;
+      resources[output] = row;
     }
     // Validate every resource before touching the filesystem or catalog.
     for (final entry in resources.entries) {
       final file = File(entry.key);
       if (await file.exists() &&
           sha256.convert(await file.readAsBytes()).toString() ==
-              sha256.convert(entry.value).toString())
+              entry.value['sha256'])
         continue;
+      // Keep only one resource in memory; the illustrated BRHC source is large.
+      final data = await bundle.load(entry.value['asset'] as String);
+      final bytes = data.buffer.asUint8List(
+        data.offsetInBytes,
+        data.lengthInBytes,
+      );
+      if (bytes.length != entry.value['bytes'] ||
+          sha256.convert(bytes).toString() != entry.value['sha256']) {
+        throw const FormatException(
+          'Bundled resource changed after validation',
+        );
+      }
       await file.parent.create(recursive: true);
       final temporary = File('${file.path}.installing');
-      await temporary.writeAsBytes(entry.value, flush: true);
+      await temporary.writeAsBytes(bytes, flush: true);
       await temporary.rename(file.path);
+    }
+    // iOS can relocate the sandbox after an update. Restore only missing
+    // publisher covers from the already validated resources, without replacing
+    // a valid user cover or touching the book text and reading data.
+    for (final raw in books) {
+      final book = raw as Map<String, dynamic>;
+      final relativeCover = book['cover_path'] as String?;
+      if (relativeCover == null) continue;
+      final cover = p.normalize(p.join(libraryRoot, relativeCover));
+      if (!resources.containsKey(cover)) {
+        throw const FormatException(
+          'Managed cover is not a validated resource',
+        );
+      }
+      final rows = await destination.query(
+        'library_items',
+        columns: ['cover_path'],
+        where: 'id = ? AND deleted_at IS NULL',
+        whereArgs: [book['id']],
+        limit: 1,
+      );
+      if (rows.isEmpty) continue;
+      final stored = rows.single['cover_path']?.toString() ?? '';
+      if (stored.startsWith('assets/') ||
+          (stored.isNotEmpty && File(stored).existsSync()) ||
+          (stored == relativeCover && File(cover).existsSync())) {
+        continue;
+      }
+      await destination.update(
+        'library_items',
+        {'cover_path': relativeCover},
+        where: 'id = ? AND deleted_at IS NULL',
+        whereArgs: [book['id']],
+      );
     }
     final markerTable = await destination.rawQuery(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='bundled_library_updates'",
@@ -76,7 +147,9 @@ class BundledLibraryContent {
       final rows = await destination.query('bundled_library_updates');
       if (ids.every(
         (id) => rows.any(
-          (row) => row['library_item_id'] == id && row['revision'] == revision,
+          (row) =>
+              row['library_item_id'] == id &&
+              row['revision'] == itemRevisions[id],
         ),
       ))
         return 0;
@@ -100,6 +173,7 @@ class BundledLibraryContent {
         source: source,
         managedItemIds: ids,
         revision: revision,
+        itemRevisions: itemRevisions,
         resourceRoot: libraryRoot,
       );
     } finally {

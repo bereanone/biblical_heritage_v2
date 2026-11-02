@@ -403,6 +403,7 @@ class LibraryDocumentRepository {
         'display_order',
         'plain_text',
         'source_href',
+        'source_anchor',
         'formatted_content',
       ],
       where: 'library_item_id = ? AND block_type = ?',
@@ -423,6 +424,18 @@ class LibraryDocumentRepository {
         continue;
       }
       if (_isFirstCanonicalBodyLabel(label)) {
+        return (heading['display_order'] as num?)?.toInt();
+      }
+    }
+    // The authored chapter identity can be an EPUB anchor rather than visible
+    // text. BRHC uses chapter-001 for "The Scriptures"; its first visible
+    // numbered heading is Chapter 48, so inferred roles alone skip the start.
+    for (final heading in headingRows) {
+      final anchor = heading['source_anchor']?.toString() ?? '';
+      if (RegExp(
+        r'^(?:chapter|chap)[-_ ]*0*1$',
+        caseSensitive: false,
+      ).hasMatch(anchor)) {
         return (heading['display_order'] as num?)?.toInt();
       }
     }
@@ -534,12 +547,17 @@ class LibraryDocumentRepository {
   Future<int?> displayOrderForBlockId(String itemId, String blockId) async {
     final rows = await db.query(
       'library_document_blocks',
-      columns: const ['display_order'],
+      columns: const ['display_order', 'formatted_content'],
       where: 'library_item_id = ? AND id = ?',
       whereArgs: [itemId, blockId],
       limit: 1,
     );
-    return rows.isEmpty ? null : (rows.single['display_order'] as num).toInt();
+    if (rows.isEmpty) return null;
+    final metadata = LibraryFormattedContent.fromJson(
+      rows.single['formatted_content'] as String,
+    ).metadata;
+    return (metadata['publisher_joined_head_order'] as num?)?.toInt() ??
+        (rows.single['display_order'] as num).toInt();
   }
 
   Future<int?> displayOrderForSearchTarget(

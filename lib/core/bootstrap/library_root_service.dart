@@ -189,7 +189,7 @@ class LibraryRootService {
 
   Future<LibraryRootSelection> loadSelection() async {
     final cached = _cachedSelection;
-    if (cached != null) {
+    if (cached != null && cached.path != null) {
       return cached;
     }
     final path = await LocalSettingsStore.instance.loadLibraryRootPath();
@@ -205,6 +205,20 @@ class LibraryRootService {
       bookmark: bookmark,
       defaultAppRoot: defaultAppRoot,
     );
+
+    // Older setup could select Documents while the active study databases
+    // and bundled books remained in its v2 child. Repair only that app-managed
+    // selection; external roots and roots with their own databases stay put.
+    if (shouldRecoverDefaultAppSelection(
+      isIOS: Platform.isIOS,
+      source: source,
+      bookmark: bookmark,
+      storedPath: resolvedPath,
+      documentsPath: (await getApplicationDocumentsDirectory()).path,
+      defaultRoot: defaultAppRoot,
+    )) {
+      resolvedPath = defaultAppRoot;
+    }
 
     if (LibraryRootNative.usesAndroidDocumentTree) {
       final authorization = await validateAndroidAuthorization();
@@ -509,9 +523,51 @@ class LibraryRootService {
     return selection.path;
   }
 
+  /// Keep an established mobile library together instead of selecting its
+  /// parent and making the same relative book paths point at an empty folder.
+  static String resolveDefaultAppLibraryRoot({
+    required String documentsPath,
+    required bool isIOS,
+  }) {
+    if (!isIOS) return documentsPath;
+    bool hasDatabase(String root, {bool nested = false}) {
+      final folder = nested ? p.join(root, 'Databases') : root;
+      return [
+        'user.db',
+        'eLibrary.db',
+      ].any((name) => File(p.join(folder, name)).existsSync());
+    }
+
+    if (hasDatabase(documentsPath, nested: true) ||
+        hasDatabase(documentsPath)) {
+      return documentsPath;
+    }
+    final existing = p.join(documentsPath, 'BiblicalHeritage', 'v2');
+    return hasDatabase(existing) ? existing : documentsPath;
+  }
+
+  static bool shouldRecoverDefaultAppSelection({
+    required bool isIOS,
+    required LibraryRootSource source,
+    required String? bookmark,
+    required String? storedPath,
+    required String documentsPath,
+    required String defaultRoot,
+  }) =>
+      isIOS &&
+      source == LibraryRootSource.defaultAppFolder &&
+      (bookmark == null || bookmark.trim().isEmpty) &&
+      storedPath != null &&
+      p.normalize(storedPath) == p.normalize(documentsPath) &&
+      p.normalize(defaultRoot) ==
+          p.normalize(p.join(documentsPath, 'BiblicalHeritage', 'v2'));
+
   Future<String> defaultAppLibraryRootPath() async {
     final documentsDir = await getApplicationDocumentsDirectory();
-    return documentsDir.path;
+    return resolveDefaultAppLibraryRoot(
+      documentsPath: documentsDir.path,
+      isIOS: Platform.isIOS,
+    );
   }
 
   Future<String?> databasesPath() async {

@@ -11,7 +11,7 @@ enum ViewerRangeAction {
   addHashTag,
   addDollarTag,
   addToMemory,
-  strongs,
+  viewTags,
   extendRange,
   resetRange,
 }
@@ -34,7 +34,6 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
   BuildContext context, {
   required ViewerRangeActionsPayload payload,
   required double fontScale,
-  bool enableStrongs = false,
 }) {
   final theme = Theme.of(context);
   return showModalBottomSheet<ViewerRangeAction>(
@@ -52,19 +51,48 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
             color: colorScheme.surface,
             borderRadius: BorderRadius.circular(18),
             clipBehavior: Clip.antiAlias,
-            child: SizedBox(
-              height: mediaQuery.size.height * 0.82,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: mediaQuery.size.height * 0.82,
+              ),
               child: ListView(
+                shrinkWrap: true,
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
                 children: [
-                  Text(
-                    'Range Actions',
-                    style: TagDialogStyles.titleTextStyle(
-                      theme,
-                      fontScale,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.15,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Range Actions',
+                          style: TagDialogStyles.titleTextStyle(
+                            theme,
+                            fontScale,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.15,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Selection help',
+                        icon: const Icon(Icons.help_outline),
+                        onPressed: () => showDialog<void>(
+                          context: sheetContext,
+                          builder: (helpContext) => AlertDialog(
+                            title: const Text('Selection help'),
+                            content: const SingleChildScrollView(
+                              child: Text(readerSelectionHelp),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.of(helpContext).pop(),
+                                child: const Text('Close'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -163,6 +191,14 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                         ).pop(ViewerRangeAction.addDollarTag),
                       ),
                       _ActionButton(
+                        icon: Icons.tag,
+                        label: 'View # Tags',
+                        fontScale: fontScale,
+                        onTap: () => Navigator.of(
+                          sheetContext,
+                        ).pop(ViewerRangeAction.viewTags),
+                      ),
+                      _ActionButton(
                         icon: Icons.menu_book_outlined,
                         label: 'Add to Memory',
                         fontScale: fontScale,
@@ -187,15 +223,6 @@ Future<ViewerRangeAction?> showViewerRangeActionsSheet(
                         ).pop(ViewerRangeAction.resetRange),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    readerSelectionHelp,
-                    style: TagDialogStyles.bodyTextStyle(
-                      theme,
-                      fontScale,
-                      color: TagDialogStyles.mutedBody(theme),
-                    ),
                   ),
                 ],
               ),

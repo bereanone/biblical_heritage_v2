@@ -19,6 +19,7 @@ import 'library_epub_text_styles.dart';
 import 'library_citation_links.dart';
 import 'library_xml_html_entities.dart';
 import 'optional_book_companions.dart';
+import '../../../core/database/elibrary_publisher_text_corrections.dart';
 
 /// Separator between hash inputs, built via String.fromCharCode to avoid
 /// an unprintable literal in source.
@@ -251,6 +252,7 @@ class LibraryDocumentCanonicalizer {
       itemId: libraryItemId,
       sourceHash: sourceHash,
     );
+    await ELibraryPublisherTextCorrections.apply(db, itemId: libraryItemId);
     final current = await db.query(
       'library_document_conversion',
       where: 'library_item_id = ?',
@@ -708,6 +710,7 @@ class LibraryDocumentCanonicalizer {
         );
       });
 
+      await ELibraryPublisherTextCorrections.apply(db, itemId: libraryItemId);
       return LibraryDocumentCanonicalizationResult(
         skipped: false,
         blockCount: written,

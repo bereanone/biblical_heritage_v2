@@ -264,7 +264,7 @@ class ViewerVerseLine extends StatelessWidget {
             _VerseGutter(
               chapter: line.chapter,
               verse: line.verse,
-              showVerseNumber: !displayChapterNumber,
+              showVerseNumber: !displayChapterNumber || isTagged,
               showChapterNumber: displayChapterNumber,
               chapterStyle: chapterStyle,
               numberStyle: isSelected
@@ -353,12 +353,10 @@ class _VerseGutter extends StatelessWidget {
             textDirection,
           ).ceilToDouble()
         : 0.0;
-    final badgePadding = isTagged ? 10.0 : 0.0;
+
     final contentWidth = showChapterNumber
-        ? (chapterWidth > verseSlotWidth + badgePadding
-              ? chapterWidth
-              : verseSlotWidth + badgePadding)
-        : verseSlotWidth + badgePadding;
+        ? (chapterWidth > verseSlotWidth ? chapterWidth : verseSlotWidth)
+        : verseSlotWidth;
     final width = contentWidth + 16.0;
 
     return GestureDetector(
@@ -418,38 +416,19 @@ class _VerseNumberBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    if (!showVerseNumber) {
-      return const SizedBox.shrink();
-    }
-    if (!isTagged) {
-      return Text(
-        '$verse',
-        style: style,
-        maxLines: 1,
-        softWrap: false,
-        overflow: TextOverflow.clip,
-      );
-    }
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.75),
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-        child: Text(
-          '$verse',
-          style: style.copyWith(color: theme.colorScheme.onSurface),
-          maxLines: 1,
-          softWrap: false,
-          overflow: TextOverflow.clip,
-        ),
-      ),
+    if (!showVerseNumber) return const SizedBox.shrink();
+    return Text(
+      '$verse',
+      style: isTagged
+          ? style.copyWith(
+              decoration: TextDecoration.underline,
+              decorationColor: style.color,
+              decorationThickness: 1.5,
+            )
+          : style,
+      maxLines: 1,
+      softWrap: false,
+      overflow: TextOverflow.clip,
     );
   }
 }

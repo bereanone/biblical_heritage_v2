@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_settings_service.dart';
 import '../../reader/data/highlight_groups_repository.dart';
+import '../../reader/presentation/highlight_paint_button.dart';
 
 const List<_ElibraryHighlightPaletteChoice> _elibraryFallbackPalette =
     <_ElibraryHighlightPaletteChoice>[
@@ -91,7 +92,37 @@ class _ElibraryHighlightColorPickerDialogState
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     return AlertDialog(
-      title: const Text('Choose Highlight Color'),
+      title: Row(
+        children: [
+          const Expanded(child: Text('Choose Highlight Color')),
+          IconButton(
+            tooltip: 'Highlighting help',
+            icon: const Icon(Icons.help_outline),
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (helpContext) => AlertDialog(
+                title: const Text('eLibrary highlighting'),
+                content: const SingleChildScrollView(
+                  child: Text(
+                    'With text selected, open Range Actions and choose Highlight. '
+                    'Choose a color, then tap Apply Highlight (the paintbrush button) '
+                    'to paint the selected text. Choosing a color sample alone '
+                    'does not apply it. Cancel leaves the text unchanged. '
+                    'Use Clear Markup in Range Actions to remove highlighting '
+                    'from the selected range.',
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(helpContext).pop(),
+                    child: const Text('Close'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
       content: SingleChildScrollView(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -149,9 +180,8 @@ class _ElibraryHighlightColorPickerDialogState
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(
+        HighlightPaintButton(
           onPressed: () => Navigator.of(context).pop(_selectedHex),
-          child: const Text('Use Color'),
         ),
       ],
     );

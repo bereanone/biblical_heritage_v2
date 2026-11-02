@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -116,7 +117,7 @@ void main() {
     expect(official.displayTitle, 'Waggoner on Romans');
     expect(capture.displayAuthor, 'E. J. Waggoner');
     expect(official.displayAuthor, 'E. J. Waggoner');
-    expect(capture.editionLabel, 'CaptureClipper edition');
+    expect(capture.editionLabel, isNull);
     expect(official.editionLabel, 'Official EPUB edition');
     expect(capture.id, isNot(official.id));
   });
@@ -351,7 +352,9 @@ void main() {
   late Directory libraryRootDir;
   late Directory databaseDir;
 
+  // This fixture owns its catalog; mobile bundle delivery has separate tests.
   setUp(() async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     supportDir = await Directory.systemTemp.createTemp(
       'library_catalog_support_',
     );
@@ -376,6 +379,7 @@ void main() {
   });
 
   tearDown(() async {
+    debugDefaultTargetPlatformOverride = null;
     LibraryRootService.instance.invalidateCachedSelection();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(

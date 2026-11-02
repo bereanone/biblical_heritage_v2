@@ -1,8 +1,16 @@
+import 'reading_speed_button.dart';
+import 'mac_reader_autoscroll_controller.dart' show normalizeSpeechRate;
+import 'audio_timeline_migration.dart';
+import 'watch_library_catalog.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
 import '../data/optional_book_companions.dart';
+import '../data/wor_publisher_audio_correction.dart';
+import '../data/lessons_bundled_audio.dart';
+import '../data/lessons_reading_edition.dart';
+import '../../../core/bootstrap/bundled_content_platform.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -27,6 +35,18 @@ Future<String?> recordedCursorForNavigation({
     cursor = item.nextCursor;
   }
   return null;
+}
+
+/// Titles and bylines immediately preceding the first recorded paragraph
+/// belong to that chapter's opening, even when absent from cue metadata.
+/// Stop at body text so an unrelated paragraph can never become an alias.
+Iterable<LibrarySpeechItem> recordedChapterOpeningItems(
+  List<LibrarySpeechItem> items,
+  int firstCueItem,
+) sync* {
+  for (var i = firstCueItem - 1; i >= 0 && items[i].isHeading; i--) {
+    yield items[i];
+  }
 }
 
 bool recordedChapterOpening(int cueIndex, Duration position) =>
@@ -108,6 +128,20 @@ int recordedCueItemIndex(
       );
       if (direct >= 0) return direct;
     }
+    // A malformed metadata digest must not hide an otherwise exact source
+    // match. Keep this recovery bound to both cursor and complete cue text.
+    final cueWords = _recordedCueWords(cue.text);
+    if (cue.sourceCursor != null &&
+        cueWords.isNotEmpty &&
+        sha256.convert(utf8.encode(cueWords)).toString() != cue.textDigest) {
+      final exact = items.indexWhere(
+        (item) =>
+            item.sourceCursor == cue.sourceCursor &&
+            _recordedCueWords(item.text) == cueWords,
+        startIndex,
+      );
+      if (exact >= 0) return exact;
+    }
     return items.indexWhere(matches, startIndex);
   }
   final wanted = _recordedCueWords(cue.text);
@@ -160,6 +194,8 @@ class RecordedLibraryAudioCue {
     this.phrases = const [],
     this.textDigest,
     this.sourceCursor,
+    this.sourceOffset,
+    this.sourceEndOffset,
     this.role,
     this.noteOrder,
     this.openingSources = const [],
@@ -168,10 +204,41 @@ class RecordedLibraryAudioCue {
   final String? role;
   final int? noteOrder;
   final String? sourceCursor;
+  final int? sourceOffset;
+  final int? sourceEndOffset;
   final Duration start;
   final String text;
   final String? textDigest;
   final List<RecordedLibraryAudioCue> phrases;
+}
+
+/// Exact source coordinates disambiguate repeated words. Never infer a seek
+/// time from character percentage or silently restart at a different word.
+Duration? recordedWordSeekPosition(RecordedLibraryAudioCue cue, int offset) {
+  if (offset <= 0) return cue.start;
+  final requested = offset;
+  // Opening quotation marks belong to the same selected word.
+  while (offset < cue.text.length && '“”\"‘’('.contains(cue.text[offset])) {
+    offset++;
+  }
+  RecordedLibraryAudioCue? previous;
+  for (final word in cue.phrases) {
+    final start = word.sourceOffset;
+    final end = word.sourceEndOffset;
+    if (start == null || end == null) continue;
+    if (start <= offset && offset < end) {
+      final ms = (cue.start + word.start).inMilliseconds - 80;
+      return Duration(milliseconds: ms < 0 ? 0 : ms);
+    }
+    if (start <= requested &&
+        (previous == null || start > previous.sourceOffset!))
+      previous = word;
+  }
+  if (previous != null) {
+    final ms = (cue.start + previous.start).inMilliseconds - 80;
+    return Duration(milliseconds: ms < 0 ? 0 : ms);
+  }
+  return null;
 }
 
 class RecordedLibraryAudioPackage {
@@ -179,10 +246,18 @@ class RecordedLibraryAudioPackage {
     this.title,
     this.tracks, {
     this.totalChapters,
+    this.timelineMigration,
+    this.timelineTracks,
+    this.timelineVersion,
   });
   final String title;
   final List<RecordedLibraryAudioTrack> tracks;
   final int? totalChapters;
+  final Map<String, dynamic>? timelineMigration;
+  final List<dynamic>? timelineTracks;
+  final String? timelineVersion;
+  Map<String, dynamic> remapSavedPosition(Map<String, dynamic> saved) =>
+      remapLibraryAudioPosition(saved, timelineMigration, timelineTracks);
   bool get hasMarginNotes =>
       tracks.any((track) => track.cues.any((cue) => cue.role == 'margin_note'));
   bool get isComplete =>
@@ -211,7 +286,13 @@ class RecordedLibraryAudioPackage {
     String title, {
     String? sourceHash,
   }) async {
+    if (!bundledContentEnabled) {
+      await LessonsBundledAudio.ensure(root, sourceHash);
+    }
     if (!await root.exists()) return null;
+    if (!bundledContentEnabled) {
+      await WorPublisherAudioCorrection.ensure(root, sourceHash);
+    }
     final directories = (await root.list(followLinks: false).toList())
         .whereType<Directory>()
         .where(
@@ -250,11 +331,16 @@ class RecordedLibraryAudioPackage {
         final json =
             jsonDecode(await manifest.readAsString()) as Map<String, dynamic>;
         final requiredSource = json['requires_source_sha256'] as String?;
+        if (sourceHash == LessonsReadingEdition.sourceHash &&
+            normalize(title) == normalize('Lessons on Faith') &&
+            requiredSource != sourceHash)
+          continue;
         final isWor =
             normalize(json['title'] as String) ==
             normalize('Waggoner on Romans');
         // Even older manually copied WOR packages cannot attach by title alone.
-        if (isWor && !OptionalBookCompanions.matchesWor(sourceHash)) continue;
+        if (isWor && !OptionalBookCompanions.matchesWorAudio(sourceHash))
+          continue;
         if (requiredSource != null && requiredSource != sourceHash) continue;
         if (!isWor && normalize(json['title'] as String) != normalize(title))
           continue;
@@ -294,12 +380,24 @@ class RecordedLibraryAudioPackage {
                     ],
                     phrases: [
                       for (final phrase in cue['phrases'] as List? ?? const [])
-                        RecordedLibraryAudioCue(
-                          Duration(
-                            milliseconds: (phrase['start_ms'] as num).round(),
+                        // Duplicate whole-paragraph markers have no phrase timing.
+                        // Old LOF markers used absolute timestamps; reading those
+                        // as relative delays following by another entire cue.
+                        if (!(phrase['source_start_offset'] == null &&
+                            (cue['phrases'] as List).length == 1 &&
+                            _recordedCueWords(phrase['text'] as String) ==
+                                _recordedCueWords(cue['text'] as String)))
+                          RecordedLibraryAudioCue(
+                            Duration(
+                              milliseconds: (phrase['start_ms'] as num).round(),
+                            ),
+                            phrase['text'] as String,
+                            sourceOffset:
+                                (phrase['source_start_offset'] as num?)
+                                    ?.toInt(),
+                            sourceEndOffset:
+                                (phrase['source_end_offset'] as num?)?.toInt(),
                           ),
-                          phrase['text'] as String,
-                        ),
                     ],
                   ),
               ],
@@ -312,6 +410,10 @@ class RecordedLibraryAudioPackage {
             json['title'] as String,
             tracks,
             totalChapters: json['total_chapters'] as int?,
+            timelineMigration:
+                json['timeline_migration'] as Map<String, dynamic>?,
+            timelineTracks: json['tracks'] as List<dynamic>?,
+            timelineVersion: json['timeline_version'] as String?,
           );
         }
       } catch (_) {
@@ -333,7 +435,15 @@ class RecordedLibraryAudioControls extends StatefulWidget {
     required this.startCursor,
     required this.selectedCursor,
     this.readerCursor,
+    this.playbackRate = 1,
+    this.onPlaybackRateChanged,
+    this.playbackEnabled = true,
+    this.canPlay,
   });
+  final bool playbackEnabled;
+  final bool Function()? canPlay;
+  final double playbackRate;
+  final ValueChanged<double>? onPlaybackRateChanged;
   final RecordedLibraryAudioPackage package;
   final String bookId;
   final Future<void> Function() beforePlay;
@@ -350,6 +460,9 @@ class RecordedLibraryAudioControls extends StatefulWidget {
 class RecordedLibraryAudioControlsState
     extends State<RecordedLibraryAudioControls>
     with WidgetsBindingObserver {
+  bool get _playbackAllowed =>
+      widget.playbackEnabled && (widget.canPlay?.call() ?? true);
+
   final _player = AudioPlayer();
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   NarrationMediaLease? _lease;
@@ -357,6 +470,8 @@ class RecordedLibraryAudioControlsState
   Duration _position = Duration.zero;
   Duration _trackDuration = Duration.zero;
   bool _playing = false;
+  bool _watchOwnsPlayback = false;
+  late double _readingRate;
   bool _busy = false;
   String? _feedbackMessage;
   bool _loaded = false;
@@ -371,6 +486,37 @@ class RecordedLibraryAudioControlsState
   bool _loopSeeking = false;
   bool _includeMarginNotes = true;
   bool _skippingMarginNote = false;
+
+  Future<void> _setReadingRate(double rate) async {
+    rate = normalizeSpeechRate(rate);
+    setState(() => _readingRate = rate);
+    widget.onPlaybackRateChanged?.call(rate);
+    await _applyReadingRate();
+    await _save();
+    // Make the same preference available before a later Watch handoff.
+    unawaited(WatchLibraryCatalog.refresh());
+  }
+
+  Future<void> _applyReadingRate() async {
+    if (_watchOwnsPlayback) {
+      await _watchCommand('rate:$_readingRate');
+    } else {
+      await _player.setPlaybackRate(_readingRate);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant RecordedLibraryAudioControls oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.playbackEnabled && !widget.playbackEnabled) {
+      unawaited(_pause());
+    }
+    final rate = normalizeSpeechRate(widget.playbackRate);
+    if (widget.playbackRate != oldWidget.playbackRate && rate != _readingRate) {
+      _readingRate = rate;
+      unawaited(_applyReadingRate().then((_) => _save()));
+    }
+  }
 
   int _activeCueIndex(Duration position) {
     final cues = widget.package.tracks[_index].cues;
@@ -398,7 +544,16 @@ class RecordedLibraryAudioControlsState
         final target = cues[next].start;
         _lastCue = null;
         _position = target;
-        await _player.seek(target);
+        if (_watchOwnsPlayback) {
+          await _watchCommand(
+            'seek',
+            chapter: widget.package.tracks[_index].chapter,
+            position: target,
+            play: _playing,
+          );
+        } else {
+          await _player.seek(target);
+        }
         _follow(target);
       } else {
         await _next();
@@ -449,6 +604,10 @@ class RecordedLibraryAudioControlsState
       ),
     );
     if (!mounted || choice == null) return;
+    if (_watchOwnsPlayback) {
+      await _watchCommand('loop:${choice == 'paragraph' ? 'verse' : choice}');
+      return;
+    }
     setState(() {
       _loop = choice == 'off' ? null : choice;
       _loopStart = null;
@@ -471,13 +630,88 @@ class RecordedLibraryAudioControlsState
     });
   }
 
+  Future<bool> _watchCommand(
+    String command, {
+    int? chapter,
+    Duration? position,
+    bool? play,
+  }) async {
+    if ((command == 'start' || play == true) && !_playbackAllowed) return false;
+    try {
+      await WatchLibraryCatalog.command(
+        widget.bookId,
+        command,
+        chapter: chapter,
+        position: position,
+        play: play,
+      );
+      if (mounted && _feedbackMessage != null)
+        setState(() => _feedbackMessage = null);
+      return true;
+    } catch (error) {
+      if (mounted)
+        setState(
+          () => _feedbackMessage = 'Recorded audio could not update: $error',
+        );
+      return false;
+    }
+  }
+
+  void _watchPlaybackChanged() {
+    if (!mounted) return;
+    final state = WatchLibraryCatalog.playback.value;
+    if (state == null ||
+        !state.nativePlayback ||
+        state.bookId != widget.bookId) {
+      if (_watchOwnsPlayback) {
+        setState(() {
+          _watchOwnsPlayback = false;
+          _playing = false;
+        });
+        _keepReaderAwake(false);
+      }
+      return;
+    }
+    if (!_playbackAllowed && state.playing) {
+      _watchOwnsPlayback = true;
+      unawaited(_watchCommand('pause'));
+      return;
+    }
+    final index = widget.package.tracks.indexWhere(
+      (t) => t.chapter == state.chapter,
+    );
+    if (index < 0) return;
+    final starting = state.playing && (!_watchOwnsPlayback || !_playing);
+    setState(() {
+      _watchOwnsPlayback = true;
+      _index = index;
+      _position = state.position;
+      _readingRate = state.readingRate;
+      if (state.duration > Duration.zero) _trackDuration = state.duration;
+      _playing = state.playing;
+      _loop = state.readerLoop;
+      _loopCueIndex = state.paragraph - 1;
+      _feedbackMessage = null;
+      _loaded = false;
+    });
+    if (widget.playbackRate != _readingRate) {
+      widget.onPlaybackRateChanged?.call(_readingRate);
+    }
+    if (starting) unawaited(widget.beforePlay());
+    _keepReaderAwake(_playing);
+    // Native position events use the existing cue/word follow path.
+    _follow(_position);
+  }
+
   Future<void> _repeatAt(Duration start) async {
-    if (_loopSeeking) return;
+    if (_loopSeeking || !_playbackAllowed) return;
     _loopSeeking = true;
     try {
       await _player.seek(start);
       _lastCue = null;
       _follow(start);
+      await _player.setPlaybackRate(_readingRate);
+      if (!_playbackAllowed) return;
       await _player.resume();
     } finally {
       _loopSeeking = false;
@@ -516,6 +750,7 @@ class RecordedLibraryAudioControlsState
     if (!mounted || revision != _navigationRevision) return;
     _navigationUnavailable = target == null;
     _chapterStartPending = false;
+    _feedbackMessage = null;
     if (target != null) {
       await _seekSelected(requestedCursor: target, force: true);
       await _save();
@@ -524,7 +759,11 @@ class RecordedLibraryAudioControlsState
     if (mounted) setState(() {});
   }
 
-  Future<void> playFromParagraph(String cursor) async {
+  Future<void> playFromParagraph(
+    String cursor, {
+    int startOffset = 0,
+    String? paragraphCursor,
+  }) async {
     await _ready;
     if (!mounted) return;
     _navigationUnavailable = false;
@@ -539,8 +778,32 @@ class RecordedLibraryAudioControlsState
       }
       return;
     }
-    await _seekSelected(requestedCursor: cursor, force: true);
-    await _play();
+    var selected = await _seekSelected(
+      requestedCursor: cursor,
+      sourceOffset: startOffset,
+      force: true,
+    );
+    if (!selected && startOffset > 0) {
+      final fallback = paragraphCursor ?? cursor;
+      if (fallback != cursor) {
+        final earlier = await widget.load(fallback);
+        if (!mounted) return;
+        selected = await _seekSelected(
+          requestedCursor: fallback,
+          sourceOffset: earlier?.text.length ?? 0,
+          force: true,
+        );
+      }
+      if (!selected) {
+        selected = await _seekSelected(requestedCursor: fallback, force: true);
+      }
+      if (selected && mounted)
+        setState(
+          () => _feedbackMessage =
+              'Starting at the nearest available earlier point.',
+        );
+    }
+    if (selected) await _play();
   }
 
   Future<void> playMarginNotesFromParagraph(String cursor) async {
@@ -640,7 +903,17 @@ class RecordedLibraryAudioControlsState
         );
     _lastRequestedCursor = cursor;
     _lastCue = null;
-    if (_loaded) await _player.seek(_position);
+    if (_watchOwnsPlayback) {
+      await _watchCommand(
+        'seek',
+        chapter: widget.package.tracks[_index].chapter,
+        position: _position,
+        play: false,
+      );
+      await _watchCommand('loop:off');
+    } else if (_loaded) {
+      await _player.seek(_position);
+    }
     _loop = null;
     _loopStart = null;
     _loopEnd = null;
@@ -648,13 +921,15 @@ class RecordedLibraryAudioControlsState
     await _play();
   }
 
-  Future<void> _seekSelected({
+  Future<bool> _seekSelected({
     String? requestedCursor,
+    int sourceOffset = 0,
     String? requestedRole,
     bool force = false,
   }) async {
     final cursor = requestedCursor ?? widget.selectedCursor();
-    if (cursor == null || (!force && cursor == _lastRequestedCursor)) return;
+    if (cursor == null || (!force && cursor == _lastRequestedCursor))
+      return false;
     _lastRequestedCursor = cursor;
     final entries = _cueItems.entries.where((entry) {
       if (entry.value.sourceCursor != cursor) return false;
@@ -666,7 +941,7 @@ class RecordedLibraryAudioControlsState
       if (track == null || cueIndex == null) return false;
       return widget.package.tracks[track].cues[cueIndex].role == requestedRole;
     }).toList();
-    if (entries.isEmpty) return;
+    if (entries.isEmpty) return false;
     final parts = entries.first.key.split(':');
     final index = int.parse(parts[0]);
     final cue = widget.package.tracks[index].cues[int.parse(parts[1])];
@@ -678,14 +953,51 @@ class RecordedLibraryAudioControlsState
         _loaded = false;
       });
     }
-    _position = entries.first.key.contains(':opening:')
+    if (sourceOffset > 0 &&
+        _words(entries.first.value.text) != _words(cue.text)) {
+      setState(
+        () => _feedbackMessage =
+            'Word timing is not yet available at this selection.',
+      );
+      return false;
+    }
+    final destination = sourceOffset > 0
+        ? recordedWordSeekPosition(cue, sourceOffset)
+        : entries.first.key.contains(':opening:')
         ? Duration.zero
         : cue.start;
+    if (destination == null) {
+      setState(
+        () => _feedbackMessage =
+            'Word timing is not yet available at this selection.',
+      );
+      return false;
+    }
+    if (_feedbackMessage != null) setState(() => _feedbackMessage = null);
     _lastCue = null;
-    if (_loaded) await _player.seek(_position);
+    // Ignore the old track position while the native seek is completing.
+    _changingSource = true;
+    try {
+      if (_watchOwnsPlayback) {
+        if (!await _watchCommand(
+          'seek',
+          chapter: widget.package.tracks[_index].chapter,
+          position: destination,
+          play: false,
+        ))
+          return false;
+      } else if (_loaded) {
+        await _player.seek(destination);
+      }
+      _position = destination;
+    } finally {
+      _changingSource = false;
+    }
     _loop = null;
     _loopStart = null;
     _loopEnd = null;
+    if (_watchOwnsPlayback) await _watchCommand('loop:off');
+    return true;
   }
 
   static String _words(String text) => text
@@ -716,6 +1028,11 @@ class RecordedLibraryAudioControlsState
         );
         if (match >= 0) {
           _cueItems['$track:$i'] = items[match];
+          if (i == 0) {
+            for (final heading in recordedChapterOpeningItems(items, match)) {
+              _cueItems['$track:$i:opening:${heading.sourceCursor}'] = heading;
+            }
+          }
           for (final alias in cues[i].openingSources) {
             final aliasMatch = recordedCueItemIndex(alias, items);
             if (aliasMatch >= 0 &&
@@ -728,6 +1045,27 @@ class RecordedLibraryAudioControlsState
           nextItem = match;
           var phraseItem = match;
           for (var j = 0; j < cues[i].phrases.length; j++) {
+            final timedWord = cues[i].phrases[j];
+            final offset = timedWord.sourceOffset;
+            final end = timedWord.sourceEndOffset;
+            final source = items[match];
+            if (offset != null && end != null) {
+              if (offset >= 0 &&
+                  end <= source.text.length &&
+                  offset < end &&
+                  _words(source.text.substring(offset, end)) ==
+                      _words(timedWord.text)) {
+                _phraseItems['$track:$i:$j'] = LibrarySpeechItem(
+                  cursor: source.cursor,
+                  sourceCursor: source.sourceCursor,
+                  nextCursor: source.nextCursor,
+                  text: source.text,
+                  startOffset: offset,
+                  sourceLength: source.text.length,
+                );
+              }
+              continue;
+            }
             final wantedWords = _words(
               cues[i].phrases[j].text,
             ).split(' ').where((word) => word.isNotEmpty).take(8).toList();
@@ -852,7 +1190,7 @@ class RecordedLibraryAudioControlsState
           ? cue.start + cue.phrases[phraseIndex + 1].start
           : active + 1 < cues.length
           ? cues[active + 1].start
-          : start;
+          : _trackDuration;
       final span = (end - start).inMilliseconds;
       final progress = span <= 0
           ? 0.0
@@ -961,10 +1299,12 @@ class RecordedLibraryAudioControlsState
   @override
   void initState() {
     super.initState();
+    _readingRate = normalizeSpeechRate(widget.playbackRate);
     WidgetsBinding.instance.addObserver(this);
+    WatchLibraryCatalog.playback.addListener(_watchPlaybackChanged);
     _subscriptions.add(
       _player.onPositionChanged.listen((position) {
-        if (!mounted || _changingSource) return;
+        if (!mounted || _changingSource || _watchOwnsPlayback) return;
         setState(() => _position = position);
         if (_playing) {
           if (!_includeMarginNotes &&
@@ -996,11 +1336,13 @@ class RecordedLibraryAudioControlsState
       }),
     );
     _subscriptions.add(
-      _player.onPlayerComplete.listen((_) => unawaited(_complete())),
+      _player.onPlayerComplete.listen((_) {
+        if (!_watchOwnsPlayback) unawaited(_complete());
+      }),
     );
     _subscriptions.add(
       _player.onPlayerStateChanged.listen((state) {
-        if (!mounted) return;
+        if (!mounted || _watchOwnsPlayback) return;
         setState(() => _playing = state == PlayerState.playing);
         _keepReaderAwake(_playing);
         _publish();
@@ -1012,6 +1354,8 @@ class RecordedLibraryAudioControlsState
   Future<void> _initializePosition() async {
     await Future.wait([_restore(), _mapCues()]);
     if (!mounted) return;
+    _watchPlaybackChanged();
+    if (_watchOwnsPlayback) return;
     final cursor = widget.readerCursor?.call();
     if (cursor != null) {
       await _seekSelected(requestedCursor: cursor, force: true);
@@ -1023,7 +1367,9 @@ class RecordedLibraryAudioControlsState
     final raw = await AppSettingsService.instance.loadRawSetting(_setting);
     if (!mounted || raw == null) return;
     try {
-      final saved = jsonDecode(raw) as Map<String, dynamic>;
+      final saved = widget.package.remapSavedPosition(
+        jsonDecode(raw) as Map<String, dynamic>,
+      );
       final index = widget.package.tracks.indexWhere(
         (t) => t.chapter == saved['chapter'],
       );
@@ -1038,14 +1384,23 @@ class RecordedLibraryAudioControlsState
     } catch (_) {}
   }
 
-  Future<void> _save() => AppSettingsService.instance.saveRawSetting(
-    _setting,
-    jsonEncode({
-      'chapter': widget.package.tracks[_index].chapter,
-      'position_ms': _position.inMilliseconds,
-      'include_margin_notes': _includeMarginNotes,
-    }),
-  );
+  Future<void> _save() {
+    // The native owner persists its own position; stale shelf revisions must
+    // never rewind it when a reader is replaced or closed.
+    if (_watchOwnsPlayback) return Future.value();
+    return AppSettingsService.instance.saveRawSetting(
+      _setting,
+      jsonEncode({
+        'chapter': widget.package.tracks[_index].chapter,
+        'position_ms': _position.inMilliseconds,
+        'include_margin_notes': _includeMarginNotes,
+        'reading_rate': _readingRate,
+        if (widget.package.timelineVersion != null)
+          'timeline_version': widget.package.timelineVersion,
+      }),
+    );
+  }
+
   void _publish() => _lease?.update(
     NarrationNowPlaying(
       title: widget.package.title,
@@ -1056,7 +1411,36 @@ class RecordedLibraryAudioControlsState
     ),
   );
   Future<void> _play() async {
-    if (_busy) return;
+    if (_busy || !_playbackAllowed) return;
+    final desiredReadingRate = _readingRate;
+    final remote = WatchLibraryCatalog.playback.value;
+    if (remote != null &&
+        remote.nativePlayback &&
+        remote.bookId != widget.bookId) {
+      await _ready;
+      if (!mounted) return;
+      final chapter = widget.package.tracks[_index].chapter;
+      final position = _position;
+      final loop = _loop;
+      if (!await _watchCommand('libraryBook:${widget.bookId}')) return;
+      if (!await _watchCommand(
+        'seek',
+        chapter: chapter,
+        position: position,
+        play: false,
+      ))
+        return;
+      await _watchCommand(
+        'loop:${loop == 'paragraph' ? 'verse' : loop ?? 'off'}',
+      );
+    }
+    if (_watchOwnsPlayback) {
+      await widget.beforePlay();
+      if (!_playbackAllowed) return;
+      await _watchCommand('rate:$desiredReadingRate');
+      await _watchCommand('start');
+      return;
+    }
     setState(() => _busy = true);
     try {
       await _ready;
@@ -1070,6 +1454,7 @@ class RecordedLibraryAudioControlsState
         return;
       }
       await widget.beforePlay();
+      if (!_playbackAllowed) return;
       if (_chapterStartPending) {
         _position = Duration.zero;
       } else {
@@ -1084,6 +1469,7 @@ class RecordedLibraryAudioControlsState
           previous: () => unawaited(_previousChapter(play: true)),
         ),
       );
+      await WatchLibraryCatalog.pauseNative();
       await NarrationMediaSession.instance.activateAudioSession(
         'recorded library audio',
       );
@@ -1104,7 +1490,12 @@ class RecordedLibraryAudioControlsState
       _chapterStartPending = false;
       if (!_includeMarginNotes) await _skipMarginNoteAt(_position);
       _follow(_position);
+      await _player.setPlaybackRate(_readingRate);
+      if (!_playbackAllowed) return;
       await _player.resume();
+      if (mounted && _feedbackMessage != null) {
+        setState(() => _feedbackMessage = null);
+      }
       _publish();
     } catch (error) {
       if (mounted) {
@@ -1125,6 +1516,10 @@ class RecordedLibraryAudioControlsState
   }
 
   Future<void> _pause() async {
+    if (_watchOwnsPlayback) {
+      await _watchCommand('pause');
+      return;
+    }
     await _player.pause();
     await _save();
   }
@@ -1134,11 +1529,22 @@ class RecordedLibraryAudioControlsState
 
   Future<void> _select(int index, {bool play = false}) async {
     if (_busy) return;
+    play = play && _playbackAllowed;
+    if (_watchOwnsPlayback) {
+      await _watchCommand(
+        'seek',
+        chapter: widget.package.tracks[index].chapter,
+        position: Duration.zero,
+        play: play,
+      );
+      return;
+    }
     setState(() => _playing = false);
     await _player.stop();
     if (!mounted) return;
     setState(() {
       _chapterStartPending = true;
+      _feedbackMessage = null;
       _lastRequestedCursor = widget.selectedCursor();
       _navigationUnavailable = false;
       _index = index;
@@ -1165,6 +1571,10 @@ class RecordedLibraryAudioControlsState
   }
 
   Future<void> _complete() async {
+    if (!_playbackAllowed) {
+      await _pause();
+      return;
+    }
     if (_loop == 'book') {
       if (_index + 1 < widget.package.tracks.length) {
         await _next();
@@ -1197,6 +1607,7 @@ class RecordedLibraryAudioControlsState
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    WatchLibraryCatalog.playback.removeListener(_watchPlaybackChanged);
     _keepReaderAwake(false);
     _saveTimer?.cancel();
     unawaited(_save());
@@ -1211,7 +1622,7 @@ class RecordedLibraryAudioControlsState
   String get _loopLabel => _loop == 'book'
       ? 'Looping ${widget.package.title}'
       : _loop == 'paragraph'
-      ? 'Looping chapter ${widget.package.tracks[_index].chapter}, paragraph ${_loopCueIndex ?? 1}'
+      ? 'Looping chapter ${widget.package.tracks[_index].chapter}, paragraph ${(_loopCueIndex ?? 0) + 1}'
       : 'Looping chapter ${widget.package.tracks[_index].chapter}';
 
   @override
@@ -1219,65 +1630,93 @@ class RecordedLibraryAudioControlsState
     top: false,
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_feedbackMessage != null)
-            Semantics(
-              liveRegion: true,
-              child: Text(
-                _feedbackMessage!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
-          Row(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final inlineSpeed =
+              constraints.maxWidth >=
+              (widget.package.hasMarginNotes ? 408 : 360) +
+                  (MediaQuery.textScalerOf(context).scale(14) / 14 - 1).clamp(
+                        0,
+                        3,
+                      ) *
+                      150;
+          final speed = ReadingSpeedButton(
+            speed: _readingRate,
+            onChanged: (rate) => unawaited(_setReadingRate(rate)),
+          );
+          return Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                tooltip: 'Previous chapter',
-                onPressed: _busy || (_index == 0 && _position == Duration.zero)
-                    ? null
-                    : () => unawaited(_previousChapter(play: _playing)),
-                icon: const Icon(Icons.skip_previous),
-              ),
-              TextButton.icon(
-                onPressed: _busy
-                    ? null
-                    : () => unawaited(_playing ? _pause() : _play()),
-                icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
-                label: Text(_playing ? 'Pause' : 'Play'),
-              ),
-              IconButton(
-                tooltip: 'Next chapter',
-                onPressed: _busy || _index + 1 >= widget.package.tracks.length
-                    ? null
-                    : () => unawaited(_select(_index + 1, play: _playing)),
-                icon: const Icon(Icons.skip_next),
-              ),
-              if (widget.package.hasMarginNotes)
-                IconButton(
-                  tooltip: _includeMarginNotes
-                      ? 'Margin notes on'
-                      : 'Margin notes off',
-                  onPressed: _busy
-                      ? null
-                      : () => unawaited(_toggleMarginNotes()),
-                  isSelected: _includeMarginNotes,
-                  icon: const Icon(Icons.speaker_notes_off_outlined),
-                  selectedIcon: const Icon(Icons.speaker_notes_outlined),
+              if (_feedbackMessage != null)
+                Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    _feedbackMessage!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
                 ),
-              const Spacer(),
-              IconButton(
-                tooltip: _loop == null ? 'Loop off' : _loopLabel,
-                onPressed: _chooseLoop,
-                isSelected: _loop != null,
-                icon: const Icon(Icons.repeat),
-                selectedIcon: const Icon(Icons.repeat_on),
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Previous chapter',
+                    onPressed:
+                        _busy || (_index == 0 && _position == Duration.zero)
+                        ? null
+                        : () => unawaited(_previousChapter(play: _playing)),
+                    icon: const Icon(Icons.skip_previous),
+                  ),
+                  TextButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => unawaited(_playing ? _pause() : _play()),
+                    icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
+                    label: Text(_playing ? 'Pause' : 'Play'),
+                  ),
+                  IconButton(
+                    tooltip: 'Next chapter',
+                    onPressed:
+                        _busy || _index + 1 >= widget.package.tracks.length
+                        ? null
+                        : () => unawaited(_select(_index + 1, play: _playing)),
+                    icon: const Icon(Icons.skip_next),
+                  ),
+                  if (widget.package.hasMarginNotes)
+                    IconButton(
+                      tooltip: _includeMarginNotes
+                          ? 'Margin notes on'
+                          : 'Margin notes off',
+                      onPressed: _busy
+                          ? null
+                          : () => unawaited(_toggleMarginNotes()),
+                      isSelected: _includeMarginNotes,
+                      icon: const Icon(Icons.speaker_notes_off_outlined),
+                      selectedIcon: const Icon(Icons.speaker_notes_outlined),
+                    ),
+                  if (inlineSpeed &&
+                      Theme.of(context).platform == TargetPlatform.macOS)
+                    Expanded(child: Center(child: speed))
+                  else ...[
+                    if (inlineSpeed) speed,
+                    const Spacer(),
+                  ],
+                  IconButton(
+                    tooltip: _loop == null ? 'Loop off' : _loopLabel,
+                    onPressed: _chooseLoop,
+                    isSelected: _loop != null,
+                    icon: const Icon(Icons.repeat),
+                    selectedIcon: const Icon(Icons.repeat_on),
+                  ),
+                ],
               ),
+              if (!inlineSpeed)
+                Align(alignment: Alignment.centerLeft, child: speed),
+              if (_loop != null)
+                Text(_loopLabel, style: Theme.of(context).textTheme.labelSmall),
             ],
-          ),
-          if (_loop != null)
-            Text(_loopLabel, style: Theme.of(context).textTheme.labelSmall),
-        ],
+          );
+        },
       ),
     ),
   );

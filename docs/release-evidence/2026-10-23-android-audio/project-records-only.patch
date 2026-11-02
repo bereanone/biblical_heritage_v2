@@ -1,0 +1,57 @@
+--- a/BUGS.md
++++ b/BUGS.md
+@@ -12,6 +12,36 @@
+ Still open: source-specific verification of SL27 and the anomalous EPUB cohort, unresolved Greek/Strong's candidates, desktop long-session/recovery acceptance, physical-device note creation/playback and heat/battery checks, and release packaging/store readiness. No TestFlight upload is established by this review.
+ 
+ Automated fixtures expecting an empty, explicitly seeded catalog now run without automatic mobile bundled-book provisioning. Existing assertions remain intact; mobile delivery remains covered separately.
++
++## Verification Needed — October 23, 2026
++
++### Sony Android: references play, but Bible Scripture stays silent
++
++**Report:** An existing user of the original free app updated with the bottom “Keep Current Data” choice. Bible Explorer speaks the book/chapter but not the Scripture text; hashtag playback speaks both references and text. Toggling Read aloud did not help. Sony model, Android version and installed app version are unknown.
++
++**Device evidence:** Dean's connected Samsung was updated in place to the completed 2.0.6/build 153 runtime/assets (test-signed install number 2153, preserving its October 5 first-install date). Dean confirmed Bible playback works after the same bottom choice. The separate Ministry Test app was untouched. The installation choice alone is therefore not an established cause. No actual Sony failure was reproduced.
++
++**Investigation:** Bible playback uses separate chapter/cue MediaPlayers and asynchronous seeking; hashtags use prepared verse/reference clips. A deliberately suppressed seek-complete callback makes the original bridge wait indefinitely after announcements. This is fault injection, not evidence that Sony actually loses that callback. No setting was found that intentionally enables references while muting Scripture text. Cached chapter corruption is a second unconfirmed explanation; the old path accepted any nonempty chapter cache file.
++
++**Local safeguards, not shipped:** A pending seek now times out after ten seconds of active reading with a clear error; it never resumes from a guessed verse position. Async playback exceptions and stale callbacks are guarded, and error reporting survives cleanup exceptions. Chapter cache files must match the catalog SHA-256; damaged cache is replaced atomically from verified bundled audio. Unavailable or invalid source audio reports an error and is not promoted.
++
++**Verification:** Native deterministic harness: 19 scenarios passed, including missing/late callbacks, pause/resume, rapid seeks, loops and cleanup failure. These are simulated branches, not a Sony/Android device matrix. Chapter-cache tests plus the existing narrator test: 6 passed; focused Dart analysis found no issues. Settings work below is separate from diagnosing this report. No candidate package was built, installed or released.
++
++**Remaining:** Check a next-build candidate on a physical phone, including audible announcements-to-Scripture transitions, seek/loop/speed controls and saved settings. The remote Sony report remains open until a failure is observed or that user verifies a remedy. Do not advise uninstalling to diagnose it.
++
++## Open Bugs — October 23, 2026
++
++### Existing free-user access must survive state writes and support reinstall recovery
++
++**Confirmed source gap:** A billing write could save access state before upgrade eligibility was captured. A restart in that interval could lose the “previous install” eligibility path. The existing local access record is also in Android no-backup app storage, so uninstall can remove it. The original app was free: there is no original paid purchase for Google Play Restore to recover.
++
++**Local candidate, not shipped:** Every access-state write captures existing-user eligibility. A dedicated Google Block Store marker records only established existing-free access, with cloud backup explicitly disabled and app-wide backup still disabled. Valid recovered markers restore local free access; absent or invalid markers never grant access. Existing local access remains usable if recovery is unavailable. Native startup enrolls qualifying existing users even when the Dart billing switch is off, without connecting billing or creating state for new users. If recovery is unavailable, paid Restore and an explicit trial remain available; purchases wait for a successful recovery check and the UI explains why.
++
++**Verification:** 23 JVM policy/recovery tests and 8 Flutter purchase-service tests passed. Native purchase/recovery production sources compiled against the real Android, Flutter, Billing and Block Store 16.4.0 APIs. Independent review caught and corrected a recovery-outage branch that bypassed paid Restore during an active trial. Together with audio/settings/cache checks, 77 focused tests passed; the phone render was an additional component check. No full app build or device recovery test was performed.
++
++**Limits:** The user must open the upgraded app and successfully enroll before uninstalling. Google documents same-device uninstall retention when device Backup is enabled, with package/signature isolation. This is not an account-based guarantee, does not recover an unenrolled original install, and does not establish factory-reset/cross-device recovery. Cloud upload is disabled, but Google may transfer the marker during a user-initiated device restore. No real Block Store write or uninstall/reinstall experiment was performed on Dean's app. Android source and tests are local candidates; physical same-signature recovery acceptance remains required. Official behavior: https://developer.android.com/identity/block-store.
++
++**Review artifacts:** `docs/release-evidence/2026-10-23-android-audio/` contains scoped patches, test evidence and a rendered settings preview. Preserve the pre-existing dirty checkout; these patches describe only this session's changes.
+ 
+ ## Open Bugs — October 22, 2026
+ 
+--- a/PLANNED_TASKS.md
++++ b/PLANNED_TASKS.md
+@@ -19,9 +19,13 @@
+ 
+ ## Make Bible audio controls obvious on the phone
+ 
+-**Status:** Deferred at Dean's request, 2026-09-25.
++**Status:** Local next-build candidate implemented at Dean's request, 2026-10-23; supersedes the September 25 deferral. Not packaged, installed or shipped.
+ 
+-Dean found the current Bible/audio screen unclear about what to press. Make the
++The bottom-right gear menu now opens **Bible Audio Settings**. Long-press Play opens the same panel. Read aloud, speed, independent recorded book/chapter/verse announcement switches and the pronunciation editor are grouped there. Audio setup is removed from the Bible autoscroll and loop popups; existing saved keys/values and other readers' defaults remain intact. Turning Read aloud off pauses playback. Pronunciation text clearly explains that edits do not change the prerecorded Bible voice.
++
++Verification: 21 focused tests passed; targeted analysis found only the pre-existing unused import in `bible_explorer_screen.dart`. A Flutter-rendered 390×844 phone preview was inspected without clipping (`docs/release-evidence/2026-10-23-android-audio/bible-audio-settings-phone.png`). Component rendering is not installed-device acceptance. Dean should review the panel in the next test build. The Sony playback report remains a separate open verification item in `BUGS.md`.
++
++Original request: Dean found the current Bible/audio screen unclear about what to press. Make the
+ primary Play/Pause action visually prominent and plainly labeled in the ordinary
+ Bible reader. Keep the bundled recorded-Bible path easy to find without a
+ Utilities import step. Check the design on the phone with Dean before calling it

@@ -1,3 +1,8 @@
+import 'dart:async';
+import '../features/library/presentation/watch_library_catalog.dart';
+import '../features/library/presentation/watch_library_reader_coordinator.dart';
+import '../features/library/presentation/library_book_reader_screen.dart';
+import '../features/library/data/library_catalog_service.dart';
 import '../features/purchases/data/android_purchase_service.dart';
 import '../features/purchases/presentation/android_access_gate.dart';
 import 'package:flutter/material.dart';
@@ -29,6 +34,7 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
   bool _temperatureNoticeVisible = false;
   final _navigator = GlobalKey<NavigatorState>();
   late final MacMemoryReminderService _memoryReminders;
+  late final WatchLibraryReaderCoordinator _watchLibraryReader;
   AppThemeMode _themeMode = AppThemeMode.sepia;
   AppVisualSettings? _visualSettings;
   bool _loadedTheme = false;
@@ -36,6 +42,11 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
   @override
   void initState() {
     super.initState();
+    WatchLibraryCatalog.initialize();
+    _watchLibraryReader = WatchLibraryReaderCoordinator(
+      playback: WatchLibraryCatalog.playback,
+      openBook: _openWatchLibraryBook,
+    )..start();
     SynthesisThermalGate.instance.waitingForTemperature.addListener(
       _temperatureChanged,
     );
@@ -46,6 +57,7 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
 
   @override
   void dispose() {
+    _watchLibraryReader.dispose();
     SynthesisThermalGate.instance.waitingForTemperature.removeListener(
       _temperatureChanged,
     );
@@ -54,6 +66,29 @@ class _StudyBibleAppState extends State<StudyBibleApp> {
       _handleThemeModeChanged,
     );
     super.dispose();
+  }
+
+  Future<void> _openWatchLibraryBook(String bookId) async {
+    final item = await LibraryCatalogService.instance.loadItemById(bookId);
+    if (!mounted ||
+        item == null ||
+        WatchLibraryCatalog.playback.value?.bookId != bookId) {
+      return;
+    }
+    final navigator = _navigator.currentState;
+    if (navigator == null) return;
+    unawaited(
+      navigator.push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => LibraryBookReaderScreen(
+            item: item,
+            themeMode: _themeMode,
+            onThemeChanged: _setThemeMode,
+            onReturnToBible: () => navigator.pop(),
+          ),
+        ),
+      ),
+    );
   }
 
   void _temperatureChanged() {

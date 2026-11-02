@@ -165,6 +165,53 @@ double _compositedContrastRatio(
 }
 
 void main() {
+  testWidgets('verified Lessons on Faith EPUB can be selected for import', (
+    tester,
+  ) async {
+    final catalog = PioneerSourceCatalog.fromJson({
+      'authors': [
+        {
+          'author_id': 'at_jones',
+          'author_name': 'A. T. Jones',
+          'works': [
+            {
+              'work_id': 'lessons_on_faith',
+              'title': 'Lessons on Faith',
+              'abbreviation': 'LOF',
+              'source_type': 'epub',
+              'source_url': 'https://example.invalid/LOF.epub',
+              'availability_status': 'available',
+              'verified': true,
+              'importable': true,
+            },
+          ],
+        },
+      ],
+    });
+    final lessons = catalog.workById('lessons_on_faith')!;
+    expect(lessons.isImportable, isTrue);
+    expect(lessons.textReadAvailable, isFalse);
+    await _pumpScreen(tester, catalog: catalog);
+    await _openAuthor(tester, lessons.authorId);
+    final choice = find.byKey(
+      ValueKey<String>(
+        'pioneer_work_checkbox_${lessons.authorId}_${lessons.id}',
+      ),
+    );
+    expect(tester.widget<Checkbox>(choice).onChanged, isNotNull);
+    await tester.tap(choice);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Checkbox>(choice).value, isTrue);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Import Selected'),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('shows an author list before work rows', (tester) async {

@@ -6,9 +6,11 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../bootstrap/sandbox_bootstrap.dart';
+import '../bootstrap/library_root_service.dart';
 import '../bootstrap/bundled_content_platform.dart';
 import 'elibrary_schema.dart';
 import 'bundled_library_content.dart';
+import 'elibrary_publisher_text_corrections.dart';
 
 const bool kLogKnownELibrarySqfliteFalsePositives = false;
 
@@ -77,15 +79,44 @@ class ELibraryDatabase {
     );
     if (bundledContentEnabled) {
       final parent = p.dirname(dbPath);
-      final libraryRoot = p.basename(parent) == 'Databases' ? p.dirname(parent) : parent;
+      final libraryRoot = p.basename(parent) == 'Databases'
+          ? p.dirname(parent)
+          : parent;
       try {
-        await BundledLibraryContent.ensure(destination: db, libraryRoot: libraryRoot);
+        await BundledLibraryContent.ensure(
+          destination: db,
+          libraryRoot: libraryRoot,
+        );
+        // An early startup lookup can predate creation of the book resources.
+        LibraryRootService.instance.invalidateCachedSelection();
       } catch (error, stack) {
         debugPrint('Bundled library preparation failed: $error');
         await db.close();
-        Error.throwWithStackTrace(const BundledLibraryPreparationException(), stack);
+        Error.throwWithStackTrace(
+          const BundledLibraryPreparationException(),
+          stack,
+        );
       }
     }
+    await ELibraryPublisherTextCorrections.apply(db);
+    if (!bundledContentEnabled) {
+      final parent = p.dirname(dbPath);
+      final libraryRoot = p.basename(parent) == 'Databases'
+          ? p.dirname(parent)
+          : parent;
+      try {
+        await BundledLibraryContent.ensure(
+          destination: db,
+          libraryRoot: libraryRoot,
+          onlyItemIds: {'library_item_publisher_lof_complete_2017'},
+        );
+      } catch (error) {
+        // A failed optional delivery must not block the existing desktop library.
+        debugPrint('Lessons reading edition preparation deferred: $error');
+      }
+    }
+    // Desktop optional delivery may have just added the affected edition.
+    await ELibraryPublisherTextCorrections.apply(db);
     return db;
   }
 

@@ -1,0 +1,7 @@
+{
+  "grandfather_cutoff_ms": 1792704812236,
+  "cutoff_status": "candidate build time; refresh before final public rollout",
+  "billing": true,
+  "production_signing": true,
+  "public_release_authorized": false
+}

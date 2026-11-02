@@ -1,0 +1,15 @@
+{
+  "version": "2.0.6",
+  "build": 151,
+  "bundle_bytes": 3055880205,
+  "AOT_ABIs": [
+    "arm64-v8a",
+    "armeabi-v7a",
+    "x86_64"
+  ],
+  "pack_assets_sha256_matched": 1333,
+  "public_key_in_primary_dex": true,
+  "source_billing_enabled": true,
+  "google_purchase_tested": false,
+  "uploaded": false
+}

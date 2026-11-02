@@ -1,0 +1,114 @@
+[
+  {
+    "path": "BUGS.md",
+    "sha256": "751536868d366f9f5a7e2c975f6738593ed1465c592f06d85a897f0d77548581"
+  },
+  {
+    "path": "PLANNED_TASKS.md",
+    "sha256": "070729890de13c9785e713c12da3f8707427605591351611fd6800f7bb1d5a39"
+  },
+  {
+    "path": "android/app/build.gradle.kts",
+    "sha256": "a927d3e4eba96c43059bbfeca60fd6591dd525151078510d7d81c32dfe0e7c67"
+  },
+  {
+    "path": "android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessPolicy.kt",
+    "sha256": "416bc2b45ed854c53e3cad7e115f48a16e15c727d83a98b75ef577a8596902cd"
+  },
+  {
+    "path": "android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessRecovery.kt",
+    "sha256": "704697157cace7a341b00617182b3ebf186edb671e0e043746e5b1ce8c189d0d"
+  },
+  {
+    "path": "android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayLegacyBlockStore.kt",
+    "sha256": "ccd706b08a95db8ca0ce0975e6e41c35894b714b78ea15228350cf5a417c8204"
+  },
+  {
+    "path": "android/app/src/main/kotlin/com/deanbowen/bibleappmac/PlayPurchaseBridge.kt",
+    "sha256": "d942b298dda0479f1bfe297f85932a646020a627160d9b71de4c65866f6a2ea0"
+  },
+  {
+    "path": "android/app/src/main/kotlin/com/deanbowen/bibleappmac/RecordedBibleAudioBridge.kt",
+    "sha256": "d0219b4d9454b81ef45bc3286b101ff78c286afad26981fc7dd7ebce85e27c18"
+  },
+  {
+    "path": "android/app/src/test/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessPolicyTest.kt",
+    "sha256": "c89ad54728a5553cad55c7a86e3e214563dca705cc6e1462ab96121005780bfb"
+  },
+  {
+    "path": "android/app/src/test/kotlin/com/deanbowen/bibleappmac/PlayLegacyAccessRecoveryTest.kt",
+    "sha256": "92be00885bf14088f6a7514822d8c90ddcf6d615963ae036b67439eec95b1bc7"
+  },
+  {
+    "path": "lib/features/library/presentation/mac_reader_autoscroll_controls.dart",
+    "sha256": "70007dc8129473627709aa167b639b0209113654edd044ab4b0793f0bc337f6e"
+  },
+  {
+    "path": "lib/features/library/presentation/reader_narration_button.dart",
+    "sha256": "77e0a1d8b53f142744b8b94ff15eb219ac3b8816a1b94b2fc78546ddb486203b"
+  },
+  {
+    "path": "lib/features/purchases/data/android_purchase_service.dart",
+    "sha256": "ed5404cbd878dde310d813a65b5ca648e0a8ec620812cfcdfe55f3216c9d88e7"
+  },
+  {
+    "path": "lib/features/reader/presentation/bible_audio_settings.dart",
+    "sha256": "669b7a1b58c845456ad6991ae6cad39764406d8bfa32a264fd9bf2c783694abe"
+  },
+  {
+    "path": "lib/features/reader/presentation/bible_explorer_navigation.dart",
+    "sha256": "a577022ef765243826e252914a67634952b2e6533e1116078f4baf4bc73eb9ae"
+  },
+  {
+    "path": "lib/features/reader/presentation/bible_explorer_screen.dart",
+    "sha256": "897524dbf4f30694ac2b5739de6a22f9d045be5e0a6cd9be286059a050866a26"
+  },
+  {
+    "path": "lib/features/reader/presentation/bible_loop_picker.dart",
+    "sha256": "a06616d4130c7283da672074f72cebab87b7d8b48e614e16c3f4dd7b91523a57"
+  },
+  {
+    "path": "lib/features/reader/presentation/bundled_bible_audio_narrator.dart",
+    "sha256": "01de3e8a02cc69ecafda6f224b8b6cfb692329a57c4ed6efb1f651a388ba2bf6"
+  },
+  {
+    "path": "lib/features/reader/presentation/bundled_bible_recording_cache.dart",
+    "sha256": "11992e4a1369b3673762a17d53faf5d7ffb4694491d089985e80141f0d04266d"
+  },
+  {
+    "path": "lib/features/reader/presentation/viewer_mode_popup.dart",
+    "sha256": "4abff8792dadd6f95bc62ec3256cfa99c6b90aa2b835fd5a0636ea722db17ba6"
+  },
+  {
+    "path": "test/features/purchases/android_purchase_service_test.dart",
+    "sha256": "149bea30f99dc56aecc36425aa60cf5c1d3e6e0bc208218b3197e91152432e9c"
+  },
+  {
+    "path": "test/features/reader/presentation/bible_audio_settings_test.dart",
+    "sha256": "fa0c6a56cfa268a44319d3f38636d6d04cee620d1f6e9eab31da4e9c9034866c"
+  },
+  {
+    "path": "test/features/reader/presentation/bundled_bible_recording_cache_test.dart",
+    "sha256": "efc040b54f0b333e642ea8ac150052a348d1288c7ddb6796a4c015d460323d88"
+  },
+  {
+    "path": "test/native/android_recorded_audio/Channel.kt",
+    "sha256": "1e59858a6d0291eb4499d39387f5faf188fbf40ba9dffca40e9652c48af6ff77"
+  },
+  {
+    "path": "test/native/android_recorded_audio/Media.kt",
+    "sha256": "3391e426531ccfb12c7b16198639ba5c9c2edf2c577c07eb15c4898187993611"
+  },
+  {
+    "path": "test/native/android_recorded_audio/Os.kt",
+    "sha256": "a5d928a852e8397568e83e89e765e4fe640f0c58a65388758f1cc07f83521fee"
+  },
+  {
+    "path": "test/native/android_recorded_audio/README.md",
+    "sha256": "f9f19cd679b74e90432bf96112808900764e1a50ba5ee9dad97459d8cf673c52"
+  },
+  {
+    "path": "test/native/android_recorded_audio/Regression.kt",
+    "sha256": "a47b8dd1359e69ca559d3aeca723dab8d41267a6a909af706bd427899c2f96ad"
+  }
+]

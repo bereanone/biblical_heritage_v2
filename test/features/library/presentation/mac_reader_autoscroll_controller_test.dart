@@ -20,6 +20,56 @@ class _Target implements ReaderAutoScrollTarget {
 }
 
 void main() {
+  test(
+    'toolbar silent session uses arrow speed steps despite saved audio setting',
+    () {
+      final target = _Target();
+      final controller = MacReaderAutoScrollController(
+        scrollTarget: target,
+        preferences: const MacAutoscrollPreferences(
+          audioEnabled: true,
+          lastNonzeroStep: 3,
+        ),
+        narrationControlsPacing: true,
+        driveFrames: false,
+      );
+      addTearDown(controller.dispose);
+      controller.toggle(silent: true);
+      expect(controller.audioEnabled, isTrue);
+      expect(controller.isNarrationMode, isFalse);
+      expect(controller.isPixelScrolling, isFalse);
+      expect(controller.signedStep, 0);
+      controller.advanceDownward();
+      expect(controller.isPixelScrolling, isTrue);
+      expect(controller.signedStep, 1);
+      controller.tick(Duration.zero);
+      controller.tick(const Duration(milliseconds: 20));
+      expect(target.offset, greaterThan(0));
+      controller.stopForManualInteraction();
+      expect(controller.isScrolling, isFalse);
+      controller.toggle();
+      expect(controller.isNarrationMode, isTrue);
+    },
+  );
+
+  test('Up from silent pause reverses the page without changing speech rate', () {
+    final target = _Target();
+    final controller = MacReaderAutoScrollController(
+      scrollTarget: target,
+      preferences: const MacAutoscrollPreferences(audioEnabled: true, speechRate: 0.75),
+      narrationControlsPacing: true,
+      driveFrames: false,
+    );
+    addTearDown(controller.dispose);
+    controller.toggle(silent: true);
+    controller.advanceUpward();
+    expect(controller.signedStep, -1);
+    expect(controller.speechRate, 0.75);
+    controller.tick(Duration.zero);
+    controller.tick(const Duration(milliseconds: 20));
+    expect(target.offset, lessThan(0));
+  });
+
   test('voice rate restores fine increments and bounds invalid settings', () {
     expect(
       MacAutoscrollPreferences.fromStoredValues(speechRate: '1.15').speechRate,

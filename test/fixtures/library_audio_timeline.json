@@ -1,0 +1,510 @@
+[
+  {
+    "name": "same source word despite a shorter recording",
+    "saved": {
+      "chapter": 2,
+      "position_ms": 1800,
+      "include_margin_notes": false
+    },
+    "migration": {
+      "to": "corrected",
+      "from_versions": [
+        "",
+        "earlier"
+      ],
+      "tracks": [
+        {
+          "chapter": 2,
+          "cues": [
+            {
+              "source_cursor": "70",
+              "start_ms": 1000,
+              "end_ms": 3000,
+              "words": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  500,
+                  5
+                ],
+                [
+                  1000,
+                  11
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "tracks": [
+      {
+        "chapter": 2,
+        "cues": [
+          {
+            "source_cursor": "70",
+            "start_ms": 400,
+            "end_ms": 1900,
+            "phrases": [
+              {
+                "start_ms": 0,
+                "source_start_offset": 0
+              },
+              {
+                "start_ms": 200,
+                "source_start_offset": 5
+              },
+              {
+                "start_ms": 700,
+                "source_start_offset": 11
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "expected": {
+      "chapter": 2,
+      "position_ms": 600,
+      "include_margin_notes": false,
+      "timeline_version": "corrected"
+    }
+  },
+  {
+    "name": "last reliable earlier word",
+    "saved": {
+      "chapter": 2,
+      "position_ms": 2100,
+      "include_margin_notes": false
+    },
+    "migration": {
+      "to": "corrected",
+      "from_versions": [
+        "",
+        "earlier"
+      ],
+      "tracks": [
+        {
+          "chapter": 2,
+          "cues": [
+            {
+              "source_cursor": "70",
+              "start_ms": 1000,
+              "end_ms": 3000,
+              "words": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  500,
+                  5
+                ],
+                [
+                  1000,
+                  11
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "tracks": [
+      {
+        "chapter": 2,
+        "cues": [
+          {
+            "source_cursor": "70",
+            "start_ms": 400,
+            "end_ms": 1900,
+            "phrases": [
+              {
+                "start_ms": 0,
+                "source_start_offset": 0
+              },
+              {
+                "start_ms": 200,
+                "source_start_offset": 5
+              },
+              {
+                "start_ms": 700,
+                "source_start_offset": 11
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "expected": {
+      "chapter": 2,
+      "position_ms": 1100,
+      "include_margin_notes": false,
+      "timeline_version": "corrected"
+    }
+  },
+  {
+    "name": "missing word backs up slightly",
+    "saved": {
+      "chapter": 2,
+      "position_ms": 2100,
+      "include_margin_notes": false
+    },
+    "migration": {
+      "to": "corrected",
+      "from_versions": [
+        "",
+        "earlier"
+      ],
+      "tracks": [
+        {
+          "chapter": 2,
+          "cues": [
+            {
+              "source_cursor": "70",
+              "start_ms": 1000,
+              "end_ms": 3000,
+              "words": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  500,
+                  5
+                ],
+                [
+                  1000,
+                  11
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "tracks": [
+      {
+        "chapter": 2,
+        "cues": [
+          {
+            "source_cursor": "70",
+            "start_ms": 400,
+            "end_ms": 1900,
+            "phrases": [
+              {
+                "start_ms": 0,
+                "source_start_offset": 0
+              },
+              {
+                "start_ms": 200,
+                "source_start_offset": 5
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "expected": {
+      "chapter": 2,
+      "position_ms": 600,
+      "include_margin_notes": false,
+      "timeline_version": "corrected"
+    }
+  },
+  {
+    "name": "idempotent corrected position",
+    "saved": {
+      "chapter": 2,
+      "position_ms": 600,
+      "include_margin_notes": false,
+      "timeline_version": "corrected"
+    },
+    "migration": {
+      "to": "corrected",
+      "from_versions": [
+        "",
+        "earlier"
+      ],
+      "tracks": [
+        {
+          "chapter": 2,
+          "cues": [
+            {
+              "source_cursor": "70",
+              "start_ms": 1000,
+              "end_ms": 3000,
+              "words": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  500,
+                  5
+                ],
+                [
+                  1000,
+                  11
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "tracks": [
+      {
+        "chapter": 2,
+        "cues": [
+          {
+            "source_cursor": "70",
+            "start_ms": 400,
+            "end_ms": 1900,
+            "phrases": [
+              {
+                "start_ms": 0,
+                "source_start_offset": 0
+              },
+              {
+                "start_ms": 200,
+                "source_start_offset": 5
+              },
+              {
+                "start_ms": 700,
+                "source_start_offset": 11
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "expected": {
+      "chapter": 2,
+      "position_ms": 600,
+      "include_margin_notes": false,
+      "timeline_version": "corrected"
+    }
+  },
+  {
+    "name": "unknown recording is not rewritten",
+    "saved": {
+      "chapter": 2,
+      "position_ms": 1800,
+      "include_margin_notes": false,
+      "timeline_version": "unrelated"
+    },
+    "migration": {
+      "to": "corrected",
+      "from_versions": [
+        "",
+        "earlier"
+      ],
+      "tracks": [
+        {
+          "chapter": 2,
+          "cues": [
+            {
+              "source_cursor": "70",
+              "start_ms": 1000,
+              "end_ms": 3000,
+              "words": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  500,
+                  5
+                ],
+                [
+                  1000,
+                  11
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "tracks": [
+      {
+        "chapter": 2,
+        "cues": [
+          {
+            "source_cursor": "70",
+            "start_ms": 400,
+            "end_ms": 1900,
+            "phrases": [
+              {
+                "start_ms": 0,
+                "source_start_offset": 0
+              },
+              {
+                "start_ms": 200,
+                "source_start_offset": 5
+              },
+              {
+                "start_ms": 700,
+                "source_start_offset": 11
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "expected": {
+      "chapter": 2,
+      "position_ms": 1800,
+      "include_margin_notes": false,
+      "timeline_version": "unrelated"
+    }
+  },
+  {
+    "name": "heading stays at the chapter opening",
+    "saved": {
+      "chapter": 2,
+      "position_ms": 100,
+      "include_margin_notes": false
+    },
+    "migration": {
+      "to": "corrected",
+      "from_versions": [
+        "",
+        "earlier"
+      ],
+      "tracks": [
+        {
+          "chapter": 2,
+          "cues": [
+            {
+              "source_cursor": "70",
+              "start_ms": 1000,
+              "end_ms": 3000,
+              "words": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  500,
+                  5
+                ],
+                [
+                  1000,
+                  11
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "tracks": [
+      {
+        "chapter": 2,
+        "cues": [
+          {
+            "source_cursor": "70",
+            "start_ms": 400,
+            "end_ms": 1900,
+            "phrases": [
+              {
+                "start_ms": 0,
+                "source_start_offset": 0
+              },
+              {
+                "start_ms": 200,
+                "source_start_offset": 5
+              },
+              {
+                "start_ms": 700,
+                "source_start_offset": 11
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "expected": {
+      "chapter": 2,
+      "position_ms": 0,
+      "include_margin_notes": false,
+      "timeline_version": "corrected"
+    }
+  },
+  {
+    "name": "unrelated chapter remains untouched",
+    "saved": {
+      "chapter": 3,
+      "position_ms": 1800,
+      "include_margin_notes": false
+    },
+    "migration": {
+      "to": "corrected",
+      "from_versions": [
+        "",
+        "earlier"
+      ],
+      "tracks": [
+        {
+          "chapter": 2,
+          "cues": [
+            {
+              "source_cursor": "70",
+              "start_ms": 1000,
+              "end_ms": 3000,
+              "words": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  500,
+                  5
+                ],
+                [
+                  1000,
+                  11
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "tracks": [
+      {
+        "chapter": 2,
+        "cues": [
+          {
+            "source_cursor": "70",
+            "start_ms": 400,
+            "end_ms": 1900,
+            "phrases": [
+              {
+                "start_ms": 0,
+                "source_start_offset": 0
+              },
+              {
+                "start_ms": 200,
+                "source_start_offset": 5
+              },
+              {
+                "start_ms": 700,
+                "source_start_offset": 11
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "expected": {
+      "chapter": 3,
+      "position_ms": 1800,
+      "include_margin_notes": false
+    }
+  }
+]

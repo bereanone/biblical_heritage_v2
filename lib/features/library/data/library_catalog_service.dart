@@ -23,6 +23,7 @@ import 'library_epub_metadata.dart';
 import 'library_item_availability.dart';
 import 'library_item_identity.dart';
 import 'library_reading_copy_review.dart';
+import 'lessons_reading_edition.dart';
 import 'library_search_navigation_target.dart';
 import '../../utilities/data/pioneer_capture_folder_metadata.dart';
 import '../../utilities/data/elibrary_folder_policy.dart';
@@ -218,7 +219,9 @@ class LibraryCatalogService {
         .map((row) {
           final id = row['id']?.toString() ?? '';
           final warmedAuthor = warmedAuthorValues[id];
-          final warmedCoverPath = embeddedCovers[id] ?? warmedCoverPaths[id];
+          // An explicit valid cover (including publisher artwork) takes
+          // priority over an EPUB's embedded fallback/title-page image.
+          final warmedCoverPath = warmedCoverPaths[id] ?? embeddedCovers[id];
           final repairedCaptureCoverPath = repairedCaptureCoverPaths[id];
           final warmedTitle = warmedTitleValues[id];
           if ((warmedAuthor == null || warmedAuthor.trim().isEmpty) &&
@@ -458,6 +461,12 @@ class LibraryCatalogService {
         AND LOWER(COALESCE(folder_type, '')) IN ('commentary', 'research')
         AND LOWER(COALESCE(index_status, '')) != 'needs_attention'
         AND LOWER(COALESCE(epub_storage_state, 'present')) = 'present'
+        AND NOT EXISTS (
+          SELECT 1 FROM library_document_blocks canonical
+          WHERE canonical.library_item_id = library_items.id
+            AND canonical.block_type NOT IN ('heading', 'image')
+            AND TRIM(COALESCE(canonical.plain_text, '')) != ''
+        )
         AND (
           LOWER(COALESCE(index_status, '')) NOT IN ('indexed', 'indexed_empty')
           OR NOT EXISTS (
@@ -478,6 +487,12 @@ class LibraryCatalogService {
         AND LOWER(COALESCE(li.folder_type, '')) IN ('commentary', 'research')
         AND LOWER(COALESCE(li.index_status, '')) != 'needs_attention'
         AND LOWER(COALESCE(li.epub_storage_state, 'present')) = 'present'
+        AND NOT EXISTS (
+          SELECT 1 FROM library_document_blocks canonical
+          WHERE canonical.library_item_id = li.id
+            AND canonical.block_type NOT IN ('heading', 'image')
+            AND TRIM(COALESCE(canonical.plain_text, '')) != ''
+        )
         AND (
           LOWER(COALESCE(li.index_status, '')) NOT IN ('indexed', 'indexed_empty')
           OR NOT EXISTS (
@@ -1963,6 +1978,17 @@ class LibraryCatalogService {
         return null;
       }
 
+      if (existingCoverPath
+              ?.replaceAll('\\', '/')
+              .contains('Research/ManagedBundles/') ==
+          true) {
+        final currentCover = _resolveCoverPath(
+          existingCoverPath,
+          rootPath: rootPath,
+        );
+        if (currentCover != null) return currentCover;
+      }
+
       final mirroredCoverPath = await _resolveMirroredCoverPath(
         rootPath: rootPath,
         existingCoverPath: existingCoverPath,
@@ -2444,10 +2470,12 @@ class LibraryCatalogItem {
 
   /// Human-readable provenance for editions that otherwise look identical.
   String? get editionLabel {
+    if (fileHash == LessonsReadingEdition.sourceHash)
+      return 'Complete reading edition';
     if ((readingCopyLabel ?? '').isNotEmpty) return readingCopyLabel;
     if (!_isWaggonerOnRomansEdition(this)) return null;
     if (id == 'library_item_research_pioneer_e_j_waggoner_WOR') {
-      return 'CaptureClipper edition';
+      return null;
     }
     return 'Official EPUB edition';
   }
@@ -3149,6 +3177,24 @@ String? _resolveCoverPath(String? coverPathValue, {String? rootPath}) {
   if (File(coverPathValue).existsSync()) return coverPathValue;
   final normalizedRoot = rootPath?.trim() ?? '';
   if (normalizedRoot.isEmpty) return null;
+  // Managed covers retain their full subpath when iOS moves the app sandbox.
+  // Basename-only lookup under Graphics loses publisher artwork and can
+  // substitute an unrelated embedded image from the EPUB.
+  final portablePath = coverPathValue.replaceAll('\\', '/');
+  const managedPrefix = 'Research/ManagedBundles/';
+  final managedOffset = portablePath.startsWith(managedPrefix)
+      ? 0
+      : portablePath.indexOf('/$managedPrefix') + 1;
+  if (portablePath.startsWith(managedPrefix) || managedOffset > 0) {
+    final relative = portablePath.substring(managedOffset);
+    if (!relative.split('/').contains('..')) {
+      final managedCover = p.normalize(p.join(normalizedRoot, relative));
+      if (p.isWithin(p.normalize(normalizedRoot), managedCover) &&
+          File(managedCover).existsSync()) {
+        return managedCover;
+      }
+    }
+  }
   final fileName = p.basename(coverPathValue);
   if (fileName.isEmpty) return null;
   final candidate = p.join(

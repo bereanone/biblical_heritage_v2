@@ -119,4 +119,56 @@ fun main() {
  p.failIsPlaying=false
  println("PASS invalid native state during timeout cleanup still reports original error without autoplay")
  call("stop")
+ p=fresh();call("play");p.currentPosition=4321
+ val startsBefore=p.starts.toList()
+ call("diagnostics")
+ var report=MethodChannel.lastResult as Map<*,*>
+ check(report["readingRequested"]==true && report["chapterPlaying"]==true)
+ check(report["positionMs"]==4321 && report["audibleOutputVerified"]==false)
+ check(report["chapterOutputType"]==2 && report["chapterAudioSession"]==1)
+ p.info(804,0);call("diagnostics");report=MethodChannel.lastResult as Map<*,*>
+ check((report["events"] as List<*>).any{it.toString().contains("chapter info what=804")})
+ check(p.starts==startsBefore && p.isPlaying)
+ check(!report.toString().contains(fixtureRoot.path)) {"Report leaked private filesystem path"}
+ println("PASS diagnostic snapshot distinguishes requested playback from audible proof without changing playback")
+ p=readyWithAnnouncement();call("diagnostics");report=MethodChannel.lastResult as Map<*,*>
+ check(report["pendingSeekMs"]==10000 && report["announcementActive"]==true)
+ check(report["chapterPlaying"]==false)
+ check((report["events"] as List<*>).any{it.toString().contains("announcement start")})
+ println("PASS diagnostic snapshot identifies announcement and seek wait")
+ p.failIsPlaying=true
+ call("diagnostics");report=MethodChannel.lastResult as Map<*,*>
+ check(report["chapterPlaying"]==null && errors().isEmpty())
+ p.failIsPlaying=false
+ println("PASS diagnostic state inspection tolerates decoder errors without creating playback failures")
+ repeat(100){call("pause")};call("diagnostics");report=MethodChannel.lastResult as Map<*,*>
+ check((report["events"] as List<*>).size==60)
+ println("PASS native diagnostic event trail is bounded")
+ call("stop");p=fresh();p.failParameters=true;call("play")
+ check(p.isPlaying && p.parameterWrites==0)
+ events();p.currentPosition=10380;Handler.tick();p.finishSeek();MediaPlayer.all.last().finish()
+ check(p.isPlaying && p.parameterWrites==0)
+ println("PASS natural-speed chapter and announcement resume never request hardware rate/pitch changes")
+ p.failParameters=false
+ call("setRate","rate" to 1.25)
+ check(p.parameterWrites==1 && p.playbackParams.selectedSpeed==1.25f)
+ check(p.playbackParams.fallbackMode==android.media.PlaybackParams.AUDIO_FALLBACK_MODE_FAIL)
+ call("setRate","rate" to 1.25);call("pause");call("play")
+ check(p.parameterWrites==1)
+ call("setRate","rate" to 1.0)
+ check(p.parameterWrites==2 && p.playbackParams.selectedSpeed==1.0f)
+ println("PASS custom speed requests FAIL fallback, is not reapplied on resume, and restores natural speed")
+ MethodChannel.notifications.clear();p.failParameters=true
+ val failed=runCatching{call("setRate","rate" to 1.1)}
+ check(failed.isFailure && errors().size==1 && !p.isPlaying)
+ call("diagnostics");report=MethodChannel.lastResult as Map<*,*>
+ check(report["readingRequested"]==false && report["appliedRate"]==1.0f)
+ check(errors().single().second.toString().contains("voice speed to 1.0"))
+ println("PASS unsupported speed stops and reports an actionable failure instead of silently advancing")
+ call("stop");p=fresh();MethodChannel.notifications.clear()
+ call("setRate","rate" to 1.25);p.failParameters=true
+ val startFailed=runCatching{call("play")}
+ check(startFailed.isFailure && errors().size==1 && !p.isPlaying)
+ println("PASS unsupported saved speed on first play stops and reports failure")
+ call("stop")
 }

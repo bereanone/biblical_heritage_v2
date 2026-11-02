@@ -1,5 +1,6 @@
 import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -263,4 +264,54 @@ void main() {
       isTrue,
     );
   });
+  for (final upgrade in [false, true]) {
+    test(
+      'empty SQLite journal is backed up safely for ${upgrade ? "upgrade" : "fresh start"}',
+      () async {
+        await createLegacyDatabase(withRealContent: true);
+        final legacyPath = await SandboxBootstrap.legacyUserDatabasePath();
+        final journal = File('$legacyPath-journal');
+        await journal.writeAsBytes([]);
+        final original = await File(legacyPath).readAsBytes();
+        final result = upgrade
+            ? await StartupCoordinator.instance.backUpAndUpgrade()
+            : await StartupCoordinator.instance.startFreshButKeepLegacyBackup();
+        expect(result.phase, isNot(StartupPhase.migrationFailed));
+        final state = await LocalSettingsStore.instance.loadMigrationState();
+        final backup = Directory(state['backup_path'] as String);
+        final manifest =
+            jsonDecode(
+                  await File(
+                    '${backup.path}/backup_manifest.json',
+                  ).readAsString(),
+                )
+                as Map;
+        final entry = (manifest['files'] as List).cast<Map>().singleWhere(
+          (e) => e['original_path'] == journal.path,
+        );
+        expect(entry['size'], 0);
+        expect(await File(entry['backup_path'] as String).length(), 0);
+        final mainEntry = (manifest['files'] as List).cast<Map>().singleWhere(
+          (e) => e['original_path'] == legacyPath,
+        );
+        expect(
+          await File(mainEntry['backup_path'] as String).readAsBytes(),
+          original,
+        );
+      },
+    );
+  }
+  test(
+    'zero-byte legacy database remains intact when no legacy content is discovered',
+    () async {
+      final legacyPath = await SandboxBootstrap.legacyUserDatabasePath();
+      await File(legacyPath).parent.create(recursive: true);
+      await File(legacyPath).writeAsBytes([]);
+      final result = await StartupCoordinator.instance
+          .startFreshButKeepLegacyBackup();
+      expect(result.phase, StartupPhase.freshInstallSelected);
+      expect(await File(legacyPath).exists(), isTrue);
+      expect(await File(legacyPath).length(), 0);
+    },
+  );
 }

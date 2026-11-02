@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../database/user_database.dart';
+import '../../features/library/data/lessons_reading_edition.dart';
 import '../../features/library/presentation/mac_reader_autoscroll_controller.dart';
 import '../../features/library/presentation/reader_tilt_preferences.dart';
 import 'app_theme_mode.dart';
@@ -92,6 +93,12 @@ class AppSettingsService {
   /// Generic single-key string accessor for callers (e.g. platform storage
   /// policy preferences) that don't warrant a dedicated typed key constant
   /// pair here.
+  Future<String?> loadTopShelf({required Set<String> availableItemIds}) async {
+    final db = await UserDatabase.instance.database;
+    await LessonsReadingEdition.offerOnExistingShelf(db, availableItemIds);
+    return loadRawSetting('elibrary_top_shelf_v1');
+  }
+
   Future<String?> loadRawSetting(String key) async {
     final db = await UserDatabase.instance.database;
     final rows = await db.query(

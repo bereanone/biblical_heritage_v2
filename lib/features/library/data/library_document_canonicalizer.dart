@@ -73,7 +73,8 @@ class LibraryDocumentCanonicalizer {
   /// otherwise the version-equality check below silently treats
   /// already-imported books as up to date and the fix never reaches them.
   // v41 links chapter references and distinguishes numbered books from verse lists.
-  static const int version = 43;
+  // v44 refreshes historical citation links using the shared speech/lookup aliases.
+  static const int version = 44;
   final LibraryCanonicalizationFailureHook? failureHook;
 
   Future<void> _reconcileStagedBlockIds(

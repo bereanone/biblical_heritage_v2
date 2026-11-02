@@ -103,7 +103,11 @@ void main() {
           'updated_at': 'test',
         });
         final item = LibraryCatalogItem.fromRow(
-          (await db.query('library_items')).single,
+          (await db.query(
+            'library_items',
+            where: 'id = ?',
+            whereArgs: ['links'],
+          )).single,
         );
         return (
           dir: dir,
@@ -152,7 +156,11 @@ void main() {
       await settle();
       expect(find.text('The destination paragraph is here.'), findsOneWidget);
       final saved = (await tester.runAsync(
-        () async => (await setup.db.query('library_items')).single,
+        () async => (await setup.db.query(
+          'library_items',
+          where: 'id = ?',
+          whereArgs: ['links'],
+        )).single,
       ))!;
       expect(saved['anchor_id'], 'canonical:${setup.target['id']}');
       expect(
@@ -172,68 +180,73 @@ void main() {
     },
     variant: const TargetPlatformVariant({TargetPlatform.macOS}),
   );
-  testWidgets('long-press selection on linked text does not navigate', (
-    tester,
-  ) async {
-    final setup = (await tester.runAsync(() async {
-      sqfliteFfiInit();
-      final dir = await Directory.systemTemp.createTemp('select_link_');
-      final db = await databaseFactoryFfi.openDatabase('${dir.path}/test.db');
-      await ELibrarySchema.ensure(db);
-      final file = File('${dir.path}/book.html');
-      await file.writeAsString(
-        '<p>Read the linked page <a href="#destination">421</a> without losing selection.</p>',
-      );
-      await const LibraryDocumentCanonicalizer().canonicalize(
-        db: db,
-        libraryItemId: 'select-link',
-        source: file,
-      );
-      final controller = LibraryDocumentController(
-        libraryItemId: 'select-link',
-        repository: LibraryDocumentRepository(db),
-      );
-      await controller.initialize();
-      return (dir: dir, db: db, controller: controller);
-    }))!;
-    final followed = <String>[];
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: CanonicalLibraryDocumentBody(
-            controller: setup.controller,
-            autoScrollTarget: CallbackReaderAutoScrollTarget(),
-            onVisibleOrderChanged: (_) {},
-            textColor: Colors.black,
-            onFollowLink: (_, href) => followed.add(href),
+  testWidgets(
+    'long-press selection on linked text does not navigate',
+    (tester) async {
+      final setup = (await tester.runAsync(() async {
+        sqfliteFfiInit();
+        final dir = await Directory.systemTemp.createTemp('select_link_');
+        final db = await databaseFactoryFfi.openDatabase('${dir.path}/test.db');
+        await ELibrarySchema.ensure(db);
+        final file = File('${dir.path}/book.html');
+        await file.writeAsString(
+          '<p>Read the linked page <a href="#destination">421</a> without losing selection.</p>',
+        );
+        await const LibraryDocumentCanonicalizer().canonicalize(
+          db: db,
+          libraryItemId: 'select-link',
+          source: file,
+        );
+        final controller = LibraryDocumentController(
+          libraryItemId: 'select-link',
+          repository: LibraryDocumentRepository(db),
+        );
+        await controller.initialize();
+        return (dir: dir, db: db, controller: controller);
+      }))!;
+      final followed = <String>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CanonicalLibraryDocumentBody(
+              controller: setup.controller,
+              autoScrollTarget: CallbackReaderAutoScrollTarget(),
+              onVisibleOrderChanged: (_) {},
+              textColor: Colors.black,
+              onFollowLink: (_, href) => followed.add(href),
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    final editable = tester.state<EditableTextState>(find.byType(EditableText));
-    final boxes = editable.renderEditable.getBoxesForSelection(
-      const TextSelection(baseOffset: 21, extentOffset: 24),
-    );
-    final point = editable.renderEditable.localToGlobal(
-      boxes.first.toRect().center,
-    );
-    await tester.longPressAt(point);
-    await tester.pumpAndSettle();
-    expect(editable.renderEditable.selection?.isCollapsed, false);
-    expect(followed, isEmpty);
-    await tester.tapAt(point);
-    await tester.pumpAndSettle();
-    expect(
-      followed,
-      isEmpty,
-      reason: 'An active selected range must retain the annotation interaction',
-    );
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.runAsync(() async {
-      setup.controller.dispose();
-      await setup.db.close();
-      await setup.dir.delete(recursive: true);
-    });
-  }, variant: const TargetPlatformVariant({TargetPlatform.macOS}));
+      );
+      await tester.pumpAndSettle();
+      final editable = tester.state<EditableTextState>(
+        find.byType(EditableText),
+      );
+      final boxes = editable.renderEditable.getBoxesForSelection(
+        const TextSelection(baseOffset: 21, extentOffset: 24),
+      );
+      final point = editable.renderEditable.localToGlobal(
+        boxes.first.toRect().center,
+      );
+      await tester.longPressAt(point);
+      await tester.pumpAndSettle();
+      expect(editable.renderEditable.selection?.isCollapsed, false);
+      expect(followed, isEmpty);
+      await tester.tapAt(point);
+      await tester.pumpAndSettle();
+      expect(
+        followed,
+        isEmpty,
+        reason:
+            'An active selected range must retain the annotation interaction',
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(() async {
+        setup.controller.dispose();
+        await setup.db.close();
+        await setup.dir.delete(recursive: true);
+      });
+    },
+    variant: const TargetPlatformVariant({TargetPlatform.macOS}),
+  );
 }

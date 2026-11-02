@@ -1,3 +1,5 @@
+import 'library_citation_parser.dart';
+
 /// Adds lookup targets without rewriting source text, marks, or existing links.
 /// Formatting boundaries may divide references; line breaks and existing links
 /// remain boundaries. Each styled piece points to the whole reference.
@@ -17,7 +19,7 @@ List<Map<String, Object?>> linkLibraryCitations(
   final run = <Map<String, Object?>>[];
   void flush() {
     final text = run.map((node) => node['text'] as String).join();
-    final matches = _citation.allMatches(text).toList();
+    final matches = findLibraryCitations(text);
     var offset = 0;
     for (final node in run) {
       final value = node['text'] as String;
@@ -30,13 +32,15 @@ List<Map<String, Object?>> linkLibraryCitations(
         if (start > cursor) {
           result.add({...node, 'text': text.substring(cursor, start)});
         }
-        final book = match.group(1)!;
-        final locator = (match.group(2) ?? match.group(3))!;
+        final book = match.book;
+        final locator = match.locator;
         final ok = resolves == null || resolves(book, locator);
         result.add({
           ...node,
           'text': text.substring(start, stop),
-          if (ok) 'link': 'studybible-citation:${Uri.encodeComponent('$book $locator')}',
+          if (ok)
+            'link':
+                'studybible-citation:${Uri.encodeComponent('$book $locator')}',
           if (ok) 'link_kind': 'external',
         });
         cursor = stop;
@@ -67,7 +71,11 @@ List<Map<String, Object?>> linkLibraryCitations(
         ),
       );
       if (parts == null || !resolves(parts.$1, parts.$2)) {
-        result.add({...node}..remove('link')..remove('link_kind'));
+        result.add(
+          {...node}
+            ..remove('link')
+            ..remove('link_kind'),
+        );
       } else {
         result.add(node);
       }
@@ -93,98 +101,3 @@ List<Map<String, Object?>> linkLibraryCitations(
   if (match == null) return null;
   return (match.group(1)!, match.group(2)!);
 }
-
-const _bookNames = <String>[
-  'Genesis',
-  'Gen',
-  'Exodus',
-  'Ex',
-  'Leviticus',
-  'Lev',
-  'Numbers',
-  'Num',
-  'Deuteronomy',
-  'Deut',
-  'Joshua',
-  'Josh',
-  'Judges',
-  'Judg',
-  'Ruth',
-  'Ezra',
-  'Nehemiah',
-  'Neh',
-  'Esther',
-  'Job',
-  'Psalms',
-  'Psalm',
-  'Ps',
-  'Proverbs',
-  'Prov',
-  'Ecclesiastes',
-  'Eccl',
-  'Song of Solomon',
-  'Isaiah',
-  'Isa',
-  'Jeremiah',
-  'Jer',
-  'Lamentations',
-  'Ezekiel',
-  'Ezek',
-  'Daniel',
-  'Dan',
-  'Hosea',
-  'Hos',
-  'Joel',
-  'Amos',
-  'Obadiah',
-  'Jonah',
-  'Micah',
-  'Nahum',
-  'Habakkuk',
-  'Zephaniah',
-  'Zeph',
-  'Haggai',
-  'Zechariah',
-  'Zech',
-  'Malachi',
-  'Mal',
-  'Matthew',
-  'Matt',
-  'Mark',
-  'Luke',
-  'John',
-  'Acts',
-  'Romans',
-  'Rom',
-  'Galatians',
-  'Gal',
-  'Ephesians',
-  'Eph',
-  'Philippians',
-  'Phil',
-  'Colossians',
-  'Col',
-  'Titus',
-  'Philemon',
-  'Hebrews',
-  'Heb',
-  'James',
-  'Jude',
-  'Revelation',
-  'Rev',
-];
-
-final _books =
-    '(?:(?:[123]|III|II|I)\\s+(?:Samuel|Sam|Kings|Chronicles|Chron|'
-    'Corinthians|Cor|Thessalonians|Thess|Timothy|Tim|Peter|Pet|John)|'
-    '${(_bookNames.toList()..sort((a, b) => b.length.compareTo(a.length))).map(RegExp.escape).join('|')})\\.?';
-const _numberedNames = r'(?:Samuel|Sam|Kings|Chronicles|Chron|Corinthians|Cor|Thessalonians|Thess|Timothy|Tim|Peter|Pet|John)\b';
-// A comma may introduce the next numbered book, not another verse.
-const _verseNumber = r'\d+(?!\d)(?!\s+' + _numberedNames + ')';
-const _verses = _verseNumber + r'(?:\s*[-–]\s*' + _verseNumber + r')?(?:\s*,\s*' + _verseNumber + r'(?:\s*[-–]\s*' + _verseNumber + ')?)*';
-final _citation = RegExp(
-  '(?<![\\w])($_books)\\s*(?:'
-  '(\\d+\\s*:\\s*$_verses(?:\\s*;\\s*\\d+\\s*:\\s*$_verses)*)'
-  '|($_verses))(?![\\d:–-])(?!\\s*[:,–-]\\s*(?![123]\\s+$_numberedNames)\\d)',
-  caseSensitive: false,
-);

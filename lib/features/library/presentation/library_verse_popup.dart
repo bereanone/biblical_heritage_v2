@@ -1,3 +1,4 @@
+import '../data/library_bible_book_aliases.dart';
 import 'package:flutter/material.dart';
 import '../../../core/database/study_bible_database.dart';
 import '../../reader/data/commentary_reference_parser.dart';
@@ -11,53 +12,7 @@ class LibraryVerseTarget {
   final int verse;
 }
 
-String _expandedLibraryBook(String book) {
-  var value = book.replaceAll('.', '').trim();
-  value = value.replaceFirstMapped(
-    RegExp(r'^(III|II|I)\s+', caseSensitive: false),
-    (m) => '${{'I': 1, 'II': 2, 'III': 3}[m[1]!.toUpperCase()]} ',
-  );
-  const aliases = {
-    'gen': 'Genesis',
-    'ex': 'Exodus',
-    'lev': 'Leviticus',
-    'num': 'Numbers',
-    'deut': 'Deuteronomy',
-    'josh': 'Joshua',
-    'judg': 'Judges',
-    'neh': 'Nehemiah',
-    'sam': 'Samuel',
-    'chron': 'Chronicles',
-    'ps': 'Psalms',
-    'prov': 'Proverbs',
-    'eccl': 'Ecclesiastes',
-    'isa': 'Isaiah',
-    'jer': 'Jeremiah',
-    'ezek': 'Ezekiel',
-    'dan': 'Daniel',
-    'hos': 'Hosea',
-    'zech': 'Zechariah',
-    'zeph': 'Zephaniah',
-    'mal': 'Malachi',
-    'matt': 'Matthew',
-    'rom': 'Romans',
-    'cor': 'Corinthians',
-    'gal': 'Galatians',
-    'eph': 'Ephesians',
-    'phil': 'Philippians',
-    'col': 'Colossians',
-    'thess': 'Thessalonians',
-    'tim': 'Timothy',
-    'heb': 'Hebrews',
-    'pet': 'Peter',
-    'rev': 'Revelation',
-  };
-  final numbered = RegExp(r'^([123])\s+(.+)$').firstMatch(value);
-  if (numbered != null) {
-    return '${numbered[1]} ${aliases[numbered[2]!.toLowerCase()] ?? numbered[2]}';
-  }
-  return aliases[value.toLowerCase()] ?? value;
-}
+String _expandedLibraryBook(String book) => expandedLibraryBibleBook(book);
 
 /// Fail closed on qualifiers/unknown syntax, never silently omit a verse suffix.
 List<LibraryVerseTarget> parseLibraryCitation(
